@@ -80,3 +80,9 @@ test('findPlacementNear: further off when every cell around the bot is taken (le
   assert.ok(pos != null)
   assert.strictEqual(Math.max(Math.abs(pos.x), Math.abs(pos.z)), 3)
 })
+
+test('REPLACEABLE_BLOCKS is vanilla #replaceable: bubble columns, and 26.3\'s red shrub', async () => {
+  const { REPLACEABLE_BLOCKS } = await import('../../src/skills/util')
+  for (const name of ['air', 'water', 'short_grass', 'bubble_column', 'red_shrub', 'leaf_litter']) assert.ok(REPLACEABLE_BLOCKS.has(name), name)
+  assert.ok(!REPLACEABLE_BLOCKS.has('stone'))
+})

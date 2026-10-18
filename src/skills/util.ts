@@ -240,7 +240,10 @@ export const AIR_BLOCKS = new Set(['air', 'cave_air', 'void_air'])
 export const REPLACEABLE_BLOCKS = new Set([
   ...AIR_BLOCKS, 'water', 'lava', 'short_grass', 'tall_grass', 'fern', 'large_fern', 'dead_bush', 'snow', 'vine',
   'glow_lichen', 'light', 'structure_void', 'seagrass', 'tall_seagrass', 'fire', 'soul_fire', 'bush', 'short_dry_grass',
-  'tall_dry_grass', 'leaf_litter', 'resin_clump', 'warped_roots', 'crimson_roots', 'nether_sprouts', 'hanging_roots'
+  'tall_dry_grass', 'leaf_litter', 'resin_clump', 'warped_roots', 'crimson_roots', 'nether_sprouts', 'hanging_roots',
+  'bubble_column',
+  // 26.3's #replaceable adds red_shrub (otherwise the same as 1.21.11's)
+  'red_shrub'
 ])
 
 export function vecKey (pos: Vec3): string {
