@@ -4,12 +4,12 @@
 // through, the dragon fought, out by the exit portal). Each skill runs as one foreground task, so the reflexes still
 // preempt it (it starts over after).
 import type { Bot } from 'mineflayer'
-import { EYES_FOR_FRAME, EYES_TARGET } from './planner/progression'
+import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET } from './planner/progression'
 import type { MilestoneHandler } from './runner'
 import { buildPortal, collectBlazeRods, enterNether, obtainPearls, returnOverworld } from './nether/skills'
 import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
 import { enterEnd, fightDragon, isInEnd, leaveEnd } from './end/skills'
-import { enchantGear } from './skills/enchant'
+import { countBookshelves, enchantGear, findEnchantingTable } from './skills/enchant'
 import { countItems } from './skills/util'
 import { normalizeDimension } from './core/memory'
 import { TaskError } from './core/errors'
@@ -28,9 +28,50 @@ export function netherNeeds (inv: { count: (name: string) => number }): { rods: 
   return { rods: Math.max(0, Math.ceil((wanted - powder) / 2)), pearls: Math.max(0, wanted - inv.count('ender_pearl')) }
 }
 
-export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal }) => {
+/** ticks the enchanting milestone's bookshelves may cost (the plan's estimate): a day's work */
+export const SHELF_BUDGET_TICKS = 24000
+
+/**
+ * The most bookshelves (of `max`, in steps of 3: a shelf is 3 books) whose plan costs `budget` ticks or less, 0 when
+ * even 3 cost more: the 15 of a level-30 table are 135 sugar canes and 45 cows' leather, which a world often hasn't got
+ * near (seed 2: 4 canes within 96 blocks of the base), and a table with fewer still enchants, at lower levels
+ */
+export function shelvesWithin (cost: (shelves: number) => number | null, budget: number, max = BOOKSHELVES): number {
+  for (let n = max; n > 0; n -= 3) {
+    const c = cost(n)
+    if (c != null && c <= budget) return n
+  }
+  return 0
+}
+
+/**
+ * The enchanting milestone: the table and the lapis (its goals), then the bookshelves the world gives within
+ * SHELF_BUDGET_TICKS (planned again with what the first try found: a source explored for in vain costs more after),
+ * then the table set up with those and the gear enchanted
+ */
+export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {
   await executor.obtain(milestone.goals(state), signal)
-  await executor.task('enchant the gear', async (s) => await enchantGear(bot, { executor, signal: s }), signal)
+  const table = findEnchantingTable(bot, { memory: executor.memory, maxDistance: 16 })
+  const around = table != null ? countBookshelves(pos => bot.blockAt(pos) as any, table.position) : 0
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const held = countItems(bot, 'bookshelf')
+    const want = shelvesWithin(n => {
+      if (n <= held + around) return 0
+      const plan = executor.plan([{ item: 'bookshelf', count: n - around }])
+      return plan.ok ? plan.cost : null
+    }, SHELF_BUDGET_TICKS, BOOKSHELVES)
+    if (want <= held + around) break
+    log(`enchanting: ${want} bookshelves (${held + around} so far)`)
+    try {
+      await executor.obtain([{ item: 'bookshelf', count: want - around }], signal)
+      break
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`enchanting: ${countItems(bot, 'bookshelf') + around} bookshelves: ${(err as Error).message}`)
+    }
+  }
+  const shelves = Math.min(BOOKSHELVES, countItems(bot, 'bookshelf') + around)
+  await executor.task('enchant the gear', async (s) => await enchantGear(bot, { executor, signal: s, bookshelves: shelves }), signal)
 }
 
 export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, log }) => {

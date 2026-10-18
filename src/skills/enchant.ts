@@ -81,6 +81,12 @@ export function offerCostRange (slot: 0 | 1 | 2, bookshelves: number): { min: nu
   return { min: cost(lo), max: cost(hi) }
 }
 
+/** whether a top offer's cost is one the table makes with that many shelves counted (offerCostRange) */
+export function topOfferFits (cost: number, bookshelves: number): boolean {
+  const range = offerCostRange(2, bookshelves)
+  return cost >= range.min && cost <= range.max
+}
+
 /** the bottom ring's middle cells: one is left out as the way in to the table */
 const DOORS = [new Vec3(0, 0, -2), new Vec3(0, 0, 2), new Vec3(-2, 0, 0), new Vec3(2, 0, 0)]
 
@@ -397,6 +403,11 @@ export interface SetupEnchantingArgs {
   verify?: boolean
   /** how far from the base or the bot to look for a site (default 12) */
   radius?: number
+  /**
+   * the shelves to have round the table (default MAX_BOOKSHELVES): fewer when the world gave fewer (the sugar cane and
+   * leather of 15 are 135 canes and 45 cows), the offers' costs lower (offerCostRange)
+   */
+  bookshelves?: number
 }
 
 export interface SetupEnchantingResult {
@@ -426,7 +437,8 @@ export async function setupEnchanting (bot: Bot, args: SetupEnchantingArgs = {},
 
   let table = findEnchantingTable(bot, { table: args.table, memory, maxDistance: 16 })?.position ?? null
   const shelvesHeld = (): number => countItems(bot, 'bookshelf')
-  const needed = (): number => MAX_BOOKSHELVES - (table == null ? 0 : countBookshelves(lookup, table))
+  const target = Math.max(0, Math.min(MAX_BOOKSHELVES, args.bookshelves ?? MAX_BOOKSHELVES))
+  const needed = (): number => Math.max(0, target - (table == null ? 0 : countBookshelves(lookup, table)))
 
   // the items: the table and the shelves still to put down
   if (table == null && countItems(bot, 'enchanting_table') === 0) {
@@ -487,17 +499,21 @@ export async function setupEnchanting (bot: Bot, args: SetupEnchantingArgs = {},
     }
   }
   res.bookshelves = countBookshelves(lookup, table)
-  if (res.bookshelves < MAX_BOOKSHELVES) {
-    throw new SkillError(shelvesHeld() > 0 ? 'VERIFY_FAILED' : 'MISSING_ITEMS', `the table at ${table.toString()} counts ${res.bookshelves} bookshelves of ${MAX_BOOKSHELVES}`, res)
+  if (res.bookshelves < target) {
+    throw new SkillError(shelvesHeld() > 0 ? 'VERIFY_FAILED' : 'MISSING_ITEMS', `the table at ${table.toString()} counts ${res.bookshelves} bookshelves of ${target}`, res)
   }
 
-  // the table's own count: the top offer for anything enchantable is 30 with 15 shelves
+  // the table's own count: the top offer for anything enchantable is 30 with 15 shelves, in offerCostRange's range
+  // with fewer
   const probe = args.verify === false ? null : probeItem(bot)
   if (probe != null) {
     const offers = await readTableOffers(bot, table, probe, signal)
     res.costs = offers.map(o => o.cost)
     trace('setupEnchanting: offers for', probe.name, res.costs)
-    if (offers[2].cost !== 30) throw new SkillError('VERIFY_FAILED', `the table's top offer for ${probe.name} is ${offers[2].cost}, not 30`, res)
+    if (!topOfferFits(offers[2].cost, res.bookshelves)) {
+      const range = offerCostRange(2, res.bookshelves)
+      throw new SkillError('VERIFY_FAILED', `the table's top offer for ${probe.name} is ${offers[2].cost}, not ${range.min === range.max ? range.min : `${range.min} to ${range.max}`} (${res.bookshelves} shelves)`, res)
+    }
   }
   return res
 }
@@ -655,8 +671,10 @@ export interface EnchantGearOptions {
   memory?: WorldMemory
   /** the kinds to enchant, in order (default GEAR_ORDER) */
   categories?: readonly ItemKind[]
-  /** the level to gain before the first enchant (default 30, the top offer of 15 shelves; 0 for none) */
+  /** the level to gain before the first enchant (default the dearest top offer of the shelves set up: 30 with 15; 0 for none) */
   targetLevel?: number
+  /** the shelves to set up round the table (setupEnchanting's; default 15) */
+  bookshelves?: number
   /** how the levels are gained (gainLevels' options) */
   xp?: Omit<GainLevelsArgs, 'level'>
   signal?: AbortSignal
@@ -674,8 +692,8 @@ export interface EnchantGearResult {
 export async function enchantAll (bot: Bot, opts: EnchantGearOptions = {}): Promise<EnchantGearResult> {
   const signal = opts.signal
   const memory = opts.memory ?? opts.executor?.memory
-  const setup = await setupEnchanting(bot, { memory }, signal)
-  const target = opts.targetLevel ?? 30
+  const setup = await setupEnchanting(bot, { memory, bookshelves: opts.bookshelves }, signal)
+  const target = opts.targetLevel ?? offerCostRange(2, setup.bookshelves).max
   if (experience(bot).level < target) {
     try {
       await gainLevels(bot, { ...opts.xp, level: target }, signal)

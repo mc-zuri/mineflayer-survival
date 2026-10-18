@@ -4,7 +4,7 @@ import { Vec3 } from 'vec3'
 import minecraftData from 'minecraft-data'
 import {
   BOOKSHELF_OFFSETS, ENCHANT_PREFERENCES, MAX_BOOKSHELVES, bookshelfGap, bookshelfLayout, chooseEnchantingSite, chooseOffer,
-  countBookshelves, enchantingRequests, isValidBookShelf, itemKind, nearestDoor, offerCostRange, planEnchantingSetup, type EnchantOffer
+  countBookshelves, enchantingRequests, isValidBookShelf, itemKind, nearestDoor, offerCostRange, planEnchantingSetup, topOfferFits, type EnchantOffer
 } from '../../src/skills/enchant'
 import { checkPlan, type PlanStep } from '../../src/planner/steps'
 import type { RegistryLike } from '../../src/core/registry'
@@ -213,4 +213,21 @@ test('the full setup planned from nothing: 45 + 1 books from 138 sugar cane and 
   const short = planEnchantingSetup(registry, { inventory: held })
   assert.deepStrictEqual(short.steps.map(s => `${s.kind} ${s.item} ${s.count}`), ['craft enchanting_table 1', 'craft bookshelf 15'])
   assert.strictEqual(checkPlan(registry, short.steps, held).ok, true)
+})
+
+test('topOfferFits: the top offer a table makes with fewer shelves (no shelves: 1 to 8; 6: 12 to 17; 15: 30)', () => {
+  for (let c = 1; c <= 8; c++) assert.ok(topOfferFits(c, 0))
+  assert.ok(!topOfferFits(9, 0))
+  assert.ok(!topOfferFits(11, 6))
+  assert.ok(topOfferFits(12, 6) && topOfferFits(17, 6))
+  assert.ok(!topOfferFits(18, 6))
+  assert.ok(topOfferFits(30, 15) && !topOfferFits(29, 15))
+})
+
+test('the enchanting milestone\'s shelves: the most within the budget, in steps of 3; none when even 3 cost too much or have no plan', async () => {
+  const { shelvesWithin } = await import('../../src/milestones')
+  assert.equal(shelvesWithin(n => n * 1000, 24000), 15)
+  assert.equal(shelvesWithin(n => n * 2000, 24000), 12)
+  assert.equal(shelvesWithin(n => n > 6 ? null : n * 3000, 24000), 6)
+  assert.equal(shelvesWithin(() => 30000, 24000), 0)
 })

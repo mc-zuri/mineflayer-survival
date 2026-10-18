@@ -35,7 +35,7 @@ export interface Milestone {
 export const EYES_TARGET = 14
 /** eyes left once the stronghold is found: enough for any frame */
 export const EYES_FOR_FRAME = 12
-/** bookshelves around the table for level 30 enchantments (vanilla EnchantmentHelper caps at 15) */
+/** bookshelves around the table for level 30 enchantments (vanilla EnchantmentHelper caps at 15), the most the milestone gets */
 export const BOOKSHELVES = 15
 /** logs the wood milestone cuts beyond its tools: the sticks and planks of the night down the mine */
 export const SPARE_LOGS = 8
@@ -177,10 +177,9 @@ export const MILESTONES: readonly Milestone[] = [
     id: 'enchanting',
     title: 'an enchanting table with 15 bookshelves, and enchanted gear',
     done: s => s.memory.getPois('enchanting_table').length > 0 && (s.enchanted ?? []).some(n => parseTool(n)?.kind === 'pickaxe'),
+    // (the bookshelves are the handler's: as many as the world gives within a budget, up to BOOKSHELVES)
     goals: s => [
-      ...(s.memory.getPois('enchanting_table').length > 0
-        ? []
-        : [{ item: 'enchanting_table', count: 1 }, { item: 'bookshelf', count: BOOKSHELVES }]),
+      ...(s.memory.getPois('enchanting_table').length > 0 ? [] : [{ item: 'enchanting_table', count: 1 }]),
       { item: 'lapis_lazuli', count: 9 }
     ]
   },

@@ -124,6 +124,8 @@ test('done predicates read inventory, worn equipment, memory and advancements', 
   assert.equal(nextMilestone(worn)?.id, 'diamonds')
 
   assert.equal(milestone('enchanting').done(state()), false)
+  // the table and the lapis: the bookshelves are the handler's, as many as the world gives
+  assert.deepEqual(milestone('enchanting').goals(state()), [{ item: 'enchanting_table', count: 1 }, { item: 'lapis_lazuli', count: 9 }])
   const table = state({}, { enchanted: ['diamond_pickaxe'] })
   table.memory.addPoi('enchanting_table', { x: 1, y: 40, z: 1 })
   assert.equal(milestone('enchanting').done(table), true)
