@@ -193,8 +193,13 @@ export function enableLockstep (bot: Bot, opts: LockstepOptions = {}): Lockstep 
 
   // mineflayer starts its timer at login (physics.js): until the server's first tick the bot ticks on this one
   bot.on('login', () => startTimer())
-  bot.once('spawn', () => {
+  // hello after every spawn: a player the server sends back to configuration leaves its player list (switchToConfig:
+  // removePlayerFromWorld), which forgets its hello; the server answers a hello it already has again, and nothing more
+  let helloSent = false
+  bot.on('spawn', () => {
     send(encode({ type: 'hello', version: PROTOCOL_VERSION }))
+    if (helloSent) return
+    helloSent = true
     helloTimer = setTimeout(() => {
       if (!available && mode === 'realtime') bot.emit('lockstepUnavailable')
     }, options.helloTimeoutMs)

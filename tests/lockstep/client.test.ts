@@ -33,13 +33,14 @@ const until = async (condition: () => boolean, ms = 1000): Promise<void> => {
   }
 }
 
-test('hello goes once the bot spawned, and only then', () => {
+test('hello goes once the bot spawned, and after every spawn (a reconfigured player is a new one to the server)', () => {
   const bot = fakeBot()
   enableLockstep(bot)
   assert.deepStrictEqual(bot.sent, [])
   bot.emit('spawn')
-  bot.emit('spawn')
   assert.deepStrictEqual(bot.sent, [{ type: 'hello', version: 1 }])
+  bot.emit('spawn')
+  assert.deepStrictEqual(bot.sent, [{ type: 'hello', version: 1 }, { type: 'hello', version: 1 }])
   bot.emit('end')
 })
 
