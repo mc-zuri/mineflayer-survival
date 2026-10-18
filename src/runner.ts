@@ -427,7 +427,7 @@ export class Runner {
     }
     for (const chest of base.chests) {
       const known = this.memory.chestAt(chest, dimension)
-      const wanted = Object.keys(known?.items ?? {}).filter(name => (defaultKeep(name) ?? 0) > 0)
+      const wanted = Object.keys(known?.items ?? {}).filter(name => (defaultKeep(name, bot.registry) ?? 0) > 0)
       if (wanted.length === 0) continue
       try {
         const res = await this.executor.task('kit', async (s) => await retrieveItems(bot, { chest: new Vec3(chest.x, chest.y, chest.z), filter: wanted }, s), signal)

@@ -1,4 +1,4 @@
-import { burnTicks, FOODS, parseTool, TOOL_MATERIAL_RANK, toolKindForMaterial, type ToolKind } from './items'
+import { burnTicks, foodInfo, parseTool, TOOL_MATERIAL_RANK, toolKindForMaterial, type ToolKind } from './items'
 import type { RegistryLike } from './registry'
 import { itemTags, type ItemTags } from './tags'
 
@@ -171,7 +171,7 @@ export class Inventory {
   foodPoints (): number {
     let points = 0
     for (const [name, count] of this.counts) {
-      const food = FOODS[name]
+      const food = foodInfo(this.registry, name)
       if (food != null && food.harmful !== true) points += food.nutrition * count
     }
     return points

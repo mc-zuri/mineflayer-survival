@@ -1,8 +1,11 @@
+import { cachedPerRegistry, type RegistryLike } from './registry'
+
 /**
- * Vanilla item constants that minecraft-data doesn't carry: furnace burn times, food values and tool materials.
+ * Vanilla item constants that minecraft-data doesn't carry: furnace burn times, what foods do and tool materials.
  *
  * One table serves 1.21.11 and 26.3. Every item both versions have has the same burn time (1.21.11's
- * FuelValues.vanillaBurnTimes against 26.3's cooking_fuel item components), the same food (Foods) and the same tool
+ * FuelValues.vanillaBurnTimes against 26.3's cooking_fuel item components), the same food (Foods; the values are read
+ * from minecraft-data's foods, see foodsOf) and the same tool
  * material (ToolMaterial). The 26.3 items (poplar wood, wool slabs and stairs, cushions) are in it as well: an item a
  * version doesn't have never comes up there.
  */
@@ -121,48 +124,44 @@ export interface FoodInfo {
   harmful?: boolean
 }
 
-/** vanilla Foods: nutrition and saturation (nutrition × modifier × 2) */
-export const FOODS: Record<string, FoodInfo> = {
-  apple: { nutrition: 4, saturation: 2.4 },
-  baked_potato: { nutrition: 5, saturation: 6 },
-  beef: { nutrition: 3, saturation: 1.8 },
-  beetroot: { nutrition: 1, saturation: 1.2 },
-  beetroot_soup: { nutrition: 6, saturation: 7.2 },
-  bread: { nutrition: 5, saturation: 6 },
-  carrot: { nutrition: 3, saturation: 3.6 },
-  chicken: { nutrition: 2, saturation: 1.2, harmful: true },
-  chorus_fruit: { nutrition: 4, saturation: 2.4 },
-  cod: { nutrition: 2, saturation: 0.4 },
-  cooked_beef: { nutrition: 8, saturation: 12.8 },
-  cooked_chicken: { nutrition: 6, saturation: 7.2 },
-  cooked_cod: { nutrition: 5, saturation: 6 },
-  cooked_mutton: { nutrition: 6, saturation: 9.6 },
-  cooked_porkchop: { nutrition: 8, saturation: 12.8 },
-  cooked_rabbit: { nutrition: 5, saturation: 6 },
-  cooked_salmon: { nutrition: 6, saturation: 9.6 },
-  cookie: { nutrition: 2, saturation: 0.4 },
-  dried_kelp: { nutrition: 1, saturation: 0.6 },
-  enchanted_golden_apple: { nutrition: 4, saturation: 9.6 },
-  glow_berries: { nutrition: 2, saturation: 0.4 },
-  golden_apple: { nutrition: 4, saturation: 9.6 },
-  golden_carrot: { nutrition: 6, saturation: 14.4 },
-  honey_bottle: { nutrition: 6, saturation: 1.2 },
-  melon_slice: { nutrition: 2, saturation: 1.2 },
-  mushroom_stew: { nutrition: 6, saturation: 7.2 },
-  mutton: { nutrition: 2, saturation: 1.2 },
-  poisonous_potato: { nutrition: 2, saturation: 1.2, harmful: true },
-  porkchop: { nutrition: 3, saturation: 1.8 },
-  potato: { nutrition: 1, saturation: 0.6 },
-  pufferfish: { nutrition: 1, saturation: 0.2, harmful: true },
-  pumpkin_pie: { nutrition: 8, saturation: 4.8 },
-  rabbit: { nutrition: 3, saturation: 1.8 },
-  rabbit_stew: { nutrition: 10, saturation: 12 },
-  rotten_flesh: { nutrition: 4, saturation: 0.8, harmful: true },
-  salmon: { nutrition: 2, saturation: 0.4 },
-  spider_eye: { nutrition: 2, saturation: 3.2, harmful: true },
-  suspicious_stew: { nutrition: 6, saturation: 7.2 },
-  sweet_berries: { nutrition: 2, saturation: 0.4 },
-  tropical_fish: { nutrition: 1, saturation: 0.2 }
+/**
+ * Foods minecraft-data lists that can't be eaten: the fish buckets carry a food component (Items: `.component(FOOD,
+ * Foods.COD)`, 1.21.11 and 26.3) but no consumable one, so using one empties the fish out (MobBucketItem)
+ */
+export const NOT_EATEN = new Set(['cod_bucket', 'salmon_bucket', 'pufferfish_bucket', 'tropical_fish_bucket'])
+
+/**
+ * Foods whose consume effects hurt (Foods / Consumables): rotten_flesh 80% hunger, spider_eye poison,
+ * poisonous_potato 60% poison, pufferfish poison, hunger and nausea, raw chicken 30% hunger. The same in 26.3.
+ */
+export const HARMFUL_FOODS = ['rotten_flesh', 'spider_eye', 'poisonous_potato', 'pufferfish', 'chicken']
+/** the golden apples: their absorption and regeneration (Consumables.GOLDEN_APPLE, ENCHANTED_GOLDEN_APPLE) are kept for low health */
+export const RESERVED_FOODS = ['golden_apple', 'enchanted_golden_apple']
+/** chorus fruit teleports whoever eats it (Consumables: teleport_randomly) */
+export const TELEPORTING_FOODS = ['chorus_fruit']
+
+/**
+ * The version's foods: nutrition and saturation from minecraft-data (FoodProperties: nutrition × modifier × 2 for
+ * saturation; the same values in 1.21.11 and 26.3), less the ones that can't be eaten, with what they do.
+ */
+export const foodsOf = cachedPerRegistry((registry: RegistryLike): Record<string, FoodInfo> => {
+  const out: Record<string, FoodInfo> = {}
+  for (const [name, food] of Object.entries(registry.foodsByName ?? {})) {
+    if (NOT_EATEN.has(name)) continue
+    out[name] = { nutrition: food.foodPoints, saturation: food.saturation, ...(HARMFUL_FOODS.includes(name) ? { harmful: true } : {}) }
+  }
+  return out
+})
+
+/** a food of the version (nutrition, saturation, harmful), or null for anything that isn't eaten */
+export function foodInfo (registry: RegistryLike, name: string): FoodInfo | null {
+  return foodsOf(registry)[name] ?? null
+}
+
+/** a food the bot eats whenever hungry: edible and not harmful */
+export function isSafeFood (registry: RegistryLike, name: string): boolean {
+  const food = foodInfo(registry, name)
+  return food != null && food.harmful !== true
 }
 
 export type ToolKind = 'pickaxe' | 'axe' | 'shovel' | 'hoe' | 'sword'

@@ -333,7 +333,7 @@ export class Executor {
         if (emptySlots(this.bot) >= this.options.minFreeSlots) return
       }
       const want = this.options.minFreeSlots + 2 - emptySlots(this.bot)
-      const toss = junkToToss(this.bot.inventory.items(), want, { keep: this.options.keep, needed, anything: force })
+      const toss = junkToToss(this.bot.inventory.items(), want, { keep: this.options.keep, registry: this.bot.registry, needed, anything: force })
       if (toss.length > 0) this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
       if (toss.length > 0) {
         await this.task('make room', async (s) => {
@@ -352,7 +352,7 @@ export class Executor {
   async storeAtBase (needed: Record<string, number> = {}, signal?: AbortSignal): Promise<Record<string, number>> {
     const base = this.base
     if (base == null || base.chests.length === 0) return {}
-    const { store: toStore } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, needed })
+    const { store: toStore } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed })
     const moved: Record<string, number> = {}
     if (toStore.length === 0) return moved
     const dimension = this.memory.base?.dimension ?? 'overworld'

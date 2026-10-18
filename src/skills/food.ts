@@ -1,6 +1,7 @@
 // Food choice: what to eat given the hunger bar, as vanilla's FoodData.eat adds it up (nutrition capped at 20,
 // saturation capped at the new food level), keeping the harmful foods for when the bot is starving and the golden
 // apples for when its health is low.
+import { HARMFUL_FOODS, NOT_EATEN, RESERVED_FOODS, TELEPORTING_FOODS } from '../core/items'
 
 export interface FoodValues {
   name: string
@@ -34,12 +35,9 @@ export interface FoodChoiceOptions {
 export const DEFAULT_FOOD_CHOICE: Required<FoodChoiceOptions> = {
   starvingFood: 6,
   lowHealth: 8,
-  // rotten_flesh: 80% hunger; spider_eye: poison; poisonous_potato: 60% poison; pufferfish: poison, hunger, nausea;
-  // raw chicken: 30% hunger
-  harmful: ['rotten_flesh', 'spider_eye', 'poisonous_potato', 'pufferfish', 'chicken'],
-  reserved: ['golden_apple', 'enchanted_golden_apple'],
-  // chorus_fruit teleports (ChorusFruitItem / teleport_randomly)
-  banned: ['chorus_fruit'],
+  harmful: HARMFUL_FOODS,
+  reserved: RESERVED_FOODS,
+  banned: TELEPORTING_FOODS,
   wastePenalty: 0.5
 }
 
@@ -81,7 +79,7 @@ export function chooseFood<T extends { name: string }> (
   let bestScore = -Infinity
   for (const item of candidates) {
     const food = foods[item.name]
-    if (food == null || o.banned.includes(item.name) || !canEat(state, item.name)) continue
+    if (food == null || NOT_EATEN.has(item.name) || o.banned.includes(item.name) || !canEat(state, item.name)) continue
     if (o.harmful.includes(item.name) && !starving) continue
     const reserved = o.reserved.includes(item.name)
     if (reserved && !lowHealth) continue

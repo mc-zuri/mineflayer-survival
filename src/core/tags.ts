@@ -1,4 +1,4 @@
-import { burnTicks, FOODS, NON_FLAMMABLE_WOOD, parseTool, WOOD_TYPES, type ToolKind } from './items'
+import { burnTicks, foodsOf, NON_FLAMMABLE_WOOD, parseTool, WOOD_TYPES, type ToolKind } from './items'
 import { cachedPerRegistry, type RegistryLike } from './registry'
 
 /**
@@ -60,8 +60,8 @@ export class ItemTags {
     add('hoes', toolsOf('hoe'))
     add('swords', toolsOf('sword'))
     add('fuel', names.filter(n => burnTicks(n) > 0))
-    const foods = Object.keys(FOODS)
-    add('food', foods.filter(n => FOODS[n].harmful !== true))
+    const foods = foodsOf(registry)
+    add('food', Object.keys(foods).filter(n => foods[n].harmful !== true))
     add('cooked_food', ['cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'cooked_chicken', 'cooked_rabbit', 'cooked_cod', 'cooked_salmon', 'bread', 'baked_potato', 'golden_carrot', 'pumpkin_pie'])
     add('raw_meat', ['beef', 'porkchop', 'mutton', 'chicken', 'rabbit', 'cod', 'salmon'])
   }

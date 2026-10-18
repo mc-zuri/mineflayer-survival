@@ -1,10 +1,11 @@
 // What the bot carries on a trip and what goes into the base's chests, and what it may throw away when the
 // inventory is full far from the base. Pure, over item names and counts.
-import { FOODS, isBed, parseTool } from '../core/items'
+import { isBed, isSafeFood, parseTool } from '../core/items'
 import type { ItemCount } from '../core/inventory'
+import type { RegistryLike } from '../core/registry'
 
-/** how many of an item to carry; Infinity: all of them */
-export type KeepRule = (name: string) => number | null
+/** how many of an item to carry; Infinity: all of them (the registry: the version's, for what is food) */
+export type KeepRule = (name: string, registry?: RegistryLike) => number | null
 
 /** a carried stack of each: blocks to bridge, pillar and plug lava with, torches, a crafting table and a furnace */
 export const KEEP_COUNTS: Record<string, number> = {
@@ -36,14 +37,14 @@ export const KEEP_COUNTS: Record<string, number> = {
 const ARMOR = /_(helmet|chestplate|leggings|boots)$/
 
 /**
- * The default rule: every tool, weapon and armor piece, every safe food, the beds, and the counts of KEEP_COUNTS.
- * Anything else (ores, ingots, gems, building blocks over a stack) goes to the base.
+ * The default rule: every tool, weapon and armor piece, every safe food (of the registry's foods: none without one),
+ * the beds, and the counts of KEEP_COUNTS. Anything else (ores, ingots, gems, building blocks over a stack) goes to the
+ * base.
  */
-export const defaultKeep: KeepRule = name => {
+export const defaultKeep: KeepRule = (name, registry) => {
   if (parseTool(name) != null || name === 'shears' || ARMOR.test(name) || name === 'elytra') return Infinity
   if (isBed(name)) return 1
-  const food = FOODS[name]
-  if (food != null && food.harmful !== true) return Infinity
+  if (registry != null && isSafeFood(registry, name)) return Infinity
   return KEEP_COUNTS[name] ?? null
 }
 
@@ -59,6 +60,8 @@ export const JUNK = new Set([
 
 export interface SplitOptions {
   keep?: KeepRule
+  /** the version's registry, for the keep rule */
+  registry?: RegistryLike
   /** what the current goals need: never stored or thrown (on top of what `keep` keeps) */
   needed?: Record<string, number>
 }
@@ -71,7 +74,7 @@ export function splitInventory (items: readonly ItemCount[], opts: SplitOptions 
   const keep: ItemCount[] = []
   const store: ItemCount[] = []
   for (const [name, count] of totals) {
-    const rule = keepRule(name) ?? 0
+    const rule = keepRule(name, opts.registry) ?? 0
     const kept = Math.min(count, Math.max(rule, opts.needed?.[name] ?? 0))
     if (kept > 0) keep.push({ name, count: kept })
     if (count - kept > 0) store.push({ name, count: count - kept })
@@ -95,7 +98,7 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number 
     for (const s of candidates) {
       if (out.length >= slots) return
       const total = left.get(s.name) ?? 0
-      const keep = Math.max(keepRule(s.name) ?? 0, needed[s.name] ?? 0)
+      const keep = Math.max(keepRule(s.name, opts.registry) ?? 0, needed[s.name] ?? 0)
       // a stack may go when what's left of the item without it still covers what's kept
       if (total - s.count < Math.min(keep, total)) continue
       out.push({ name: s.name, count: s.count })
@@ -103,6 +106,6 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number 
     }
   }
   pick(name => JUNK.has(name))
-  if (opts.anything === true) pick(name => !JUNK.has(name) && (keepRule(name) ?? 0) !== Infinity)
+  if (opts.anything === true) pick(name => !JUNK.has(name) && (keepRule(name, opts.registry) ?? 0) !== Infinity)
   return out
 }

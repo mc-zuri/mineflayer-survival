@@ -21,6 +21,8 @@ export interface RegistryLike {
   blocksByName: { [name: string]: RegistryBlock }
   /** result item id → recipes, as minecraft-data stores them */
   recipes: { [id: number]: unknown }
+  /** minecraft-data's foods (FoodProperties): nutrition (foodPoints) and saturation */
+  foodsByName?: { [name: string]: { foodPoints: number, saturation: number } }
 }
 
 /** per-registry caches, so derived tables are built once per version */
