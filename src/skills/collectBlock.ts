@@ -23,6 +23,11 @@ export interface CollectBlockArgs {
   maxDistance?: number
   /** pick up the drops (default true) */
   pickup?: boolean
+  /**
+   * Leave the bottom block of a column plant (sugar cane, cactus, bamboo) found by name, breaking the one above it, so
+   * it grows back (default true)
+   */
+  keepBase?: boolean
 }
 
 export interface CollectBlockResult {
@@ -33,6 +38,25 @@ export interface CollectBlockResult {
   items: ItemCounts
   /** items gained: the inventory's gains added up */
   count: number
+}
+
+/**
+ * Plants that grow up from their bottom block (SugarCaneBlock, CactusBlock, BambooStalkBlock: a random tick adds a
+ * block on top while the column is short enough); when one breaks, the ones over it can't survive and break too.
+ */
+export const COLUMN_PLANTS = new Set(['sugar_cane', 'cactus', 'bamboo'])
+
+/**
+ * The block to break to harvest the column plant at `pos` and leave its bottom block to grow back: the second one
+ * from the bottom (SugarCaneBlock.canSurvive: the one above stands on its own kind). Null for a column of one.
+ */
+export function columnHarvestTarget (lookup: (pos: Vec3) => { name: string } | null, pos: Vec3): Vec3 | null {
+  const name = lookup(pos)?.name
+  if (name == null || !COLUMN_PLANTS.has(name)) return null
+  let base = pos.floored()
+  for (let i = 0; i < 32 && lookup(base.offset(0, -1, 0))?.name === name; i++) base = base.offset(0, -1, 0)
+  const second = base.offset(0, 1, 0)
+  return lookup(second)?.name === name ? second : null
 }
 
 function sameBlock (bot: Bot, pos: Vec3, type: number): boolean {
@@ -80,7 +104,14 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       }
       return null
     }
-    const found = bot.findBlocks({ matching: ids, maxDistance, count: 256 })
+    // a column plant's bottom block stays to grow back: the one above it is broken instead (and the rest falls)
+    const keepBase = args.keepBase !== false
+    const targets = new Map<string, Vec3>()
+    for (const pos of bot.findBlocks({ matching: ids, maxDistance, count: 256 })) {
+      const target = keepBase && COLUMN_PLANTS.has(bot.blockAt(pos)?.name ?? '') ? columnHarvestTarget(p => bot.blockAt(p), pos) : pos
+      if (target != null) targets.set(vecKey(target), target)
+    }
+    const found = [...targets.values()]
       .filter(pos => !tried.has(vecKey(pos)))
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
     if (found.length === 0) return null
@@ -176,4 +207,19 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     throw new SkillError('VERIFY_FAILED', `broke ${positions.length} blocks but no item came into the inventory`, res)
   }
   return res
+}
+
+export interface HarvestSugarCaneArgs {
+  /** sugar cane wanted (default 3: a craft of paper) */
+  count?: number
+  /** how far to look (default 64) */
+  maxDistance?: number
+}
+
+/**
+ * Sugar cane from the columns nearby (it grows only beside water: SugarCaneBlock.canSurvive), the bottom block of
+ * each left to grow back.
+ */
+export async function harvestSugarCane (bot: Bot, args: HarvestSugarCaneArgs = {}, signal?: AbortSignal): Promise<CollectBlockResult> {
+  return await collectBlock(bot, { names: ['sugar_cane'], count: args.count ?? 3, maxDistance: args.maxDistance, keepBase: true }, signal)
 }
