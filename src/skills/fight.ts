@@ -35,11 +35,11 @@ export interface FightResult {
   lastPosition: Vec3
 }
 
-// LivingEntity.DATA_LIVING_ENTITY_FLAGS (index 8 on 1.21.11): bit 1 is "using an item" (a skeleton drawing its bow)
+// LivingEntity.DATA_LIVING_ENTITY_FLAGS (index 8 on 1.21.11 and 26.3): bit 1 is "using an item" (a skeleton drawing its bow)
 const LIVING_FLAGS_INDEX = 8
-// Creeper.DATA_SWELL_DIR (index 16 on 1.21.11): 1 swelling, -1 not
+// Creeper.DATA_SWELL_DIR (index 16 on 1.21.11 and 26.3): 1 swelling, -1 not
 export const CREEPER_SWELL_DIR_INDEX = 16
-// Creeper.DATA_IS_IGNITED (index 18): lit by flint and steel, it swells whatever the distance
+// Creeper.DATA_IS_IGNITED (index 18 on 1.21.11 and 26.3): lit by flint and steel, it swells whatever the distance
 export const CREEPER_IGNITED_INDEX = 18
 const RANGED = new Set(['skeleton', 'stray', 'bogged', 'pillager', 'piglin', 'drowned', 'parched'])
 
@@ -48,7 +48,7 @@ export function isUsingItem (bot: Bot, entity: Entity): boolean {
   return typeof flags === 'number' && (flags & 1) !== 0
 }
 
-// Blaze.DATA_FLAGS_ID (index 16 on 1.21.11): bit 1 is set while it's charged, about to shoot (Blaze.setCharged)
+// Blaze.DATA_FLAGS_ID (index 16 on 1.21.11 and 26.3): bit 1 is set while it's charged, about to shoot (Blaze.setCharged)
 const BLAZE_FLAGS_INDEX = 16
 
 /** a blaze about to shoot its fireballs (BlazeAttackGoal sets it charged for the volley) */

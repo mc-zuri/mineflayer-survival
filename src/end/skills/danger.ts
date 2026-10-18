@@ -4,7 +4,7 @@ import type { Pos } from '../../core/memory'
 import { motionTrackerOf } from '../../skills/motion'
 import { steerToward } from '../../skills/steer'
 import { eat, bestFoodInInventory } from '../../skills/eat'
-import { TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataValue } from '../../skills/combatUtil'
+import { TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataIndex, metadataValue } from '../../skills/combatUtil'
 import { DRAGON_PHASE_METADATA, phaseName } from '../dragon'
 import { countItems, groundY, isOpenAt, SCAFFOLD_ITEMS, towerUp, VoidGuard, type BlockGetter } from './world'
 
@@ -73,7 +73,7 @@ export function dragonDangers (bot: Bot, ground: number, island = ground): Dange
       if (land != null) dangers.push({ center: land, y: ground, radius: 6, why: 'fireball' })
     } else if (e.name === 'ender_dragon') {
       motion.track(e)
-      if (phaseName((e.metadata as any)?.[DRAGON_PHASE_METADATA]) !== 'charging_player') continue
+      if (phaseName((e.metadata as any)?.[metadataIndex(bot, 'ender_dragon', 'phase', DRAGON_PHASE_METADATA)]) !== 'charging_player') continue
       const v = motion.velocity(e)
       const pass = closestApproach(e.position, v, me, 60)
       if (pass.distance < 8) dangers.push({ center: { x: e.position.x + v.x * pass.tick, z: e.position.z + v.z * pass.tick }, y: island, radius: 8, why: 'charge' })

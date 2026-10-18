@@ -7,7 +7,7 @@ import { motionTrackerOf } from '../../skills/motion'
 import { attackStrengthOf } from '../../skills/weapons'
 import { bestFoodInInventory } from '../../skills/eat'
 import { steerToward } from '../../skills/steer'
-import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataValue, eyePosition, yawPitchOf, distanceToBox } from '../../skills/combatUtil'
+import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataIndex, metadataValue, eyePosition, yawPitchOf, distanceToBox } from '../../skills/combatUtil'
 import { DragonPhaseTracker, headPosition, meleeSpots, vanillaYaw, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
 import { exitPortal } from '../spikes'
 import { destroyCrystals } from './destroyCrystals'
@@ -157,7 +157,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       if (dragon != null) {
         dragonId = dragon.id
         motion.track(dragon)
-        const phase = (dragon.metadata as any)?.[DRAGON_PHASE_METADATA]
+        const phase = (dragon.metadata as any)?.[metadataIndex(bot, 'ender_dragon', 'phase', DRAGON_PHASE_METADATA)]
         const view = { position: dragon.position.clone(), yaw: vanillaYaw(dragon.yaw) }
         tracker.update({ tick, phase: typeof phase === 'number' ? phase : 0, ...view })
         const h = metadataValue(bot, dragon, 'health')

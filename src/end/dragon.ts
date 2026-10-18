@@ -7,7 +7,10 @@ export const DRAGON_PHASES = [
 ] as const
 export type DragonPhase = typeof DRAGON_PHASES[number]
 
-/** the ender_dragon's entity metadata index for EnderDragon.DATA_PHASE (after Mob's flags at 15) */
+/**
+ * the ender_dragon's entity metadata index for EnderDragon.DATA_PHASE (after Mob's flags at 15), 16 on 1.21.11 and 26.3:
+ * the fallback of metadataIndex(bot, 'ender_dragon', 'phase', ...), which reads the version's metadataKeys
+ */
 export const DRAGON_PHASE_METADATA = 16
 
 /** what the bot should make of a phase */
