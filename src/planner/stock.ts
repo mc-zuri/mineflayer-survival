@@ -10,6 +10,7 @@ import type { RegistryLike } from '../core/registry'
 import { itemTags } from '../core/tags'
 import { heldFor, unitValue, type ObtainRequest } from './obtain'
 import { FOOD_GOAL, type MilestoneId } from './progression'
+import { JUNK } from '../executor/keep'
 
 /** where a top-up's source is: on the surface (trees, animals: by day) or down a mine (stone, ores: by night) */
 export type StockPlace = 'surface' | 'underground'
@@ -149,6 +150,15 @@ export function describeLevel (l: StockLevel): string {
   return `${l.mark.id} ${fmt(l.carried)}${l.stored > 0 ? `+${fmt(l.stored)}` : ''}/${l.mark.low}-${l.mark.high}`
 }
 
+/** slots the items fill but the junk's (dirt, andesite...: thrown away when room is wanted, the executor's makeRoom) */
+function keptSlots (inventory: Inventory): number {
+  let used = 0
+  for (const { name, count } of inventory.entries()) {
+    if (!JUNK.has(name)) used += Math.ceil(count / Math.max(1, inventory.registry.itemsByName[name]?.stackSize ?? STACK))
+  }
+  return used
+}
+
 /** slots one unit of a mark takes: a gathered item's stack (64 or 16), a food's nutrition for a nutrition mark */
 function unitsPerSlot (mark: StockMark, registry: RegistryLike): number {
   const tags = itemTags(registry)
@@ -191,8 +201,8 @@ export class StockPolicy {
   /**
    * The top-ups due at these places (the schedule's: the surface by day, underground by night or down the mine), the
    * lowest first (by level over low). Each gathers to its high mark, as much as fits this trip: the slots free beyond
-   * reserveSlots, shared out among the top-ups due (the rest comes on a later trip, the chests holding what's
-   * gathered between). Updates the levels first.
+   * reserveSlots (the junk counted free), shared out among the top-ups due (the rest comes on a later trip, the chests
+   * holding what's gathered between). Updates the levels first.
    */
   topUps (inventory: Inventory, stored: Readonly<Record<string, number>>, reached: readonly MilestoneId[], places: readonly StockPlace[]): TopUp[] {
     const levels = this.update(inventory, stored, reached)
@@ -200,7 +210,7 @@ export class StockPolicy {
       .filter(l => this.active.has(l.mark.id) && places.includes(l.mark.where))
       .sort((a, b) => a.have / a.mark.low - b.have / b.mark.low)
     if (due.length === 0) return []
-    const room = Math.max(0, inventory.slots - inventory.usedSlots() - this.reserveSlots)
+    const room = Math.max(0, inventory.slots - keptSlots(inventory) - this.reserveSlots)
     const share = Math.floor(room / due.length)
     const tags = itemTags(inventory.registry)
     const out: TopUp[] = []

@@ -80,13 +80,16 @@ for (const version of VERSIONS) {
     const policy = new StockPolicy({ reserveSlots: 10 })
     const fill: Record<string, number> = {}
     // 20 slots used: 6 free beyond the 10 kept free
-    const junk = ['dirt', 'andesite', 'diorite', 'granite', 'gravel', 'sand', 'tuff', 'calcite', 'netherrack', 'basalt']
-    for (const j of junk) fill[j] = 128
+    const blocks = ['stone_bricks', 'bricks', 'glass', 'sandstone', 'smooth_stone', 'polished_andesite', 'white_wool', 'terracotta', 'bookshelf', 'oak_slab']
+    for (const b of blocks) fill[b] = 128
     const ups = policy.topUps(inv({ ...fill }), {}, ['wood', 'stone'], ['underground'])
     // stone, torches, coal and iron due: 6 slots shared, a slot each
     assert.equal(ups.length, 4)
     for (const u of ups) assert.equal(u.units, 64, u.mark.id)
     // the inventory full: none this trip
+    // junk is thrown away when room is wanted: it counts as free
+    const junk = { ...fill, dirt: 640, andesite: 640 }
+    assert.equal(policy.topUps(inv(junk), {}, ['wood', 'stone'], ['underground']).length, 4)
     for (const j of ['blackstone', 'deepslate', 'cobblestone', 'stone', 'mud', 'clay']) fill[j] = 128
     assert.equal(policy.topUps(inv(fill), {}, ['wood', 'stone'], ['underground']).length, 0)
   })
