@@ -39,7 +39,12 @@ export interface SmeltingRecipe {
 
 export interface BarterOffer {
   item: string
-  /** expected items per gold ingot: weight / 459 × mean count (vanilla piglin_bartering) */
+  /** the entry's weight in the piglin_bartering loot table */
+  weight: number
+  /** the entry's set_count range (uniform, whole numbers) */
+  min: number
+  max: number
+  /** expected items per gold ingot: weight / BARTER_TOTAL_WEIGHT × mean count */
   perIngot: number
 }
 
@@ -174,19 +179,32 @@ export const SMELTING: SmeltingRecipe[] = [
   { input: ['potato'], output: 'baked_potato' }
 ]
 
+/**
+ * the sum of the weights in vanilla 1.21.11 data/minecraft/loot_table/gameplay/piglin_bartering.json
+ * (469 since 1.21.6 added dried_ghast at weight 10; it was 459 before)
+ */
+export const BARTER_TOTAL_WEIGHT = 469
+
+function offer (item: string, weight: number, min: number, max: number): BarterOffer {
+  // UniformGenerator.getInt: Mth.nextInt(floor(min), floor(max)), so the mean is (min + max) / 2
+  return { item, weight, min, max, perIngot: weight / BARTER_TOTAL_WEIGHT * (min + max) / 2 }
+}
+
 /** 1 gold ingot per trade; the bot must wear a piece of gold armor or piglins attack */
 export const BARTER: BarterOffer[] = [
-  { item: 'ender_pearl', perIngot: 10 / 459 * 3 },
-  { item: 'string', perIngot: 20 / 459 * 6 },
-  { item: 'obsidian', perIngot: 40 / 459 * 1 },
-  { item: 'crying_obsidian', perIngot: 40 / 459 * 2 },
-  { item: 'leather', perIngot: 40 / 459 * 3 },
-  { item: 'fire_charge', perIngot: 40 / 459 * 1 },
-  { item: 'iron_nugget', perIngot: 10 / 459 * 23 },
-  { item: 'quartz', perIngot: 20 / 459 * 12 },
-  { item: 'gravel', perIngot: 40 / 459 * 12 },
-  { item: 'soul_sand', perIngot: 40 / 459 * 5 },
-  { item: 'blackstone', perIngot: 40 / 459 * 12 }
+  offer('ender_pearl', 10, 2, 4),
+  offer('string', 20, 3, 9),
+  offer('obsidian', 40, 1, 1),
+  offer('crying_obsidian', 40, 1, 3),
+  offer('leather', 40, 2, 4),
+  offer('fire_charge', 40, 1, 1),
+  offer('iron_nugget', 10, 10, 36),
+  offer('quartz', 20, 5, 12),
+  offer('gravel', 40, 8, 16),
+  offer('soul_sand', 40, 2, 8),
+  offer('blackstone', 40, 8, 16),
+  offer('nether_brick', 40, 2, 8),
+  offer('spectral_arrow', 40, 6, 12)
 ]
 export const BARTER_FIND = 1500
 /** PiglinAi.ADMIRE_DURATION: a piglin looks at the ingot for 119 ticks before it throws the loot */
