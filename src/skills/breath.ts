@@ -1,6 +1,6 @@
 // Keeping the bot's head out of water on its walks. The player breathes only with its eyes out of water
 // (LivingEntity.baseTick: the air supply runs down while the eyes are in water, 300 ticks of it, then 2 damage a
-// second), and the pathfinder walks and swims under water like through air: a way to an ore through a flooded cave
+// second; the same in 26.3), and the pathfinder walks and swims under water like through air: a way to an ore through a flooded cave
 // (an aquifer) drowned the bot on seed 5.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'

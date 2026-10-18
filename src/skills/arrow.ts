@@ -3,6 +3,7 @@ import { Vec3 } from 'vec3'
 // An arrow's flight as vanilla's AbstractArrow.tick moves it, one server tick at a time: it moves by its velocity
 // (stopping at the first block or entity on the way), then its velocity is scaled by its inertia (0.99 in air,
 // AbstractArrow.getWaterInertia 0.6 in water) and loses its gravity (AbstractArrow.getDefaultGravity 0.05).
+// The same in 26.3, as are BowItem's power and speed, Projectile.shoot's spread and the arrow's damage.
 export const ARROW_GRAVITY = 0.05
 /** applyInertia(0.99F): the float widened to a double */
 export const ARROW_INERTIA = Math.fround(0.99)

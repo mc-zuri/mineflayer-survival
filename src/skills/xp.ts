@@ -1,5 +1,7 @@
 // Experience: the levels vanilla's Player counts, where the points come from (ExperienceOrb drops of ores, furnace
 // output, kills), picking the orbs up, and gainLevels: mining, smelting and killing until the bot has the levels.
+// The same in 26.3 (the levels, the ores' and recipes' experience, the orbs), as is the enchanting table
+// (EnchantmentMenu, EnchantmentHelper, the enchantments' data) and the anvil (AnvilMenu).
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from './errors'

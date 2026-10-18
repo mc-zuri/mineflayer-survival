@@ -3,7 +3,8 @@ import type { Item } from 'prismarine-item'
 import { TaskError, type SkillOptions } from './combatUtil'
 
 // Armor as 1.21.11's ArmorMaterials gives it (defense by piece, toughness), and the damage it lets through as
-// CombatRules.getDamageAfterAbsorb and getDamageAfterMagicAbsorb work it out.
+// CombatRules.getDamageAfterAbsorb and getDamageAfterMagicAbsorb work it out. The same in 26.3 (every piece's
+// attribute_modifiers, CombatRules and the protection enchantments).
 export type ArmorSlot = 'head' | 'torso' | 'legs' | 'feet'
 export const ARMOR_SLOTS: ArmorSlot[] = ['head', 'torso', 'legs', 'feet']
 const PIECES: Record<string, ArmorSlot> = { helmet: 'head', chestplate: 'torso', leggings: 'legs', boots: 'feet' }

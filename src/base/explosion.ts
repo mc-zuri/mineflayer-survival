@@ -4,6 +4,10 @@ import { BlockGetter, BlockRegistry, Box, Vec, blockRegistry } from './blocks'
 // bytecode): the block rays of calculateExplodedPositions, getSeenPercent and the entity damage of
 // hurtEntities / ExplosionDamageCalculator.getEntityDamageAmount. Float arithmetic is kept with
 // Math.fround where vanilla works in float.
+// 26.3's ServerExplosion is the same but for two things the bot doesn't meet: an entity on the source's team takes no
+// damage (Entity.doTeamsAllowDamage), and the push goes through Entity.pushFromExplosion (Entity.push, overridden
+// nowhere). The sources' powers are the same; minecraft-data's resistances differ for three slabs (quartz, red
+// sandstone and cut red sandstone: 6 then 0.8), read from the version's registry.
 
 const f = Math.fround
 const F_0_3 = f(0.3)
