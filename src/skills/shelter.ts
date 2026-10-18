@@ -494,22 +494,37 @@ export async function sleepThroughNight (bot: Bot, opts: SleepThroughNightOption
   const signal = opts.signal
   let fought = 0
   let last: unknown = null
+  const fightOff = async (monster: Bot['entities'][string]): Promise<void> => {
+    await fight(bot, monster, { signal, maxTicks: 600 }).catch((e) => { if (isAbort(e)) throw e })
+    fought++
+  }
   for (let attempt = 0; attempt < (opts.tries ?? 6); attempt++) {
     throwIfAborted(signal)
+    // the ones the server will see first (the bed goes next to the bot): mineflayer's own check is a box off by one
+    // each way, and the server's refusal ("You may not rest now") only shows as mineflayer's 3 s timeout
+    const near = monstersPreventingRest(bot, bot.entity.position.floored())[0]
+    if (near != null) {
+      await fightOff(near)
+      continue
+    }
+    // on the ground first: the bed goes beside the feet (a crit jump of the fight before left them in the air)
+    await waitUntil(bot, () => bot.entity.onGround, 40, signal)
     try {
       await sleep(bot, { pickUpBed: true, bedDistance: opts.bedDistance }, signal)
       return { slept: true, fought }
     } catch (err) {
-      if (!isSkillError(err, 'REFUSED') || !/monsters/i.test((err as Error).message)) throw err
+      trace('sleepThroughNight: try', attempt, (err as Error).message)
+      if (!isSkillError(err, 'REFUSED')) throw err
       last = err
       const bed = (err.partial as any)?.bed as Vec3 | undefined
       const monster = bed != null ? monstersPreventingRest(bot, bed)[0] : undefined
       if (monster != null) {
-        await fight(bot, monster, { signal, maxTicks: 600 }).catch((e) => { if (isAbort(e)) throw e })
-        fought++
-      } else {
+        await fightOff(monster)
+      } else if (/monsters|not sleeping/i.test((err as Error).message)) {
         // the server sees one the bot doesn't (in a cave under the bed): give it a moment
         await waitUntil(bot, () => false, 60, signal)
+      } else {
+        throw err
       }
     }
   }

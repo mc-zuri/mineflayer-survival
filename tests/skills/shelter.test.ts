@@ -2,10 +2,10 @@ import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import {
-  armorPoints, celestialAngle, defaultDigCost, findShelterSpot, isBrightOutside, isEnclosed, nightPlan, sealItem, shelterAt, skyDarken
+  armorPoints, celestialAngle, defaultDigCost, findShelterSpot, isBrightOutside, isEnclosed, monstersPreventingRest, nightPlan, sealItem, shelterAt, skyDarken
 } from '../../src/skills/shelter'
 import type { BlockLookup } from '../../src/skills/placement'
-import { fakeBot, item } from '../reflexes/fakeBot'
+import { entity, fakeBot, item } from '../reflexes/fakeBot'
 
 const SOLID = new Set(['stone', 'dirt', 'grass_block', 'sand', 'oak_leaves', 'cobblestone', 'oak_log'])
 
@@ -121,4 +121,12 @@ test('findShelterSpot: a column the bot couldn\'t get to is left out the next ti
   assert.ok(next != null)
   assert.notDeepStrictEqual(next.surface, first.surface)
   assert.strictEqual(next.surface.distanceTo(first.surface), 1)
+})
+
+test('monstersPreventingRest: Player.startSleepInBed\'s box, 8 across and 5 up or down of the bed; the living ones, nearest first', () => {
+  const zombie = (x: number, y: number, z: number, health = 20): any => entity({ name: 'zombie', position: new Vec3(x, y, z), meta: { health } })
+  const near = zombie(3.5, 64, 0.5)
+  const corner = zombie(8.4, 64, -7.4)
+  const bot = fakeBot({ entities: [zombie(9.6, 64, 0.5), zombie(0.5, 70, 0.5), zombie(1.5, 64, 1.5, 0), corner, near, entity({ name: 'cow', position: new Vec3(1.5, 64, 0.5) })] })
+  assert.deepStrictEqual(monstersPreventingRest(bot, new Vec3(0, 64, 0)).map(e => e.id), [near.id, corner.id])
 })
