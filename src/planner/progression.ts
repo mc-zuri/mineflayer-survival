@@ -171,11 +171,7 @@ export const MILESTONES: readonly Milestone[] = [
     id: 'diamonds',
     title: 'a diamond pickaxe and sword, armor when there are enough diamonds',
     done: s => ownsAny(s, toolsAtLeast('pickaxe', 'diamond')) && ownsAny(s, toolsAtLeast('sword', 'diamond')),
-    goals: () => [
-      { item: toolsAtLeast('pickaxe', 'diamond'), count: 1 },
-      { item: toolsAtLeast('sword', 'diamond'), count: 1 },
-      ...ARMOR_SLOTS.map(slot => ({ item: armorAtLeast(slot, 'diamond'), count: 1, optional: true }))
-    ]
+    goals: s => diamondGoals(s)
   },
   {
     id: 'enchanting',
@@ -224,6 +220,29 @@ export const MILESTONES: readonly Milestone[] = [
     ]
   }
 ]
+
+/** diamonds each piece takes (vanilla's recipes) */
+const DIAMOND_COST: Record<string, number> = { pickaxe: 3, sword: 2, helmet: 5, chestplate: 8, leggings: 7, boots: 4 }
+
+/**
+ * The diamonds milestone's goals: the pickaxe and the sword, and the armor pieces the diamonds held beyond those pay
+ * for, cheapest first, as optional goals; not armor planned from diamonds yet to be found: the plan for all of it mined
+ * 14 diamonds, at 600 ticks of strip mining each, where 5 make the milestone
+ */
+export function diamondGoals (s: ProgressState): ObtainRequest[] {
+  const goals: ObtainRequest[] = [
+    { item: toolsAtLeast('pickaxe', 'diamond'), count: 1 },
+    { item: toolsAtLeast('sword', 'diamond'), count: 1 }
+  ]
+  let spare = s.inventory.count('diamond')
+  for (const kind of ['pickaxe', 'sword'] as const) if (!ownsAny(s, toolsAtLeast(kind, 'diamond'))) spare -= DIAMOND_COST[kind]
+  for (const slot of [...ARMOR_SLOTS].sort((a, b) => DIAMOND_COST[a] - DIAMOND_COST[b])) {
+    if (ownsAny(s, armorAtLeast(slot, 'diamond')) || spare < DIAMOND_COST[slot]) continue
+    spare -= DIAMOND_COST[slot]
+    goals.push({ item: armorAtLeast(slot, 'diamond'), count: 1, optional: true })
+  }
+  return goals
+}
 
 export function milestone (id: MilestoneId): Milestone {
   return MILESTONES.find(m => m.id === id) as Milestone

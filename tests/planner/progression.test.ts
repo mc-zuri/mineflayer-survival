@@ -165,3 +165,15 @@ test('iron: the armor is iron, not diamond, even with a diamond ore seen nearby 
   assert.ok(!plan.steps.some(st => st.item === 'diamond'), plan.steps.map(st => `${st.kind} ${st.count} ${st.item}`).join(', '))
   assert.ok(plan.steps.some(st => st.item === 'iron_chestplate'))
 })
+
+test('diamonds: the pickaxe and sword, and only the armor the diamonds held beyond them pay for', () => {
+  const kit = { iron_pickaxe: 1, iron_sword: 1, crafting_table: 1, furnace: 1 }
+  const items = (s: ProgressState): string[] => milestone('diamonds').goals(s).map(g => (g.item as string[])[0])
+  assert.deepEqual(items(state(kit)), ['diamond_pickaxe', 'diamond_sword'])
+  const plan = planMilestone(registry, milestone('diamonds'), state(kit))
+  assert.equal(plan.steps.filter(st => st.kind === 'mine' && st.item === 'diamond').reduce((n, st) => n + st.count, 0), 5)
+  // 5 for the tools and 4 over: the boots
+  assert.deepEqual(items(state({ ...kit, diamond: 9 })), ['diamond_pickaxe', 'diamond_sword', 'diamond_boots'])
+  // the tools made, 9 held: the boots and the helmet
+  assert.deepEqual(items(state({ ...kit, diamond_pickaxe: 1, diamond_sword: 1, diamond: 9 })), ['diamond_pickaxe', 'diamond_sword', 'diamond_boots', 'diamond_helmet'])
+})
