@@ -14,6 +14,7 @@ import { hitDamage } from './weapons'
 import { CARDINALS, countItems, trace, vecKey, waitUntil, type Block } from './util'
 import { findBedPlacement, type BlockLookup, type BlockView } from './placement'
 import { SCAFFOLD_ITEMS, towerUp } from '../end/skills/world'
+import { isBed } from '../core/items'
 
 /** how deep the hole goes: the feet three blocks down, the head two, the seal one (flush with the ground) */
 export const SHELTER_DEPTH = 3
@@ -187,7 +188,7 @@ export function bestHitDamage (bot: Bot): number {
 
 /** A bed in the bag or one placed nearby: sleep; good gear: stay out and fight; else dig in. */
 export function nightPlan (bot: Bot, opts: NightPlanOptions & { bedNearby?: boolean } = {}): NightPlan {
-  if (opts.bedNearby === true || bot.inventory.items().some(i => i.name.endsWith('_bed'))) return 'sleep'
+  if (opts.bedNearby === true || bot.inventory.items().some(i => isBed(i.name))) return 'sleep'
   if (armorPoints(bot) >= (opts.minArmor ?? 10) && bestHitDamage(bot) >= (opts.minDamage ?? 6)) return 'fight'
   return 'shelter'
 }
@@ -589,7 +590,7 @@ export async function sleepThroughNight (bot: Bot, opts: SleepThroughNightOption
         continue
       }
       // a bed standing nearby that won't do (one it can't get to, one it can't click): its own from the bag, once
-      if (!ownBed && !/monsters|not sleeping/i.test((err as Error).message) && bot.inventory.items().some(i => i.name.endsWith('_bed'))) {
+      if (!ownBed && !/monsters|not sleeping/i.test((err as Error).message) && bot.inventory.items().some(i => isBed(i.name))) {
         ownBed = true
         continue
       }

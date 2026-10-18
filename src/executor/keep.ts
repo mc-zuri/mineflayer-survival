@@ -1,6 +1,6 @@
 // What the bot carries on a trip and what goes into the base's chests, and what it may throw away when the
 // inventory is full far from the base. Pure, over item names and counts.
-import { FOODS, parseTool } from '../core/items'
+import { FOODS, isBed, parseTool } from '../core/items'
 import type { ItemCount } from '../core/inventory'
 
 /** how many of an item to carry; Infinity: all of them */
@@ -41,7 +41,7 @@ const ARMOR = /_(helmet|chestplate|leggings|boots)$/
  */
 export const defaultKeep: KeepRule = name => {
   if (parseTool(name) != null || name === 'shears' || ARMOR.test(name) || name === 'elytra') return Infinity
-  if (name.endsWith('_bed')) return 1
+  if (isBed(name)) return 1
   const food = FOODS[name]
   if (food != null && food.harmful !== true) return Infinity
   return KEEP_COUNTS[name] ?? null

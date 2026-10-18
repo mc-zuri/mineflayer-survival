@@ -7,6 +7,7 @@ import { navigate } from './navigate'
 import { placeBlock } from './placeBlock'
 import { findBedPlacement } from './placement'
 import { findInventoryItem, waitUntil, type Block } from './util'
+import { isBed } from '../core/items'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 
 export interface SleepArgs {
@@ -28,7 +29,7 @@ export interface SleepResult {
   ticks: number
 }
 
-const isBedName = (name: string): boolean => name.endsWith('_bed')
+const isBedName = isBed
 
 /**
  * A block state's property by name, from minecraft-data's states (the last one varies fastest; a bool's values are

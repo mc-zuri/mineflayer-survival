@@ -10,6 +10,7 @@ import { hasLineOfSight, type Entity } from '../skills/combatUtil'
 import { GHAST_FIREBALL, deflectFireball, fireballIncoming } from '../nether/safety'
 import { isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
+import { isBed } from '../core/items'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
 export function isHostile (bot: Bot, e: Entity): boolean {
@@ -251,7 +252,7 @@ function cachedNightPlan (ctx: ReflexContext): NightPlan {
   const cached = planCache.get(bot)
   if (cached != null && ctx.tick - cached.tick < 100 && cached.tick <= ctx.tick) return cached.plan
   const bedNearby = config.night.sleep && typeof bot.findBlock === 'function' &&
-    bot.findBlock({ matching: (b: any) => b.name.endsWith('_bed'), maxDistance: config.night.bedDistance }) != null
+    bot.findBlock({ matching: (b: any) => isBed(b.name), maxDistance: config.night.bedDistance }) != null
   const plan = nightPlan(bot, { minArmor: config.night.minArmor, minDamage: config.night.minDamage, bedNearby })
   planCache.set(bot, { tick: ctx.tick, plan })
   return plan

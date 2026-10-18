@@ -9,6 +9,7 @@ import * as path from 'node:path'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { TaskError } from './core/errors'
+import { isBed } from './core/items'
 import { Inventory, type ItemCount } from './core/inventory'
 import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './core/memory'
 import { MILESTONES, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
@@ -339,8 +340,8 @@ export class Runner {
     if (normalizeDimension(bot.game?.dimension) !== 'overworld') return
     const base = baseRecord(this.memory)
     const baseBed = base?.bed != null && bot.entity.position.distanceTo(new Vec3(base.bed.x, base.bed.y, base.bed.z)) <= 64 ? new Vec3(base.bed.x, base.bed.y, base.bed.z) : null
-    const held = bot.inventory.items().some(i => i.name.endsWith('_bed'))
-    const near = bot.findBlock({ matching: (b: any) => b.name.endsWith('_bed'), maxDistance: 32 }) != null
+    const held = bot.inventory.items().some(i => isBed(i.name))
+    const near = bot.findBlock({ matching: (b: any) => isBed(b.name), maxDistance: 32 }) != null
     if (baseBed == null && !held && !near) return
     this.log(`night (time ${bot.time.timeOfDay}): sleeping`)
     try {

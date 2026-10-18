@@ -208,3 +208,12 @@ export function toolKindForMaterial (material: string | undefined): ToolKind | n
   if (material.includes('sword_instantly_mines') || material === 'coweb') return 'sword'
   return null
 }
+
+/**
+ * A bed the bot carries, sleeps in and builds into its base, its spawn point: a `<colour>_bed` (BedBlock). Not 26.3's
+ * straw_bed (StrawBedBlock): in the overworld it lets you sleep when it's dark but sets no spawn and is gone once you
+ * get up (STRAW_BED_RULE DESTROY_ON_LEAVE), and elsewhere it breaks when used (DESTROY_ON_USE).
+ */
+export function isBed (name: string): boolean {
+  return name.endsWith('_bed') && name !== 'straw_bed'
+}

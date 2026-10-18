@@ -5,6 +5,7 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { TaskError } from '../core/errors'
+import { isBed } from '../core/items'
 import { normalizeDimension } from '../core/memory'
 import type { Executor } from '../executor/executor'
 import { isAbort } from '../skills/errors'
@@ -187,7 +188,7 @@ function materialRequests (bot: Bot, materials: Record<string, number>, shellMat
     if (name === shellMaterial) continue
     if (name === 'bed') {
       // any bed (a white one from white wool when it has to be made), left out when there's no sheep to be had
-      const beds = Object.keys(bot.registry.itemsByName).filter(i => i.endsWith('_bed'))
+      const beds = Object.keys(bot.registry.itemsByName).filter(isBed)
       out.push({ item: ['white_bed', ...beds.filter(b => b !== 'white_bed')], count: 1, optional: true })
       continue
     }

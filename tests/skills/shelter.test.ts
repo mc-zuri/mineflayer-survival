@@ -100,6 +100,8 @@ test('nightPlan: a bed means sleep; armor and a weapon that can fight, fight; el
   assert.strictEqual(nightPlan(fakeBot({ items: [item('stone_sword')] })), 'shelter')
   assert.strictEqual(nightPlan(fakeBot({ items: [item('stone_sword'), item('red_bed')] })), 'sleep')
   assert.strictEqual(nightPlan(fakeBot({ items: [item('stone_sword')] }), { bedNearby: true }), 'sleep')
+  // 26.3's straw bed sets no spawn and is gone once slept in: not a bed to sleep the night in
+  assert.strictEqual(nightPlan(fakeBot({ version: '26.3', items: [item('stone_sword', 1, undefined, '26.3'), item('straw_bed', 1, undefined, '26.3')] })), 'shelter')
   const iron = { head: item('iron_helmet'), torso: item('iron_chestplate'), legs: item('iron_leggings'), feet: item('iron_boots') }
   assert.strictEqual(armorPoints(fakeBot({ armor: iron })), 15)
   assert.strictEqual(nightPlan(fakeBot({ armor: iron, items: [item('iron_sword')] })), 'fight')

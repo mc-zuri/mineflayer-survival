@@ -1,17 +1,24 @@
-// A synthetic bot for the reflex and skill unit tests: 1.21.11's registry, an inventory, entities with metadata and
-// a world of named blocks, without a server.
+// A synthetic bot for the reflex and skill unit tests: a version's registry (1.21.11 unless the test says another), an
+// inventory, entities with metadata and a world of named blocks, without a server.
 import { EventEmitter } from 'node:events'
 import { Vec3 } from 'vec3'
 
 /* eslint-disable @typescript-eslint/no-var-requires */
-const registry = require('minecraft-data')('1.21.11')
-const Item = require('prismarine-item')('1.21.11')
+const FAKE_VERSION = '1.21.11'
+const versions = new Map<string, { registry: any, Item: any }>()
+function versionData (version: string): { registry: any, Item: any } {
+  let data = versions.get(version)
+  if (data == null) versions.set(version, data = { registry: require('minecraft-data')(version), Item: require('prismarine-item')(version) })
+  return data
+}
 
 const SOLID = new Set(['stone', 'dirt', 'grass_block', 'bedrock', 'obsidian', 'cobblestone', 'magma_block', 'oak_planks'])
 
-export function item (name: string, count = 1, enchants?: Array<{ name: string, lvl: number }>): any {
+/** an item of the version (the fake bot's must be the same) */
+export function item (name: string, count = 1, enchants?: Array<{ name: string, lvl: number }>, version = FAKE_VERSION): any {
+  const { registry, Item } = versionData(version)
   const def = registry.itemsByName[name]
-  if (def == null) throw new Error(`no item ${name}`)
+  if (def == null) throw new Error(`no item ${name} in ${version}`)
   const it = new Item(def.id, count)
   if (enchants != null) it.enchants = enchants
   return it
@@ -23,12 +30,13 @@ export interface FakeEntityInput {
   /** metadata by field name (e.g. { swell_dir: 1 }) */
   meta?: Record<string, unknown>
   id?: number
+  version?: string
 }
 
 let nextId = 100
 
 export function entity (input: FakeEntityInput): any {
-  const def = registry.entitiesByName[input.name]
+  const def = versionData(input.version ?? FAKE_VERSION).registry.entitiesByName[input.name]
   const metadata: any[] = []
   for (const [key, value] of Object.entries(input.meta ?? {})) {
     const i = def.metadataKeys.indexOf(key)
@@ -54,13 +62,16 @@ export interface FakeBotInput {
   inWater?: boolean
   onGround?: boolean
   usingHeldItem?: boolean
+  /** the registry's version (default 1.21.11): the items and entities given must be of it */
+  version?: string
 }
 
 const DEST = { head: 5, torso: 6, legs: 7, feet: 8, 'off-hand': 45, hand: 36 } as const
 
 export function fakeBot (input: FakeBotInput = {}): any {
   const bot: any = new EventEmitter()
-  bot.registry = registry
+  bot.registry = versionData(input.version ?? FAKE_VERSION).registry
+  bot.version = input.version ?? FAKE_VERSION
   const slots: any[] = new Array(46).fill(null)
   let i = 9
   for (const it of input.items ?? []) { it.slot = i; slots[i++] = it }
