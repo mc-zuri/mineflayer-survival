@@ -39,7 +39,7 @@ test('SkillError is a TaskError: its code one of the core codes, its reason the 
 })
 
 /** a bot whose pathfinder searches forever (no path) or "walks" without moving (stuck), ticked on setImmediate */
-function pathBot (mode: 'searching' | 'stuck'): any {
+function pathBot (mode: 'searching' | 'stuck' | 'hung'): any {
   const bot: any = new EventEmitter()
   bot.setMaxListeners(50)
   bot.entity = { position: new Vec3(0.7, 64, 0.5), velocity: new Vec3(0, 0, 0), onGround: true, yaw: 0 }
@@ -53,11 +53,12 @@ function pathBot (mode: 'searching' | 'stuck'): any {
     goto: async () => {
       gotos++
       bot.pathfinder.isPathing = true
-      if (mode === 'stuck') setImmediate(() => bot.emit('pathGenerated', { path: [] }))
+      if (mode !== 'searching') setImmediate(() => bot.emit('pathGenerated', { path: [] }))
       await new Promise<void>(resolve => { cancelled = resolve })
       bot.pathfinder.isPathing = false
     },
-    cancel: async () => { cancelled?.(); cancelled = null }
+    // a hung goto doesn't return when cancelled
+    cancel: async () => { if (mode === 'hung') return; cancelled?.(); cancelled = null }
   }
   let ticking = true
   const tick = (): void => { if (!ticking) return; bot.emit('physicsTickBegin'); bot.emit('physicsTick'); setImmediate(tick) }
@@ -111,4 +112,17 @@ test('navigate gives up stuck while a dig target stays set and the bot stays put
   assert.strictEqual(settled, false, 'stuck after 50 ticks on one dig')
   for (let i = 0; i < 100; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
   await rejected
+})
+
+test('navigate: a goto that does not return once called off is left behind after CANCEL_TICKS (the trip ends STUCK, not never)', async () => {
+  const { CANCEL_TICKS } = await import('../../src/skills/navigate')
+  const bot = pathBot('hung')
+  let ticks = 0
+  bot.on('physicsTick', () => { ticks++ })
+  try {
+    await assert.rejects(navigate(bot, { goal: new goals.GoalBlock(50, 64, 0), stuckTicks: 10, unstick: 0 }), (err: unknown) => isSkillError(err, 'STUCK'))
+    assert.ok(ticks >= CANCEL_TICKS && ticks < CANCEL_TICKS + 100, `${ticks} ticks`)
+    // (only the test's own tick counter is left)
+    assert.equal(bot.listenerCount('physicsTick'), 1)
+  } finally { bot.stop() }
 })

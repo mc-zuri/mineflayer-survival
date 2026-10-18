@@ -56,6 +56,12 @@ export function goalReached (bot: Bot, goal: Goal): boolean {
   return false
 }
 
+/**
+ * Ticks goto gets to return once navigate called the trip off: a goto that doesn't (the pathfinder held up in its
+ * end) is left behind rather than holding the skill, and with it the task, for good
+ */
+export const CANCEL_TICKS = 100
+
 /** how many times the stuck ticks a dig of one block may hold the bot still (a stone block by hand takes 150 ticks) */
 export const DIG_STUCK_FACTOR = 5
 
@@ -123,6 +129,9 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
     }
     if (++still >= stuckTicks * (dig != null ? DIG_STUCK_FACTOR : 1) && !stuck) {
       stuck = true
+      const move = bot.pathfinder.currentMove
+      trace('navigate: stuck in', move?.moveType?.constructor?.name ?? 'no move', move != null ? `${move.entryPos.toString()} -> ${move.exitPos.toString()}` : '',
+        'dig', dig ?? 'none', 'collided', (bot.entity as any).isCollidedHorizontally === true)
       void bot.pathfinder.cancel()
     }
   }
@@ -136,12 +145,24 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
   signal?.addEventListener('abort', onAbort, { once: true })
 
   let error: unknown = null
+  // once navigate has called the trip off (stuck, aborted, no path in time), goto gets CANCEL_TICKS to return
+  let cancelledFor = 0
+  let hung = false
+  const onCancelTick = (): void => { if (stuck || aborted || planning) cancelledFor++ }
+  bot.on('physicsTick', onCancelTick)
+  const stopWaiting = new AbortController()
   try {
-    await bot.pathfinder.goto(goal)
+    await Promise.race([
+      bot.pathfinder.goto(goal),
+      waitUntil(bot, () => cancelledFor >= CANCEL_TICKS, Number.MAX_SAFE_INTEGER, stopWaiting.signal).then(() => { hung = true }, () => {})
+    ])
   } catch (err) {
     error = err
   } finally {
+    stopWaiting.abort()
+    if (hung) trace('navigate: goto did not return', CANCEL_TICKS, 'ticks after it was called off: left behind')
     bot.off('physicsTick', onTick)
+    bot.off('physicsTick', onCancelTick)
     bot.off('pathGenerated', onPath)
     signal?.removeEventListener('abort', onAbort)
   }
