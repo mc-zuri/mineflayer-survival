@@ -1,0 +1,292 @@
+// One runner per kind of plan step, each over the skills: mine → collectBlock (finding or exploring for the block
+// first), craft, smelt, kill → hunt, loot → retrieveItems, fill → fillBucket; barter waits for the nether skills.
+// A runner keeps its starting count in the task's state, so a step a reflex preempted picks up where it was.
+import type { Bot } from 'mineflayer'
+import { Vec3 } from 'vec3'
+import { TaskError } from '../core/errors'
+import type { WorldMemory } from '../core/memory'
+import { normalizeDimension } from '../core/memory'
+import type { CraftStep, FillStep, KillStep, LootStep, MineStep, PlanStep, SmeltStep } from '../planner/steps'
+import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
+import { collectBlock } from '../skills/collectBlock'
+import { craft } from '../skills/craft'
+import { smelt } from '../skills/smelt'
+import { retrieveItems } from '../skills/chest'
+import { fillBucket, isSource } from '../skills/bucket'
+import { hunt, nearestOfType } from '../skills/hunt'
+import { navigateNear } from '../skills/navigate'
+import { countItems, trace } from '../skills/util'
+import { ensureSurface, exploreForBlocks, exploreSurface, findNear, oreLevel } from './explore'
+import { toolKindFor, wornOutTools } from './durability'
+
+/** a mine step hands back to the executor when its tool has this many uses left (the executor's default too) */
+export const MIN_TOOL_USES = 12
+
+export interface StepContext {
+  bot: Bot
+  memory: WorldMemory
+  signal: AbortSignal
+  /** the task's state: kept when a reflex preempts the step and it runs again */
+  state: Record<string, any>
+  log: (line: string) => void
+  /** a crafting table and a furnace to use when they are near (the base's) */
+  table?: Vec3 | null
+  furnace?: Vec3 | null
+  /** where exploring turns around (the spawn, the base) */
+  home?: Vec3 | null
+  /** blocks never mined (the base's shell): their positions */
+  protect?: (pos: Vec3) => boolean
+}
+
+export interface StepOutcome {
+  /** what the step added of its item */
+  gained: number
+  /** the step came out other than planned (another wood, another animal): plan again before going on */
+  replan?: boolean
+}
+
+export type StepRunner<S extends PlanStep = PlanStep> = (step: S, ctx: StepContext) => Promise<StepOutcome>
+
+/** the blocks the pathfinder builds with (BlockInfo.scaffoldingBlockItems), kept this many on top of what a plan uses */
+export const SCAFFOLD_ITEMS = ['cobblestone', 'cobbled_deepslate', 'dirt']
+export const SCAFFOLD_BUFFER = 24
+
+/** how far under its starting level a mine step for a block that isn't an ore goes (stone, dirt, sand...) */
+export const SHALLOW_DEPTH = 8
+
+/** how far a crafting table or furnace may be to be used when the bot carries its own */
+export const NEAR_STATION = 6
+
+/** how far to look for a block or an animal before exploring */
+export const SEARCH_RADIUS = 64
+
+const LOGS = ['oak_log', 'birch_log', 'spruce_log', 'jungle_log', 'acacia_log', 'dark_oak_log', 'mangrove_log', 'cherry_log', 'pale_oak_log']
+const MEAT_ANIMALS = ['cow', 'pig', 'sheep', 'chicken', 'rabbit']
+
+/**
+ * Blocks that will do instead of the step's when none of those is near: another wood (the plan crafts what the logs
+ * held make once it plans again), deepslate for stone (cobbled deepslate is a stone crafting material too)
+ */
+export function blockSubstitutes (step: Pick<MineStep, 'block' | 'blocks'>): string[] {
+  if (LOGS.includes(step.block)) return LOGS.filter(l => !step.blocks.includes(l))
+  if (step.block === 'stone') return ['deepslate'].filter(b => !step.blocks.includes(b))
+  return []
+}
+
+/** animals that will do instead of the step's: any other meat animal for meat */
+export function mobSubstitutes (step: Pick<KillStep, 'mob' | 'item'>): string[] {
+  if (!MEAT_ANIMALS.includes(step.mob)) return []
+  return MEAT_ANIMALS.filter(m => m !== step.mob)
+}
+
+function startCount (ctx: StepContext, key: string, now: () => number): number {
+  if (typeof ctx.state[key] !== 'number') ctx.state[key] = now()
+  return ctx.state[key]
+}
+
+function dimensionOf (bot: Bot): string {
+  return normalizeDimension(bot.game?.dimension)
+}
+
+/**
+ * Brings one of `names` within the search radius: a block seen there now, else the nearest the memory has (walked
+ * to, forgotten when it's gone), else exploring. Resolves the names found near, or throws NOT_FOUND.
+ */
+async function findBlocks (bot: Bot, names: string[], ctx: StepContext, alternatives: string[] = [], exclude: ((pos: Vec3) => boolean) | undefined = ctx.protect): Promise<string[]> {
+  const near = (list: string[]): boolean => list.length > 0 && findNear(bot, list, SEARCH_RADIUS, exclude) != null
+  if (near(names)) return names
+  const dimension = dimensionOf(bot)
+  for (let i = 0; i < 3; i++) {
+    const known = ctx.memory.findBlocks(names, { dimension, near: bot.entity.position, count: 1, maxDistance: 512 })[0]
+    if (known == null) break
+    try {
+      await navigateNear(bot, new Vec3(known.x, known.y, known.z), 8, ctx.signal)
+    } catch (err) {
+      if (isAbort(err)) throw err
+    }
+    if (near(names)) return names
+    // not there any more (or not reachable): drop it
+    ctx.memory.forgetBlock(known, dimension)
+  }
+  if (near(alternatives)) return alternatives
+  ctx.log(`exploring for ${names.join(', ')}`)
+  const all = [...names, ...alternatives]
+  if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined }, ctx.signal)) {
+    if (near(names)) return names
+    if (near(alternatives)) return alternatives
+  }
+  throw new SkillError('NOT_FOUND', `no ${names.join(', ')} found exploring`)
+}
+
+export const runMine: StepRunner<MineStep> = async (step, ctx) => {
+  const { bot, signal } = ctx
+  const start = startCount(ctx, 'start', () => countItems(bot, step.item))
+  // stone mined for a plan brings a few more along: the pathfinder towers and bridges with them, and lava is plugged
+  const buffer = SCAFFOLD_ITEMS.includes(step.item) ? Math.max(0, SCAFFOLD_BUFFER - start) : 0
+  const target = start + step.count + buffer
+  const perBlock = step.blockCount > 0 ? step.count / step.blockCount : 1
+  let failures = 0
+  let substituted = 0
+  // what isn't an ore is mined near the level the step starts at: a block at a time down the nearest one, the bot
+  // ends at the bottom of a shaft it can't plan out of
+  const startY = startCount(ctx, 'startY', () => Math.floor(bot.entity.position.y))
+  const shallow = oreLevel(step.blocks) == null
+  let deep = !shallow
+  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || (!deep && pos.y < startY - SHALLOW_DEPTH)
+  while (countItems(bot, step.item) < target) {
+    throwIfAborted(signal)
+    const subs = blockSubstitutes(step)
+    // the tool about to break: back to the executor, which makes another before the step goes on
+    const kind = toolKindFor(bot.registry as any, step.block)
+    if (kind != null && wornOutTools(bot.inventory.items(), { minUses: MIN_TOOL_USES }).some(w => w.kind === kind)) {
+      return { gained: countItems(bot, step.item) - start, replan: true }
+    }
+    // none near the level: deeper after all
+    if (!deep && findNear(bot, [...step.blocks, ...subs], SEARCH_RADIUS, exclude) == null && findNear(bot, step.blocks, SEARCH_RADIUS, ctx.protect) != null) deep = true
+    const names = await findBlocks(bot, step.blocks, ctx, subs, exclude)
+    const isSub = names !== step.blocks
+    const left = isSub ? step.blockCount - substituted : Math.ceil((target - countItems(bot, step.item)) / perBlock - 1e-9)
+    if (left <= 0) break
+    try {
+      const res = await collectBlock(bot, { names, count: Math.min(left, 8), maxDistance: SEARCH_RADIUS, exclude }, signal)
+      for (const pos of res.positions) ctx.memory.forgetBlock(pos, dimensionOf(bot))
+      if (isSub) substituted += res.mined
+    } catch (err) {
+      if (isAbort(err) || TaskError.is(err, 'NO_TOOL', 'INVENTORY_FULL', 'DIED')) throw err
+      const partial = (err as TaskError).partial as { mined?: number, positions?: Vec3[] } | undefined
+      for (const pos of partial?.positions ?? []) ctx.memory.forgetBlock(pos, dimensionOf(bot))
+      if (isSub) substituted += partial?.mined ?? 0
+      if (++failures > 4) throw err
+      trace('executor: mine failed', (err as Error).message)
+    }
+    if (isSub && substituted >= step.blockCount) return { gained: countItems(bot, step.item) - start, replan: true }
+  }
+  return { gained: countItems(bot, step.item) - start }
+}
+
+export const runCraft: StepRunner<CraftStep> = async (step, ctx) => {
+  const { bot, signal } = ctx
+  const start = startCount(ctx, 'start', () => countItems(bot, step.item))
+  const want = start + step.count - countItems(bot, step.item)
+  if (want > 0) {
+    const table = step.table && ctx.table != null && bot.entity.position.distanceTo(ctx.table) <= 48 ? ctx.table : undefined
+    // with a table in the bag, one close by or the bag's (put down and taken back): a table left far off up a hill
+    // costs a trip the pathfinder may not make
+    const tableDistance = countItems(bot, 'crafting_table') > 0 ? NEAR_STATION : undefined
+    await craft(bot, { item: step.item, count: want, table, tableDistance, pickUpTable: table == null }, signal)
+  }
+  return { gained: countItems(bot, step.item) - start }
+}
+
+export const runSmelt: StepRunner<SmeltStep> = async (step, ctx) => {
+  const { bot, signal } = ctx
+  const start = startCount(ctx, 'start', () => countItems(bot, step.item))
+  const furnace = ctx.furnace != null && bot.entity.position.distanceTo(ctx.furnace) <= 48 ? ctx.furnace : undefined
+  // one kind of fuel the plan chose and the bot has enough of: that; else the skill's choice by preference
+  const fuel = step.fuel.length === 1 && countItems(bot, step.fuel[0].name) >= step.fuel[0].count ? step.fuel[0].name : undefined
+  for (const input of step.inputs) {
+    const done = countItems(bot, step.item) - start
+    const n = Math.min(input.count, step.count - done, countItems(bot, input.name))
+    if (n <= 0) continue
+    const furnaceDistance = countItems(bot, 'furnace') > 0 ? NEAR_STATION : undefined
+    await smelt(bot, { input: input.name, count: n, fuel, furnace, furnaceDistance, pickUpFurnace: furnace == null }, signal)
+  }
+  const gained = countItems(bot, step.item) - start
+  if (gained < step.count) throw new SkillError('MISSING_ITEMS', `smelted ${gained} of ${step.count} ${step.item}`, { gained })
+  return { gained }
+}
+
+export const runKill: StepRunner<KillStep> = async (step, ctx) => {
+  const { bot, signal } = ctx
+  const start = startCount(ctx, 'start', () => countItems(bot, step.item))
+  const target = start + step.count
+  const subs = mobSubstitutes(step)
+  let failures = 0
+  let substituted = 0
+  while (countItems(bot, step.item) < target) {
+    throwIfAborted(signal)
+    let mob = step.mob
+    if (nearestOfType(bot, [step.mob], SEARCH_RADIUS) == null) {
+      const sub = subs.find(m => nearestOfType(bot, [m], SEARCH_RADIUS) != null)
+      if (sub != null) mob = sub
+      else {
+        ctx.log(`exploring for a ${[step.mob, ...subs].join(' or ')}`)
+        const found = await exploreSurface(bot, { found: () => nearestOfType(bot, [step.mob, ...subs], 32) != null, center: ctx.home ?? undefined }, signal)
+        if (!found) throw new SkillError('NOT_FOUND', `no ${step.mob} found exploring`)
+        continue
+      }
+    }
+    // a trip to an animal from the bottom of a mine is a search the pathfinder doesn't finish: climb out first
+    const prey = nearestOfType(bot, [mob], SEARCH_RADIUS)
+    if (prey != null && prey.position.distanceTo(bot.entity.position) > 8) await ensureSurface(bot, signal)
+    try {
+      trace('executor: hunting a', mob, 'for', step.item, countItems(bot, step.item), '/', target)
+      const res = await hunt(bot, mob, { signal, range: SEARCH_RADIUS })
+      trace('executor: hunt', res.killed ? 'killed' : 'lost', 'the', mob, 'drops', res.drops)
+      if (mob !== step.mob && res.killed) substituted++
+    } catch (err) {
+      if (isAbort(err) || TaskError.is(err, 'DIED', 'INVENTORY_FULL')) throw err
+      if (++failures > 4) throw err
+      trace('executor: hunt failed', (err as Error).message)
+    }
+    if (substituted >= step.kills) return { gained: countItems(bot, step.item) - start, replan: true }
+  }
+  return { gained: countItems(bot, step.item) - start }
+}
+
+export const runLoot: StepRunner<LootStep> = async (step, ctx) => {
+  const { bot, signal } = ctx
+  const start = startCount(ctx, 'start', () => countItems(bot, step.item))
+  const want = start + step.count - countItems(bot, step.item)
+  if (want > 0) {
+    const chest = new Vec3(step.from.x, step.from.y, step.from.z)
+    const res = await retrieveItems(bot, { chest, filter: step.item, count: want }, signal)
+    const known = ctx.memory.chestAt(chest, step.from.dimension)
+    if (known != null) {
+      const items = { ...known.items }
+      for (const [name, n] of Object.entries(res.moved)) items[name] = Math.max(0, (items[name] ?? 0) - n)
+      ctx.memory.rememberChest(chest, items, step.from.dimension)
+    }
+  }
+  return { gained: countItems(bot, step.item) - start }
+}
+
+export const runFill: StepRunner<FillStep> = async (step, ctx) => {
+  const { bot, signal } = ctx
+  const start = startCount(ctx, 'start', () => countItems(bot, step.item))
+  const target = start + step.count
+  let failures = 0
+  while (countItems(bot, step.item) < target) {
+    throwIfAborted(signal)
+    const source = (): boolean => bot.findBlock({ matching: (b: any) => isSource(b, step.fluid), maxDistance: 32 }) != null
+    if (!source()) {
+      ctx.log(`exploring for ${step.fluid}`)
+      const found = step.fluid === 'water'
+        ? await exploreSurface(bot, { found: source, center: ctx.home ?? undefined }, signal)
+        : await exploreForBlocks(bot, { names: ['lava'], radius: 32 }, signal)
+      if (!found) throw new SkillError('NOT_FOUND', `no ${step.fluid} source found exploring`)
+    }
+    try {
+      await fillBucket(bot, { fluid: step.fluid, maxDistance: 32 }, signal)
+    } catch (err) {
+      if (isAbort(err) || TaskError.is(err, 'MISSING_ITEMS')) throw err
+      if (++failures > 3) throw err
+    }
+  }
+  return { gained: countItems(bot, step.item) - start }
+}
+
+/** bartering with piglins is the nether skills' (not wired yet): the plan has to do without it */
+export const runBarter: StepRunner = async (step) => {
+  throw new TaskError('FAILED', `bartering for ${step.item} is not wired yet`)
+}
+
+export const DEFAULT_RUNNERS: { [K in PlanStep['kind']]: StepRunner<Extract<PlanStep, { kind: K }>> } = {
+  mine: runMine,
+  craft: runCraft,
+  smelt: runSmelt,
+  kill: runKill,
+  loot: runLoot,
+  fill: runFill,
+  barter: runBarter
+}

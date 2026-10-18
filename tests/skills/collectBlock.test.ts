@@ -21,6 +21,16 @@ test('columnHarvestTarget: the second block of a sugar cane column, from any blo
   assert.ok(COLUMN_PLANTS.has('sugar_cane') && COLUMN_PLANTS.has('cactus') && !COLUMN_PLANTS.has('oak_log'))
 })
 
+test('collectBlock leaves the excluded blocks alone (the base\'s walls): none left to break is NOT_FOUND', async () => {
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  const walls = [new Vec3(2, 63, 0), new Vec3(3, 63, 0)]
+  bot.findBlocks = () => walls
+  let dug = 0
+  bot.dig = async () => { dug++ }
+  await assert.rejects(collectBlock(bot, { names: ['stone'], count: 1, exclude: pos => pos.x >= 2 }), (err: any) => err.code === 'NOT_FOUND' && /no more stone/.test(err.message))
+  assert.strictEqual(dug, 0)
+})
+
 test('collectBlock picks up what the broken blocks drop, not the sticks of leaves decaying up a tree', async () => {
   const registry = require('minecraft-data')('1.21.11')
   const Item = require('prismarine-item')('1.21.11')

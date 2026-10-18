@@ -28,6 +28,8 @@ export interface CollectBlockArgs {
    * it grows back (default true)
    */
   keepBase?: boolean
+  /** blocks of `names` never broken (the base's walls): their positions */
+  exclude?: (pos: Vec3) => boolean
 }
 
 export interface CollectBlockResult {
@@ -112,7 +114,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       if (target != null) targets.set(vecKey(target), target)
     }
     const found = [...targets.values()]
-      .filter(pos => !tried.has(vecKey(pos)))
+      .filter(pos => !tried.has(vecKey(pos)) && args.exclude?.(pos) !== true)
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
     if (found.length === 0) return null
     tried.add(vecKey(found[0]))
