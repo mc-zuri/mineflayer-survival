@@ -159,9 +159,9 @@ test('night reflex: at night a bed means sleep, poor gear a shelter, good gear n
   const iron = { head: item('iron_helmet'), torso: item('iron_chestplate'), legs: item('iron_leggings'), feet: item('iron_boots') }
   assert.strictEqual(night({ armor: iron, items: [item('iron_sword')] }, 13000), null)
   assert.strictEqual(night(early, 13000, bot => { bot.game.dimension = 'the_nether' }), null)
-  // in the dark of a mine (no sky light at the feet): not a night out
-  const mine = (bot: any): void => { const blockAt = bot.blockAt; bot.blockAt = (p: Vec3) => ({ ...blockAt(p), skyLight: 0 }) }
-  assert.strictEqual(night(early, 13000, mine), null)
+  // in a mine (rock over the head): not a night out; under a tree's leaves it is
+  assert.strictEqual(night({ ...early, world: (p: Vec3) => p.y < 64 || p.y >= 70 ? 'stone' : 'air' }, 13000), null)
+  assert.strictEqual(night({ ...early, world: (p: Vec3) => p.y < 64 ? 'stone' : p.y === 69 ? 'oak_leaves' : 'air' }, 13000), 'shelter')
   assert.strictEqual(night(early, 13000, bot => { bot.isSleeping = true }), null)
   assert.strictEqual(night(early, 13000), 'shelter')
   // turned off

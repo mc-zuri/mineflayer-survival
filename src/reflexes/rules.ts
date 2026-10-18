@@ -234,11 +234,19 @@ function cachedNightPlan (ctx: ReflexContext): NightPlan {
   return plan
 }
 
-/** under the open sky (the sky's light at the feet), or in a shelter dug already */
-function outInTheNight (bot: Bot): boolean {
+/**
+ * Under the open sky (no solid block but leaves over the head, the way Level.canSeeSky goes by the heightmap; the sky
+ * light the client has goes stale as blocks change), or in a shelter dug already.
+ */
+export function outInTheNight (bot: Bot): boolean {
   const feet = bot.entity.position.floored()
-  const sky = (bot.blockAt(feet) as any)?.skyLight
-  return typeof sky !== 'number' || sky >= 8 || isEnclosed((pos) => bot.blockAt(pos) as any, feet)
+  if (isEnclosed((pos) => bot.blockAt(pos) as any, feet)) return true
+  for (let dy = 2; dy <= 64; dy++) {
+    const b = bot.blockAt(feet.offset(0, dy, 0))
+    if (b == null) break
+    if (b.boundingBox === 'block' && !/_leaves$/.test(b.name)) return false
+  }
+  return true
 }
 
 /**
