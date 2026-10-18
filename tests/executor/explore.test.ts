@@ -178,3 +178,18 @@ test('dryStart: off a lake\'s shore (water under every side), a place a few bloc
   // water under everything in reach: none
   assert.equal(dryStart((pos: Vec3) => pos.y >= 64 ? { name: 'air', boundingBox: 'empty' } : pos.y >= 60 && pos.y <= 62 ? { name: 'water', boundingBox: 'empty' } : { name: 'stone', boundingBox: 'block' }, new Vec3(0, 64, 0)), null)
 })
+
+test('onTheSurface: the pathfinder gets the under-roof step cost and no drop into water of any height while fn runs, then its settings back', async () => {
+  const { onTheSurface } = await import('../../src/executor/explore')
+  const settings: any[] = []
+  const pf: any = {
+    defaultMoveSettings: { infiniteLiquidDropdownDistance: true, exclusionAreasStep: [] },
+    setMoveOptions (s: any) { this.defaultMoveSettings = s; settings.push(s) }
+  }
+  const bot: any = { pathfinder: pf, entity: { position: new Vec3(0, 64, 0) }, blockAt: () => null }
+  const during = await onTheSurface(bot, async () => ({ ...pf.defaultMoveSettings }))
+  assert.equal(during.infiniteLiquidDropdownDistance, false)
+  assert.equal(during.exclusionAreasStep.length, 1)
+  assert.equal(pf.defaultMoveSettings.infiniteLiquidDropdownDistance, true)
+  assert.equal(pf.defaultMoveSettings.exclusionAreasStep.length, 0)
+})

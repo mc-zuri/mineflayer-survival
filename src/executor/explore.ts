@@ -395,12 +395,21 @@ export function surfaceStepCost (lookup: Lookup, refY: number, range = 64): (blo
   }
 }
 
-/** runs `fn` with surfaceStepCost added to the pathfinder's step costs, and puts the old settings back */
+/**
+ * runs `fn` with surfaceStepCost added to the pathfinder's step costs and no drop into water deeper than maxDropDown
+ * (a surface leg on seed 4 dropped 48 blocks into a ravine's water and went on through the caves), and puts the old
+ * settings back
+ */
 export async function onTheSurface<T> (bot: Bot, fn: () => Promise<T>): Promise<T> {
   const pf = bot.pathfinder as any
   if (pf?.setMoveOptions == null || pf.defaultMoveSettings == null) return await fn()
   const before = { ...pf.defaultMoveSettings }
-  pf.setMoveOptions({ ...before, exclusionAreasStep: [...(before.exclusionAreasStep ?? []), surfaceStepCost(lookupOf(bot), Math.floor(bot.entity.position.y))] })
+  pf.setMoveOptions({
+    ...before,
+    exclusionAreasStep: [...(before.exclusionAreasStep ?? []), surfaceStepCost(lookupOf(bot), Math.floor(bot.entity.position.y))],
+    // no jump into the water at a ravine's bottom, whatever the height: the way out of one is through its caves
+    infiniteLiquidDropdownDistance: false
+  })
   try {
     return await fn()
   } finally {
