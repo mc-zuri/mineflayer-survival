@@ -11,6 +11,7 @@ import {
   blockIds, countsDelta, eyeHeight, trace, inventoryCounts, inventoryItems, settleInventory, sumPositive, vecKey, waitTicks, waitUntil, withinReach,
   type Block, type ItemCounts
 } from './util'
+import { dig } from '../core/actions'
 
 export interface CollectBlockArgs {
   /** block names to look for, nearest first */
@@ -90,14 +91,9 @@ function sameBlock (bot: Bot, pos: Vec3, type: number): boolean {
   return bot.blockAt(pos)?.type === type
 }
 
-async function digBlock (bot: Bot, block: Block): Promise<void> {
-  try {
-    await bot.dig(block, true, 'raycast')
-  } catch (err) {
-    // no face in view from here (the raycast choice): dig the face the bot looks at the block's centre through
-    if (!/not in view/i.test((err as Error).message)) throw err
-    await bot.dig(block, true)
-  }
+async function digBlock (bot: Bot, block: Block, signal?: AbortSignal): Promise<void> {
+  // only what the crosshair hits breaks: the leaves in front of a log first
+  await dig(bot, block, { signal })
 }
 
 export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: AbortSignal): Promise<CollectBlockResult> {
@@ -207,7 +203,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       const current = bot.blockAt(pos)
       if (current == null) continue
       try {
-        await digBlock(bot, current)
+        await digBlock(bot, current, signal)
       } catch (err) {
         lastFailure = new SkillError('VERIFY_FAILED', `digging ${block.name} at ${pos.toString()} failed: ${(err as Error).message}`, undefined, { cause: err })
         continue

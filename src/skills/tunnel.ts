@@ -6,6 +6,7 @@ import { SkillError, throwIfAborted } from './errors'
 import { walkTo } from './navigate'
 import { placeBlock } from './placeBlock'
 import { CARDINALS, countItems, settleInventory, trace, waitTicks, waitUntil } from './util'
+import { dig } from '../core/actions'
 
 export interface TunnelArgs {
   target: Vec3
@@ -73,7 +74,7 @@ export async function tunnelTo (bot: Bot, args: TunnelArgs, signal?: AbortSignal
         const tool = (bot as any).pathingUtil?.bestHarvestingTool?.(b)
         if (tool != null && bot.heldItem?.slot !== tool.slot) { await settleInventory(bot, signal); await bot.equip(tool, 'hand') }
         try {
-          await bot.dig(b, true)
+          await dig(bot, b, { signal })
           dug++
         } catch (err) {
           trace('tunnelTo: digging', b.name, c.toString(), 'failed:', (err as Error).message)

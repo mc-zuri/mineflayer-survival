@@ -15,6 +15,7 @@ import { CARDINALS, countItems, trace, vecKey, waitUntil, type Block } from './u
 import { findBedPlacement, type BlockLookup, type BlockView } from './placement'
 import { SCAFFOLD_ITEMS, towerUp } from '../end/skills/world'
 import { isBed } from '../core/items'
+import { dig } from '../core/actions'
 
 /** how deep the hole goes: the feet three blocks down, the head two, the seal one (flush with the ground) */
 export const SHELTER_DEPTH = 3
@@ -267,7 +268,7 @@ async function climbDownTree (bot: Bot, signal?: AbortSignal): Promise<void> {
     if (below == null) break
     if (below.boundingBox === 'block' || /vine/.test(below.name)) {
       await equipFor(bot, below)
-      await bot.dig(below, true)
+      await dig(bot, below, { signal })
     }
     await waitUntil(bot, () => bot.entity.onGround && Math.floor(bot.entity.position.y + 1e-6) < feet.y, 60, signal)
   }
@@ -303,7 +304,7 @@ async function digBelow (bot: Bot, toY: number, signal?: AbortSignal): Promise<v
     if (below == null) throw new SkillError('NOT_FOUND', 'the block below is unloaded')
     if (below.boundingBox === 'block') {
       await equipFor(bot, below)
-      await bot.dig(below, true)
+      await dig(bot, below, { signal })
     }
     await waitUntil(bot, () => bot.entity.onGround && Math.floor(bot.entity.position.y + 1e-6) < feet.y, 20, signal)
   }
@@ -487,7 +488,7 @@ async function climbOut (bot: Bot, surface: Vec3, signal?: AbortSignal): Promise
   // the torch back first: a block can't go up into its cell (it isn't replaceable, BlockBehaviour.canBeReplaced)
   for (let dy = 0; dy <= 1; dy++) {
     const cell = bot.blockAt(bot.entity.position.floored().offset(0, dy, 0))
-    if (cell != null && /torch/.test(cell.name)) await bot.dig(cell, true).catch(() => {})
+    if (cell != null && /torch/.test(cell.name)) await dig(bot, cell, { signal }).catch(() => {})
   }
   if (blocks >= needed) {
     try {
@@ -496,7 +497,7 @@ async function climbOut (bot: Bot, surface: Vec3, signal?: AbortSignal): Promise
       if (over != null && over.boundingBox === 'block') {
         const had = countItems(bot, SCAFFOLD_ITEMS)
         await equipFor(bot, over)
-        await bot.dig(over, true)
+        await dig(bot, over, { signal })
         await waitUntil(bot, () => countItems(bot, SCAFFOLD_ITEMS) > had, 40, signal)
       }
       await towerUp(bot, surface.y, { signal })
