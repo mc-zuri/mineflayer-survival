@@ -103,8 +103,9 @@ export const BLOCK_SOURCES: BlockSource[] = [
   block('deepslate_redstone_ore', [{ item: 'redstone', count: 4.5 }], 2000, 40),
   block('lapis_ore', [{ item: 'lapis_lazuli', count: 6.5 }], 3000, 40),
   block('deepslate_lapis_ore', [{ item: 'lapis_lazuli', count: 6.5 }], 2500, 40),
-  block('diamond_ore', 'diamond', 7000, 60),
-  block('deepslate_diamond_ore', 'diamond', 6000, 60),
+  // diamonds come a vein (about 4) every few hundred blocks of branch mining at -58: the next one is far
+  block('diamond_ore', 'diamond', 7000, 600),
+  block('deepslate_diamond_ore', 'diamond', 6000, 600),
   block('emerald_ore', 'emerald', 15000, 200),
   block('obsidian', 'obsidian', 3000, 20),
   block('netherrack', 'netherrack', 5, 3, 'the_nether'),

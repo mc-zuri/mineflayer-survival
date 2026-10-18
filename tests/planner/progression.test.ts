@@ -92,3 +92,13 @@ test('nether: the rods and pearls still missing for the eyes, and the portal onl
   assert.equal(milestone('nether').done({ ...s, inventory: plan.inventory }), true)
   assert.equal(milestone('eyes').done({ ...s, inventory: plan.inventory }), false)
 })
+
+test('iron: the armor is iron, not diamond, even with a diamond ore seen nearby (one vein is no armor set)', () => {
+  const memory = new WorldMemory()
+  memory.rememberBlock('deepslate_diamond_ore', { x: 10, y: 50, z: 0 })
+  const s = state({ iron_pickaxe: 1, stone_sword: 1, stone_axe: 1, crafting_table: 1, cooked_beef: 8, raw_iron: 11, cobblestone: 20 }, { memory })
+  const plan = planMilestone(registry, milestone('iron'), s, { position: { x: 0, y: 60, z: 0 } })
+  assert.equal(plan.ok, true)
+  assert.ok(!plan.steps.some(st => st.item === 'diamond'), plan.steps.map(st => `${st.kind} ${st.count} ${st.item}`).join(', '))
+  assert.ok(plan.steps.some(st => st.item === 'iron_chestplate'))
+})
