@@ -290,6 +290,8 @@ export const nightReflex: Reflex = {
       if (shelterToLeave(bot) == null) return null
       return { name: 'night', priority: config.night.priority, detail: 'leave shelter', run: async (signal) => await leaveShelter(bot, signal) }
     }
+    // the night's mining (the runner's schedule) is on its way down: a staircase is a roof within a few blocks
+    if ((bot as any).survival?.nightWork === true) return null
     const plan = cachedNightPlan(ctx)
     if (plan === 'fight') return null
     const backoff = noGround.get(bot)

@@ -225,3 +225,33 @@ test('a death after the iron: the milestones reached stay reached, the food is g
   assert.ok(progressState(bot, bot.survival.memory).inventory.foodPoints() >= 20)
   assert.deepEqual(result.reached.map(r => r.id), ['wood', 'stone', 'food', 'iron', 'diamonds'])
 })
+
+test('at night with a pickaxe and no bed the runner mines the night: the iron down there, once a night, the reflex left out', async () => {
+  const bot = fakeBot({ stone_pickaxe: 1, stone_sword: 1, torch: 20, crafting_table: 1, furnace: 1, cooked_beef: 8 })
+  bot.time = { timeOfDay: 13000, day: 1 }
+  bot.findBlock = () => null
+  const lines: string[] = []
+  const mined: string[] = []
+  let nightWork: boolean | undefined
+  const runners = {
+    mine: async (step: any) => { nightWork = bot.survival.nightWork; mined.push(`${step.item} ${String(step.block)}`); bot.give(step.item, step.count); return { gained: step.count } }
+  }
+  const runner = new Runner(bot, { log: l => lines.push(l), executor: { runners, log: () => {} } })
+  runner.reached.push({ id: 'wood', title: '', tick: 0, wallMs: 0 }, { id: 'stone', title: '', tick: 0, wallMs: 0 }, { id: 'food', title: '', tick: 0, wallMs: 0 })
+  await runner.nightSchedule()
+  assert.ok(lines.some(l => /down the mine for 33 raw_iron/.test(l)), lines.join('\n'))
+  assert.deepEqual(mined, ['raw_iron iron_ore'])
+  assert.equal(nightWork, true)
+  assert.equal(bot.survival.nightWork, false)
+  // once a night
+  await runner.nightSchedule()
+  assert.equal(mined.length, 1)
+  // by day, or with a bed to sleep in, no mining
+  const day = new Runner(bot, { log: () => {}, executor: { runners, log: () => {} } })
+  bot.time = { timeOfDay: 6000, day: 2 }
+  await day.nightSchedule()
+  bot.time = { timeOfDay: 13000, day: 2 }
+  bot.give('white_bed', 1)
+  await day.nightSchedule()
+  assert.equal(mined.length, 1)
+})

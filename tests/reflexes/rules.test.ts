@@ -165,6 +165,8 @@ test('night reflex: at night a bed means sleep, poor gear a shelter, good gear n
   assert.strictEqual(night({ ...early, world: (p: Vec3) => p.y < 64 ? 'stone' : p.y === 69 ? 'oak_leaves' : 'air' }, 13000), 'shelter')
   assert.strictEqual(night(early, 13000, bot => { bot.isSleeping = true }), null)
   assert.strictEqual(night(early, 13000), 'shelter')
+  // the runner's night mining on its way down: no shelter
+  assert.strictEqual(night(early, 13000, bot => { bot.survival = { ...bot.survival, nightWork: true } }), null)
   // turned off
   const bot = fakeBot(early)
   bot.time = { timeOfDay: 13000 }

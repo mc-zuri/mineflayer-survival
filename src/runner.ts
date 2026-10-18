@@ -14,6 +14,7 @@ import { Inventory, type ItemCount } from './core/inventory'
 import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './core/memory'
 import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
+import { comeUp, dayPhase, nightAction, nightGoals } from './planner/schedule'
 import type { Station } from './planner/steps'
 import { buildBase, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
@@ -68,6 +69,8 @@ export interface PlayOptions {
   saveFile?: string
   /** sleep at night when a bed is at hand (default true) */
   sleep?: boolean
+  /** from dusk with a pickaxe and no bed, mine through the night (the schedule's nightAction; default true) */
+  nightMining?: boolean
   /** go back for the items when the bot died at most this many ticks ago (default 6000: ItemEntity's 5 min lifespan) */
   deathItemTicks?: number
   /** a milestone failing this many times in a row stops play (default 5) */
@@ -186,6 +189,11 @@ export class Runner {
   private readonly started = Date.now()
   private readonly log: (line: string) => void
   private sleepCooldownUntil = 0
+  /** play's signal, for the night's work started from the executor's beforeStep hook */
+  private playSignal?: AbortSignal
+  /** the day (bot.time.day) whose night's mining is over: the rest of that night is the milestones' and the reflexes' */
+  private nightMinedDay = -1
+  private inNightWork = false
   private restockRetryAt = 0
 
   constructor (readonly bot: Bot, readonly options: PlayOptions = {}) {
@@ -199,6 +207,7 @@ export class Runner {
         beforeStep: async (step) => {
           await options.executor?.hooks?.beforeStep?.(step)
           await this.nightCheck()
+          await this.nightSchedule(this.playSignal)
         }
       }
     })
@@ -288,6 +297,7 @@ export class Runner {
   }
 
   private async loop (signal: AbortSignal): Promise<PlayResult> {
+    this.playSignal = signal
     const skip = new Set(this.options.skip ?? [])
     const failures = new Map<MilestoneId, number>()
     const maxFailures = this.options.maxFailures ?? 5
@@ -300,6 +310,17 @@ export class Runner {
       this.noteReached(state)
       if (this.options.until != null && this.reached.some(r => r.id === this.options.until)) return this.stop(null, 'until')
       const reachedIds = this.reached.map(r => r.id)
+      try {
+        await this.nightSchedule(signal)
+      } catch (err) {
+        if (stopped()) return this.stop(null, 'aborted', err)
+        if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+          this.log(`died in the night's mine: ${(err as Error).message}`)
+          await this.recoverFromDeath(signal)
+          continue
+        }
+        throw err
+      }
       const restock = this.bot.survival.tasks.tick >= this.restockRetryAt ? restockGoals(state, reachedIds) : null
       if (restock != null) {
         try {
@@ -411,6 +432,80 @@ export class Runner {
       }
     }
     await this.executor.storeExact(items, signal)
+  }
+
+  /** whether a bed is at hand: one held, the base's when near, or one standing nearby */
+  private bedAtHand (): boolean {
+    const bot = this.bot
+    const base = baseRecord(this.memory)
+    if (base?.bed != null && bot.entity.position.distanceTo(new Vec3(base.bed.x, base.bed.y, base.bed.z)) <= 64) return true
+    if (bot.inventory.items().some(i => isBed(i.name))) return true
+    return typeof bot.findBlock === 'function' && bot.findBlock({ matching: (b: any) => isBed(b.name), maxDistance: 32 }) != null
+  }
+
+  /**
+   * The schedule (nightAction): from dusk with a pickaxe and no bed, the night goes down the mine (mineTheNight), once a
+   * night; the bed and the shelter are nightCheck's and the night reflex's
+   */
+  async nightSchedule (signal?: AbortSignal): Promise<void> {
+    const bot = this.bot
+    if (this.inNightWork || this.options.nightMining === false || bot.time == null) return
+    const day = (bot.time as any).day ?? Math.floor(((bot.time as any).age ?? 0) / 24000)
+    if (day === this.nightMinedDay) return
+    const phase = dayPhase(bot.time.timeOfDay)
+    if (phase === 'day') return
+    const reached = this.reached.map(r => r.id)
+    const inv = ownedInventory(bot)
+    const goals = nightGoals(inv, reached)
+    const action = nightAction({
+      phase,
+      overworld: normalizeDimension(bot.game?.dimension) === 'overworld',
+      bed: this.options.sleep !== false && this.bedAtHand(),
+      pickaxe: inv.bestTool('pickaxe'),
+      goals: goals.length > 0
+    })
+    if (action !== 'mine') return
+    this.nightMinedDay = day
+    await this.mineTheNight(goals, signal)
+  }
+
+  /**
+   * The night down the mine: its goals (nightGoals: torches, the iron, the diamonds) one after the other, planned with
+   * what a mine has (undergroundOnly), until the day comes back or the food runs low (comeUp). The night reflex leaves
+   * the bot to it (bot.survival.nightWork): the staircase down is a roof within a few blocks.
+   */
+  async mineTheNight (goals: readonly ObtainRequest[], signal?: AbortSignal): Promise<void> {
+    const bot = this.bot
+    const ctrl = new AbortController()
+    const onOuter = (): void => ctrl.abort(signal?.reason)
+    if (signal?.aborted === true) onOuter()
+    signal?.addEventListener('abort', onOuter, { once: true })
+    const watch = (): void => {
+      if (ctrl.signal.aborted || !comeUp(dayPhase(bot.time.timeOfDay), ownedInventory(bot).foodPoints())) return
+      ctrl.abort(new TaskError('ABORTED', 'the night is over'))
+    }
+    bot.on('physicsTick', watch)
+    this.inNightWork = true
+    ;(bot as any).survival.nightWork = true
+    this.log(`night (time ${bot.time.timeOfDay}): down the mine for ${goals.map(g => `${g.count} ${String(g.item)}`).join(', ')}`)
+    try {
+      for (const goal of goals) {
+        if (ctrl.signal.aborted) break
+        try {
+          await this.executor.obtain([{ ...goal, optional: false }], ctrl.signal, { undergroundOnly: true })
+        } catch (err) {
+          if (signal?.aborted === true || TaskError.is(err, 'DIED') || bot.health <= 0) throw err
+          if (ctrl.signal.aborted) break
+          this.log(`night: no ${String(goal.item)}: ${(err as Error).message}`)
+        }
+      }
+    } finally {
+      bot.off('physicsTick', watch)
+      signal?.removeEventListener('abort', onOuter)
+      this.inNightWork = false
+      ;(bot as any).survival.nightWork = false
+    }
+    this.log(`night's mining over at time ${bot.time.timeOfDay}`)
   }
 
   /** sleeps through the night when a bed is at hand: one held, the base's when near, or one standing nearby */

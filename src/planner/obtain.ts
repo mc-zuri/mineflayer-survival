@@ -62,6 +62,8 @@ export interface ObtainOptions {
    * was looked for), over the memory and the source's estimate; undefined leaves those
    */
   findCost?: (target: FindTarget) => number | undefined
+  /** only what the bot can get down a mine: no surface blocks (logs, sand, plants), no animals (the night's plans) */
+  undergroundOnly?: boolean
 }
 
 /** what findCost is asked about: a block or mob of a source, and the source's own estimate */
@@ -105,6 +107,9 @@ type Strategy = (s: State, path: string[], limit: number) => State | null
 
 /** blocks a mine step goes down for (ORE_LEVELS' ores, the deep stone): the rest is got at the surface */
 export const UNDERGROUND_BLOCKS = /(_ore|^ancient_debris|^deepslate|^obsidian)$/
+
+/** blocks a mine has besides its ores: what an undergroundOnly plan may mine */
+export const MINE_BLOCKS = /(_ore|^ancient_debris|^deepslate|^obsidian|^stone|^gravel|^dirt|^clay|^tuff|^andesite|^diorite|^granite)$/
 
 const PREFERRED_WOOD = ['oak_', 'birch_', 'spruce_']
 
@@ -309,7 +314,7 @@ export class Resolver {
     if (use('smelt')) for (const r of this.smelting.get(item) ?? []) out.push((s, p, l) => this.smelt(s, r, item, n, p, l))
     if (use('mine')) for (const b of this.blockSources.get(item) ?? []) out.push((s, p, l) => this.mine(s, b, item, n, p, l))
     if (use('fill')) { const f = this.fluids.get(item); if (f != null) out.push((s, p, l) => this.fill(s, f, n, p, l)) }
-    if (use('kill')) for (const m of this.mobSources.get(item) ?? []) out.push((s, p, l) => this.kill(s, m, item, n, p, l))
+    if (use('kill') && this.opts.undergroundOnly !== true) for (const m of this.mobSources.get(item) ?? []) out.push((s, p, l) => this.kill(s, m, item, n, p, l))
     if (use('barter')) { const o = this.barter.get(item); if (o != null) out.push((s, p, l) => this.trade(s, o, n, p, l)) }
     return out
   }
@@ -501,6 +506,7 @@ export class Resolver {
   }
 
   private mine (s: State, src: BlockSource, item: string, n: number, path: string[], limit: number): State | null {
+    if (this.opts.undergroundOnly === true && !MINE_BLOCKS.test(src.block)) return null
     const perBlock = src.drops.find(d => d.item === item)?.count ?? 0
     if (perBlock <= 0) return null
     const blockCount = Math.ceil(n / perBlock - 1e-9)

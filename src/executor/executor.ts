@@ -11,7 +11,7 @@ import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import type { TaskRunner } from '../core/taskRunner'
 import { itemTags } from '../core/tags'
-import { heldFor, obtainAll, type ObtainPlan, type ObtainRequest, type StrategyKind } from '../planner/obtain'
+import { heldFor, obtainAll, type ObtainOptions, type ObtainPlan, type ObtainRequest, type StrategyKind } from '../planner/obtain'
 import { toolsAtLeast } from '../planner/progression'
 import { checkPlan, type PlanStep, type Station } from '../planner/steps'
 import { baseRecord, type BaseRecord } from '../base/pois'
@@ -55,6 +55,9 @@ export interface ExecutorOptions {
   /** the spawn or base, where exploring turns around */
   home?: () => Vec3 | null
 }
+
+/** what a caller adds to the executor's plans (the night's: undergroundOnly) */
+export type PlanOptions = Pick<ObtainOptions, 'undergroundOnly'>
 
 export interface ObtainOutcome {
   /** plans made */
@@ -165,8 +168,9 @@ export class Executor {
   }
 
   /** plans the requests from what the bot holds now */
-  plan (requests: readonly ObtainRequest[], inventory: Inventory = ownedInventory(this.bot)): ObtainPlan {
+  plan (requests: readonly ObtainRequest[], inventory: Inventory = ownedInventory(this.bot), extra: PlanOptions = {}): ObtainPlan {
     return obtainAll(this.bot.registry as any, requests, {
+      ...extra,
       inventory,
       stations: this.stations(),
       memory: this.memory,
@@ -182,7 +186,7 @@ export class Executor {
    * meets them. Throws a TaskError when it can't (NOT_FOUND when no plan exists, the last step's error when a step
    * keeps failing, DIED when the bot died).
    */
-  async obtain (requests: readonly ObtainRequest[], signal?: AbortSignal): Promise<ObtainOutcome> {
+  async obtain (requests: readonly ObtainRequest[], signal?: AbortSignal, planOptions: PlanOptions = {}): Promise<ObtainOutcome> {
     const failures = new Map<string, number>()
     let plans = 0
     let steps = 0
@@ -194,7 +198,7 @@ export class Executor {
       if (plans >= this.options.maxReplans) {
         throw new TaskError('FAILED', `gave up after ${plans} plans`, { cause: lastError })
       }
-      const plan = this.plan(requests, inv)
+      const plan = this.plan(requests, inv, planOptions)
       plans++
       if (!plan.ok) {
         const what = plan.unresolved.map(r => `${r.count} ${String(r.item)}`).join(', ')
