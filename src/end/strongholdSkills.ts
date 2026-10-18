@@ -4,7 +4,7 @@
 // stone bricks, and its corridors walked until the portal room's frames are found.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
-import { normalizeDimension } from '../core/memory'
+import { normalizeDimension, type Poi, type WorldMemory } from '../core/memory'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { craft } from '../skills/craft'
 import { pickupDrops } from '../skills/pickupDrops'
@@ -160,6 +160,35 @@ function toVec (p: Vec3): Vec {
 
 // ---- triangulation
 
+/**
+ * Where the eye came down by the stronghold (reachStronghold), a point of interest of its own: the milestone's
+ * 'stronghold' is the portal room, once found
+ */
+export const STRONGHOLD_SPOT = 'stronghold_spot'
+/** an eye's flight as a point of interest: the throw's spot, the direction in the note */
+export const EYE_RAY = 'eye_ray'
+
+/** remembers a throw's ray (the search goes on from it after a reflex or a death cut it off) */
+export function rememberRay (memory: WorldMemory | undefined, ray: EyeRay): void {
+  memory?.addPoi(EYE_RAY, { x: Math.round(ray.origin.x), y: 0, z: Math.round(ray.origin.z) }, 'overworld', `ray=${ray.direction.x.toFixed(5)},${ray.direction.z.toFixed(5)}`)
+}
+
+/** the rays remembered, oldest first */
+export function rememberedRays (memory: WorldMemory | undefined): EyeRay[] {
+  const out: EyeRay[] = []
+  for (const p of memory?.getPois(EYE_RAY, { dimension: 'overworld' }) ?? []) {
+    const m = /^ray=(-?[\d.]+),(-?[\d.]+)/.exec(p.note ?? '')
+    if (m != null) out.push({ origin: { x: p.x, z: p.z }, direction: { x: Number(m[1]), z: Number(m[2]) } })
+  }
+  return out
+}
+
+/** the remembered estimate (stronghold_estimate), replaced */
+function rememberEstimate (memory: WorldMemory | undefined, target: XZ, note: string): void {
+  memory?.removePoi('stronghold_estimate')
+  memory?.addPoi('stronghold_estimate', { x: Math.round(target.x), y: 0, z: Math.round(target.z) }, 'overworld', note)
+}
+
 export interface LocateStrongholdArgs {
   /** blocks to walk sideways before the second throw (default 500) */
   sideways?: number
@@ -186,17 +215,30 @@ export async function locateStronghold (bot: Bot, args: LocateStrongholdArgs = {
   bot.on('physicsTick', onTick)
   try {
     const throws: ThrowEyeResult[] = []
-    const first = await throwReadable(bot, signal)
-    throws.push(first)
-    if (first.near != null) return done(bot, null, first.near, throws, ticks)
-    if (first.ray == null) throw new SkillError('VERIFY_FAILED', 'the first eye flew no way to read')
-    const side = secondThrowPoint(first.ray, args.sideways ?? 500)
+    const memory = bot.survival?.memory
+    // a first throw made before a reflex or a death cut the search off: on from it to the side
+    const known = rememberedRays(memory)
+    const crossing = known.length >= 2 ? triangulate(known) : null
+    if (crossing != null && crossing.crossingAngle > 2) return done(bot, crossing, crossing, throws, ticks)
+    let firstRay: EyeRay | null = known[known.length - 1] ?? null
+    if (firstRay == null) {
+      const first = await throwReadable(bot, signal)
+      throws.push(first)
+      if (first.near != null) return done(bot, null, first.near, throws, ticks)
+      if (first.ray == null) throw new SkillError('VERIFY_FAILED', 'the first eye flew no way to read')
+      firstRay = first.ray
+      rememberRay(memory, firstRay)
+    } else {
+      trace('locateStronghold: on from the throw remembered at', firstRay.origin)
+    }
+    const side = secondThrowPoint(firstRay, args.sideways ?? 500)
     trace('locateStronghold: second throw from', side)
     await travel(bot, { target: new Vec3(side.x, bot.entity.position.y, side.z), range: 8, hop: args.hop }, signal)
     const second = await throwReadable(bot, signal)
     throws.push(second)
     if (second.near != null) return done(bot, null, second.near, throws, ticks)
-    const rays = throws.map(t => t.ray).filter((r): r is EyeRay => r != null)
+    if (second.ray != null) rememberRay(memory, second.ray)
+    const rays = [firstRay, ...(second.ray != null ? [second.ray] : [])]
     const estimate = triangulate(rays)
     if (estimate != null && estimate.crossingAngle > 2) return done(bot, estimate, estimate, throws, ticks)
     const guess = guessFromOneThrow(rays[rays.length - 1])
@@ -225,7 +267,7 @@ async function throwReadable (bot: Bot, signal?: AbortSignal): Promise<ThrowEyeR
 }
 
 function done (bot: Bot, estimate: Triangulation | null, target: XZ, throws: ThrowEyeResult[], ticks: number): LocateStrongholdResult {
-  bot.survival?.memory.addPoi('stronghold_estimate', { x: target.x, y: 0, z: target.z }, 'overworld', estimate != null ? `error=${Math.round(estimate.error)}` : 'eye')
+  rememberEstimate(bot.survival?.memory, target, estimate != null ? `error=${Math.round(estimate.error)}` : 'eye')
   return { estimate, target: { x: target.x, z: target.z }, throws, ticks }
 }
 
@@ -274,15 +316,17 @@ export async function reachStronghold (bot: Bot, args: ReachStrongholdArgs = {},
       if (inWater(bot)) await toShore(bot, signal)
       const t = await throwEnderEye(bot, {}, signal)
       if (t.near != null) {
-        bot.survival?.memory.addPoi('stronghold', { x: t.near.x, y: 0, z: t.near.z }, 'overworld', 'eye came down')
+        bot.survival?.memory.addPoi(STRONGHOLD_SPOT, { x: t.near.x, y: 0, z: t.near.z }, 'overworld', 'eye came down')
         return { spot: t.near, throws: n, ticks }
       }
       if (t.ray == null) continue
       rays.push(t.ray)
+      rememberRay(bot.survival?.memory, t.ray)
       const est = rays.length >= 2 ? triangulate(rays) : null
       // the crossing when it's ahead and well conditioned, else on along this ray (the eye was 12+ blocks short)
       if (est != null && est.crossingAngle > 5 && Math.hypot(est.x - bot.entity.position.x, est.z - bot.entity.position.z) > 2) target = est
       else target = { x: t.ray.origin.x + t.ray.direction.x * Math.max(TOO_FAR_DISTANCE * 2, d / 2), z: t.ray.origin.z + t.ray.direction.z * Math.max(TOO_FAR_DISTANCE * 2, d / 2) }
+      rememberEstimate(bot.survival?.memory, target, 'reach')
     }
     throw new SkillError('NOT_FOUND', 'no eye came down near the estimate')
   } finally {
@@ -325,7 +369,7 @@ export async function findPortalRoom (bot: Bot, args: FindPortalRoomArgs = {}, s
   const onTick = (): void => { ticks++ }
   bot.on('physicsTick', onTick)
   try {
-    const remembered = bot.survival?.memory.getPois('stronghold', { dimension: 'overworld', near: bot.entity.position })[0]
+    const remembered = bot.survival?.memory.getPois(STRONGHOLD_SPOT, { dimension: 'overworld', near: bot.entity.position })[0]
     const center = args.near ?? (remembered != null ? { x: remembered.x, z: remembered.z } : { x: bot.entity.position.x, z: bot.entity.position.z })
     const frameId = bot.registry.blocksByName.end_portal_frame.id
     const visited: Vec3[] = []
@@ -391,9 +435,17 @@ async function toward (bot: Bot, p: Vec3, range: number, signal?: AbortSignal): 
 }
 
 /** the whole milestone after the eyes are made: locate, reach, and find the portal room */
-export async function strongholdToPortalRoom (bot: Bot, args: LocateStrongholdArgs = {}, signal?: AbortSignal): Promise<{ located: LocateStrongholdResult, reached: ReachStrongholdResult, room: FindPortalRoomResult }> {
-  const located = await locateStronghold(bot, args, signal)
-  const reached = await reachStronghold(bot, { target: located.target, rays: located.throws.map(t => t.ray).filter((r): r is EyeRay => r != null) }, signal)
+export async function strongholdToPortalRoom (bot: Bot, args: LocateStrongholdArgs = {}, signal?: AbortSignal): Promise<{ located: LocateStrongholdResult | null, reached: ReachStrongholdResult | null, room: FindPortalRoomResult }> {
+  // on from where the search got to, as the memory has it: the task runs again from the start after a reflex
+  // preempts it (a zombie on the way), and each start threw a new first eye and set off sideways again (all 14 eyes
+  // gone on 26.3 seed 2, the stronghold never reached)
+  const memory = bot.survival?.memory
+  const spot = memory?.getPois(STRONGHOLD_SPOT, { dimension: 'overworld', near: bot.entity.position })[0]
+  if (spot != null) return { located: null, reached: null, room: await findPortalRoom(bot, { near: { x: spot.x, z: spot.z } }, signal) }
+  const estimate = memory?.getPois('stronghold_estimate', { dimension: 'overworld', near: bot.entity.position })[0]
+  const located = estimate == null ? await locateStronghold(bot, args, signal) : null
+  const target = located?.target ?? { x: (estimate as Poi).x, z: (estimate as Poi).z }
+  const reached = await reachStronghold(bot, { target, rays: rememberedRays(memory) }, signal)
   const room = await findPortalRoom(bot, { near: reached.spot }, signal)
   return { located, reached, room }
 }

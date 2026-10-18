@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { STRONGHOLD_BLOCKS, craftEyes, overWater } from '../../src/end/strongholdSkills'
+import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, EYE_RAY } from '../../src/end/strongholdSkills'
 import { isSkillError } from '../../src/skills/errors'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
@@ -24,4 +24,17 @@ test('overWater: an eye dropped into a frozen sea is left; one over open water, 
   assert.strictEqual(overWater(sea(true), new Vec3(12.4, 70.2, 8.9)), false)
   assert.strictEqual(overWater((p: any) => ({ name: p.y > 62 ? 'air' : 'grass_block' }), new Vec3(3.4, 70.2, 8.9)), false)
   assert.strictEqual(overWater(() => null, new Vec3(0, 64, 0)), false)
+})
+
+test('the throws\' rays are remembered and come back from a save: the search goes on from them after a reflex cut it off', () => {
+  const { WorldMemory } = require('../../src/core/memory')
+  const memory = new WorldMemory()
+  rememberRay(memory, { origin: { x: -27.5, z: 10.5 }, direction: { x: 0.12963, z: -0.99156 } })
+  rememberRay(memory, { origin: { x: 464.05, z: -48.5 }, direction: { x: -0.87773, z: 0.47917 } })
+  const back = WorldMemory.fromJSON(JSON.parse(JSON.stringify(memory.toJSON())))
+  const rays = rememberedRays(back)
+  assert.strictEqual(rays.length, 2)
+  assert.deepStrictEqual(rays[0], { origin: { x: -27, z: 11 }, direction: { x: 0.12963, z: -0.99156 } })
+  assert.deepStrictEqual(rays[1].direction, { x: -0.87773, z: 0.47917 })
+  assert.strictEqual(back.getPois(EYE_RAY).length, 2)
 })
