@@ -231,8 +231,9 @@ test('crafting recipes: one recipe per tag member merged back into tag ingredien
   assert.deepEqual(recipesFor(registry, 'white_bed')[0].ingredients.find(i => i.items.includes('white_wool'))?.items, ['white_wool'])
 })
 
-test('every source names blocks and items of the 1.21.11 registry', () => {
+test('every source names blocks and items of the 1.21.11 registry (but the poplar of 26.3)', () => {
   for (const b of BLOCK_SOURCES) {
+    if (b.block === 'poplar_log') continue
     assert.ok(registry.blocksByName[b.block] != null, b.block)
     for (const d of b.drops) assert.ok(registry.itemsByName[d.item] != null, d.item)
   }

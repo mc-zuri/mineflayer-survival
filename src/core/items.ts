@@ -1,10 +1,17 @@
 /**
- * Vanilla item constants that minecraft-data doesn't carry (or doesn't carry for 1.21.11):
- * furnace burn times, food values and tool materials.
+ * Vanilla item constants that minecraft-data doesn't carry: furnace burn times, food values and tool materials.
+ *
+ * One table serves 1.21.11 and 26.3. Every item both versions have has the same burn time (1.21.11's
+ * FuelValues.vanillaBurnTimes against 26.3's cooking_fuel item components), the same food (Foods) and the same tool
+ * material (ToolMaterial). The 26.3 items (poplar wood, wool slabs and stairs, cushions) are in it as well: an item a
+ * version doesn't have never comes up there.
  */
 
-/** wood families, as the `<wood>_planks` items name them */
-export const WOOD_TYPES = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak', 'bamboo', 'crimson', 'warped'] as const
+/**
+ * wood families, as the `<wood>_planks` items name them; 26.3 adds poplar (the users of this list keep to the woods the
+ * version's registry has)
+ */
+export const WOOD_TYPES = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak', 'poplar', 'bamboo', 'crimson', 'warped'] as const
 /** vanilla #non_flammable_wood: removed from the fuel map */
 export const NON_FLAMMABLE_WOOD = ['crimson', 'warped']
 
@@ -90,6 +97,9 @@ export function burnTicks (name: string): number {
   const fixed = FIXED_BURN[name]
   if (fixed != null) return fixed
   if (name.endsWith('_wool')) return 100
+  // 26.3: the wool slabs (cooking/time_wool_slabs) and the cushions 50, the wool stairs (cooking/time_wool) 100
+  if (name.endsWith('_wool_slab') || name.endsWith('_cushion')) return 50
+  if (name.endsWith('_wool_stairs')) return 100
   if (name.endsWith('_carpet') && name !== 'moss_carpet' && name !== 'pale_moss_carpet') return 67
   if (name.endsWith('_banner') && !name.endsWith('_wall_banner')) return 300
   if (name === 'bamboo_block' || name === 'stripped_bamboo_block') return 300

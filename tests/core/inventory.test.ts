@@ -5,10 +5,26 @@ import { Inventory } from '../../src/core/inventory'
 import { itemTags } from '../../src/core/tags'
 import { burnTicks } from '../../src/core/items'
 import type { RegistryLike } from '../../src/core/registry'
+import { VERSIONS } from '../versions'
 
 const registry: RegistryLike = minecraftData('1.21.11')
 
-test('tag groups hold every variant of the version', () => {
+for (const version of VERSIONS) {
+  test(`tag groups hold every variant of the version (${version})`, () => {
+    const tags = itemTags(minecraftData(version))
+    const logs = tags.members('#logs')
+    for (const n of ['oak_log', 'pale_oak_log', 'stripped_cherry_wood', 'mangrove_log', 'crimson_stem', 'warped_hyphae']) assert.ok(logs.includes(n), n)
+    // 26.3's poplar: its logs burn, its planks and slab are planks and wooden slabs (vanilla #logs_that_burn, #planks, #wooden_slabs)
+    const poplar = version === '26.3'
+    assert.equal(tags.members('#logs_that_burn').includes('stripped_poplar_wood'), poplar)
+    assert.equal(tags.members('#planks').length, poplar ? 13 : 12)
+    assert.equal(tags.members('#wooden_slabs').includes('poplar_slab'), poplar)
+    assert.equal(tags.members('#fuel').includes('white_wool_slab'), poplar)
+    assert.deepEqual([...tags.members('#poplar_logs')].sort(), poplar ? ['poplar_log', 'poplar_wood', 'stripped_poplar_log', 'stripped_poplar_wood'] : [])
+  })
+}
+
+test('tag groups: logs, coals, tools, ores, fuel, food', () => {
   const tags = itemTags(registry)
   const logs = tags.members('#logs')
   for (const n of ['oak_log', 'pale_oak_log', 'stripped_cherry_wood', 'mangrove_log', 'crimson_stem', 'warped_hyphae']) assert.ok(logs.includes(n), n)
@@ -88,6 +104,13 @@ test('fuel and food totals follow vanilla burn times and nutrition', () => {
   assert.equal(burnTicks('stick'), 100)
   assert.equal(burnTicks('white_wool'), 100)
   assert.equal(burnTicks('cobblestone'), 0)
+  // 26.3's wool slabs and stairs, cushions and poplar wood (cooking_fuel components)
+  assert.equal(burnTicks('red_wool_slab'), 50)
+  assert.equal(burnTicks('red_wool_stairs'), 100)
+  assert.equal(burnTicks('black_cushion'), 50)
+  assert.equal(burnTicks('stripped_poplar_log'), 300)
+  assert.equal(burnTicks('poplar_hanging_sign'), 800)
+  assert.equal(burnTicks('red_poplar_leaves'), 0)
   const inv = new Inventory(registry, { coal: 2, oak_planks: 3, blaze_rod: 1, cooked_beef: 2, rotten_flesh: 5, bread: 1 })
   assert.equal(inv.fuelTicks(['blaze_rod']), 2 * 1600 + 3 * 300)
   assert.equal(inv.fuelTicks(), 2 * 1600 + 3 * 300 + 2400)
