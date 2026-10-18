@@ -7,7 +7,7 @@ import { TaskError } from '../core/errors'
 import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import type { CraftStep, FarmStep, FillStep, KillStep, LootStep, MineStep, PlanStep, SmeltStep } from '../planner/steps'
-import { farmCells, grownPlots, harvestFarm, knownFarms, plantFarm, rememberFarm } from '../skills/farm'
+import { farmCells, grownPlots, harvestFarm, knownFarms, plantFarm, rememberFarm, SEED_OF, sow } from '../skills/farm'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { craft } from '../skills/craft'
@@ -181,6 +181,8 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
       const batch = kind != null && wornOutTools(bot.inventory.items(), { minUses: 64 }).some(w => w.kind === kind) ? 2 : 8
       const res = await collectBlock(bot, { names, count: Math.min(left, batch), maxDistance: SEARCH_RADIUS, exclude }, signal)
       for (const pos of res.positions) ctx.memory.forgetBlock(pos, dimensionOf(bot))
+      // a crop taken from a farm (a village's) is sown again from what it dropped: the farm grows back
+      if (growsAny(step.blocks)) await resow(bot, res.positions, names, signal)
       if (isSub) substituted += res.mined
     } catch (err) {
       if (isAbort(err) || TaskError.is(err, 'NO_TOOL', 'INVENTORY_FULL', 'DIED')) throw err
@@ -194,6 +196,25 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
     if (isSub && substituted >= step.blockCount) return { gained: countItems(bot, step.item) - start, replan: true }
   }
   return { gained: countItems(bot, step.item) - start }
+}
+
+/** sows the farmland under crops just harvested (of the blocks `names`) again with their seed, when it's held */
+export async function resow (bot: Bot, crops: readonly Vec3[], names: readonly string[], signal: AbortSignal): Promise<number> {
+  let n = 0
+  const seeds = names.map(c => SEED_OF[c]).filter((s): s is string => s != null)
+  for (const pos of crops) {
+    const below = pos.offset(0, -1, 0)
+    if (bot.blockAt(below)?.name !== 'farmland') continue
+    const seed = seeds.find(s => countItems(bot, s) > 0)
+    if (seed == null) continue
+    try {
+      await sow(bot, below, seed, signal)
+      n++
+    } catch (err) {
+      if (isAbort(err)) throw err
+    }
+  }
+  return n
 }
 
 /**

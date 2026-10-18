@@ -22,9 +22,14 @@ import { wornOutTools } from './durability'
 import { defaultKeep, junkToToss, splitInventory, type KeepRule } from './keep'
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
+import { noteVillage } from '../skills/village'
+import { rememberAround } from './explore'
 import { farmCells, grownPlots, knownFarms } from '../skills/farm'
 import { GROW_TICKS } from '../core/crops'
 import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
+
+/** ticks between the looks for a village about the bot */
+export const VILLAGE_CHECK_TICKS = 400
 
 /** how far from the bot a failed mine step's remembered blocks are forgotten: all of them in the dimension */
 export const FORGET_RADIUS = Infinity
@@ -145,6 +150,16 @@ export class Executor {
     this.logFn = opts.log ?? (line => trace('executor:', line))
     this.home = opts.home ?? (() => null)
     this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos))
+    // a village passed by is noted, with its farms' crops and hay, for the food plans
+    let nextVillageCheck = 0
+    bot.on('physicsTick', () => {
+      if (this.tasks.tick < nextVillageCheck || typeof bot.findBlock !== 'function' || bot.entity == null) return
+      nextVillageCheck = this.tasks.tick + VILLAGE_CHECK_TICKS
+      if (normalizeDimension(bot.game?.dimension) !== 'overworld') return
+      const before = this.memory.getPois('village').length
+      const at = noteVillage(bot, this.memory, names => rememberAround(bot, this.memory, names, 64))
+      if (at != null && this.memory.getPois('village').length > before) this.log(`a village at ${at.toString()}: its crops and hay noted`)
+    })
   }
 
   log (line: string): void {
