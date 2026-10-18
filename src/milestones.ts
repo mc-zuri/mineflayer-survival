@@ -6,12 +6,13 @@
 import type { Bot } from 'mineflayer'
 import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET } from './planner/progression'
 import type { MilestoneHandler } from './runner'
-import { buildPortal, collectBlazeRods, enterNether, obtainPearls, returnOverworld } from './nether/skills'
+import { buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
+import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
 import { enterEnd, fightDragon, isInEnd, leaveEnd } from './end/skills'
 import { countBookshelves, enchantGear, findEnchantingTable } from './skills/enchant'
 import { countItems } from './skills/util'
-import { normalizeDimension } from './core/memory'
+import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
 import { findFarmSite, knownFarms, plantFarm, rememberFarm, SEED_OF } from './skills/farm'
@@ -74,6 +75,29 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   await executor.task('enchant the gear', async (s) => await enchantGear(bot, { executor, signal: s, bookshelves: shelves }), signal)
 }
 
+/**
+ * The axis walks a fortress search takes in turn, without the seed: findFortress's first (along the nearer axis, away
+ * from 0), then the other axis both ways, then back the first way
+ */
+export function fortressRoutes (from: { x: number, z: number }): Array<Required<Pick<ExploreOptions, 'axis' | 'direction'>>> {
+  const axis = Math.abs(from.z) <= Math.abs(from.x) ? 'x' : 'z'
+  const other = axis === 'x' ? 'z' : 'x'
+  const away = (a: 'x' | 'z'): 1 | -1 => (a === 'x' ? from.x : from.z) < 0 ? -1 : 1
+  return [{ axis, direction: away(axis) }, { axis: other, direction: away(other) }, { axis: other, direction: -away(other) as 1 | -1 }, { axis, direction: -away(axis) as 1 | -1 }]
+}
+
+/**
+ * The next fortress search's walk: the routes in turn, by the searches counted in memory (the 'fortress_search' point's
+ * note, counted up here, saved with the rest), so a search that found none doesn't walk the same line again
+ */
+export function fortressRoute (memory: WorldMemory, from: Vec3): ExploreOptions {
+  const routes = fortressRoutes(from)
+  const done = Number(/^searches=(\d+)/.exec(memory.getPois('fortress_search', { dimension: 'the_nether' })[0]?.note ?? '')?.[1] ?? 0)
+  const route = routes[done % routes.length]
+  memory.addPoi('fortress_search', { x: 0, y: 0, z: 0 }, 'the_nether', `searches=${done + 1};last=${route.direction > 0 ? '+' : '-'}${route.axis}`)
+  return route
+}
+
 export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, log }) => {
   const count = (name: string): number => countItems(bot, name)
   if (!inNether(bot)) {
@@ -86,7 +110,14 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
   const needs = netherNeeds({ count })
   if (needs.rods > 0) {
     log(`blaze rods: ${needs.rods} to get`)
-    await executor.task('blaze rods', async (s) => await collectBlazeRods(bot, { count: count('blaze_rod') + needs.rods }, s), signal)
+    // a fortress first: the spawner is looked for in the one in view (the arrival is seldom by one)
+    const spawner = executor.memory.getPois('blaze_spawner', { dimension: 'the_nether', near: bot.entity.position })[0]
+    if (spawner == null) {
+      const route = fortressRoute(executor.memory, bot.entity.position)
+      const found = await executor.task('find a fortress', async (s) => await findFortress(bot, { explore: route }, s), signal)
+      log(`a fortress at ${found.fortress.center.x} ${found.fortress.center.y} ${found.fortress.center.z} (${found.via}, ${found.ticks} ticks)`)
+    }
+    await executor.task('blaze rods', async (s) => await collectBlazeRods(bot, { count: count('blaze_rod') + needs.rods, spawner }, s), signal)
   }
   const pearls = netherNeeds({ count }).pearls
   if (pearls > 0) {
