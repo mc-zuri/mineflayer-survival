@@ -8,7 +8,7 @@ import { Vec3 } from 'vec3'
 import { TaskRunner } from '../../src/core/taskRunner'
 import { TaskError } from '../../src/core/errors'
 import { WorldMemory } from '../../src/core/memory'
-import { Runner, deathSpotWorthIt, progressState, type MilestoneHandler } from '../../src/runner'
+import { Runner, deathSpotWorthIt, progressState, tickLine, type MilestoneHandler } from '../../src/runner'
 
 /* eslint-disable @typescript-eslint/no-var-requires */
 const registry = require('minecraft-data')('1.21.11')
@@ -167,4 +167,18 @@ test('a death spot the bot died at again going back for its items is left for go
   await runner.recoverFromDeath()
   assert.deepEqual(trips, ['to the death spot'])
   assert.ok(logs.some(l => /not back to the death spot at 24 15 3/.test(l)), logs.join('\n'))
+})
+
+test('the default log puts the game tick in front of each line', async () => {
+  assert.equal(tickLine(1234, 'plan 1: mine 3 oak_log'), '[survival] t1234 plan 1: mine 3 oak_log')
+  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1 })
+  const lines: string[] = []
+  const log = console.log
+  console.log = (line: string) => { lines.push(line) }
+  try {
+    await new Runner(bot, { until: 'wood' }).play()
+  } finally {
+    console.log = log
+  }
+  assert.ok(lines.some(l => /^\[survival\] t\d+ milestone wood reached/.test(l)), lines.join('\n'))
 })

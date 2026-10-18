@@ -75,7 +75,7 @@ export interface PlayOptions {
   base?: Partial<Omit<BuildBaseOptions, 'executor'>>
   /** stop after this many ticks of this run (the work in hand is aborted) */
   maxTicks?: number
-  /** a line per milestone, plan and failure (default: console.log with a [survival] prefix) */
+  /** a line per milestone, plan and failure (default: console.log with a [survival] prefix and the tick, tickLine) */
   log?: (line: string) => void
   signal?: AbortSignal
 }
@@ -139,7 +139,10 @@ export function deathSpotWorthIt (death: { x: number, y: number, z: number, dime
 /** how near an earlier deadly spot (one the bot died going back to) a death spot is passed over */
 export const DEADLY_SPOT_RADIUS = 16
 
-const DEFAULT_LOG = (line: string): void => console.log(`[survival] ${line}`)
+/** a log line with the game's tick in front, so where a run's ticks went reads off its log: "[survival] t1234 plan 1: ..." */
+export function tickLine (tick: number, line: string): string {
+  return `[survival] t${tick} ${line}`
+}
 
 /** gets the goals of a milestone through the executor */
 const obtainGoals: MilestoneHandler = async ({ milestone, state, executor, signal }) => {
@@ -163,7 +166,7 @@ export class Runner {
   private sleepCooldownUntil = 0
 
   constructor (readonly bot: Bot, readonly options: PlayOptions = {}) {
-    this.log = options.log ?? DEFAULT_LOG
+    this.log = options.log ?? (line => console.log(tickLine(this.tick, line)))
     this.executor = new Executor(bot, {
       log: this.log,
       home: () => this.home(),
