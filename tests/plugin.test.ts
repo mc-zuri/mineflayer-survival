@@ -9,13 +9,21 @@ function fakeBot (): any {
   bot.loadPlugin = () => { throw new Error('pathfinder already loaded') }
   bot.entity = { position: { x: 1.5, y: 64, z: -2.5 } }
   bot.game = { dimension: 'minecraft:the_nether' }
+  bot.inventory = new EventEmitter()
   return bot
 }
 
 test('createPlugin sets bot.survival with the default options', () => {
   const bot = fakeBot()
   createPlugin()(bot)
-  assert.deepStrictEqual(bot.survival.options, { loadPathfinder: true })
+  assert.deepStrictEqual(bot.survival.options, { loadPathfinder: true, reflexes: true })
+  assert.ok(bot.survival.reflexes != null)
+})
+
+test('createPlugin without reflexes', () => {
+  const bot = fakeBot()
+  createPlugin({ reflexes: false })(bot)
+  assert.strictEqual(bot.survival.reflexes, null)
 })
 
 test('on death the tasks fail with DIED and the death spot is remembered', async () => {
