@@ -155,7 +155,7 @@ test('the executor makes a new tool at the uses left a mine step hands back at (
   assert.equal(ex.options.minToolUses, MIN_TOOL_USES)
 })
 
-test('a mine step that fails forgets the remembered blocks of its kinds near the bot (the next plan prices them as yet to find)', async () => {
+test('a mine step that fails forgets the remembered blocks of its kinds (the next plan prices them as yet to find)', async () => {
   const bot = fakeBot()
   const memory: WorldMemory = bot.survival.memory
   memory.rememberBlock('oak_log', { x: 10, y: 64, z: 0 })
@@ -166,7 +166,7 @@ test('a mine step that fails forgets the remembered blocks of its kinds near the
   await assert.rejects(ex.obtain([{ item: 'oak_log', count: 1 }]), /no safe way down/)
   assert.equal(tries, 1)
   assert.equal(memory.findBlocks('oak_log', { near: { x: 0, y: 64, z: 0 } as any, maxDistance: 128 }).length, 0)
-  // far off, and of other kinds: kept
-  assert.equal(memory.findBlocks('oak_log').length, 1)
+  // far off too (a vein remembered 200 blocks off priced cheaper than one yet to find); of other kinds: kept
+  assert.equal(memory.findBlocks('oak_log').length, 0)
   assert.equal(memory.findBlocks('stone').length, 1)
 })

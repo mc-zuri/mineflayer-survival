@@ -22,8 +22,8 @@ import { wornOutTools } from './durability'
 import { defaultKeep, junkToToss, splitInventory, type KeepRule } from './keep'
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, type StepContext, type StepOutcome, type StepRunner } from './steps'
 
-/** how far from the bot a failed mine step's remembered blocks are forgotten */
-export const FORGET_RADIUS = 128
+/** how far from the bot a failed mine step's remembered blocks are forgotten: all of them in the dimension */
+export const FORGET_RADIUS = Infinity
 
 export interface ExecutorHooks {
   /** before every step (the runner sleeps through the night here) */
@@ -232,8 +232,8 @@ export class Executor {
   }
 
   /**
-   * A mine step that failed: the remembered blocks of its kinds near the bot are forgotten, so the next plan prices
-   * them as blocks yet to be found. One diamond ore remembered under a lake kept the iron milestone planning a diamond
+   * A mine step that failed: the remembered blocks of its kinds are forgotten, so the next plan prices them as blocks
+   * yet to be found (diamonds remembered 200 blocks off kept the iron milestone on seed 5 planning a diamond helmet). One diamond ore remembered under a lake kept the iron milestone planning a diamond
    * sword, and the step failed the same way five times over.
    */
   private forgetFailedBlocks (step: Extract<PlanStep, { kind: 'mine' }>): void {
