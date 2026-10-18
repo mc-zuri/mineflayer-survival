@@ -43,3 +43,6 @@ declare module 'mineflayer' {
     survival: Survival
   }
 }
+
+export { enableLockstep, createLockstepBot } from './lockstep'
+export type { Lockstep, LockstepOptions, LockstepMode } from './lockstep'
