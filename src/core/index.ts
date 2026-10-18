@@ -1,3 +1,7 @@
 export * from './errors'
 export * from './taskRunner'
 export * from './memory'
+export * from './registry'
+export * from './items'
+export * from './tags'
+export * from './inventory'
