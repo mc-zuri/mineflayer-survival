@@ -3,7 +3,8 @@ import type { Item } from 'prismarine-item'
 
 // Melee stats of 1.21.11's weapons and tools: the attack damage the tooltip shows (the player's 1 plus the item's
 // attribute modifier) and the attack speed (the player's 4 plus the item's modifier), from Items' sword / axe /
-// pickaxe / shovel / hoe properties over ToolMaterial (wood, stone, copper, iron, diamond, gold, netherite).
+// pickaxe / shovel / hoe / spear properties over ToolMaterial (wood, stone, copper, iron, diamond, gold, netherite).
+// The same in 26.3: every item's attribute_modifiers are, and the sharpness, smite and bane bonuses.
 interface MeleeStats { damage: number, speed: number }
 
 const TIERS = ['wooden', 'stone', 'copper', 'iron', 'golden', 'diamond', 'netherite'] as const
@@ -22,6 +23,9 @@ const AXE: Record<Tier, MeleeStats> = {
 }
 // Items: hoe(material, damage, speed)
 const HOE_SPEED: Record<Tier, number> = { wooden: 1, stone: 2, copper: 2, iron: 3, golden: 1, diamond: 4, netherite: 4 }
+// Items: spear(material, attackDuration, ...): its jab (the attack, without the charge of its kinetic_weapon), the
+// material's damage bonus and an attack speed of 1 / duration: 0.65, 0.75, 0.85, 0.95, 0.95, 1.05, 1.15 seconds
+const SPEAR_SECONDS: Record<Tier, number> = { wooden: 0.65, stone: 0.75, copper: 0.85, iron: 0.95, golden: 0.95, diamond: 1.05, netherite: 1.15 }
 
 const STATS: Record<string, MeleeStats> = {
   trident: { damage: 9, speed: 1.1 },
@@ -34,6 +38,7 @@ for (const tier of TIERS) {
   STATS[`${tier}_pickaxe`] = { damage: 2 + bonus, speed: 1.2 }
   STATS[`${tier}_shovel`] = { damage: 2.5 + bonus, speed: 1 }
   STATS[`${tier}_hoe`] = { damage: 1, speed: HOE_SPEED[tier] }
+  STATS[`${tier}_spear`] = { damage: 1 + bonus, speed: 1 / SPEAR_SECONDS[tier] }
 }
 
 /** Bare hands: the player's attack_damage 1 and attack_speed 4. */
@@ -91,7 +96,8 @@ export function bestMeleeWeapon (bot: Bot, targetName?: string): Item | null {
 
 /**
  * Player.getAttackStrengthScale, counted on the client: the ticks since the last swing or since the main hand took
- * another item (Player.tick's attackStrengthTicker), over the held item's delay.
+ * another item (Player.tick's attackStrengthTicker), over the held item's delay. As 26.3 counts it; 1.21.11's server
+ * also starts over on any other arm swing (ServerPlayer.swing: a dig or a placement mid-fight), which this leaves out.
  */
 export class AttackStrength {
   ticker = 0

@@ -20,6 +20,24 @@ test('weapon stats are 1.21.11\'s (swords 1.6 a second, axes slower and harder)'
   near(attackStrengthDelay('iron_axe'), 20 / 0.9)
 })
 
+test('the spears\' jab: the material\'s damage, 4 less the attribute_modifiers\' attack speed (1.21.11 and 26.3)', () => {
+  // the item reports: attack_damage 0 / 1 / 1 / 2 / 0 / 3 / 4, attack_speed -2.4615 / -2.6667 / -2.8235 / -2.9474 / -2.9474 / -3.0476 / -3.1304
+  const vanilla: Record<string, [number, number]> = {
+    wooden_spear: [1, 4 - 2.4615384340286255],
+    stone_spear: [2, 4 - 2.666666626930237],
+    copper_spear: [2, 4 - 2.8235294818878174],
+    iron_spear: [3, 4 - 2.9473683834075928],
+    golden_spear: [1, 4 - 2.9473683834075928],
+    diamond_spear: [4, 4 - 3.0476189851760864],
+    netherite_spear: [5, 4 - 3.13043475151062]
+  }
+  for (const [name, [damage, speed]] of Object.entries(vanilla)) {
+    assert.strictEqual(meleeStats(name).damage, damage, name)
+    near(meleeStats(name).speed, speed, 1e-6)
+  }
+  near(attackStrengthDelay('iron_spear'), 19)
+})
+
 test('bestMeleeWeapon by damage a second, sharpness and smite counted', () => {
   assert.strictEqual(bestMeleeWeapon(fakeBot({ items: [item('iron_axe'), item('iron_sword'), item('dirt', 64)] }))?.name, 'iron_sword')
   assert.strictEqual(bestMeleeWeapon(fakeBot({ items: [item('stone_sword'), item('diamond_axe')] }))?.name, 'diamond_axe')
