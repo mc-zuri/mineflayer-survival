@@ -112,10 +112,14 @@ export async function throwEnderEye (bot: Bot, opts: { recover?: boolean } = {},
       const at = positions[positions.length - 1]
       await waitTicks(bot, 3, signal)
       const had = countItems(bot, 'ender_eye')
-      try {
-        await pickupDrops(bot, { near: at, radius: 16, names: ['ender_eye'] }, signal)
-      } catch (err) {
-        if (isAbort(err)) throw err
+      if (!overWater(p => bot.blockAt(p) as any, at)) {
+        try {
+          await pickupDrops(bot, { near: at, radius: 16, names: ['ender_eye'] }, signal)
+        } catch (err) {
+          if (isAbort(err)) throw err
+        }
+      } else {
+        trace('throwEnderEye: the eye came down over water: left')
       }
       recovered = countItems(bot, 'ender_eye') > had
     }
@@ -125,6 +129,21 @@ export async function throwEnderEye (bot: Bot, opts: { recover?: boolean } = {},
     bot.off('physicsTick', onTick)
     bot.off('entitySpawn', onSpawn)
   }
+}
+
+/**
+ * Whether an eye that dropped at `at` falls into water (the first block under it that isn't air, within 24): it sinks
+ * and floats up under any ice, and the bot that dived after one on 26.3 drowned under a frozen sea. Such an eye is left.
+ */
+export function overWater (blockAt: (pos: Vec3) => { name: string } | null, at: Vec3): boolean {
+  const start = at.floored()
+  for (let dy = 0; dy >= -24; dy--) {
+    const name = blockAt(start.offset(0, dy, 0))?.name
+    if (name == null) return false
+    if (name === 'air' || name === 'cave_air') continue
+    return name === 'water' || name === 'bubble_column' || name === 'kelp' || name === 'seagrass'
+  }
+  return false
 }
 
 function toVec (p: Vec3): Vec {
