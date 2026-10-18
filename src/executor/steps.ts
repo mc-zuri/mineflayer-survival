@@ -154,7 +154,9 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
     const left = isSub ? step.blockCount - substituted : Math.ceil((target - countItems(bot, step.item)) / perBlock - 1e-9)
     if (left <= 0) break
     try {
-      const res = await collectBlock(bot, { names, count: Math.min(left, 8), maxDistance: SEARCH_RADIUS, exclude }, signal)
+      // a tool getting low comes back between fewer blocks (the pathfinder's digging on the way wears it too)
+      const batch = kind != null && wornOutTools(bot.inventory.items(), { minUses: 64 }).some(w => w.kind === kind) ? 2 : 8
+      const res = await collectBlock(bot, { names, count: Math.min(left, batch), maxDistance: SEARCH_RADIUS, exclude }, signal)
       for (const pos of res.positions) ctx.memory.forgetBlock(pos, dimensionOf(bot))
       if (isSub) substituted += res.mined
     } catch (err) {
