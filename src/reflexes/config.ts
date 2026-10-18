@@ -84,6 +84,21 @@ export interface ReflexConfig {
     range: number
     priority: number
   }
+  night: {
+    enabled: boolean
+    /** sleep in a bed from the inventory or one nearby (default true) */
+    sleep: boolean
+    /** dig in for the night without the gear to fight (default true) */
+    shelter: boolean
+    /** the gear to stay out and fight with: armor points worn or carried, and a weapon's hit (default 10 and 6) */
+    minArmor: number
+    minDamage: number
+    /** how far to look for a bed standing (default 16) and for a column to dig the shelter in (default 8) */
+    bedDistance: number
+    shelterRadius: number
+    /** below the eat (50) and hostiles reflexes: it waits for a fight or a meal to end (default 40) */
+    priority: number
+  }
   totem: {
     enabled: boolean
     /** keep a totem in the off hand whatever the health (default true); else only at or below `health` */
@@ -117,6 +132,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
   drowning: { enabled: true, air: 6, recoverTo: 18, searchRadius: 8, maxTicks: 300, priority: 85 },
   armor: { enabled: true, priority: 20 },
   fireball: { enabled: true, range: 12, priority: 92 },
+  night: { enabled: true, sleep: true, shelter: true, minArmor: 10, minDamage: 6, bedDistance: 16, shelterRadius: 8, priority: 40 },
   totem: { enabled: true, always: true, health: 10, priority: 95 },
   retryCooldownTicks: 20
 }

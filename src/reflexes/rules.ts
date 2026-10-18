@@ -4,6 +4,7 @@ import { eat, bestFoodInInventory } from '../skills/eat'
 import { escapeHazard, evadeCreeper, fleeFrom, headInWater, inHazard, surface } from '../skills/escape'
 import { creeperSwelling, fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
+import { botIsBrightOutside, isEnclosed, nightPlan, shelter, sleepThroughNight, type NightPlan } from '../skills/shelter'
 import { bestMeleeWeapon } from '../skills/weapons'
 import { hasLineOfSight, type Entity } from '../skills/combatUtil'
 import { GHAST_FIREBALL, deflectFireball, fireballIncoming } from '../nether/safety'
@@ -214,4 +215,62 @@ export const armorReflex: Reflex = {
   }
 }
 
-export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fireballReflex, hazardReflex, drowningReflex, creeperReflex, hostilesReflex, eatReflex, armorReflex]
+const planCache = new WeakMap<Bot, { tick: number, plan: NightPlan }>()
+
+/** the night's plan, looked at again every 100 ticks (a bed nearby is a block search) */
+function cachedNightPlan (ctx: ReflexContext): NightPlan {
+  const { bot, config } = ctx
+  const cached = planCache.get(bot)
+  if (cached != null && ctx.tick - cached.tick < 100 && cached.tick <= ctx.tick) return cached.plan
+  const bedNearby = config.night.sleep && typeof bot.findBlock === 'function' &&
+    bot.findBlock({ matching: (b: any) => b.name.endsWith('_bed'), maxDistance: config.night.bedDistance }) != null
+  const plan = nightPlan(bot, { minArmor: config.night.minArmor, minDamage: config.night.minDamage, bedNearby })
+  planCache.set(bot, { tick: ctx.tick, plan })
+  return plan
+}
+
+/** under the open sky (the sky's light at the feet), or in a shelter dug already */
+function outInTheNight (bot: Bot): boolean {
+  const feet = bot.entity.position.floored()
+  const sky = (bot.blockAt(feet) as any)?.skyLight
+  return typeof sky !== 'number' || sky >= 8 || isEnclosed((pos) => bot.blockAt(pos) as any, feet)
+}
+
+/**
+ * At night in the overworld: a bed means sleep (the monsters that keep the bot up fought first), good gear means stay
+ * out and let the hostiles reflex fight, else a shelter dug into the ground till the day. Not underground at work: the
+ * dark there is the same day and night.
+ */
+export const nightReflex: Reflex = {
+  name: 'night',
+  priority: 40,
+  check (ctx) {
+    const { bot, config } = ctx
+    if (!config.night.enabled || bot.isSleeping === true || bot.time == null) return null
+    if (bot.game?.dimension != null && !/overworld/.test(String(bot.game.dimension))) return null
+    if (botIsBrightOutside(bot)) return null
+    const plan = cachedNightPlan(ctx)
+    if (plan === 'fight') return null
+    const dig = async (signal: AbortSignal): Promise<unknown> => await shelter(bot, { signal, radius: config.night.shelterRadius })
+    if (plan === 'sleep' && config.night.sleep) {
+      return {
+        name: 'night',
+        priority: config.night.priority,
+        detail: 'sleep',
+        run: async (signal) => {
+          try {
+            return await sleepThroughNight(bot, { signal, bedDistance: config.night.bedDistance })
+          } catch (err) {
+            if (signal.aborted || !config.night.shelter) throw err
+            planCache.delete(bot)
+            return await dig(signal)
+          }
+        }
+      }
+    }
+    if (!config.night.shelter || !outInTheNight(bot)) return null
+    return { name: 'night', priority: config.night.priority, detail: 'shelter', run: dig }
+  }
+}
+
+export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fireballReflex, hazardReflex, drowningReflex, creeperReflex, hostilesReflex, eatReflex, nightReflex, armorReflex]

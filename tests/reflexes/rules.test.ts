@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { armorReflex, creeperReflex, drowningReflex, eatReflex, hazardReflex, hostilesReflex, totemReflex } from '../../src/reflexes/rules'
+import { armorReflex, creeperReflex, drowningReflex, eatReflex, hazardReflex, hostilesReflex, nightReflex, totemReflex } from '../../src/reflexes/rules'
 import { ReflexEngine } from '../../src/reflexes/engine'
 import type { ReflexConfigInput } from '../../src/reflexes/config'
 import type { Reflex } from '../../src/reflexes/types'
@@ -138,6 +138,38 @@ test('hostiles and creeper reflexes leave alone what has no line of sight to the
   const hole = (p: Vec3): string => (p.x === 0 && p.z === 0 && (p.y === 61 || p.y === 62)) ? 'air' : p.y < 64 ? 'dirt' : 'air'
   const above = entity({ name: 'zombie', position: new Vec3(0.5, 64, 0.5) })
   assert.strictEqual(check(hostilesReflex, { position: new Vec3(0.5, 61, 0.5), entities: [above], world: hole }), null)
+})
+
+test('night reflex: at night a bed means sleep, poor gear a shelter, good gear nothing (the hostiles reflex fights); not by day or underground', () => {
+  const night = (input: FakeBotInput, time: number, setup?: (bot: any) => void): string | null => {
+    const bot = fakeBot(input)
+    bot.time = { timeOfDay: time }
+    bot.game.dimension = 'overworld'
+    setup?.(bot)
+    const engine = new ReflexEngine(bot, { enabled: false })
+    const task = nightReflex.check(engine.context())
+    engine.stop()
+    return task == null ? null : (task.detail ?? task.name)
+  }
+  const early = { items: [item('stone_sword'), item('bread', 4)] }
+  assert.strictEqual(night(early, 13000), 'shelter')
+  assert.strictEqual(night(early, 6000), null)
+  assert.strictEqual(night(early, 23500), null)
+  assert.strictEqual(night({ items: [...early.items, item('white_bed')] }, 13000), 'sleep')
+  const iron = { head: item('iron_helmet'), torso: item('iron_chestplate'), legs: item('iron_leggings'), feet: item('iron_boots') }
+  assert.strictEqual(night({ armor: iron, items: [item('iron_sword')] }, 13000), null)
+  assert.strictEqual(night(early, 13000, bot => { bot.game.dimension = 'the_nether' }), null)
+  // in the dark of a mine (no sky light at the feet): not a night out
+  const mine = (bot: any): void => { const blockAt = bot.blockAt; bot.blockAt = (p: Vec3) => ({ ...blockAt(p), skyLight: 0 }) }
+  assert.strictEqual(night(early, 13000, mine), null)
+  assert.strictEqual(night(early, 13000, bot => { bot.isSleeping = true }), null)
+  assert.strictEqual(night(early, 13000), 'shelter')
+  // turned off
+  const bot = fakeBot(early)
+  bot.time = { timeOfDay: 13000 }
+  const engine = new ReflexEngine(bot, { enabled: false, config: { night: { shelter: false } } })
+  assert.strictEqual(nightReflex.check(engine.context()), null)
+  engine.stop()
 })
 
 test('hostiles reflex: a skeleton shooting from 12 blocks is taken on (the ones that shoot count to rangedRange, 16), a zombie there isn\'t', () => {
