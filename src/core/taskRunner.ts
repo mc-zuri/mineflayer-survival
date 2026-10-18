@@ -157,6 +157,15 @@ export class TaskRunner {
     return this.queue.map(e => e.name)
   }
 
+  /** the running task and the queue, a preempted task (one that ran before) marked: for the stall reports */
+  snapshot (): { current: { name: string, priority: number, attempt: number, ticks: number } | null, queue: Array<{ name: string, priority: number, attempt: number, preempted: boolean }> } {
+    const r = this.running
+    return {
+      current: r == null ? null : { name: r.name, priority: r.priority, attempt: r.attempt, ticks: r.ticks },
+      queue: this.queue.map(e => ({ name: e.name, priority: e.priority, attempt: e.attempt, preempted: e.attempt > 0 }))
+    }
+  }
+
   get busy (): boolean {
     return this.running != null
   }

@@ -26,6 +26,7 @@ import { noteVillage } from '../skills/village'
 import { rememberAround } from './explore'
 import { farmCells, grownPlots, knownFarms } from '../skills/farm'
 import { GROW_TICKS } from '../core/crops'
+import type { Diagnostics } from '../diagnostics'
 import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
 
 /** ticks between the looks for a village about the bot */
@@ -84,6 +85,11 @@ export function describeStep (step: PlanStep): string {
     case 'loot': return `loot ${step.count} ${step.item} at ${step.from.x} ${step.from.y} ${step.from.z}`
     default: return `${step.kind} ${step.count} ${step.item}`
   }
+}
+
+/** a request as a log line: "3 cobblestone", "40 nutrition of cooked_beef,bread" */
+export function describeRequest (r: ObtainRequest): string {
+  return `${r.count}${r.unit === 'nutrition' ? ' nutrition of' : ''} ${String(r.item)}${r.optional === true ? ' (optional)' : ''}`
 }
 
 /** the inventory the plans start from: the main slots and the off hand, and the worn armor (planMilestone's owned) */
@@ -207,6 +213,22 @@ export class Executor {
    * keeps failing, DIED when the bot died).
    */
   async obtain (requests: readonly ObtainRequest[], signal?: AbortSignal, planOptions: PlanOptions = {}): Promise<ObtainOutcome> {
+    // the stall watchdog counts while there's work (play arms it too)
+    const disarm = this.diagnostics?.arm()
+    try {
+      return await this.obtainLoop(requests, signal, planOptions)
+    } finally {
+      disarm?.()
+    }
+  }
+
+  /** the stuck reports (bot.survival.diagnostics), told of each plan and step */
+  private get diagnostics (): Diagnostics | undefined {
+    return (this.bot as any).survival?.diagnostics
+  }
+
+  private async obtainLoop (requests: readonly ObtainRequest[], signal?: AbortSignal, planOptions: PlanOptions = {}): Promise<ObtainOutcome> {
+    const diag = this.diagnostics
     const failures = new Map<string, number>()
     let plans = 0
     let steps = 0
@@ -222,9 +244,12 @@ export class Executor {
       plans++
       if (!plan.ok) {
         const what = plan.unresolved.map(r => `${r.count} ${String(r.item)}`).join(', ')
-        throw new TaskError('NOT_FOUND', `no plan for ${what}`, { cause: lastError })
+        const err = new TaskError('NOT_FOUND', `no plan for ${what}`, { cause: lastError })
+        diag?.noPlan(requests.map(describeRequest), err)
+        throw err
       }
       this.log(`plan ${plans}: ${plan.steps.map(describeStep).join(', ')}`)
+      diag?.planMade(plans, requests.map(describeRequest), plan.steps.map(s => ({ desc: describeStep(s), blocks: s.kind === 'mine' ? s.blocks : undefined })))
       if (plan.steps.length === 0) return { plans, steps }
       const needed = neededItems(requests, plan)
       for (let i = 0; i < plan.steps.length; i++) {
@@ -239,9 +264,11 @@ export class Executor {
         }
         const key = `${step.kind}:${step.item}`
         let outcome: StepOutcome
+        diag?.stepStarted(step, describeStep(step), i)
         try {
           outcome = await this.runStep(step, signal)
           steps++
+          diag?.stepDone(step, outcome.gained)
         } catch (err) {
           if (isAbort(err) && signal?.aborted === true) throw err
           if (TaskError.is(err, 'DIED', 'ABORTED')) throw err
@@ -249,6 +276,7 @@ export class Executor {
           const n = (failures.get(key) ?? 0) + 1
           failures.set(key, n)
           this.log(`step failed (${n}): ${describeStep(step)}: ${(err as Error).message}`)
+          diag?.stepFailed(step, describeStep(step), err, n)
           if (step.kind === 'mine') this.forgetFailedBlocks(step)
           this.noteMissing(step, err)
           if (n >= this.options.maxStepFailures) throw err
@@ -307,13 +335,19 @@ export class Executor {
    * Runs `fn` as a foreground task (so the reflexes preempt it; it runs again from the start after, so it should be
    * safe to repeat), cancelled when `signal` fires. Never call it from inside a task: the queue runs one at a time.
    */
-  async task<T> (name: string, fn: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal): Promise<T> {
+  async task<T> (name: string, fn: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, info?: { step?: PlanStep, desc?: string, args?: unknown }): Promise<T> {
     throwIfOwnerAborted(signal)
     const handle = this.tasks.enqueue<T>({ name, onPreempt: 'resume' }, async (ctx) => await fn(ctx.signal))
     const onAbort = (): void => handle.cancel(`${name} was stopped`)
     signal?.addEventListener('abort', onAbort, { once: true })
     try {
       return await handle.result
+    } catch (err) {
+      // a skill that threw (not stopped, not dead): a skill report, with the window, the target and the step's args
+      if (!isAbort(err) && !TaskError.is(err, 'DIED') && signal?.aborted !== true && !(this.bot.health <= 0)) {
+        try { this.diagnostics?.skillFailed(name, err, info) } catch {}
+      }
+      throw err
     } finally {
       signal?.removeEventListener('abort', onAbort)
     }
@@ -326,6 +360,8 @@ export class Executor {
     const near = base != null && this.nearBase(base, 48)
     // kept across the attempts a reflex's preemption makes
     const state: Record<string, any> = {}
+    const diag = this.diagnostics
+    if (diag?.step != null && diag.step.key === `${step.kind}:${step.item}`) diag.step.state = state
     return await this.task(`step:${describeStep(step)}`, async (taskSignal) => {
       const stepCtx: StepContext = {
         bot: this.bot,
@@ -342,7 +378,7 @@ export class Executor {
         replacingTools: this.replacing
       }
       return await runner(step, stepCtx)
-    }, signal)
+    }, signal, { step, desc: describeStep(step) })
   }
 
   /** before a step: room in the inventory, a tool that won't break during it, the hooks */

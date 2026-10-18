@@ -20,7 +20,7 @@ import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
 import { buildBase, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
-import { Executor, ownedInventory, type ExecutorOptions } from './executor/executor'
+import { Executor, describeRequest, ownedInventory, type ExecutorOptions } from './executor/executor'
 import { defaultKeep, SPARE_FOOD_POINTS, spareKitGoals } from './executor/keep'
 import { isAbort } from './skills/errors'
 import { navigate, navigateNear } from './skills/navigate'
@@ -30,6 +30,7 @@ import { canSleepNow, sleep } from './skills/sleep'
 import { MILESTONE_HANDLERS, harvestGrownFarms } from './milestones'
 import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
+import type { Diagnostics, WatchdogOptions } from './diagnostics'
 
 export interface MilestoneContext {
   bot: Bot
@@ -92,6 +93,8 @@ export interface PlayOptions {
   /** a line per milestone, plan and failure (default: console.log with a [survival] prefix and the tick, tickLine) */
   log?: (line: string) => void
   signal?: AbortSignal
+  /** the stall watchdog's limits (bot.survival.diagnostics: a stall report when the work gets nowhere) */
+  watchdog?: WatchdogOptions
 }
 
 export interface PlayResult {
@@ -220,6 +223,15 @@ export function tickLine (tick: number, line: string): string {
   return `[survival] t${tick} ${line}`
 }
 
+/** a milestone's goals as the reports list them ("3 iron_ingot") */
+export function describeGoals (m: Milestone, state: ProgressState): string[] {
+  try {
+    return m.goals(state).map(describeRequest)
+  } catch {
+    return []
+  }
+}
+
 /** gets the goals of a milestone through the executor */
 const obtainGoals: MilestoneHandler = async ({ milestone, state, executor, signal }) => {
   await executor.obtain(milestone.goals(state), signal)
@@ -272,6 +284,11 @@ export class Runner {
     return this.executor.memory
   }
 
+  /** the reports of a stuck bot (bot.survival.diagnostics): told of each milestone, its failures and the waits */
+  get diagnostics (): Diagnostics | undefined {
+    return (this.bot as any).survival?.diagnostics
+  }
+
   /** ticks over all runs of this game */
   get tick (): number {
     return this.ticksBefore + this.bot.survival.tasks.tick
@@ -317,6 +334,7 @@ export class Runner {
       const event: MilestoneEvent = { id: m.id, title: m.title, tick: this.tick, wallMs: Date.now() - this.started }
       this.reached.push(event)
       this.log(`milestone ${m.id} reached at tick ${event.tick} (${(event.wallMs / 1000).toFixed(1)} s)`)
+      this.diagnostics?.milestoneReached(m.id)
       this.bot.emit('survivalMilestone' as any, event)
     }
   }
@@ -354,6 +372,11 @@ export class Runner {
     }
     this.bot.on('death', onDeath)
     this.bot.on('messagestr' as any, onMessage)
+    // the stall watchdog, on play's ticks
+    const diag = this.diagnostics
+    const clock = (): number => this.tick
+    if (diag != null) diag.clock = clock
+    const disarm = diag?.arm(this.options.watchdog)
     try {
       const result = await this.loop(controller.signal)
       if (overBudget && result.reason === 'aborted') result.reason = 'budget'
@@ -364,6 +387,8 @@ export class Runner {
       this.bot.off('death', onDeath)
       this.bot.off('messagestr' as any, onMessage)
       outer?.removeEventListener('abort', onOuter)
+      disarm?.()
+      if (diag != null && diag.clock === clock) diag.clock = null
     }
   }
 
@@ -422,6 +447,7 @@ export class Runner {
         return this.stop(m.id, 'unwired')
       }
       this.log(`working on ${m.id}: ${m.title}`)
+      this.diagnostics?.milestoneStarted(m.id, m.title, describeGoals(m, state))
       try {
         const how = await this.untilDusk(signal, async (s) => await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log }))
         if (stopped()) return this.stop(m.id, 'aborted')
@@ -440,6 +466,7 @@ export class Runner {
         const n = (failures.get(m.id) ?? 0) + 1
         failures.set(m.id, n)
         this.log(`milestone ${m.id} failed (${n}): ${(err as Error).message}`)
+        this.diagnostics?.milestoneFailed(m.id, err)
         if (n >= maxFailures && OPTIONAL_MILESTONES.includes(m.id)) {
           // the dragon doesn't need it: the game goes on without
           this.log(`milestone ${m.id} left out after ${n} failures: on to the next`)
@@ -657,10 +684,12 @@ export class Runner {
       const surfaceWork = upNext != null && MILESTONES.indexOf(upNext) < MILESTONES.findIndex(m => m.id === 'iron')
       if (!ctrl.signal.aborted && surfaceWork && typeof bot.blockAt === 'function' && !onSurface(p => bot.blockAt(p) as any, bot.entity.position.floored())) {
         this.log(`night (time ${bot.time.timeOfDay}): the rest of it waited out down the mine`)
+        // (a wait, not a stall)
+        this.diagnostics?.wait('the rest of the night down the mine')
         await new Promise<void>(resolve => {
           if (ctrl.signal.aborted) return resolve()
           ctrl.signal.addEventListener('abort', () => resolve(), { once: true })
-        })
+        }).finally(() => this.diagnostics?.wait(null))
         if (signal?.aborted === true) throw signal.reason
       }
     } finally {
