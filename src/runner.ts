@@ -613,7 +613,9 @@ export class Runner {
     if (this.stock == null || places.length === 0 || this.bot.entity == null) return []
     if (normalizeDimension(this.bot.game?.dimension) !== 'overworld') return []
     const now = this.bot.survival.tasks.tick
-    return this.stock.topUps(ownedInventory(this.bot), this.stockStored(), reached, places).filter(u => (this.stockRetryAt.get(u.mark.id) ?? 0) <= now)
+    // the room counted in the 36 slots the items go to (the owned inventory has the worn armor and the off hand too)
+    const bag = new Inventory(this.bot.registry as any, this.bot.inventory.items().map(i => ({ name: i.name, count: i.count })))
+    return this.stock.topUps(ownedInventory(this.bot), this.stockStored(), reached, places, bag).filter(u => (this.stockRetryAt.get(u.mark.id) ?? 0) <= now)
   }
 
   /**

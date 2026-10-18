@@ -201,22 +201,26 @@ export class StockPolicy {
   /**
    * The top-ups due at these places (the schedule's: the surface by day, underground by night or down the mine), the
    * lowest first (by level over low). Each gathers to its high mark, as much as fits this trip: the slots free beyond
-   * reserveSlots (the junk counted free), shared out among the top-ups due (the rest comes on a later trip, the chests
-   * holding what's gathered between). Updates the levels first.
+   * reserveSlots (the junk counted free), shared out among the top-ups due, a slot each to the lowest ones when there are
+   * fewer slots than top-ups (the rest comes on a later trip, the chests holding what's gathered between). `bag` is the
+   * main inventory the slots are counted in, when `inventory` has the worn armor too. Updates the levels first.
    */
-  topUps (inventory: Inventory, stored: Readonly<Record<string, number>>, reached: readonly MilestoneId[], places: readonly StockPlace[]): TopUp[] {
+  topUps (inventory: Inventory, stored: Readonly<Record<string, number>>, reached: readonly MilestoneId[], places: readonly StockPlace[], bag: Inventory = inventory): TopUp[] {
     const levels = this.update(inventory, stored, reached)
     const due = levels
       .filter(l => this.active.has(l.mark.id) && places.includes(l.mark.where))
       .sort((a, b) => a.have / a.mark.low - b.have / b.mark.low)
     if (due.length === 0) return []
-    const room = Math.max(0, inventory.slots - keptSlots(inventory) - this.reserveSlots)
+    const room = Math.max(0, bag.slots - keptSlots(bag) - this.reserveSlots)
     const share = Math.floor(room / due.length)
+    let extra = room - share * due.length
     const tags = itemTags(inventory.registry)
     const out: TopUp[] = []
     for (const level of due) {
       const mark = level.mark
-      const fits = Math.max(share, 0) * unitsPerSlot(mark, inventory.registry)
+      const slots = share + (extra > 0 ? 1 : 0)
+      if (extra > 0) extra--
+      const fits = slots * unitsPerSlot(mark, inventory.registry)
       const units = Math.ceil(Math.min(mark.high - level.have, fits))
       if (units <= 0) continue
       const alts = (typeof mark.gather === 'string' ? [mark.gather] : mark.gather).flatMap(g => [...tags.resolve(g)])

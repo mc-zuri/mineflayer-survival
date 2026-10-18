@@ -83,9 +83,8 @@ for (const version of VERSIONS) {
     const blocks = ['stone_bricks', 'bricks', 'glass', 'sandstone', 'smooth_stone', 'polished_andesite', 'white_wool', 'terracotta', 'bookshelf', 'oak_slab']
     for (const b of blocks) fill[b] = 128
     const ups = policy.topUps(inv({ ...fill }), {}, ['wood', 'stone'], ['underground'])
-    // stone, torches, coal and iron due: 6 slots shared, a slot each
-    assert.equal(ups.length, 4)
-    for (const u of ups) assert.equal(u.units, 64, u.mark.id)
+    // stone, torches, coal and iron due: 6 slots shared, a slot each and one more to the first two
+    assert.deepEqual(ups.map(u => [u.mark.id, u.units]), [['stone', 128], ['torch', 128], ['coal', 64], ['iron', 64]])
     // the inventory full: none this trip
     // junk is thrown away when room is wanted: it counts as free
     const junk = { ...fill, dirt: 640, andesite: 640 }
@@ -114,5 +113,22 @@ for (const version of VERSIONS) {
     const over = new StockPolicy({ overrides: { wood: { low: 4, high: 16 } } })
     assert.equal(over.topUps(inv({ oak_log: 10 }), {}, [], ['surface']).length, 0)
     assert.equal(over.topUps(inv({ oak_log: 3 }), {}, [], ['surface'])[0].units, 13)
+  })
+}
+
+for (const version of VERSIONS) {
+  const registry: any = minecraftData(version)
+  test(`${version}: fewer free slots than top-ups due: a slot each to the lowest; the worn armor takes no slot of the bag`, () => {
+    const policy = new StockPolicy({ reserveSlots: 10 })
+    // 24 slots of tools and blocks kept: 2 free beyond the reserve, 4 top-ups due (stone, torch, coal, iron)
+    const items: Record<string, number> = { cobblestone: 64 }
+    const tools = ['iron_pickaxe', 'iron_sword', 'iron_axe', 'iron_shovel', 'stone_pickaxe', 'stone_sword', 'stone_axe', 'wooden_pickaxe', 'shield', 'bucket', 'water_bucket', 'flint_and_steel', 'bow', 'crossbow', 'shears', 'compass', 'clock', 'iron_hoe', 'stone_hoe', 'stone_shovel', 'wooden_axe', 'wooden_sword', 'wooden_shovel']
+    for (const t of tools) items[t] = 1
+    const bag = new Inventory(registry, items)
+    const owned = new Inventory(registry, { ...items, iron_helmet: 1, iron_chestplate: 1, iron_leggings: 1, iron_boots: 1 })
+    const ups = policy.topUps(owned, {}, ['wood', 'stone'], ['underground'], bag)
+    assert.deepEqual(ups.map(u => [u.mark.id, u.units]), [['torch', 64], ['coal', 64]])
+    // counted with the armor in, the bag would be full
+    assert.equal(new StockPolicy({ reserveSlots: 10 }).topUps(owned, {}, ['wood', 'stone'], ['underground']).length, 0)
   })
 }
