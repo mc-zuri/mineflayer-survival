@@ -1,7 +1,7 @@
 // Food choice: what to eat given the hunger bar, as vanilla's FoodData.eat adds it up (nutrition capped at 20,
 // saturation capped at the new food level), keeping the harmful foods for when the bot is starving and the golden
 // apples for when its health is low.
-import { HARMFUL_FOODS, NOT_EATEN, RESERVED_FOODS, TELEPORTING_FOODS } from '../core/items'
+import { ALWAYS_EDIBLE, HARMFUL_FOODS, NOT_EATEN, RESERVED_FOODS, TELEPORTING_FOODS } from '../core/items'
 
 export interface FoodValues {
   name: string
@@ -41,8 +41,6 @@ export const DEFAULT_FOOD_CHOICE: Required<FoodChoiceOptions> = {
   wastePenalty: 0.5
 }
 
-// FoodProperties.canAlwaysEat: eaten even with a full bar
-const ALWAYS_EDIBLE = new Set(['golden_apple', 'enchanted_golden_apple', 'chorus_fruit', 'suspicious_stew'])
 
 /** What eating the food leaves the bar at (FoodData.eat: food capped at 20, saturation at the new food level). */
 export function afterEating (state: HungerState, food: FoodValues): { food: number, saturation: number } {

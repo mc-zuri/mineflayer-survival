@@ -1,6 +1,7 @@
 import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
 import { chooseFood, type FoodChoiceOptions, type HungerState } from './food'
+import { ALWAYS_EDIBLE } from '../core/items'
 import { TaskError, type SkillOptions, waitTicks } from './combatUtil'
 
 export interface EatOptions extends SkillOptions, FoodChoiceOptions {
@@ -41,7 +42,7 @@ export async function eat (bot: Bot, opts: EatOptions = {}): Promise<EatResult> 
   if (typeof opts.food === 'string') food = bot.inventory.items().find(i => i.name === opts.food) ?? null
   else food = opts.food ?? bestFoodInInventory(bot, opts)
   if (food == null) throw new TaskError('MISSING_ITEMS', 'no food to eat')
-  if (bot.food >= 20 && !['golden_apple', 'enchanted_golden_apple', 'chorus_fruit', 'suspicious_stew'].includes(food.name)) {
+  if (bot.food >= 20 && !ALWAYS_EDIBLE.has(food.name)) {
     throw new TaskError('FAILED', 'the food bar is full')
   }
 

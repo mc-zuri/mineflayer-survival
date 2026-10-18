@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { afterEating, chooseFood, foodScore } from '../../src/skills/food'
+import { afterEating, canEat, chooseFood, foodScore } from '../../src/skills/food'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const foods = require('minecraft-data')('1.21.11').foodsByName
@@ -50,4 +50,11 @@ test('golden apples are kept for low health, and then come first', () => {
 
 test('chorus fruit is never chosen, nor anything that isn\'t food', () => {
   assert.strictEqual(pick(['chorus_fruit', 'stone', 'diamond_sword'], 2), undefined)
+})
+
+test('canEat: with a full bar only the can_always_eat foods (the golden apples, chorus fruit, honey, suspicious stew)', () => {
+  const full = { food: 20, saturation: 5, health: 20 }
+  for (const name of ['golden_apple', 'enchanted_golden_apple', 'chorus_fruit', 'honey_bottle', 'suspicious_stew']) assert.ok(canEat(full, name), name)
+  assert.ok(!canEat(full, 'bread'))
+  assert.ok(canEat({ ...full, food: 19 }, 'bread'))
 })

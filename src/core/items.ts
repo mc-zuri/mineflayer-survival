@@ -137,6 +137,11 @@ export const NOT_EATEN = new Set(['cod_bucket', 'salmon_bucket', 'pufferfish_buc
 export const HARMFUL_FOODS = ['rotten_flesh', 'spider_eye', 'poisonous_potato', 'pufferfish', 'chicken']
 /** the golden apples: their absorption and regeneration (Consumables.GOLDEN_APPLE, ENCHANTED_GOLDEN_APPLE) are kept for low health */
 export const RESERVED_FOODS = ['golden_apple', 'enchanted_golden_apple']
+/**
+ * eaten even with a full food bar (FoodProperties.canAlwaysEat, the food components' can_always_eat: the same in 1.21.11
+ * and 26.3; minecraft-data doesn't have it)
+ */
+export const ALWAYS_EDIBLE = new Set(['golden_apple', 'enchanted_golden_apple', 'chorus_fruit', 'honey_bottle', 'suspicious_stew'])
 /** chorus fruit teleports whoever eats it (Consumables: teleport_randomly) */
 export const TELEPORTING_FOODS = ['chorus_fruit']
 
