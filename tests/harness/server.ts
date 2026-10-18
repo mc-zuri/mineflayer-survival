@@ -88,6 +88,11 @@ export interface ServerOptions {
   log?: boolean | ((line: string) => void)
   /** keep the instance directory on cleanup() */
   keep?: boolean
+  /**
+   * a world directory (a saved instance's `world`, a checkpoint) copied in as the instance's level before the start:
+   * the run goes on from that world, its players' inventories and positions and its time (level.dat has the seed)
+   */
+  world?: string
 }
 
 export interface TestServer extends EventEmitter {
@@ -287,6 +292,14 @@ function propertiesFile (props: Record<string, GameruleValue>): string {
   return Object.entries(props).map(([k, v]) => `${k}=${String(v)}`).join('\n') + '\n'
 }
 
+/**
+ * Copies a world directory (a running server's after save-all flush, or a stopped one's) without its session.lock,
+ * which the server that has the world open holds (LevelStorageSource.LevelStorageAccess) and a new server makes again
+ */
+export function copyWorld (from: string, to: string): void {
+  fs.cpSync(from, to, { recursive: true, filter: src => path.basename(src) !== 'session.lock' })
+}
+
 let instanceSeq = 0
 
 export async function startServer (options: ServerOptions = {}): Promise<TestServer> {
@@ -300,6 +313,7 @@ export async function startServer (options: ServerOptions = {}): Promise<TestSer
   for (const rel of SHARED_DIRS) link(path.join(shared, rel), path.join(dir, rel))
   const mods = [...(options.lockstep ?? true ? [lockstepModJar(version)] : []), ...(options.mods ?? [])]
   for (const mod of mods) fs.copyFileSync(mod, path.join(dir, 'mods', path.basename(mod)))
+  if (options.world != null) copyWorld(options.world, path.join(dir, 'world'))
 
   fs.writeFileSync(path.join(dir, 'eula.txt'), 'eula=true\n')
   fs.writeFileSync(path.join(dir, 'server.properties'), propertiesFile({
