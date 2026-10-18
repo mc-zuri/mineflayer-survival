@@ -122,3 +122,18 @@ test('withRoom: a station that found no room is tried again (from the surface)',
   assert.equal(calls, 2)
   await assert.rejects(withRoom(bot, new AbortController().signal, async () => { throw new SkillError('MISSING_ITEMS', 'no fuel') }), /no fuel/)
 })
+
+test('nookCell: a wall block beside the feet with rock under it, none next to lava or water, none in bedrock or air', async () => {
+  const { nookCell } = await import('../../src/executor/explore')
+  const feet = new Vec3(0, 20, 0)
+  // a one-wide tunnel along x: rock on both sides, the tunnel itself open
+  const tunnel = { '0,20,0': 'air', '0,21,0': 'air', '1,20,0': 'air', '1,21,0': 'air', '-1,20,0': 'air', '-1,21,0': 'air' }
+  const nook = nookCell(world(tunnel), feet)
+  assert.ok(nook != null && nook.y === 20 && nook.x === 0 && Math.abs(nook.z) === 1, String(nook))
+  // lava behind the wall on one side: the other side
+  const lavaBehind = nookCell(world({ ...tunnel, '0,20,-2': 'lava' }), feet)
+  assert.deepEqual(lavaBehind?.toArray(), [0, 20, 1])
+  // nothing but bedrock and lava-backed walls: none
+  assert.equal(nookCell(world({ ...tunnel, '0,20,-2': 'lava', '0,20,2': 'water' }), feet), null)
+  assert.equal(nookCell(world(tunnel, 'bedrock'), feet), null)
+})

@@ -104,6 +104,44 @@ export function unsafeStep (lookup: Lookup, step: { open: Vec3[], floor: Vec3 })
   return null
 }
 
+/** blocks a pickaxe doesn't break (Blocks' destroyTime -1) or a nook isn't dug into */
+const UNBREAKABLE = new Set(['bedrock', 'barrier', 'end_portal_frame', 'reinforced_deepslate', 'obsidian', 'crying_obsidian', 'spawner'])
+
+/**
+ * A wall block beside the bot's feet to dig out for a block to be put in (a table or a furnace in a one-wide tunnel or
+ * a shaft, where every cell around is rock): a solid block at feet level with a solid one under it, no liquid next to
+ * it, nothing a click opens. Null when there's none.
+ */
+export function nookCell (lookup: Lookup, feet: Vec3): Vec3 | null {
+  for (const d of CARDINALS) {
+    const cell = feet.plus(d)
+    const b = lookup(cell)
+    if (b == null || b.boundingBox !== 'block' || UNBREAKABLE.has(b.name) || /(chest|furnace|table|barrel|bed|door)/.test(b.name)) continue
+    if (lookup(cell.offset(0, -1, 0))?.boundingBox !== 'block') continue
+    if (liquidAround(lookup, cell) != null) continue
+    return cell
+  }
+  return null
+}
+
+/**
+ * Room for a block next to the bot where there's none: a nook dug into the wall beside its feet (nookCell). Resolves
+ * whether one was dug.
+ */
+export async function digNook (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  const cell = nookCell(lookupOf(bot), feetOf(bot))
+  if (cell == null) return false
+  trace('explore: digging a nook at', cell.toString())
+  try {
+    await open(bot, [cell], signal)
+    return true
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('explore: no nook', (err as Error).message)
+    return false
+  }
+}
+
 function lookupOf (bot: Bot): Lookup {
   return pos => bot.blockAt(pos) as any
 }

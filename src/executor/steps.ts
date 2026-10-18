@@ -17,7 +17,7 @@ import { hunt, nearestOfType } from '../skills/hunt'
 import type { Entity } from '../skills/combatUtil'
 import { navigateNear } from '../skills/navigate'
 import { countItems, trace } from '../skills/util'
-import { ensureSurface, exploreForBlocks, exploreSurface, findNear, oreLevel, unstick } from './explore'
+import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, oreLevel, unstick } from './explore'
 import { toolKindFor, wornOutTools } from './durability'
 
 /** a mine step hands back to the executor when its tool has this many uses left (the executor's default too) */
@@ -176,7 +176,8 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
 
 /**
  * Runs a craft or smelt that puts its table or furnace down, and when there's no room for it where the bot is (a
- * one-wide tunnel down a mine) climbs out to the surface and tries again there.
+ * one-wide tunnel or a shaft down a mine) digs a nook into the wall beside it and tries again; only with no wall to
+ * dig into (lava or water behind it) it climbs out to the surface, a long way up past the caves, and tries there.
  */
 export async function withRoom<T> (bot: Bot, signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
   try {
@@ -184,6 +185,13 @@ export async function withRoom<T> (bot: Bot, signal: AbortSignal, fn: () => Prom
   } catch (err) {
     if (!isSkillError(err, 'CANNOT_PLACE')) throw err
     trace('executor: no room for the station here:', (err as Error).message)
+    if (await digNook(bot, signal)) {
+      try {
+        return await fn()
+      } catch (again) {
+        if (!isSkillError(again, 'CANNOT_PLACE')) throw again
+      }
+    }
     if (!(await ensureSurface(bot, signal))) await unstick(bot, signal)
     return await fn()
   }
