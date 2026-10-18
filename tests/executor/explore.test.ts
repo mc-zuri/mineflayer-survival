@@ -108,3 +108,17 @@ test('ensurePickaxe: the one held, else a stone one made, else a wooden one', as
   assert.equal(await ensurePickaxe(bot, undefined, craft), 'wooden_pickaxe')
   assert.equal(tried.length, 2)
 })
+
+test('withRoom: a station that found no room is tried again (from the surface)', async () => {
+  const { withRoom } = await import('../../src/executor/steps')
+  const { SkillError } = await import('../../src/skills/errors')
+  const bot: any = { entity: { position: new Vec3(0.5, 64, 0.5) }, blockAt: () => ({ name: 'air', boundingBox: 'empty' }) }
+  let calls = 0
+  const out = await withRoom(bot, new AbortController().signal, async () => {
+    if (++calls === 1) throw new SkillError('CANNOT_PLACE', 'no room next to the bot for a furnace')
+    return 'smelted'
+  })
+  assert.equal(out, 'smelted')
+  assert.equal(calls, 2)
+  await assert.rejects(withRoom(bot, new AbortController().signal, async () => { throw new SkillError('MISSING_ITEMS', 'no fuel') }), /no fuel/)
+})

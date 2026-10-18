@@ -7,7 +7,7 @@ import { TaskError } from '../core/errors'
 import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import type { CraftStep, FillStep, KillStep, LootStep, MineStep, PlanStep, SmeltStep } from '../planner/steps'
-import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
+import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { craft } from '../skills/craft'
 import { smelt } from '../skills/smelt'
@@ -174,6 +174,21 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
   return { gained: countItems(bot, step.item) - start }
 }
 
+/**
+ * Runs a craft or smelt that puts its table or furnace down, and when there's no room for it where the bot is (a
+ * one-wide tunnel down a mine) climbs out to the surface and tries again there.
+ */
+export async function withRoom<T> (bot: Bot, signal: AbortSignal, fn: () => Promise<T>): Promise<T> {
+  try {
+    return await fn()
+  } catch (err) {
+    if (!isSkillError(err, 'CANNOT_PLACE')) throw err
+    trace('executor: no room for the station here:', (err as Error).message)
+    if (!(await ensureSurface(bot, signal))) await unstick(bot, signal)
+    return await fn()
+  }
+}
+
 export const runCraft: StepRunner<CraftStep> = async (step, ctx) => {
   const { bot, signal } = ctx
   const start = startCount(ctx, 'start', () => countItems(bot, step.item))
@@ -183,7 +198,7 @@ export const runCraft: StepRunner<CraftStep> = async (step, ctx) => {
     // with a table in the bag, one close by or the bag's (put down and taken back): a table left far off up a hill
     // costs a trip the pathfinder may not make
     const tableDistance = countItems(bot, 'crafting_table') > 0 ? NEAR_STATION : undefined
-    await craft(bot, { item: step.item, count: want, table, tableDistance, pickUpTable: table == null }, signal)
+    await withRoom(bot, signal, async () => await craft(bot, { item: step.item, count: want, table, tableDistance, pickUpTable: table == null }, signal))
   }
   return { gained: countItems(bot, step.item) - start }
 }
@@ -205,7 +220,7 @@ export const runSmelt: StepRunner<SmeltStep> = async (step, ctx) => {
       // a furnace drops nothing to a hand without a pickaxe: it stays where it was put then
       const canPickUp = bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))
       try {
-        await smelt(bot, { input: input.name, count: n, fuel, furnace, furnaceDistance, pickUpFurnace: furnace == null && canPickUp }, signal)
+        await withRoom(bot, signal, async () => await smelt(bot, { input: input.name, count: n, fuel, furnace, furnaceDistance, pickUpFurnace: furnace == null && canPickUp }, signal))
       } catch (err) {
         // out of this fuel: the next one
         if (fuel == null || !TaskError.is(err, 'MISSING_ITEMS')) throw err
