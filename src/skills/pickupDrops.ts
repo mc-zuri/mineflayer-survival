@@ -91,6 +91,18 @@ export function landingCell (bot: Bot, pos: Vec3): Vec3 {
   return cell
 }
 
+/**
+ * The height an item comes to rest at in its landing cell: on top of what fills the cell part way (a dirt path or
+ * farmland at 15/16, a slab, snow), else the cell's floor. The item on a dirt path lies at 0.9375 up, where the client's
+ * stale position (the server sends an item's every 20 ticks at most) had it inside the block, and the bot standing
+ * on it was taken for not touching it (the eyes thrown at seed 2's spawn).
+ */
+export function restingY (blockAt: (pos: Vec3) => { boundingBox: string, shapes?: number[][] } | null, cell: Vec3): number {
+  const b = blockAt(cell)
+  if (b == null || b.boundingBox === 'empty' || b.shapes == null || b.shapes.length === 0) return cell.y
+  return cell.y + Math.min(1, Math.max(...b.shapes.map(s => s[4])))
+}
+
 export async function pickupDrops (bot: Bot, args: PickupDropsArgs = {}, signal?: AbortSignal): Promise<PickupDropsResult> {
   const near = args.near ?? bot.entity.position.clone()
   const radius = args.radius ?? 8
@@ -117,7 +129,8 @@ export async function pickupDrops (bot: Bot, args: PickupDropsArgs = {}, signal?
     // where the item lies, or falls to (the bot doesn't see a block's drop fall: the server moves it, and tells the
     // client every 20 ticks at most)
     const cell = landingCell(bot, drop.position)
-    const rest = (): Vec3 => new Vec3(drop.position.x, Math.min(drop.position.y, cell.y), drop.position.z)
+    const floor = restingY(p => bot.blockAt(p) as any, cell)
+    const rest = (): Vec3 => new Vec3(drop.position.x, Math.max(floor, Math.min(drop.position.y, cell.y)), drop.position.z)
     const touching = (): boolean => touches(bot.entity.position, rest())
     try {
       await navigate(bot, { goal: new GoalTouch(rest()), reached: () => gone() || touching() }, signal)
