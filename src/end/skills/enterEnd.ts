@@ -1,0 +1,110 @@
+import type { Bot } from 'mineflayer'
+import { Vec3 } from 'vec3'
+import { normalizeDimension } from '../../core/memory'
+import { TaskError, type SkillOptions, throwIfAborted, waitTicks, waitUntil, eyePosition } from '../../skills/combatUtil'
+import { analyzePortalRoom, FACING_STEP, findPortalFrames, readPortalFrame, type PortalRoom } from '../portalRoom'
+import { steerToward } from '../../skills/steer'
+import { blockGetter, gotoBlock, gotoNear, groundY } from './world'
+
+// enterEnd: the eyes the portal room's frames are missing put in (EnderEyeItem.useOn on each frame's top), then into
+// the end_portal the 12th eye opens (EndPortalBlock.entityInside), and the arrival in the End awaited.
+
+/** the block reach for using an item on a block (Attributes.BLOCK_INTERACTION_RANGE default 4.5) */
+export const BLOCK_REACH = 4.5
+
+export function isInEnd (bot: Bot): boolean {
+  return normalizeDimension(bot.game?.dimension) === 'the_end'
+}
+
+/** the portal room around the bot, read from the end_portal_frame blocks within `radius` */
+export function readPortalRoom (bot: Bot, radius = 12): PortalRoom | null {
+  const frames = findPortalFrames(pos => bot.blockAt(new Vec3(pos.x, pos.y, pos.z)) as any, bot.entity.position, radius)
+  return analyzePortalRoom(frames)
+}
+
+export interface EnterEndOptions extends SkillOptions {
+  /** how far around the bot to look for the frames (default 12) */
+  radius?: number
+  /** ticks to wait for the End after stepping in (default 400) */
+  arriveTicks?: number
+}
+
+export interface EnterEndResult {
+  /** eyes put in */
+  eyesPlaced: number
+  /** where the bot came out (the obsidian platform, ServerLevel.END_SPAWN_POINT) */
+  arrival: Vec3
+}
+
+function framePos (p: { x: number, y: number, z: number }): Vec3 {
+  return new Vec3(p.x, p.y, p.z)
+}
+
+/**
+ * Fills the frames still missing an eye (nearest first, walking within reach of each), waits for the end_portal to
+ * fill the 3×3 inside, and walks into it. Resolves once the bot is in the End and on the ground. Throws NOT_FOUND
+ * without a whole frame around, MISSING_ITEMS short of eyes.
+ */
+export async function enterEnd (bot: Bot, opts: EnterEndOptions = {}): Promise<EnterEndResult> {
+  const signal = opts.signal
+  if (isInEnd(bot)) return { eyesPlaced: 0, arrival: bot.entity.position.clone() }
+  const room = readPortalRoom(bot, opts.radius ?? 12)
+  if (room == null) throw new TaskError('NOT_FOUND', 'no end portal frame around')
+  if (room.unseen.length > 0) throw new TaskError('NOT_FOUND', `${room.unseen.length} of the portal's 12 frames aren't there`)
+  const eyes = bot.inventory.items().filter(i => i.name === 'ender_eye').reduce((n, i) => n + i.count, 0)
+  if (eyes < room.missing.length) throw new TaskError('MISSING_ITEMS', `${room.missing.length} eyes needed, ${eyes} in the inventory`)
+
+  let placed = 0
+  const left = [...room.missing]
+  while (left.length > 0) {
+    throwIfAborted(signal)
+    left.sort((a, b) => framePos(a.pos).distanceTo(bot.entity.position) - framePos(b.pos).distanceTo(bot.entity.position))
+    const frame = left.shift() as typeof left[number]
+    const pos = framePos(frame.pos)
+    // the top face's middle, within reach of the eyes
+    const top = pos.offset(0.5, 13 / 16, 0.5)
+    if (eyePosition(bot).distanceTo(top) > BLOCK_REACH - 0.5) {
+      // from outside the ring, two blocks out from the frame (FACING points into the room)
+      const out = FACING_STEP[frame.facing]
+      const spot = pos.offset(-out.x * 2, 0, -out.z * 2)
+      const y = groundY(blockGetter(bot), spot.x, spot.z, spot.y + 3, spot.y - 4) ?? spot.y
+      await gotoBlock(bot, { x: spot.x, y, z: spot.z }, { signal })
+    }
+    const block = bot.blockAt(pos)
+    if (block == null || readPortalFrame(block as any, pos) == null) throw new TaskError('NOT_FOUND', `the frame at ${pos.toString()} is gone`)
+    if (readPortalFrame(block as any, pos)?.eye === true) continue
+    const eye = bot.inventory.items().find(i => i.name === 'ender_eye')
+    if (eye == null) throw new TaskError('MISSING_ITEMS', 'out of eyes of ender')
+    if (bot.heldItem?.name !== 'ender_eye') await bot.equip(eye, 'hand')
+    await bot.lookAt(top, true)
+    await bot.activateBlock(block, new Vec3(0, 1, 0), new Vec3(0.5, 13 / 16, 0.5))
+    const filled = await waitUntil(bot, () => {
+      const b = bot.blockAt(pos)
+      return b != null && readPortalFrame(b as any, pos)?.eye === true
+    }, 20, signal)
+    if (!filled) throw new TaskError('NO_PATH', `the eye didn't go into the frame at ${pos.toString()}`)
+    placed++
+  }
+
+  // EnderEyeItem.useOn: the last eye fills the inside with end_portal at once
+  const center = framePos(room.center)
+  const open = await waitUntil(bot, () => bot.blockAt(center)?.name === 'end_portal', 20, signal)
+  if (!open) throw new TaskError('NO_PATH', 'the frames are full but no portal opened')
+
+  // onto the frames (13/16 high) and off them into the portal
+  try {
+    if (bot.entity.position.distanceTo(center.offset(0.5, 0, 0.5)) > 4) await gotoNear(bot, center.offset(0.5, 0, 0.5), 2.5, { signal })
+    for (let t = 0; t < 200 && !isInEnd(bot); t++) {
+      steerToward(bot, center.offset(0.5, 0, 0.5), { sprint: false })
+      await waitTicks(bot, 1, signal)
+    }
+    bot.clearControlStates()
+    if (!isInEnd(bot)) throw new TaskError('NO_PATH', 'walked into the portal and stayed in the overworld')
+    // the End's spawn platform: wait for its chunks and the bot to land
+    const landed = await waitUntil(bot, () => isInEnd(bot) && bot.entity.onGround, opts.arriveTicks ?? 400, signal)
+    if (!landed) throw new TaskError('TIMEOUT', 'in the End but not on the ground')
+  } finally {
+    bot.clearControlStates()
+  }
+  return { eyesPlaced: placed, arrival: bot.entity.position.clone() }
+}
