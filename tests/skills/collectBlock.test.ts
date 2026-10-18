@@ -73,3 +73,19 @@ test('collectBlock picks up what the broken blocks drop, not the sticks of leave
     clearInterval(ticker)
   }
 })
+
+test('collectBlock gives up after 3 targets in a row it can\'t get to (it used to try every block it found)', async () => {
+  const registry = require('minecraft-data')('1.21.11')
+  const logs = [10, 11, 12, 13, 14, 15].map(x => new Vec3(x, 80, 0))
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (pos: Vec3) => logs.some(l => l.equals(pos)) ? 'oak_log' : pos.y < 64 ? 'stone' : 'air' })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; b.harvestTools = registry.blocksByName[b.name].harvestTools; return b }
+  bot.findBlocks = () => logs
+  bot._client = { on: () => {}, off: () => {} }
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: () => null }
+  let trips = 0
+  // the pathfinder plans short of each log, up a cliff
+  bot.pathfinder = { isPathing: false, goto: async () => { trips++ }, cancel: async () => {}, world: {} }
+  await assert.rejects(collectBlock(bot, { names: ['oak_log'], count: 1 }), (err: any) => err.code === 'NO_PATH')
+  assert.strictEqual(trips, 3)
+})

@@ -28,6 +28,8 @@ export interface CollectBlockArgs {
    * it grows back (default true)
    */
   keepBase?: boolean
+  /** targets in a row the bot can't get to before it gives up (default 3) */
+  maxUnreachable?: number
   /** blocks of `names` never broken (the base's walls): their positions */
   exclude?: (pos: Vec3) => boolean
 }
@@ -90,6 +92,8 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
   const minedTypes: number[] = []
   const tried = new Set<string>()
   let lastFailure: SkillError | null = null
+  // targets in a row the bot couldn't get to
+  let unreachable = 0
   const result = (): CollectBlockResult => {
     const items = countsDelta(before, inventoryCounts(bot))
     return { mined: positions.length, positions, items, count: sumPositive(items) }
@@ -165,6 +169,8 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
         if (isAbort(err)) throw (err as TaskError).withPartial?.(result()) ?? err
         if (!gone() && !withinReach(bot, pos)) {
           lastFailure = err instanceof SkillError ? err : new SkillError('NO_PATH', (err as Error).message, undefined, { cause: err })
+          // the next nearest is most likely as far out of reach (up a cliff from a ravine): the caller decides
+          if (++unreachable >= (args.maxUnreachable ?? 3)) break
           continue
         }
       }
@@ -187,6 +193,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       continue
     }
     positions.push(pos)
+    unreachable = 0
     trace('collectBlock: broke', block.name, pos.toString(), 'from', bot.entity.position.toString())
     minedTypes.push(block.type)
 
