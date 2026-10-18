@@ -6,6 +6,8 @@ import { WorldMemory, normalizeDimension } from './core/memory'
 export * from './core'
 export * from './planner'
 
+export * as base from './base'
+
 export interface SurvivalOptions {
   /** load the pathfinder if the bot doesn't have it yet (default true) */
   loadPathfinder?: boolean
