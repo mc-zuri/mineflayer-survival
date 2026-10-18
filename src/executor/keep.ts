@@ -5,6 +5,7 @@ import type { Inventory, ItemCount } from '../core/inventory'
 import type { RegistryLike } from '../core/registry'
 import { heldFor, unitValue, type ObtainRequest } from '../planner/obtain'
 import { FOOD_GOAL, toolsAtLeast } from '../planner/progression'
+import type { StockPolicy } from '../planner/stock'
 
 /** how many of an item to carry; Infinity: all of them (the registry: the version's, for what is food) */
 export type KeepRule = (name: string, registry?: RegistryLike) => number | null
@@ -139,4 +140,12 @@ export function spareKitGoals (carried: Inventory, stored: Readonly<Record<strin
     goals.push({ item: FOOD_GOAL, count: heldFor(carried, FOOD_GOAL, { unit: 'nutrition' }) + SPARE_FOOD_POINTS - storedPoints, unit: 'nutrition' })
   }
   return goals
+}
+
+/**
+ * The keep rule with the stock policy's working set over it (its marks' keep and the options' keep list): a stack of
+ * logs carried, say, where the default stores them; what the policy says nothing of goes by `base`
+ */
+export function stockKeepRule (policy: Pick<StockPolicy, 'keepCount'>, base: KeepRule = defaultKeep): KeepRule {
+  return (name, registry) => policy.keepCount(name, registry) ?? base(name, registry)
 }
