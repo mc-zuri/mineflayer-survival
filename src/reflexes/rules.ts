@@ -8,6 +8,7 @@ import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, s
 import { bestMeleeWeapon } from '../skills/weapons'
 import { hasLineOfSight, type Entity } from '../skills/combatUtil'
 import { GHAST_FIREBALL, deflectFireball, fireballIncoming } from '../nether/safety'
+import { isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
@@ -241,6 +242,8 @@ export const armorReflex: Reflex = {
 }
 
 const planCache = new WeakMap<Bot, { tick: number, plan: NightPlan }>()
+/** no ground to dig a shelter in found: not before this tick, and this far out next time */
+const noGround = new WeakMap<Bot, { until: number, radius: number }>()
 
 /** the night's plan, looked at again every 100 ticks (a bed nearby is a block search) */
 function cachedNightPlan (ctx: ReflexContext): NightPlan {
@@ -288,7 +291,19 @@ export const nightReflex: Reflex = {
     }
     const plan = cachedNightPlan(ctx)
     if (plan === 'fight') return null
-    const dig = async (signal: AbortSignal): Promise<unknown> => await shelter(bot, { signal, radius: config.night.shelterRadius })
+    const backoff = noGround.get(bot)
+    if (backoff != null && ctx.tick < backoff.until) return null
+    const dig = async (signal: AbortSignal): Promise<unknown> => {
+      try {
+        const result = await shelter(bot, { signal, radius: backoff?.radius ?? config.night.shelterRadius })
+        noGround.delete(bot)
+        return result
+      } catch (err) {
+        // nowhere to dig about (a swamp, the sea, bare rock without a pickaxe): look again in a while, further out
+        if (isSkillError(err, 'NOT_FOUND')) noGround.set(bot, { until: ctx.tick + 200, radius: Math.min(24, (backoff?.radius ?? config.night.shelterRadius) * 2) })
+        throw err
+      }
+    }
     if (plan === 'sleep' && config.night.sleep) {
       return {
         name: 'night',

@@ -240,3 +240,17 @@ test('hostiles reflex: an enderman is let be until it hurts the bot, then fought
   // long ago: let be again
   assert.strictEqual(check(hostilesReflex, { entities: [enderman], items: [item('stone_sword')] }, {}, (e) => { hurtBy(enderman)(e); (e as any).tick += 401 }), null)
 })
+
+test('night reflex: no ground to dig in about (the sea all round): tried again only after 200 ticks, twice as far out', async () => {
+  const bot = fakeBot({ items: [item('stone_sword')], world: (p: Vec3) => p.y < 64 ? 'water' : 'air' })
+  bot.time = { timeOfDay: 13000 }
+  bot.game.dimension = 'overworld'
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const ctx = engine.context()
+  const task = nightReflex.check(ctx)
+  assert.strictEqual(task?.detail, 'shelter')
+  await assert.rejects(task!.run(new AbortController().signal), /NOT_FOUND/)
+  assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 100 }), null)
+  assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 200 })?.detail, 'shelter')
+  engine.stop()
+})
