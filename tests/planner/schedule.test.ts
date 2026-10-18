@@ -42,13 +42,15 @@ test('the night\'s goals: torches first (coal means torches), then the iron, the
   assert.deepEqual(wooden.map(g => g.item), ['torch', ['stone_pickaxe', 'copper_pickaxe', 'iron_pickaxe', 'diamond_pickaxe', 'netherite_pickaxe'].filter(n => registry.itemsByName[n] != null), 'coal'])
   assert.equal(wooden[0].count, TORCH_BUDGET)
   // a stone pickaxe and torches: the iron the milestone needs, less what's held
+  // (a shield first, from the first ore: the caves' skeletons)
   const stone = nightGoals(inv({ stone_pickaxe: 1, torch: 20, iron_ingot: 3, raw_iron: 2 }), ['wood', 'stone', 'food'])
-  assert.deepEqual(stone, [{ item: 'raw_iron', count: 2 + IRON_FOR_MILESTONE - 5, optional: true }])
+  assert.deepEqual(stone, [{ item: 'shield', count: 1, optional: true }, { item: 'raw_iron', count: 2 + IRON_FOR_MILESTONE - 5, optional: true }])
+  assert.deepEqual(nightGoals(inv({ stone_pickaxe: 1, torch: 20, shield: 1 }), ['wood', 'stone', 'food']).map(g => g.item), ['raw_iron'])
   // the iron reached: the diamonds
   const iron = nightGoals(inv({ iron_pickaxe: 1, torch: 20 }), ['wood', 'stone', 'food', 'iron'])
   assert.deepEqual(iron.map(g => g.item), ['diamond'])
   // all the iron held: nothing more down there for it
-  assert.deepEqual(nightGoals(inv({ stone_pickaxe: 1, torch: 20, iron_ingot: 40 }), ['wood', 'stone', 'food']), [])
+  assert.deepEqual(nightGoals(inv({ stone_pickaxe: 1, torch: 20, iron_ingot: 40, shield: 1 }), ['wood', 'stone', 'food']), [])
 })
 
 test('the mine is left when the day is back, or when hungry with little left to eat', () => {
