@@ -4,6 +4,9 @@
   "description": "A mineflayer plugin that plays survival from a fresh spawn to the Ender Dragon, and a lockstep server mod to run it as fast as the CPU allows",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "license": "GPL-3.0",
   "scripts": {
     "build": "tsc -p ./tsconfig.json",
