@@ -80,10 +80,8 @@ test('food counts its points from any food: the raw meat held is cooked first, b
   const fresh = planMilestone(registry, milestone('food'), state(kit))
   assert.ok(fresh.steps.some(st => st.kind === 'kill'))
   assert.ok(points(fresh.inventory) >= FOOD_POINTS)
-  // a patch of ripe berry bushes beside the bot (the taiga): 20 berries off the bushes, eaten as they are
-  const memory = new WorldMemory()
-  for (let i = 0; i < 12; i++) memory.rememberBlock('sweet_berry_bush', { x: i, y: 64, z: 2 })
-  const berries = planMilestone(registry, milestone('food'), state(kit, { memory }), { position: { x: 0, y: 64, z: 0 } })
+  // a patch of ripe berry bushes seen beside the bot (the taiga; the sightings' find cost): 20 berries off the bushes
+  const berries = planMilestone(registry, milestone('food'), state(kit), { position: { x: 0, y: 64, z: 0 }, findCost: t => t.name === 'sweet_berry_bush' ? 10 : undefined })
   assert.deepEqual(berries.steps.map(st => `${st.kind} ${st.item}`), ['mine sweet_berries'])
   assert.equal(berries.inventory.count('sweet_berries'), 20)
   // melons of the jungle: 3 to 7 slices a melon, 2 points each
@@ -91,10 +89,8 @@ test('food counts its points from any food: the raw meat held is cooked first, b
   jungle.rememberBlock('melon', { x: 4, y: 64, z: 0 })
   const melons = planMilestone(registry, milestone('food'), state(kit, { memory: jungle }), { position: { x: 0, y: 64, z: 0 } })
   assert.ok(melons.steps.some(st => st.kind === 'mine' && st.item === 'melon_slice'))
-  // a village's carrots
-  const village = new WorldMemory()
-  village.rememberBlock('carrots', { x: 3, y: 64, z: 0 })
-  const carrots = planMilestone(registry, milestone('food'), state(kit, { memory: village }), { position: { x: 0, y: 64, z: 0 } })
+  // a village's grown carrots in sight
+  const carrots = planMilestone(registry, milestone('food'), state(kit), { position: { x: 0, y: 64, z: 0 }, findCost: t => t.name === 'carrots' ? 15 : undefined })
   assert.ok(carrots.steps.some(st => st.kind === 'mine' && st.item === 'carrot'))
   // the goals: the raw held cooked first, then the points
   const goals = foodGoals(new Inventory(registry, { beef: 3, cooked_beef: 1, potato: 2 }))
@@ -176,4 +172,16 @@ test('diamonds: the pickaxe and sword, and only the armor the diamonds held beyo
   assert.deepEqual(items(state({ ...kit, diamond: 9 })), ['diamond_pickaxe', 'diamond_sword', 'diamond_boots'])
   // the tools made, 9 held: the boots and the helmet
   assert.deepEqual(items(state({ ...kit, diamond_pickaxe: 1, diamond_sword: 1, diamond: 9 })), ['diamond_pickaxe', 'diamond_sword', 'diamond_boots', 'diamond_helmet'])
+})
+
+test('a crop remembered (maybe not grown: the bot\'s own farm) is no cheaper to the food plan; one seen grown is', () => {
+  const kit = { crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1 }
+  const memory = new WorldMemory()
+  for (let i = 0; i < 8; i++) memory.rememberBlock('wheat', { x: i, y: 64, z: 3 })
+  for (let i = 0; i < 8; i++) memory.rememberBlock('carrots', { x: i, y: 64, z: 4 })
+  const plan = planMilestone(registry, milestone('food'), state(kit, { memory }), { position: { x: 0, y: 64, z: 0 } })
+  assert.ok(!plan.steps.some(st => st.kind === 'mine' && (st.item === 'wheat' || st.item === 'carrot')), plan.steps.map(st => `${st.kind} ${st.item}`).join(', '))
+  // seen grown (the sightings' find cost): the carrots
+  const seen = planMilestone(registry, milestone('food'), state(kit, { memory }), { position: { x: 0, y: 64, z: 0 }, findCost: t => t.name === 'carrots' ? 20 : undefined })
+  assert.ok(seen.steps.some(st => st.kind === 'mine' && st.item === 'carrot'))
 })

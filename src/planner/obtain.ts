@@ -11,7 +11,7 @@ import {
   type BarterOffer, type BlockSource, type FluidSource, type MobSource, type SmeltingRecipe
 } from './sources'
 import { checkPlan, type PlanStep, type Station } from './steps'
-import { FARM_PLOTS, GROW_TICKS } from '../core/crops'
+import { FARM_PLOTS, GROW_TICKS, GROWN_AGE } from '../core/crops'
 
 export type StrategyKind = PlanStep['kind']
 
@@ -493,6 +493,9 @@ export class Resolver {
     if (s.visited.has(name)) return each
     const sighted = this.opts.findCost?.({ name, kind, dimension, find })
     if (sighted != null) return sighted
+    // a crop or bush remembered may not have grown (the bot's own farm, sown this morning): only one seen grown counts
+    // (the sightings'); on seed 7 the plan went for 3 wheat of its own farm, not grown, and searched 49000 ticks
+    if (GROWN_AGE[name] != null) return find
     const memory = this.opts.memory
     if (memory == null) return find
     const known = memory.findBlocks(name, { dimension, near: this.opts.position, count: 1 })
