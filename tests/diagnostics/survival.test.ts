@@ -297,3 +297,49 @@ test('play tells the diagnostics: a milestone that keeps failing is a re-plan st
   assert.equal(diagnostics.watching, false)
   assert.equal(diagnostics.clock, null)
 })
+
+test('the reports go next to play\'s save (a stuck folder) when nothing chose a dir, and the save keeps their summaries for a resumed run', async () => {
+  const { Runner } = await import('../../src/runner')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'save-'))
+  try {
+    const saveFile = path.join(dir, 'save.json')
+    const game = (): any => {
+      const bot = fakeBot()
+      bot.isRaining = false
+      bot.time = { timeOfDay: 1000 }
+      bot.survival.handlers = {}
+      bot.survival.advancements = new Set()
+      bot.survival.diagnostics = new Diagnostics(bot, { log: null })
+      return bot
+    }
+    const saved = process.env.SURVIVAL_STUCK_DIR
+    delete process.env.SURVIVAL_STUCK_DIR
+    let bot: any
+    try {
+      bot = game()
+    } finally {
+      if (saved != null) process.env.SURVIVAL_STUCK_DIR = saved
+    }
+    const fail = async (): Promise<void> => { bot.emit('physicsTick'); throw new SkillError('NO_PATH', 'no way to the trees') }
+    await new Runner(bot, { saveFile, log: () => {}, maxFailures: 2, watchdog: { maxReplans: 2 }, handlers: { wood: fail } }).play()
+    const diagnostics: Diagnostics = bot.survival.diagnostics
+    assert.equal(diagnostics.dir, path.join(dir, 'stuck'))
+    const [stall] = diagnostics.lastRecords()
+    assert.ok(stall.file != null && fs.existsSync(stall.file) && path.dirname(stall.file) === path.join(dir, 'stuck'))
+    const save = JSON.parse(fs.readFileSync(saveFile, 'utf8'))
+    assert.deepEqual(save.reports.map((r: any) => [r.kind, r.file]), [['stall', stall.file]])
+    // resumed: the earlier run's reports are in the history, before this run's
+    const bot2 = game()
+    bot = bot2
+    const runner2 = new Runner(bot2, { saveFile, log: () => {}, until: 'wood' })
+    runner2.load()
+    assert.deepEqual(bot2.survival.diagnostics.history.map((r: any) => r.diagnosis), [stall.report.diagnosis])
+    // an explicit null is nowhere
+    const quiet = fakeBot()
+    quiet.survival.diagnostics = new Diagnostics(quiet, { dir: null, log: null })
+    new Runner(quiet, { saveFile, log: () => {} })
+    assert.equal(quiet.survival.diagnostics.dir, null)
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true })
+  }
+})

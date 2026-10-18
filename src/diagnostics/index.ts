@@ -64,6 +64,8 @@ export const WINDOW_TICKS = 200
 export class Diagnostics {
   /** where the reports go (Node); the runner sets it next to its save when nothing else did */
   dir: string | null
+  /** whether the dir was chosen (the options' dir, null for nowhere, or SURVIVAL_STUCK_DIR) */
+  readonly dirChosen: boolean
   private readonly keep: number
   private readonly records: ReportRecord[] = []
   private readonly listeners = new Set<(report: DiagnosticReport, file: string | null) => void>()
@@ -101,6 +103,7 @@ export class Diagnostics {
 
   constructor (private readonly bot: Bot, private readonly opts: DiagnosticsOptions = {}) {
     this.dir = opts.dir !== undefined ? opts.dir : envDir()
+    this.dirChosen = opts.dir !== undefined || this.dir != null
     this.keep = opts.keep ?? 50
     this.keepErrors = opts.keepErrors ?? 20
     this.moveFailedEvery = opts.moveFailedEvery ?? 100
@@ -184,6 +187,14 @@ export class Diagnostics {
 
   private isMovement (report: DiagnosticReport): report is StuckReport {
     return MOVEMENT_KINDS.includes(report.kind)
+  }
+
+  /** the summaries of an earlier run's reports (a resumed game's save), before this run's */
+  restoreHistory (earlier: readonly ReportSummary[]): void {
+    const known = new Set(this.history.map(h => `${h.time}|${h.kind}|${String(h.file)}`))
+    const add = earlier.filter(h => h != null && typeof h.kind === 'string' && !known.has(`${h.time}|${h.kind}|${String(h.file)}`))
+    this.history.unshift(...add.map(h => ({ ...h })))
+    if (this.history.length > 200) this.history.splice(0, this.history.length - 200)
   }
 
   /** writes the record's report again to its file (a death report with its recovery) */

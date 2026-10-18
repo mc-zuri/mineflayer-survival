@@ -30,7 +30,7 @@ import { canSleepNow, sleep } from './skills/sleep'
 import { MILESTONE_HANDLERS, harvestGrownFarms } from './milestones'
 import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
-import type { Diagnostics, WatchdogOptions } from './diagnostics'
+import type { Diagnostics, ReportSummary, WatchdogOptions } from './diagnostics'
 import { isDeathMessage } from './diagnostics/death'
 
 export interface MilestoneContext {
@@ -135,6 +135,8 @@ interface SaveFile {
   reached: MilestoneEvent[]
   /** ticks of the earlier runs */
   ticks: number
+  /** the reports of the stuck bot so far (bot.survival.diagnostics' summaries: kind, tick, diagnosis, file) */
+  reports?: ReportSummary[]
 }
 
 /** the bot's state as the milestones read it */
@@ -264,6 +266,10 @@ export class Runner {
   constructor (readonly bot: Bot, readonly options: PlayOptions = {}) {
     this.log = options.log ?? (line => console.log(tickLine(this.tick, line)))
     this.store = options.saveStore ?? (options.saveFile != null ? fileSaveStore(options.saveFile) : null)
+    // the reports of a stuck bot next to the save (a stuck folder), when nothing else says where: an e2e run's
+    // checkpoints have them then
+    const diag = this.diagnostics
+    if (diag != null && !diag.dirChosen && diag.dir == null && options.saveFile != null) diag.dir = path.join(path.dirname(path.resolve(options.saveFile)), 'stuck')
     this.executor = new Executor(bot, {
       log: this.log,
       home: () => this.home(),
@@ -308,12 +314,15 @@ export class Runner {
     this.memory.restore(data.memory)
     this.reached.push(...data.reached)
     this.ticksBefore = data.ticks
+    if (Array.isArray(data.reports)) this.diagnostics?.restoreHistory(data.reports)
     this.log(`resumed from ${this.store?.name ?? ''}: ${data.reached.length > 0 ? data.reached.map(r => r.id).join(', ') : 'no milestones yet'}`)
   }
 
   save (): void {
     if (this.store == null) return
     const data: SaveFile = { version: 1, memory: this.memory.toJSON(), reached: this.reached, ticks: this.tick }
+    const reports = this.diagnostics?.history
+    if (reports != null && reports.length > 0) data.reports = reports
     this.store.write(JSON.stringify(data))
   }
 
