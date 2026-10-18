@@ -127,6 +127,8 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
   const ids = new Map<number, number>()
   const brokenBars: Pos[] = []
   const failures = new Map<number, number>()
+  /** the last failure on each spike */
+  const reasons = new Map<number, string>()
   /** caged spikes whose bars on the shooting line are broken: shot from there now */
   const opened = new Map<number, ShootSpot>()
   const ground = findPortalY(get) ?? 62
@@ -155,9 +157,9 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
       throwIfAborted(signal)
       if (ticks > maxTicks) throw new TaskError('TIMEOUT', `crystals left after ${maxTicks} ticks`)
       const left = remaining()
-      const todo = [...left.keys()].filter(i => (failures.get(i) ?? 0) < 3)
+      const todo = [...left.keys()].filter(i => (failures.get(i) ?? 0) < MAX_FAILURES)
       if (todo.length === 0) {
-        if (left.size > 0) throw new TaskError('NO_PATH', `couldn't destroy the crystals on spikes ${[...left.keys()].join(', ')}`)
+        if (left.size > 0) throw new TaskError('NO_PATH', `couldn't destroy the crystals on spikes ${[...left.keys()].map(i => `${i} (${reasons.get(i) ?? '?'})`).join(', ')}`)
         break
       }
       // the clouds on the ground now, with room for them to grow (a fireball's goes from 3 to 7 over 600 ticks)
@@ -188,6 +190,9 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
         if (err.code === 'MISSING_ITEMS') throw err
         opts.log?.(`spike ${target.spike.index} failed: ${err.code} ${err.message}`)
         failures.set(target.spike.index, (failures.get(target.spike.index) ?? 0) + 1)
+        reasons.set(target.spike.index, err.message)
+        // what failed at once (a walk the pathfinder gave up on) may well work a moment later
+        await waitTicks(bot, 10, signal)
       }
       // the explosion and the entity removal arrive within a few ticks of the hit
       await waitTicks(bot, 2, signal)
@@ -199,6 +204,9 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
   }
   return { destroyed, remaining: [...remaining().keys()], ticks }
 }
+
+/** tries at a crystal before it is left (a dodge of the dragon is not one) */
+const MAX_FAILURES = 5
 
 function cachedGround (get: BlockGetter): (x: number, z: number) => number {
   const cache = new Map<string, number>()
