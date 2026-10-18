@@ -7,22 +7,26 @@ import { Vec3 } from 'vec3'
 
 const WATER = new Set(['water', 'bubble_column'])
 
-/** a cost the pathfinder treats as a wall (an exclusion area's "keep out") */
-export const KEEP_OUT = 1e9
+/**
+ * The extra cost, in ticks, of a step with the head under water and no air over it: dear enough that a way through
+ * dry rock or a swim at the surface goes first, short of a wall (a keep-out left a bot already in a flooded cave with
+ * no way out at all: seed 7, 100000 ticks under water)
+ */
+export const UNDERWATER_STEP_COST = 100
 
 export type NameLookup = (pos: Vec3) => { name: string } | null
 
 /**
  * A step cost for the pathfinder (an exclusion area): a cell whose head room is water with no air right over it (a
- * flooded tunnel, the bottom of a lake: no air to come up to) is kept out of. Swimming at the surface (the head room's
- * water under air) and wading stay.
+ * flooded tunnel, the bottom of a lake: no air to come up to) costs UNDERWATER_STEP_COST more. Swimming at the
+ * surface (the head room's water under air) and wading cost nothing more.
  */
 export function underwaterStepCost (lookup: NameLookup): (block: { position: Vec3 }) => number {
   return (block) => {
     const head = block.position.offset(0, 1, 0)
     if (!WATER.has(lookup(head)?.name ?? '')) return 0
     const over = lookup(head.offset(0, 1, 0))?.name
-    return over === 'air' || over === 'cave_air' || over == null ? 0 : KEEP_OUT
+    return over === 'air' || over === 'cave_air' || over == null ? 0 : UNDERWATER_STEP_COST
   }
 }
 
