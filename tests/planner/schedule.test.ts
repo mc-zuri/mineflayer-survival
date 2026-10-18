@@ -75,3 +75,11 @@ test('a night\'s plan has only what a mine has: torches from coal ore and the st
   // food: nothing to hunt down there
   assert.equal(obtainAll(registry, [{ item: 'cooked_beef', count: 4 }], { inventory: { stone_pickaxe: 1, furnace: 1, coal: 4 }, undergroundOnly: true }).ok, false)
 })
+
+test('the stock\'s top-ups: the surface\'s by day and dusk up there, the mine\'s at night or deep down by day', async () => {
+  const { topUpPlaces } = await import('../../src/planner/schedule')
+  assert.deepEqual(topUpPlaces('day', false), ['surface'])
+  assert.deepEqual(topUpPlaces('dusk', false), ['surface'])
+  assert.deepEqual(topUpPlaces('night', false), ['underground'])
+  assert.deepEqual(topUpPlaces('day', true), ['underground'])
+})

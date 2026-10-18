@@ -110,11 +110,11 @@ export function comeUp (phase: DayPhase, foodPoints: number, hunger = 20): boole
 
 /**
  * Where the stock's top-ups (planner/stock.ts) are got now: the surface's (wood, food, arrows) by day and dusk on the
- * surface, the mine's (stone, coal, the ores, torches) at night down the mine, and by day too when the bot is down
- * there already (the iron's or the diamonds' work ended at the ores' level): neither a climb up for logs from the mine
- * nor a trip down for coal in the middle of the day's surface work.
+ * surface, the mine's (stone, coal, the ores, torches) at night down the mine, and by day too when the bot is deep down
+ * there already (under the surface's lowest y, where the iron's or the diamonds' work ended; not a pit or a hill's cave
+ * by the surface): neither a climb up for logs from the mine nor a trip down for coal in the day's surface work.
  */
-export function topUpPlaces (phase: DayPhase, onSurface: boolean): StockPlace[] {
-  if (phase === 'night' || !onSurface) return ['underground']
+export function topUpPlaces (phase: DayPhase, deep: boolean): StockPlace[] {
+  if (phase === 'night' || deep) return ['underground']
   return ['surface']
 }

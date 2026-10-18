@@ -16,7 +16,7 @@ import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type Mil
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { comeUp, dayPhase, nightAction, nightGoals, topUpPlaces } from './planner/schedule'
 import { describeLevel, StockPolicy, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
-import { onSurface } from './executor/explore'
+import { onSurface, SURFACE_MIN_Y } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
 import { buildBase, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
@@ -599,12 +599,13 @@ export class Runner {
     return this.stock.update(ownedInventory(this.bot), this.stockStored(), this.reached.map(r => r.id))
   }
 
-  /** where the top-ups are got now (topUpPlaces): the surface's by day up there, the mine's at night or down there */
+  /** where the top-ups are got now (topUpPlaces): the surface's by day up there, the mine's at night or deep down */
   private topUpPlacesNow (): StockPlace[] {
     const bot = this.bot
     if (bot.entity == null) return []
-    const surface = typeof bot.blockAt !== 'function' || onSurface(p => bot.blockAt(p) as any, bot.entity.position.floored())
-    return topUpPlaces(dayPhase(bot.time?.timeOfDay ?? 0), surface)
+    // down at the ores' depth, not a pit or a hill's cave by the surface: on 26.3 seed 2 the stone milestone ended under
+    // a hill at y 63, and the day went on coal and iron there, the stack of logs left for another day
+    return topUpPlaces(dayPhase(bot.time?.timeOfDay ?? 0), bot.entity.position.y < SURFACE_MIN_Y)
   }
 
   /** the stock's top-ups due at these places (in the overworld, where their sources are), not waiting for a retry */

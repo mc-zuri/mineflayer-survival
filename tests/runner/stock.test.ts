@@ -133,3 +133,18 @@ test('at night the stock\'s mine top-ups are the night\'s work: with no mileston
   none.reached.push(...at(['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting']))
   assert.equal(none.nightDue(), null)
 })
+
+test('by day the top-ups are the surface\'s unless the bot is deep down: a pit under a hill is the surface\'s, y 20 the mine\'s', async () => {
+  for (const [y, want] of [[63, 'oak_log'], [20, 'coal']] as const) {
+    const bot = fakeBot({ stone_pickaxe: 1, stone_axe: 1, crafting_table: 1, furnace: 1, oak_log: 8 })
+    bot.entity.position = new Vec3(0, y, 0)
+    // a roof over the bot: not the open sky
+    bot.blockAt = () => ({ name: 'stone', boundingBox: 'block' })
+    const steps: string[] = []
+    const runner = new Runner(bot, { until: 'stone', log: () => {}, executor: { runners: giving(bot, steps), log: () => {} }, handlers: { stone: async () => bot.give('stone_sword', 1) } })
+    runner.reached.push(...at(['wood']))
+    await runner.play()
+    assert.ok(steps.some(s => s.endsWith(want)), `y ${y}: ${steps.join(', ')}`)
+    assert.ok(!steps.some(s => s.endsWith(want === 'coal' ? 'oak_log' : 'coal')), `y ${y}: ${steps.join(', ')}`)
+  }
+})
