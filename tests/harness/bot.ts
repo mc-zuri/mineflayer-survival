@@ -3,6 +3,10 @@ import type { Bot, BotOptions } from 'mineflayer'
 import { createLockstepBot } from '../../src/lockstep'
 import type { LockstepOptions } from '../../src/lockstep'
 import type { TestServer } from './server'
+import * as path from 'node:path'
+
+/** where the integration tests' stuck reports go (bot.survival.diagnostics), unless SURVIVAL_STUCK_DIR says */
+export const STUCK_DIR = path.resolve(__dirname, '..', '.stuck')
 
 export interface ConnectOptions extends Partial<BotOptions> {
   lockstep?: LockstepOptions
@@ -15,6 +19,8 @@ export interface ConnectOptions extends Partial<BotOptions> {
 /** A bot on the server, resolved once the server ticks it (lockstepStart) */
 export async function connectLockstepBot (server: TestServer, options: ConnectOptions = {}): Promise<Bot> {
   const { op = true, timeoutMs = 60000, ...botOptions } = options
+  // the stuck reports of the bot's trips: a failed test's error has the diagnosis and the report's file
+  if (process.env.SURVIVAL_STUCK_DIR == null || process.env.SURVIVAL_STUCK_DIR === '') process.env.SURVIVAL_STUCK_DIR = STUCK_DIR
   const bot = createLockstepBot({ host: server.host, port: server.port, username: 'Bot', version: server.version, auth: 'offline', ...botOptions })
   await new Promise<void>((resolve, reject) => {
     const fail = (err: Error): void => { done(); bot.end(); reject(err) }

@@ -5,6 +5,7 @@ server-mod/build
 server-mod/.gradle
 server-mod/run
 tests/.servers
+tests/.stuck
 server-mod/versions/*/build
 server-mod/versions/*/run
 server-mod/versions/*/.gradle
