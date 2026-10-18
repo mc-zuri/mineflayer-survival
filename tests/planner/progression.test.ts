@@ -5,7 +5,9 @@ import type { RegistryLike } from '../../src/core/registry'
 import { Inventory } from '../../src/core/inventory'
 import { WorldMemory } from '../../src/core/memory'
 import { checkPlan } from '../../src/planner/steps'
-import { MILESTONES, milestone, nextMilestone, planMilestone, toolsAtLeast, eyesAvailable, type ProgressState } from '../../src/planner/progression'
+import { FOOD_GOAL, FOOD_POINTS, MILESTONES, RAW_TO_COOKED, foodGoals, milestone, nextMilestone, planMilestone, toolsAtLeast, eyesAvailable, type ProgressState } from '../../src/planner/progression'
+import { heldFor, unitValue } from '../../src/planner/obtain'
+import { isGrown } from '../../src/core/crops'
 
 const registry: RegistryLike = minecraftData('1.21.11')
 
@@ -49,6 +51,65 @@ test('food: hunt and cook until there are 40 food points', () => {
   assert.ok(plan.steps.some(st => st.kind === 'smelt'))
   assert.equal(plan.steps.find(st => st.kind === 'kill' && st.weapon != null)?.kind, 'kill')
   assert.equal(milestone('food').done({ ...s, inventory: plan.inventory }), true)
+})
+
+test('food counts its points from any food: the raw meat held is cooked first, berries, melons or crops when near', () => {
+  const kit = { crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1 }
+  const points = (inv: Inventory): number => heldFor(inv, FOOD_GOAL, { unit: 'nutrition' })
+  assert.equal(unitValue({ unit: 'nutrition' }, 'cooked_beef'), 8)
+  assert.equal(unitValue({ unit: 'nutrition' }, 'chicken'), 0) // raw chicken poisons
+  assert.equal(unitValue({}, 'cooked_beef'), 1)
+  assert.equal(RAW_TO_COOKED.rabbit, 'cooked_rabbit')
+  assert.equal(RAW_TO_COOKED.potato, 'baked_potato')
+  // the 9 rabbits of a snowy taiga (seed 4) are 45 points once cooked: no hunt for cows
+  const rabbits = state({ ...kit, rabbit: 9 })
+  const cooked = planMilestone(registry, milestone('food'), rabbits)
+  assert.equal(cooked.ok, true)
+  assert.equal(cooked.steps.some(st => st.kind === 'kill'), false)
+  assert.equal(cooked.inventory.count('cooked_rabbit'), 9)
+  assert.ok(points(cooked.inventory) >= FOOD_POINTS)
+  assert.equal(milestone('food').done({ ...rabbits, inventory: cooked.inventory }), true)
+  // a few points held count: 4 cooked beef (32) need one more beef's worth
+  const some = planMilestone(registry, milestone('food'), state({ ...kit, cooked_beef: 4 }))
+  assert.equal(some.ok, true)
+  assert.ok(points(some.inventory) >= FOOD_POINTS)
+  assert.ok(some.inventory.count('cooked_beef') <= 6)
+  // nothing near: the hunt for cows and their meat cooked
+  const fresh = planMilestone(registry, milestone('food'), state(kit))
+  assert.ok(fresh.steps.some(st => st.kind === 'kill'))
+  assert.ok(points(fresh.inventory) >= FOOD_POINTS)
+  // a patch of ripe berry bushes beside the bot (the taiga): 20 berries off the bushes, eaten as they are
+  const memory = new WorldMemory()
+  for (let i = 0; i < 12; i++) memory.rememberBlock('sweet_berry_bush', { x: i, y: 64, z: 2 })
+  const berries = planMilestone(registry, milestone('food'), state(kit, { memory }), { position: { x: 0, y: 64, z: 0 } })
+  assert.deepEqual(berries.steps.map(st => `${st.kind} ${st.item}`), ['mine sweet_berries'])
+  assert.equal(berries.inventory.count('sweet_berries'), 20)
+  // melons of the jungle: 3 to 7 slices a melon, 2 points each
+  const jungle = new WorldMemory()
+  jungle.rememberBlock('melon', { x: 4, y: 64, z: 0 })
+  const melons = planMilestone(registry, milestone('food'), state(kit, { memory: jungle }), { position: { x: 0, y: 64, z: 0 } })
+  assert.ok(melons.steps.some(st => st.kind === 'mine' && st.item === 'melon_slice'))
+  // a village's carrots
+  const village = new WorldMemory()
+  village.rememberBlock('carrots', { x: 3, y: 64, z: 0 })
+  const carrots = planMilestone(registry, milestone('food'), state(kit, { memory: village }), { position: { x: 0, y: 64, z: 0 } })
+  assert.ok(carrots.steps.some(st => st.kind === 'mine' && st.item === 'carrot'))
+  // the goals: the raw held cooked first, then the points
+  const goals = foodGoals(new Inventory(registry, { beef: 3, cooked_beef: 1, potato: 2 }))
+  assert.deepEqual(goals.slice(0, 2), [{ item: 'cooked_beef', count: 4, optional: true }, { item: 'baked_potato', count: 2, optional: true }])
+  assert.deepEqual(goals[2], { item: FOOD_GOAL, count: FOOD_POINTS, unit: 'nutrition' })
+})
+
+test('a berry bush or a crop counts as grown at the age its loot table drops the food at', () => {
+  const block = (name: string, age?: number): any => ({ name, getProperties: () => (age == null ? {} : { age }) })
+  assert.equal(isGrown(block('sweet_berry_bush', 1)), false)
+  assert.equal(isGrown(block('sweet_berry_bush', 2)), true)
+  assert.equal(isGrown(block('sweet_berry_bush', 3)), true)
+  assert.equal(isGrown(block('wheat', 6)), false)
+  assert.equal(isGrown(block('carrots', 7)), true)
+  assert.equal(isGrown(block('beetroots', 3)), true)
+  assert.equal(isGrown(block('melon')), true)
+  assert.equal(isGrown(null), false)
 })
 
 test('done predicates read inventory, worn equipment, memory and advancements', () => {

@@ -21,6 +21,7 @@ import { countItems, trace } from '../skills/util'
 import { findPlacementNear } from '../skills/placement'
 import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, onTheSurface, openSky, oreLevel, unstick } from './explore'
 import { toolKindFor, wornOutTools } from './durability'
+import { growsAny, isGrown } from '../core/crops'
 
 /** a mine step hands back to the executor when its tool has this many uses left (the executor's default too) */
 export const MIN_TOOL_USES = 24
@@ -60,7 +61,7 @@ export const SCAFFOLD_ITEMS = ['cobblestone', 'cobbled_deepslate', 'dirt']
 export const SCAFFOLD_BUFFER = 24
 
 /** the blocks a mine step climbs out of a mine for first */
-export const SURFACE_BLOCKS = /(_log|_leaves|^sand|^red_sand|^sugar_cane|^pumpkin|^melon|^cactus|^bamboo|^short_grass)$/
+export const SURFACE_BLOCKS = /(_log|_leaves|^sand|^red_sand|^sugar_cane|^pumpkin|^melon|^cactus|^bamboo|^short_grass|^sweet_berry_bush|^wheat|^carrots|^potatoes|^beetroots|^hay_block)$/
 
 /** how far under its starting level a mine step for a block that isn't an ore goes (stone, dirt, sand...) */
 export const SHALLOW_DEPTH = 8
@@ -150,7 +151,9 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
   // an ore is mined down to ORE_DEPTH below its level and no deeper: iron at y -29, the nearest by a straight line,
   // was a trip down through the deep caves (seed 2), where the bot died
   const tooDeep = (pos: Vec3): boolean => level != null && pos.y < level - ORE_DEPTH
-  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos)
+  // a berry bush or a crop not grown yet drops no food: passed over (GROWN_AGE)
+  const unripe = growsAny(step.blocks) ? (pos: Vec3): boolean => !isGrown(bot.blockAt(pos) as any) : () => false
+  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || unripe(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos)
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     const subs = blockSubstitutes(step)

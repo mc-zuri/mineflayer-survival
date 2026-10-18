@@ -89,12 +89,26 @@ export const BLOCK_SOURCES: BlockSource[] = [
   block('gravel', [{ item: 'gravel', count: 0.9 }, { item: 'flint', count: 0.1 }], 200, 8),
   block('clay', [{ item: 'clay_ball', count: 4 }], 1200, 10),
   block('oak_leaves', [{ item: 'apple', count: 0.005 }, { item: 'oak_sapling', count: 0.05 }, { item: 'stick', count: 0.03 }], 100, 3),
+  block('dark_oak_leaves', [{ item: 'apple', count: 0.005 }, { item: 'dark_oak_sapling', count: 0.05 }, { item: 'stick', count: 0.03 }], 1500, 3),
+  // food that grows: only grown ones are broken (src/core/crops.ts). A ripe sweet berry bush (age 3) drops 2 to 3
+  // berries and one at age 2 1 to 2 (blocks/sweet_berry_bush); the bushes come in patches in the taigas.
+  block('sweet_berry_bush', [{ item: 'sweet_berries', count: 2 }], 4000, 15),
+  // a village's farms: a grown crop (age 7) drops 1 and binomial(3, 0.5714) more carrots or potatoes, wheat 1 and the
+  // seeds; beetroots grow to age 3 (blocks/carrots, potatoes, wheat, beetroots, without Fortune)
+  block('carrots', [{ item: 'carrot', count: 2.7 }], 5000, 4),
+  block('potatoes', [{ item: 'potato', count: 2.7 }], 5000, 4),
+  block('wheat', [{ item: 'wheat', count: 1 }, { item: 'wheat_seeds', count: 1.7 }], 5000, 4),
+  block('beetroots', [{ item: 'beetroot', count: 1 }, { item: 'beetroot_seeds', count: 1.7 }], 5000, 4),
+  // a village's hay bales: 9 wheat each (the hay_block recipe back)
+  block('hay_block', 'hay_block', 5000, 8),
   block('sugar_cane', 'sugar_cane', 600, 10),
   block('cactus', 'cactus', 3000, 10),
   block('pumpkin', 'pumpkin', 3000, 20),
+  // 3 to 7 slices (blocks/melon): melons grow wild in the jungles
   block('melon', [{ item: 'melon_slice', count: 5 }], 4000, 20),
   block('bamboo', 'bamboo', 4000, 5),
   block('kelp_plant', 'kelp', 1000, 5),
+  block('kelp', 'kelp', 1000, 5),
   block('coal_ore', 'coal', 300, 40),
   block('deepslate_coal_ore', 'coal', 1500, 40),
   block('iron_ore', 'raw_iron', 600, 40),

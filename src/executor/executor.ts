@@ -11,7 +11,7 @@ import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import type { TaskRunner } from '../core/taskRunner'
 import { itemTags } from '../core/tags'
-import { obtainAll, type ObtainPlan, type ObtainRequest, type StrategyKind } from '../planner/obtain'
+import { heldFor, obtainAll, type ObtainPlan, type ObtainRequest, type StrategyKind } from '../planner/obtain'
 import { toolsAtLeast } from '../planner/progression'
 import { checkPlan, type PlanStep, type Station } from '../planner/steps'
 import { baseRecord, type BaseRecord } from '../base/pois'
@@ -89,7 +89,7 @@ export function requestsMet (inv: Inventory, requests: readonly ObtainRequest[])
   return requests.every(r => {
     if (r.optional === true) return true
     const alts = (typeof r.item === 'string' ? [r.item] : r.item).flatMap(i => [...tags.resolve(i)])
-    return inv.countAny(alts) >= r.count
+    return heldFor(inv, alts, r) >= r.count
   })
 }
 
@@ -97,7 +97,8 @@ export function requestsMet (inv: Inventory, requests: readonly ObtainRequest[])
 export function neededItems (requests: readonly ObtainRequest[], plan?: ObtainPlan): Record<string, number> {
   const out: Record<string, number> = {}
   const add = (name: string, n: number): void => { if (!name.startsWith('#')) out[name] = Math.max(out[name] ?? 0, n) }
-  for (const r of requests) for (const i of typeof r.item === 'string' ? [r.item] : r.item) add(i, r.count)
+  // (food points: the keep rule keeps every safe food)
+  for (const r of requests) if (r.unit !== 'nutrition') for (const i of typeof r.item === 'string' ? [r.item] : r.item) add(i, r.count)
   for (const step of plan?.steps ?? []) {
     if (step.kind === 'craft') for (const i of step.ingredients) add(i.name, (out[i.name] ?? 0) + i.count)
     if (step.kind === 'smelt') for (const i of [...step.inputs, ...step.fuel]) add(i.name, (out[i.name] ?? 0) + i.count)

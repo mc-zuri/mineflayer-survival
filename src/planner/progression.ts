@@ -4,6 +4,7 @@ import type { WorldMemory } from '../core/memory'
 import type { RegistryLike } from '../core/registry'
 import { obtainAll, type ObtainOptions, type ObtainPlan, type ObtainRequest } from './obtain'
 import type { Station } from './steps'
+import { SMELTING } from './sources'
 
 /** the plan's milestones, in order: wood → stone → food → base → iron → diamonds → enchanting → nether → eyes → end */
 export type MilestoneId = 'wood' | 'stone' | 'food' | 'base' | 'iron' | 'diamonds' | 'enchanting' | 'nether' | 'eyes' | 'end'
@@ -38,6 +39,33 @@ export const EYES_FOR_FRAME = 12
 export const BOOKSHELVES = 15
 /** food points to carry before leaving the spawn area */
 export const FOOD_POINTS = 40
+
+/**
+ * What the food milestone gathers its points from, by nutrition (vanilla Foods): the cooked meat and fish of the
+ * furnace, bread and baked potatoes, and what is eaten as picked (sweet berries of the taiga, apples of oak and dark
+ * oak leaves, melon slices of the jungle, a village's carrots, dried kelp of the sea). The raw meat isn't aimed for:
+ * it cooks into twice the points (RAW_TO_COOKED), and the plan cooks what is held first.
+ */
+export const FOOD_GOAL = [
+  'cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'cooked_chicken', 'cooked_rabbit', 'cooked_cod', 'cooked_salmon',
+  'bread', 'baked_potato', 'sweet_berries', 'apple', 'melon_slice', 'carrot', 'beetroot', 'dried_kelp'
+]
+
+/** raw food a furnace cooks, to what (vanilla's food smelting recipes) */
+export const RAW_TO_COOKED: Record<string, string> = Object.fromEntries(
+  SMELTING.filter(r => FOOD_GOAL.includes(r.output) && r.output !== 'dried_kelp').map(r => [r.input[0], r.output])
+)
+
+/** the food milestone's goals: the raw food held cooked first (optional: without fuel it still counts), then the points */
+export function foodGoals (inv: Inventory, points = FOOD_POINTS): ObtainRequest[] {
+  const goals: ObtainRequest[] = []
+  for (const [raw, cooked] of Object.entries(RAW_TO_COOKED)) {
+    const n = inv.count(raw)
+    if (n > 0) goals.push({ item: cooked, count: inv.count(cooked) + n, optional: true })
+  }
+  goals.push({ item: FOOD_GOAL, count: points, unit: 'nutrition' })
+  return goals
+}
 
 const ARMOR_SLOTS = ['helmet', 'chestplate', 'leggings', 'boots'] as const
 /** vanilla ArmorMaterials by defense, low to high */
@@ -105,9 +133,9 @@ export const MILESTONES: readonly Milestone[] = [
   },
   {
     id: 'food',
-    title: 'hunt animals and cook the meat',
+    title: 'food: meat cooked, berries, apples, melons, crops or fish',
     done: s => s.inventory.foodPoints() >= FOOD_POINTS,
-    goals: () => [{ item: '#cooked_food', count: 8 }]
+    goals: s => foodGoals(s.inventory)
   },
   {
     id: 'base',

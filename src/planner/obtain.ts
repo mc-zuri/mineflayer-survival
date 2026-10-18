@@ -1,5 +1,5 @@
 import { Inventory, type ItemCount } from '../core/inventory'
-import { burnTicks, parseTool, SMELT_TICKS, TOOL_MATERIAL_RANK, TOOL_MATERIALS, toolKindForMaterial } from '../core/items'
+import { burnTicks, FOODS, parseTool, SMELT_TICKS, TOOL_MATERIAL_RANK, TOOL_MATERIALS, toolKindForMaterial } from '../core/items'
 import type { Dimension, Pos, WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import type { RegistryLike } from '../core/registry'
@@ -20,6 +20,24 @@ export interface ObtainRequest {
   count: number
   /** left out of the plan (instead of failing it) when it can't be obtained */
   optional?: boolean
+  /**
+   * what `count` counts: items (the default), or the nutrition of the safe food among the alternatives (vanilla
+   * FoodProperties.nutrition), any mix of them adding up: 40 points are 5 cooked beef or 20 sweet berries
+   */
+  unit?: 'items' | 'nutrition'
+}
+
+/** what one of an item counts for in a request: 1, or its nutrition for a nutrition request (0 for harmful food) */
+export function unitValue (req: Pick<ObtainRequest, 'unit'>, item: string): number {
+  if (req.unit !== 'nutrition') return 1
+  const food = FOODS[item]
+  return food == null || food.harmful === true ? 0 : food.nutrition
+}
+
+/** how much of a request the inventory holds, in the request's unit, over its (resolved) alternatives */
+export function heldFor (inv: Inventory, alts: readonly string[], req: Pick<ObtainRequest, 'unit'>): number {
+  if (req.unit !== 'nutrition') return inv.countAny(alts)
+  return alts.reduce((n, a) => n + inv.count(a) * unitValue(req, a), 0)
 }
 
 export interface ObtainOptions {
@@ -126,8 +144,8 @@ export class Resolver {
       for (const req of requests) {
         if (unresolved.has(req)) continue
         const alts = this.alternatives(req.item)
-        if (s.inv.countAny(alts) >= req.count) continue
-        const next = this.ensure(s, alts, req.count, [], Infinity)
+        if (heldFor(s.inv, alts, req) >= req.count) continue
+        const next = req.unit === 'nutrition' ? this.ensureValue(s, alts, req, req.count, [], Infinity) : this.ensure(s, alts, req.count, [], Infinity)
         if (next == null) {
           unresolved.add(req)
           if (req.optional !== true) return { ok: false, steps: this.tidy(s.steps), cost: s.cost, inventory: s.inv, unresolved: [...unresolved] }
@@ -194,6 +212,26 @@ export class Resolver {
     for (const item of this.orderAlternatives(s, alts)) {
       const lim = best == null ? limit : Math.min(limit, best.cost)
       const r = this.produce(clone(s), item, missing, path, lim)
+      if (r != null && r.cost <= lim && (best == null || r.cost < best.cost)) best = r
+    }
+    return best
+  }
+
+  /**
+   * A state holding alternatives worth `count` in the request's unit (food points), or null: the cheapest one
+   * alternative that makes up what is missing (the points from one source, as a hunt for cows or a patch of berry
+   * bushes gets them; what is held of the others counts)
+   */
+  private ensureValue (s: State, alts: readonly string[], req: Pick<ObtainRequest, 'unit'>, count: number, path: string[], limit: number): State | null {
+    const have = heldFor(s.inv, alts, req)
+    if (have >= count) return s
+    let best: State | null = null
+    for (const item of this.orderAlternatives(s, alts)) {
+      const value = unitValue(req, item)
+      if (value <= 0) continue
+      const n = Math.ceil((count - have) / value - 1e-9)
+      const lim = best == null ? limit : Math.min(limit, best.cost)
+      const r = this.produce(clone(s), item, n, path, lim)
       if (r != null && r.cost <= lim && (best == null || r.cost < best.cost)) best = r
     }
     return best
