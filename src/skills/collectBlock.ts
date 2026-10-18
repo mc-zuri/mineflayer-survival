@@ -37,6 +37,11 @@ export interface CollectBlockArgs {
    * lava (FlowingFluid spreads into it), and the bot that broke it stands next to it
    */
   avoidLava?: boolean
+  /**
+   * Break a block with no harvest tool at hand too (by hand: stone in 150 ticks), for a way through rather than what
+   * it drops (default false: NO_TOOL)
+   */
+  anyTool?: boolean
 }
 
 const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, 1, 0), new Vec3(0, -1, 0)]
@@ -106,6 +111,8 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
   let lastFailure: SkillError | null = null
   // targets in a row the bot couldn't get to
   let unreachable = 0
+  // blocks broken without a harvest tool (anyTool): they drop nothing
+  let toolless = 0
   const result = (): CollectBlockResult => {
     const items = countsDelta(before, inventoryCounts(bot))
     return { mined: positions.length, positions, items, count: sumPositive(items) }
@@ -159,7 +166,8 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     if (block == null) break
     const pos = block.position
 
-    if (harvestToolFor(block, inventoryItems(bot)) === null) {
+    const harvestable = harvestToolFor(block, inventoryItems(bot)) !== null
+    if (!harvestable && args.anyTool !== true) {
       throw new SkillError('NO_TOOL', `${block.name} drops nothing without one of its harvest tools`, result())
     }
 
@@ -206,11 +214,12 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       continue
     }
     positions.push(pos)
+    if (!harvestable) toolless++
     unreachable = 0
     trace('collectBlock: broke', block.name, pos.toString(), 'from', bot.entity.position.toString())
     minedTypes.push(block.type)
 
-    if (pickup) {
+    if (pickup && harvestable) {
       // Block.dropResources: the drops spawn on the break, the bot hears of them a tick or two later
       const centre = pos.offset(0.5, 0.5, 0.5)
       if ((bot.registry.blocks[block.type]?.drops?.length ?? 0) > 0) await waitUntil(bot, () => nearbyDrops(bot, centre, 3).length > 0, 10, signal)
@@ -234,7 +243,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
   }
   // (minecraft-data's drops: empty for the blocks that drop nothing without silk touch, as glass)
   const dropsSomething = minedTypes.some(type => (bot.registry.blocks[type]?.drops?.length ?? 0) > 0)
-  if (pickup && res.count === 0 && dropsSomething) {
+  if (pickup && res.count === 0 && dropsSomething && toolless < positions.length) {
     throw new SkillError('VERIFY_FAILED', `broke ${positions.length} blocks but no item came into the inventory`, res)
   }
   return res

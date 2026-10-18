@@ -398,7 +398,8 @@ async function open (bot: Bot, cells: Vec3[], signal?: AbortSignal): Promise<voi
       const block = bot.blockAt(cell)
       if (block == null) throw new SkillError('NOT_FOUND', `the chunk at ${cell.toString()} isn't loaded`)
       if (block.boundingBox === 'empty' && !LIQUIDS.has(block.name)) break
-      await collectBlock(bot, { positions: [cell] }, signal)
+      // the way out matters more than the drop: a block the bag's tools don't harvest is broken by hand
+      await collectBlock(bot, { positions: [cell], anyTool: true }, signal)
     }
     if (!isOpen(bot, cell)) throw new SkillError('VERIFY_FAILED', `${bot.blockAt(cell)?.name ?? 'nothing'} still at ${cell.toString()}`)
   }

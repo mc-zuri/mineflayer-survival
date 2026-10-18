@@ -106,3 +106,24 @@ test('collectBlock passes over an ore with lava beside or over it (broken, it op
   bot.findBlocks = () => [ores[0]]
   await assert.rejects(collectBlock(bot, { names: ['iron_ore'], count: 1 }), (err: any) => err.code === 'NOT_FOUND')
 })
+
+test('collectBlock with anyTool breaks a block by hand that the bag has no harvest tool for (a way out of a mine), and expects no drop', async () => {
+  const registry = require('minecraft-data')('1.21.11')
+  const blocks = new Map<string, string>([['1,64,0', 'stone']])
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (pos: Vec3) => blocks.get(`${pos.x},${pos.y},${pos.z}`) ?? (pos.y < 64 ? 'stone' : 'air') })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; b.harvestTools = registry.blocksByName[b.name].harvestTools; return b }
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: () => null }
+  let dug = 0
+  bot.dig = async (block: any) => { dug++; blocks.set(`${block.position.x},${block.position.y},${block.position.z}`, 'air') }
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlock(bot, { positions: [new Vec3(1, 64, 0)] }), (err: any) => err.code === 'NO_TOOL')
+    assert.strictEqual(dug, 0)
+    const res = await collectBlock(bot, { positions: [new Vec3(1, 64, 0)], anyTool: true })
+    assert.strictEqual(res.mined, 1)
+    assert.strictEqual(dug, 1)
+  } finally {
+    clearInterval(ticker)
+  }
+})
