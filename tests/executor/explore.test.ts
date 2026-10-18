@@ -358,3 +358,12 @@ test('runMine: stone with water against it is left, like an ore (a flooded cave)
   await assert.rejects(runMine(step, { bot, memory: new WorldMemory(), signal: new AbortController().signal, state: {}, log: () => {} } as any))
   assert.ok(targets.length > 0 && targets.every(t => t === dry.toString()), targets.join(' '))
 })
+
+test('nearestShore: from the sea, the nearest column topped by land in the eight directions', async () => {
+  const { nearestShore } = await import('../../src/executor/explore')
+  // the sea west of x 10, a beach from there east
+  const world = (p: Vec3): any => ({ name: p.y > 62 ? 'air' : p.x >= 10 ? 'sand' : p.y > 50 ? 'water' : 'gravel', boundingBox: p.y > 62 ? 'empty' : 'block' })
+  const shore = nearestShore(world, new Vec3(0, 60, 0))
+  assert.ok(shore != null && shore.x >= 10 && shore.x <= 12, String(shore))
+  assert.equal(nearestShore((p: Vec3): any => ({ name: p.y > 62 ? 'air' : 'water', boundingBox: 'empty' }), new Vec3(0, 60, 0)), null)
+})

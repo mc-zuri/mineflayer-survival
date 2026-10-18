@@ -229,6 +229,40 @@ export function columnSurface (lookup: Lookup, x: number, z: number, y: number):
   return null
 }
 
+/** the feet (or the head) in water */
+export function inWater (bot: Bot): boolean {
+  const feet = bot.blockAt(bot.entity.position.floored())
+  return feet?.name === 'water' || headInWater(bot)
+}
+
+/** the nearest column in the loaded chunks topped by something but water, 4 to 32 blocks off in the eight directions */
+export function nearestShore (lookup: Lookup, from: Vec3): Vec3 | null {
+  for (const r of [4, 8, 12, 16, 24, 32]) {
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+      const x = Math.floor(from.x) + dx * r
+      const z = Math.floor(from.z) + dz * r
+      const top = columnSurface(lookup, x, z, Math.floor(from.y))
+      if (top != null && top !== 'water' && !LIQUIDS.has(top)) return new Vec3(x, from.y, z)
+    }
+  }
+  return null
+}
+
+/** out of the water to the nearest shore (nearestShore), swimming up first; resolves whether the bot is out */
+export async function toShore (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  if (headInWater(bot)) await surface(bot, { signal, maxTicks: 200 }).catch(err => { if (isAbort(err)) throw err })
+  const shore = nearestShore(lookupOf(bot), bot.entity.position)
+  if (shore == null) return !inWater(bot)
+  trace('explore: in the water: to the shore at', shore.x, shore.z)
+  try {
+    await navigate(bot, { goal: new goals.GoalNearXZ(shore.x, shore.z, 2), maxTicks: 1200 }, signal)
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('explore: no way to the shore', (err as Error).message)
+  }
+  return !inWater(bot)
+}
+
 /** the highest block of a column a body can't pass (trees left out), from `from` up; `from.y` when there's none */
 function columnTop (lookup: Lookup, from: Vec3, limit = 64): number {
   let top = from.y
@@ -479,6 +513,10 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
     if (args.progress != null) args.progress.leg = i
     // a leg out over the sea or a lake is passed over (no animal or tree out there): on seed 7 the hunt's legs went out
     // over the ocean, the bot sank where a leg ended short, and it drowned
+    // in the water (the sea a leg ended in, a respawn by it): to the nearest shore first, not on through it under
+    // the waves (seed 7: a leg's path swam on at y 56, the drowning reflex cut it off every 300 ticks, and a drowned
+    // killed the bot)
+    if (inWater(bot)) await toShore(bot, signal)
     if (columnSurface(lookup, wp.x, wp.z, Math.floor(bot.entity.position.y)) === 'water') {
       trace('explore: leg to', wp.x, wp.z, 'is over water: passed over')
       if (args.progress != null) args.progress.leg = i + 1
