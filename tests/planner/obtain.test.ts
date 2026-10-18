@@ -143,6 +143,30 @@ test('fuel choice: no coal wasted on one item, coal for a full load, never the b
   assert.deepEqual(smelts(withVein.steps)[0].fuel, [{ name: 'coal', count: 4 }])
 })
 
+test('the last ingots of a bucket are smelted, not crafted back from the nuggets the held ingots make (seeds 2 and 5)', () => {
+  // two ingots held: the third came out of a craft of 9 nuggets from one of them, which leaves two, and meet gave up
+  for (const inventory of [{ iron_pickaxe: 1, furnace: 1, crafting_table: 1, iron_ingot: 2 }, { iron_pickaxe: 1, furnace: 1, crafting_table: 1, iron_ingot: 2, raw_iron: 1 }]) {
+    const plan = obtain(registry, ['bucket', 'water_bucket', 'lava_bucket'], 1, { inventory })
+    assert.equal(plan.ok, true, JSON.stringify(inventory))
+    assert.equal(checkPlan(registry, plan.steps, inventory).ok, true)
+    assert.equal(crafts(plan.steps, 'iron_nugget').length, 0)
+    assert.equal(total(smelts(plan.steps)), 1)
+    assert.equal(plan.inventory.count('bucket'), 1)
+  }
+  // the same for any count held short of the recipe: an ingot is never planned out of the ingots it takes
+  for (let held = 1; held < 9; held++) {
+    const plan = obtain(registry, 'iron_ingot', held + 1, { inventory: { iron_pickaxe: 1, furnace: 1, crafting_table: 1, iron_ingot: held } })
+    assert.equal(plan.ok, true)
+    assert.equal(crafts(plan.steps, 'iron_ingot').length, 0, `${held} held`)
+    assert.equal(plan.inventory.count('iron_ingot'), held + 1)
+  }
+  // nothing to burn held: the fuel is got (a log cut into planks), not the smelt priced out
+  const noFuel = obtain(registry, 'bucket', 1, { inventory: { iron_pickaxe: 1, furnace: 1, crafting_table: 1, raw_iron: 3 } })
+  assert.equal(noFuel.ok, true)
+  assert.ok(smelts(noFuel.steps)[0].fuel.length > 0)
+  assert.ok(noFuel.steps.some(s => s.kind === 'mine' && s.item.endsWith('_log')))
+})
+
 test('tag groups and alternatives: any planks, any stone material, any pickaxe that will do', () => {
   const planks = obtain(registry, '#planks', 4, { inventory: { birch_log: 1 } })
   assert.deepEqual(planks.steps.map(s => `${s.kind} ${s.item}`), ['craft birch_planks'])

@@ -214,10 +214,14 @@ export class Resolver {
   private produce (s: State, item: string, n: number, path: string[], limit: number, skip?: StrategyKind): State | null {
     if (path.length >= this.maxDepth || path.includes(item)) return null
     const sub = [...path, item]
+    const before = s.inv.count(item)
     let best: State | null = null
     for (const strategy of this.strategies(item, n, skip)) {
       const lim = best == null ? limit : Math.min(limit, best.cost)
       const r = strategy(clone(s), sub, lim)
+      // it has to leave n more of the item: an ingot crafted back from the nuggets a held ingot crafts into only moves
+      // the iron round (2 ingots held, the bucket's third planned that way, and meet gave up: "no plan for 1 bucket")
+      if (r != null && r.inv.count(item) < before + n) continue
       if (r != null && r.cost <= lim && (best == null || r.cost < best.cost)) best = r
     }
     return best
