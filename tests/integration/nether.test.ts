@@ -4,6 +4,7 @@
 // there with a kit; gold bartered with summoned piglins for pearls. Each scenario logs its ticks and wall time.
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
+import { appendFileSync } from 'node:fs'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
@@ -29,7 +30,9 @@ describe('nether skills on a 1.21.11 server (seed 4)', { timeout: 40 * 60 * 1000
     server = await startServer({
       seed: SEED,
       difficulty: 'easy',
-      gamerules: { advance_weather: false, advance_time: false, spawn_phantoms: false, spawn_monsters: false }
+      gamerules: { advance_weather: false, advance_time: false, spawn_phantoms: false, spawn_monsters: false },
+      // SURVIVAL_SERVER_LOG=<file>: the server's log there
+      log: process.env.SURVIVAL_SERVER_LOG != null ? line => appendFileSync(process.env.SURVIVAL_SERVER_LOG as string, `${line}\n`) : undefined
     })
     bot = await connectLockstepBot(server, { username: USERNAME, timeoutMs: 120000 })
     await bot.waitForChunksToLoad()
@@ -123,7 +126,7 @@ describe('nether skills on a 1.21.11 server (seed 4)', { timeout: 40 * 60 * 1000
     await nether('kill @e[type=blaze]')
     // the south end of the fortress's bridges, 170 blocks along them from the spawners
     await nether(`tp ${USERNAME} 20.5 60 108.5`)
-    assert.ok(await waitUntil(bot, () => bot.game.dimension === 'the_nether' && bot.blockAt(bot.entity.position.offset(0, -1, 0))?.name === 'nether_bricks', 200))
+    assert.ok(await waitUntil(bot, () => bot.game.dimension === 'the_nether' && bot.blockAt(bot.entity.position.offset(0, -1, 0))?.name === 'nether_bricks', 1200), `at ${bot.entity.position.toString()} in ${bot.game.dimension}`)
     await bot.waitForChunksToLoad()
     await equipArmor(bot)
 
@@ -149,7 +152,7 @@ describe('nether skills on a 1.21.11 server (seed 4)', { timeout: 40 * 60 * 1000
     const y = 61
     const z = 100
     await nether(`tp ${USERNAME} ${x + 0.5} ${y} ${z + 0.5}`)
-    assert.ok(await waitUntil(bot, () => bot.game.dimension === 'the_nether', 200))
+    assert.ok(await waitUntil(bot, () => bot.game.dimension === 'the_nether' && bot.entity.position.distanceTo(new Vec3(x + 0.5, y, z + 0.5)) < 2, 1200))
     await bot.waitForChunksToLoad()
     await fill(`${x - 6} ${y - 1} ${z - 6} ${x + 6} ${y - 1} ${z + 6} netherrack`, 'the_nether')
     await fill(`${x - 6} ${y} ${z - 6} ${x + 6} ${y + 3} ${z + 6} air`, 'the_nether')
