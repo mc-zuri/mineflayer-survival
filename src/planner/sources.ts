@@ -7,6 +7,10 @@ import type { Dimension } from '../core/memory'
  * become 50% chances, uniform counts lose their zero), so the yields here are written out
  * from the vanilla tables, without Fortune or Looting. Costs are rough tick estimates:
  * `find` to reach the first one from a random spot, `each` to reach every further one.
+ *
+ * The same in 1.21.11 and 26.3: the expected drops of every block and mob below (26.3 rewrote the loot table files'
+ * format, the "condition" objects, the tool predicates, "modifier" for "functions", not what they drop), the furnace
+ * recipes and the bartering table.
  */
 
 export interface Drop {
@@ -144,7 +148,7 @@ export const MOB_SOURCES: MobSource[] = [
   mob('wither_skeleton', [{ item: 'coal', count: 0.33 }, { item: 'bone', count: 1 }, { item: 'wither_skeleton_skull', count: 0.025 }], 8000, 400, 'the_nether')
 ]
 
-/** vanilla furnace recipes (data/minecraft/recipe/*_from_smelting and the plain smelting ones) */
+/** vanilla furnace recipes (data/minecraft/recipe/*_from_smelting and the plain smelting ones; the same 73 in 26.3) */
 export const SMELTING: SmeltingRecipe[] = [
   { input: ['raw_iron', 'iron_ore', 'deepslate_iron_ore'], output: 'iron_ingot' },
   { input: ['raw_gold', 'gold_ore', 'deepslate_gold_ore', 'nether_gold_ore'], output: 'gold_ingot' },
@@ -182,7 +186,7 @@ export const SMELTING: SmeltingRecipe[] = [
 
 /**
  * the sum of the weights in vanilla 1.21.11 data/minecraft/loot_table/gameplay/piglin_bartering.json
- * (469 since 1.21.6 added dried_ghast at weight 10; it was 459 before)
+ * (469 since 1.21.6 added dried_ghast at weight 10; it was 459 before); 26.3's has the same entries and weights
  */
 export const BARTER_TOTAL_WEIGHT = 469
 
@@ -208,7 +212,7 @@ export const BARTER: BarterOffer[] = [
   offer('spectral_arrow', 40, 6, 12)
 ]
 export const BARTER_FIND = 1500
-/** PiglinAi.ADMIRE_DURATION: a piglin looks at the ingot for 119 ticks before it throws the loot */
+/** PiglinAi.ADMIRE_DURATION: a piglin looks at the ingot for 119 ticks before it throws the loot (1.21.11 and 26.3) */
 export const BARTER_TICKS_PER_INGOT = 120
 export const GOLD_ARMOR = ['golden_boots', 'golden_helmet', 'golden_leggings', 'golden_chestplate']
 
