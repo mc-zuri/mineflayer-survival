@@ -122,3 +122,20 @@ test('totem reflex: a totem goes to the off hand, unless the shield is up there'
   assert.strictEqual(check(totemReflex, { items: totem }, { totem: { always: false } }), null)
   assert.strictEqual(check(totemReflex, { items: totem, health: 8 }, { totem: { always: false } }), 'totem')
 })
+
+test('hostiles and creeper reflexes leave alone what has no line of sight to the bot (a wall, a shelter\'s roof)', () => {
+  // a stone wall at x 2 from y 64 to 66, between the bot (x 0.5) and the mobs further along x
+  const wall = (pos: Vec3): string => pos.y < 64 ? 'stone' : pos.x === 2 && pos.y <= 66 ? 'stone' : 'air'
+  const zombie = entity({ name: 'zombie', position: at(4) })
+  assert.strictEqual(check(hostilesReflex, { entities: [zombie] }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombie], world: wall }), null)
+  const creeper = (meta?: Record<string, unknown>): any => entity({ name: 'creeper', position: at(2.2), meta })
+  assert.strictEqual(check(creeperReflex, { entities: [creeper()], world: (p) => p.y < 64 ? 'stone' : p.x === 1 && p.y <= 66 ? 'stone' : 'air' }), null)
+  assert.strictEqual(check(creeperReflex, { entities: [creeper()] }), 'evade creeper')
+  // swelling, it sees the bot (the server says so): evade whatever the client's blocks say
+  assert.strictEqual(check(creeperReflex, { entities: [creeper({ swell_dir: 1 })], world: (p) => p.y < 64 ? 'stone' : p.x === 1 && p.y <= 66 ? 'stone' : 'air' }), 'evade creeper')
+  // the bot in a hole three deep (feet at 61), sealed at 63; a zombie standing on the seal
+  const hole = (p: Vec3): string => (p.x === 0 && p.z === 0 && (p.y === 61 || p.y === 62)) ? 'air' : p.y < 64 ? 'dirt' : 'air'
+  const above = entity({ name: 'zombie', position: new Vec3(0.5, 64, 0.5) })
+  assert.strictEqual(check(hostilesReflex, { position: new Vec3(0.5, 61, 0.5), entities: [above], world: hole }), null)
+})

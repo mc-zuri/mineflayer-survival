@@ -96,3 +96,32 @@ export function directionOf (yaw: number, pitch: number): Vec3 {
 export function clearControls (bot: Bot): void {
   bot.clearControlStates()
 }
+
+/** An entity's eyes (EntityType's default eye height: 0.85 of its height). */
+export function entityEyePosition (entity: Entity): Vec3 {
+  return entity.position.offset(0, (entity as any).eyeHeight ?? (entity.height ?? 1.8) * 0.85, 0)
+}
+
+/**
+ * LivingEntity.hasLineOfSight: no block's collision shape between the bot's eyes and the entity's (ClipContext's
+ * COLLIDER, fluids ignored), within 128 blocks. A mob needs it to see the player (Sensing), to swing at it
+ * (MeleeAttackGoal) and to start its fuse or draw its bow at it (SwellGoal, RangedBowAttackGoal).
+ */
+export function hasLineOfSight (bot: Bot, entity: Entity): boolean {
+  const from = eyePosition(bot)
+  const to = entityEyePosition(entity)
+  const delta = to.minus(from)
+  const dist = delta.norm()
+  if (dist > 128) return false
+  if (dist < 1e-6) return true
+  const raycast = (bot.world as any)?.raycast
+  if (typeof raycast === 'function') {
+    const hit: any = raycast.call(bot.world, from, delta.scaled(1 / dist), dist)
+    return hit == null || (hit.intersect != null && hit.intersect.distanceTo(from) >= dist - 1e-4)
+  }
+  // no world to raycast in (a test's bot): full blocks along the line, a step a quarter block
+  for (let t = 0.25; t < dist; t += 0.25) {
+    if (bot.blockAt(from.plus(delta.scaled(t / dist)))?.boundingBox === 'block') return false
+  }
+  return true
+}

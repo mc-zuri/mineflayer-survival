@@ -5,7 +5,7 @@ import { escapeHazard, evadeCreeper, fleeFrom, headInWater, inHazard, surface } 
 import { creeperSwelling, fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
 import { bestMeleeWeapon } from '../skills/weapons'
-import type { Entity } from '../skills/combatUtil'
+import { hasLineOfSight, type Entity } from '../skills/combatUtil'
 import { GHAST_FIREBALL, deflectFireball, fireballIncoming } from '../nether/safety'
 import type { Reflex, ReflexContext } from './types'
 
@@ -91,7 +91,8 @@ export function threateningCreeper (ctx: ReflexContext): Entity | null {
   for (const e of ctx.hostiles) {
     if (e.name !== 'creeper') continue
     const d = distance(bot, e)
-    if (d < config.creeper.triggerDistance || (creeperSwelling(bot, e) && d < config.creeper.safeDistance)) {
+    // one behind a wall can't start its fuse (SwellGoal stops swelling without a line of sight to the target)
+    if ((d < config.creeper.triggerDistance && hasLineOfSight(bot, e)) || (creeperSwelling(bot, e) && d < config.creeper.safeDistance)) {
       if (d < bestDistance) { best = e; bestDistance = d }
     }
   }
@@ -123,11 +124,16 @@ export const creeperReflex: Reflex = {
   }
 }
 
-/** The hostiles within the reflex's range, nearest first (the ignored ones left out). */
+/**
+ * The hostiles within the reflex's range that the bot can see, nearest first (the ignored ones left out). One without
+ * a line of sight can't hit or shoot the bot either (MeleeAttackGoal and RangedBowAttackGoal need one): a zombie on the
+ * far side of a wall, or over a shelter's roof, is left alone.
+ */
 export function hostilesInRange (ctx: ReflexContext): Entity[] {
   const { bot, config } = ctx
   return ctx.hostiles.filter(e => !config.hostiles.ignore.includes(e.name ?? '') &&
-    distance(bot, e) <= config.hostiles.range && Math.abs(e.position.y - bot.entity.position.y) <= config.hostiles.maxDy)
+    distance(bot, e) <= config.hostiles.range && Math.abs(e.position.y - bot.entity.position.y) <= config.hostiles.maxDy &&
+    hasLineOfSight(bot, e))
 }
 
 /** Fight the nearest hostile, or flee when hurt, outnumbered or (if so set) unarmed. Creepers are shot, fought with a shield up, or fled. */
