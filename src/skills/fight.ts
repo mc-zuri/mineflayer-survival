@@ -76,6 +76,25 @@ export class SwellCounter {
   }
 }
 
+/** AbstractSkeleton.performRangedAttack: the arrow leaves at 1.6 blocks a tick (Projectile.shoot's velocity) */
+export const MOB_ARROW_SPEED = 1.6
+
+/**
+ * When to hold the shield up against a mob's bow: from the start of its draw (LivingEntity's using-item flag) until its
+ * arrow has had the time to get here. The flag clears on the tick the arrow leaves (RangedBowAttackGoal: stopUsingItem,
+ * performRangedAttack), and the arrow is in the air a few ticks more: a shield lowered then took every arrow.
+ */
+export class ArrowGuard {
+  private holdUntil = -1
+  private drawing = false
+  /** this tick's say: the mob drawing, its distance, the tick; whether to block */
+  update (drawing: boolean, distance: number, tick: number): boolean {
+    if (this.drawing && !drawing) this.holdUntil = tick + Math.ceil(distance / MOB_ARROW_SPEED) + 2
+    this.drawing = drawing
+    return drawing || tick <= this.holdUntil
+  }
+}
+
 function findItem (bot: Bot, name: string): Item | undefined {
   return bot.inventory.items().find(i => i.name === name) ?? (bot.inventory.slots[45]?.name === name ? bot.inventory.slots[45] ?? undefined : undefined)
 }
@@ -126,6 +145,7 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
   }
   const strength = attackStrengthOf(bot)
   const swell = new SwellCounter()
+  const arrows = new ArrowGuard()
   let hits = 0
   let ticks = 0
   let lastPosition = target.position.clone()
@@ -160,7 +180,7 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
         // back off until it stops swelling (it stops past 7 blocks), then come back
         if (retreating && (fuse === 0 || bot.entity.position.distanceTo(target.position) >= creeperSafe)) retreating = false
         if (retreating && !hasShield()) wantRetreat = true
-      } else if (RANGED.has(name) && isUsingItem(bot, target) && distance > reach && hasShield()) {
+      } else if (RANGED.has(name) && arrows.update(isUsingItem(bot, target), distance, ticks) && distance > reach && hasShield()) {
         wantBlock = true
       } else if (name === 'blaze' && blazeCharged(bot, target) && distance > reach && hasShield()) {
         // its three small fireballs: the shield takes them (Player.isDamageSourceBlocked)
