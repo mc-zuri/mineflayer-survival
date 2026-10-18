@@ -20,13 +20,21 @@ test('hunt gives up with NO_PATH when the pathfinder makes no headway toward the
   let release: (() => void) | null = null
   bot.pathfinder = {
     isPathing: false,
-    goto: async () => { bot.pathfinder.isPathing = true; await new Promise<void>(resolve => { release = resolve }); bot.pathfinder.isPathing = false },
+    goto: async () => {
+      bot.pathfinder.isPathing = true
+      setImmediate(() => bot.emit('pathGenerated', { path: [] }))
+      await new Promise<void>(resolve => { release = resolve })
+      bot.pathfinder.isPathing = false
+    },
     cancel: async () => { release?.() }
   }
   const { hunt } = await import('../../src/skills/hunt')
   const rejected = assert.rejects(hunt(bot, 'cow'), (err: any) => err.code === 'NO_PATH')
-  // the pathfinder plans and plans, the bot stays in its hole
-  for (let i = 0; i < 150; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  // the pathfinder plans and plans, the bot stays in its hole (navigate steps to its block's middle and tries again
+  // twice first)
+  let settled = false
+  void rejected.then(() => { settled = true }, () => { settled = true })
+  for (let i = 0; i < 3000 && !settled; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
   await rejected
 })
 
