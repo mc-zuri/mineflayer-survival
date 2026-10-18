@@ -4,14 +4,17 @@ import type { Item } from 'prismarine-item'
 import { SkillError, throwIfAborted } from './errors'
 import { settleInventory, waitTicks, waitUntil } from './util'
 
-/** Potions' registration order on 1.21.11 (the potion_contents component's id): the ones the bot drinks */
+/**
+ * Potions' registration order (the potion_contents component's id: the potion registry's protocol ids, the same in
+ * 1.21.11 and 26.3): the ones the bot drinks, plain, long and strong
+ */
 export const POTION_IDS: Record<string, number[]> = {
   fire_resistance: [11, 12],
   swiftness: [13, 14, 15],
-  regeneration: [28, 29, 30],
-  strength: [31, 32, 33],
-  healing: [21, 22],
-  slow_falling: [41, 42]
+  healing: [24, 25],
+  regeneration: [31, 32, 33],
+  strength: [34, 35, 36],
+  slow_falling: [40, 41]
 }
 
 /** the effect ids (MobEffects' order, minecraft-data's effects) */
