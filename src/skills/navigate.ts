@@ -4,6 +4,7 @@ import { Vec3 } from 'vec3'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { SkillError, abortError, isSkillError, throwIfAborted } from './errors'
 import { eyeHeight, trace, waitUntil } from './util'
+import type { ReportKind } from '../diagnostics/report'
 
 type Goal = goals.Goal
 
@@ -96,6 +97,36 @@ export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSign
   }
 }
 
+/** what a failed trip's stuck report said, on the error navigate throws */
+export interface NavigateDiagnosis {
+  diagnosis: string
+  /** the report's file (bot.survival.diagnostics' dir), if it was written */
+  reportFile: string | null
+}
+
+/** a stuck report of the trip (bot.survival.diagnostics), when the plugin's loaded */
+function stuckReport (bot: Bot, kind: ReportKind, goal: Goal, message: string, error?: unknown): NavigateDiagnosis | null {
+  const diagnostics = (bot as any).survival?.diagnostics
+  if (diagnostics == null || bot.entity == null) return null
+  try {
+    const report = diagnostics.report({ kind, goal, message, error })
+    const file: string | null = diagnostics.fileOf(report)
+    trace('navigate:', kind, 'diagnosis:', report.diagnosis, file != null ? `(report ${file})` : '')
+    return { diagnosis: report.diagnosis, reportFile: file }
+  } catch (err) {
+    trace('navigate: the stuck report failed:', (err as Error).message)
+    return null
+  }
+}
+
+/** the error with its report's diagnosis on it (err.diagnosis, err.reportFile) and in its message */
+function withDiagnosis<E extends Error> (err: E, diag: NavigateDiagnosis | null): E {
+  if (diag == null) return err
+  Object.assign(err, diag)
+  err.message = `${err.message} [diagnosis: ${diag.diagnosis}${diag.reportFile != null ? `; report ${diag.reportFile}` : ''}]`
+  return err
+}
+
 async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal): Promise<NavigateResult> {
   throwIfAborted(signal)
   const { goal } = args
@@ -116,10 +147,13 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
   let overTime = false
 
   let digAt: string | null = null
+  // the stuck report, made when the bot is seen stuck (its move, its keys, its dig as they are then)
+  let diag: NavigateDiagnosis | null = null
   const onTick = (): void => {
     ticks++
     if (ticks >= maxTicks && !overTime && !stuck && !aborted) {
       overTime = true
+      if (!reached()) diag = stuckReport(bot, 'stuck', goal, `no arrival in ${maxTicks} ticks`)
       void bot.pathfinder.cancel()
     }
     if (!moved && bot.entity.position.distanceTo(start) >= 0.5) moved = true
@@ -146,6 +180,7 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
       const move = bot.pathfinder.currentMove
       trace('navigate: stuck in', move?.moveType?.constructor?.name ?? 'no move', move != null ? `${move.entryPos.toString()} -> ${move.exitPos.toString()}` : '',
         'dig', dig ?? 'none', 'collided', (bot.entity as any).isCollidedHorizontally === true)
+      diag = stuckReport(bot, 'stuck', goal, `no progress for ${stuckTicks} ticks at ${bot.entity.position.toString()}`)
       void bot.pathfinder.cancel()
     }
   }
@@ -184,12 +219,19 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
   const result: NavigateResult = { position: bot.entity.position.clone(), ticks }
   trace('navigate:', goal.constructor.name, 'ended at', result.position.toString(), 'after', ticks, 'ticks', aborted ? 'aborted' : stuck ? 'stuck' : '', error != null ? `error ${(error as Error).message}` : '')
   if (aborted) throw abortError(signal, result)
-  if (stuck) throw new SkillError('STUCK', `no progress for ${stuckTicks} ticks at ${result.position.toString()}`, result)
-  if (overTime && !reached()) throw new SkillError('STUCK', `no arrival in ${maxTicks} ticks, at ${result.position.toString()}`, result)
-  if (planning && !reached()) throw new SkillError('NO_PATH', `no path found in ${planTicks} ticks`, result)
+  if (stuck) throw withDiagnosis(new SkillError('STUCK', `no progress for ${stuckTicks} ticks at ${result.position.toString()}`, result), diag)
+  if (overTime && !reached()) throw withDiagnosis(new SkillError('STUCK', `no arrival in ${maxTicks} ticks, at ${result.position.toString()}`, result), diag)
+  if (planning && !reached()) {
+    const message = `no path found in ${planTicks} ticks`
+    throw withDiagnosis(new SkillError('NO_PATH', message, result), stuckReport(bot, 'no_path', goal, message))
+  }
   if (reached()) return result
-  if (error != null) throw new SkillError('NO_PATH', `the pathfinder failed: ${(error as Error).message ?? String(error)}`, result, { cause: error })
-  throw new SkillError('NO_PATH', pathFound ? `the path ended at ${result.position.toString()}, short of the goal` : 'no path to the goal', result)
+  if (error != null) {
+    const err = new SkillError('NO_PATH', `the pathfinder failed: ${(error as Error).message ?? String(error)}`, result, { cause: error })
+    throw withDiagnosis(err, stuckReport(bot, 'goto_failed', goal, err.message, err))
+  }
+  const message = pathFound ? `the path ended at ${result.position.toString()}, short of the goal` : 'no path to the goal'
+  throw withDiagnosis(new SkillError('NO_PATH', message, result), stuckReport(bot, 'no_path', goal, message))
 }
 
 /**

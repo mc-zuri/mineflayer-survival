@@ -7,6 +7,7 @@ import { play, type MilestoneHandler, type PlayOptions, type PlayResult } from '
 import { keepHeadAboveWater } from './skills/breath'
 import { openSky } from './executor/explore'
 import type { MilestoneId } from './planner/progression'
+import { Diagnostics, type DiagnosticsOptions } from './diagnostics'
 
 export * from './core'
 export * from './planner'
@@ -19,6 +20,9 @@ export * as enchanting from './skills/enchanting'
 export * as nether from './nether'
 export * as end from './end'
 export * as worldgen from './worldgen'
+export * as diagnostics from './diagnostics'
+export { Diagnostics } from './diagnostics'
+export type { DiagnosticsOptions, StuckReport, ReportKind } from './diagnostics'
 export * as executor from './executor'
 export { Executor } from './executor/executor'
 export type { ExecutorOptions, ObtainOutcome } from './executor/executor'
@@ -30,6 +34,8 @@ export interface SurvivalOptions {
   loadPathfinder?: boolean
   /** the always-on reflexes (eat, fight or flee, creepers, lava and fire, drowning, armor, totem); false for none (default true) */
   reflexes?: boolean | ReflexEngineOptions
+  /** the stuck reports (bot.survival.diagnostics): where they're written, how many kept */
+  diagnostics?: DiagnosticsOptions
 }
 
 export interface Survival {
@@ -49,10 +55,12 @@ export interface Survival {
   advancements: Set<string>
   /** plays from where the bot is, milestone by milestone (see PlayOptions) */
   play: (options?: PlayOptions) => Promise<PlayResult>
+  /** stuck reports: lastReports(), onReport(cb), dump() */
+  diagnostics: Diagnostics
 }
 
 export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
-  const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, ...opts }
+  const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, diagnostics: {}, ...opts }
   return function (bot: Bot): void {
     if (options.loadPathfinder && bot.pathfinder == null) bot.loadPlugin(createPathfinder())
     // no walk or swim with the head under water and no air over it (a flooded cave): the bot drowns on the way
@@ -60,7 +68,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     const tasks = new TaskRunner(bot)
     const memory = new WorldMemory()
     const reflexes = options.reflexes === false ? null : new ReflexEngine(bot, { sink: tasks, ...(options.reflexes === true ? {} : options.reflexes) })
-    bot.survival = { options, tasks, memory, reflexes, handlers: {}, advancements: new Set(), play: async (playOptions) => await play(bot, playOptions) }
+    const diagnostics = new Diagnostics(bot, options.diagnostics)
+    bot.survival = { options, tasks, memory, reflexes, handlers: {}, advancements: new Set(), play: async (playOptions) => await play(bot, playOptions), diagnostics }
     bot.on('physicsTick', () => { memory.now = tasks.tick })
     bot.on('death', () => {
       // the running and queued tasks can't go on; the death spot is where the items are
