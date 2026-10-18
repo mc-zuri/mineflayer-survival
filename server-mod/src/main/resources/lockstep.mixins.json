@@ -1,0 +1,16 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "mineflayer.lockstep.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "server": [
+    "CommandsMixin",
+    "DiscardedPayloadMixin",
+    "MinecraftServerMixin",
+    "PlayerListMixin",
+    "ServerGamePacketListenerImplMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

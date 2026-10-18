@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "lockstep",
+  "version": "${version}",
+  "name": "Lockstep",
+  "description": "Advances the server one tick only once every opted-in client has acked the previous one (mineflayer-survival's fast simulation)",
+  "license": "GPL-3.0",
+  "environment": "server",
+  "mixins": [
+    "lockstep.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "1.21.11",
+    "java": ">=21"
+  }
+}
