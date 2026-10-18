@@ -9,7 +9,7 @@ import { craft } from './craft'
 import { navigateToReach } from './navigate'
 import { placeBlock } from './placeBlock'
 import { findPlacementNear } from './placement'
-import { countItems, countsDelta, inventoryCounts, itemId, settleInventory, waitUntil, type Block, type ItemCounts } from './util'
+import { countItems, countsDelta, inventoryCounts, itemId, settleInventory, waitTicks, waitUntil, type Block, type ItemCounts } from './util'
 import { burnTicks, SMELT_TICKS } from '../core/items'
 
 // AbstractFurnaceBlockEntity's cook time and the furnace burn times (FuelValues), one table for the planner and the skill
@@ -226,4 +226,108 @@ export async function smelt (bot: Bot, args: SmeltArgs, signal?: AbortSignal): P
   }
   if (placed && args.pickUpFurnace === true) await collectBlock(bot, { positions: [furnaceBlock.position] }, signal)
   return res
+}
+
+/** the furnaces a big smelt runs in at once, and the items it takes for one more to pay its making (8 cobblestone) */
+export const PARALLEL_FURNACES = 3
+export const PARALLEL_MIN_ITEMS = 12
+
+/** how the items of a smelt are shared out among `furnaces` furnaces: as evenly as can be, the first ones the more */
+export function shareOut (count: number, furnaces: number): number[] {
+  const k = Math.max(1, Math.min(furnaces, count))
+  return Array.from({ length: k }, (_, i) => Math.floor(count / k) + (i < count % k ? 1 : 0))
+}
+
+export interface SmeltParallelArgs {
+  input: string
+  count: number
+  /** furnaces to run at once (default PARALLEL_FURNACES); the ones carried are put down, and more made from cobblestone */
+  furnaces?: number
+}
+
+/** furnaces a parallel smelt put down and hasn't emptied and picked up yet (a reflex cut it off), by bot */
+const pendingFurnaces = new WeakMap<Bot, Vec3[]>()
+
+/** empties the furnaces a parallel smelt left (within 16 blocks) of what's in them and picks them up; their output */
+async function collectFurnaces (bot: Bot, signal?: AbortSignal): Promise<Set<string>> {
+  const output = new Set<string>()
+  const pending = pendingFurnaces.get(bot) ?? []
+  while (pending.length > 0) {
+    const pos = pending[0]
+    const block = bot.blockAt(pos)
+    if (block?.name === 'furnace' && pos.distanceTo(bot.entity.position) <= 16) {
+      await navigateToReach(bot, pos, signal)
+      await settleInventory(bot, signal)
+      const window: Furnace = await bot.openFurnace(block)
+      try {
+        const out = window.outputItem()
+        if (out != null) { output.add(out.name); await window.takeOutput() }
+        if (window.inputItem() != null) await window.takeInput()
+        if (window.fuelItem() != null) await window.takeFuel()
+      } finally {
+        window.close()
+      }
+      await collectBlock(bot, { positions: [pos] }, signal)
+    }
+    pending.shift()
+  }
+  return output
+}
+
+/**
+ * A big smelt run in several furnaces at once, each loaded with its share and the fuel for it and left to burn while
+ * the next is loaded, then all emptied (AbstractFurnaceBlockEntity cooks each furnace's 200 ticks an item on its own):
+ * 33 raw iron in 3 furnaces is 2200 ticks at the furnaces, not 6600. The furnaces put down are emptied and picked up
+ * again, then or (cut off) when the smelt runs again. Resolves the items that came out.
+ */
+export async function smeltParallel (bot: Bot, args: SmeltParallelArgs, signal?: AbortSignal): Promise<number> {
+  throwIfAborted(signal)
+  const before = inventoryCounts(bot)
+  const output = await collectFurnaces(bot, signal)
+  const want = Math.min(args.count - Math.max(0, ...[...output].map(o => (inventoryCounts(bot)[o] ?? 0) - (before[o] ?? 0))), countItems(bot, args.input))
+  const shares = shareOut(want, args.furnaces ?? PARALLEL_FURNACES)
+  // the furnaces: the bag's, and more made while cobblestone lasts
+  while (countItems(bot, 'furnace') < shares.length && countItems(bot, 'cobblestone') >= 8 + 8) {
+    try {
+      await craft(bot, { item: 'furnace', tableDistance: 6, pickUpTable: true }, signal)
+    } catch (err) {
+      if (isAbort(err)) throw err
+      break
+    }
+  }
+  if (!pendingFurnaces.has(bot)) pendingFurnaces.set(bot, [])
+  const pending = pendingFurnaces.get(bot) as Vec3[]
+  let loaded = 0
+  try {
+    for (const share of shares) {
+      if (countItems(bot, 'furnace') === 0 || share <= 0) break
+      const pos = findPlacementNear(p => bot.blockAt(p), bot.entity.position)
+      if (pos == null) break
+      await placeBlock(bot, { pos, item: 'furnace' }, signal)
+      const block = bot.blockAt(pos)
+      if (block?.name !== 'furnace') break
+      pending.push(pos)
+      await settleInventory(bot, signal)
+      const window: Furnace = await bot.openFurnace(block)
+      try {
+        const n = Math.min(share, window.items().filter(i => i.name === args.input).reduce((a, i) => a + i.count, 0))
+        const fuel = chooseFuel(window.items(), n * SMELT_TICKS)
+        if (n <= 0 || fuel == null) break
+        await window.putInput(itemId(bot, args.input), null, n)
+        await window.putFuel(itemId(bot, fuel.name), null, fuel.count)
+        loaded = Math.max(loaded, n)
+      } finally {
+        window.close()
+      }
+    }
+    if (loaded === 0) throw new SkillError('MISSING_ITEMS', `no furnace loaded with ${args.input} and fuel`)
+    // the longest share's cooking, and a little
+    await waitTicks(bot, loaded * SMELT_TICKS + 10, signal)
+  } catch (err) {
+    if (!isAbort(err)) await collectFurnaces(bot, signal).catch(() => {})
+    throw err
+  }
+  for (const o of await collectFurnaces(bot, signal)) output.add(o)
+  const delta = countsDelta(before, inventoryCounts(bot))
+  return [...output].reduce((n, name) => n + Math.max(0, delta[name] ?? 0), 0)
 }

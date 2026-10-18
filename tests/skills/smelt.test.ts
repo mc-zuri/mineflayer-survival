@@ -113,3 +113,14 @@ test('a smelt that runs out of fuel takes what is in the furnace back out before
   assert.equal(slots.input, null)
   assert.equal(slots.output, null)
 })
+
+test('a big smelt is shared out among the furnaces as evenly as can be', async () => {
+  const { shareOut, PARALLEL_FURNACES, PARALLEL_MIN_ITEMS } = await import('../../src/skills/smelt')
+  assert.deepStrictEqual(shareOut(33, 3), [11, 11, 11])
+  assert.deepStrictEqual(shareOut(13, 3), [5, 4, 4])
+  assert.deepStrictEqual(shareOut(2, 3), [1, 1])
+  assert.deepStrictEqual(shareOut(5, 1), [5])
+  // the furnaces a 33-iron smelt takes: a third of the time at them
+  assert.ok(Math.max(...shareOut(33, PARALLEL_FURNACES)) * 3 <= 33)
+  assert.ok(PARALLEL_MIN_ITEMS >= PARALLEL_FURNACES * 4)
+})

@@ -11,7 +11,7 @@ import { farmCells, grownPlots, harvestFarm, knownFarms, plantFarm, rememberFarm
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { collectBlock, waterBeside } from '../skills/collectBlock'
 import { craft } from '../skills/craft'
-import { smelt } from '../skills/smelt'
+import { PARALLEL_MIN_ITEMS, smelt, smeltParallel } from '../skills/smelt'
 import { retrieveItems } from '../skills/chest'
 import { fillBucket, isSource } from '../skills/bucket'
 import { hunt, nearestOfType } from '../skills/hunt'
@@ -309,6 +309,17 @@ export const runSmelt: StepRunner<SmeltStep> = async (step, ctx) => {
   // the fuels the plan chose, one after the other (it kept the planks a later craft needs out of them), then the
   // skill's own choice by preference for what's left
   const fuels: Array<string | undefined> = [...step.fuel.map(f => f.name).filter(n => countItems(bot, n) > 0), undefined]
+  // a big smelt away from the base runs in a few furnaces at once (smeltParallel); the single furnace below smelts
+  // what is left
+  if (furnace == null && step.inputs.length === 1 && step.count - (countItems(bot, step.item) - start) >= PARALLEL_MIN_ITEMS) {
+    try {
+      const n = step.count - (countItems(bot, step.item) - start)
+      await withRoom(bot, signal, async () => await smeltParallel(bot, { input: step.inputs[0].name, count: n }, signal))
+    } catch (err) {
+      if (isAbort(err) || TaskError.is(err, 'DIED')) throw err
+      trace('executor: parallel smelt failed', (err as Error).message)
+    }
+  }
   for (const input of step.inputs) {
     for (const fuel of fuels) {
       const done = countItems(bot, step.item) - start
