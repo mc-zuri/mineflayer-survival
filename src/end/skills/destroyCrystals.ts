@@ -70,7 +70,8 @@ export function explosionDamage (power: number, distance: number, exposure = 1, 
   const d = distance / radius
   if (d > 1) return 0
   const impact = (1 - d) * exposure
-  const raw = Math.floor((impact * impact + impact) / 2 * 7 * radius + 1)
+  // ExplosionDamageCalculator.getEntityDamageAmount: not rounded (1.21.11 and 26.3)
+  const raw = (impact * impact + impact) / 2 * 7 * radius + 1
   return damageAfterArmor(raw, armor, toughness)
 }
 

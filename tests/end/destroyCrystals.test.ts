@@ -35,7 +35,7 @@ test('crystalsOnSpikes matches the end_crystal entities to the spikes they sit o
 
 test('explosionDamage: a crystal blast (power 6) at 3 blocks is lethal through diamond, nothing past 12 blocks', () => {
   // ServerExplosion: impact (1 - 3/12) = 0.75, (0.75² + 0.75) / 2 × 7 × 12 + 1 = 56.125, floored to 56
-  assert.strictEqual(explosionDamage(6, 3), 56)
+  assert.strictEqual(explosionDamage(6, 3), 56.125)
   assert.ok(explosionDamage(6, 3, 1, 20, 8) > 20)
   assert.strictEqual(explosionDamage(6, 12.5), 0)
   assert.strictEqual(explosionDamage(6, 3, 0), 1)
