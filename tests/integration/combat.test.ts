@@ -1,5 +1,5 @@
 // The combat skills and reflexes against a real 1.21.11 server (the tests/harness lockstep server and bot): a zombie
-// killed, a creeper survived, hunger eaten away, armor worn, a cow hunted, an end crystal shot, and an arrow's flight
+// killed, a creeper survived, hunger eaten away, armor worn, a cow hunted, beef cooked, an end crystal shot, and an arrow's flight
 // checked against the server's.
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert'
@@ -8,6 +8,7 @@ import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
 import { shoot } from '../../src/skills/shoot'
 import { hunt } from '../../src/skills/hunt'
+import { cookFood } from '../../src/skills/cookFood'
 import { simulateArrow } from '../../src/skills/arrow'
 import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 
@@ -133,6 +134,17 @@ describe('combat skills and reflexes on 1.21.11', { timeout: 15 * 60 * 1000 }, (
     const result = await hunt(bot, 'cow')
     assert.ok(result.killed)
     assert.ok((result.drops.beef ?? 0) >= 1, `drops ${JSON.stringify(result.drops)}`)
+  })
+
+  test('cook the beef in a furnace nearby', async () => {
+    await reset()
+    await give('beef', 3)
+    await give('coal', 1)
+    await server.command(`setblock 3 ${GROUND} 2 minecraft:furnace`)
+    await bot.waitForTicks(5)
+    const result = await cookFood(bot)
+    assert.deepStrictEqual(result.cooked, { cooked_beef: 3 })
+    assert.strictEqual(bot.inventory.count(bot.registry.itemsByName.cooked_beef.id, null), 3)
   })
 
   test('an end crystal on bedrock 20 blocks away is shot', async () => {
