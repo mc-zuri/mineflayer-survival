@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { collectBlock, columnHarvestTarget, COLUMN_PLANTS } from '../../src/skills/collectBlock'
+import { collectBlock, columnHarvestTarget, COLUMN_PLANTS, lavaBeside } from '../../src/skills/collectBlock'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
 // blocks by "x,y,z"; air elsewhere
@@ -88,4 +88,21 @@ test('collectBlock gives up after 3 targets in a row it can\'t get to (it used t
   bot.pathfinder = { isPathing: false, goto: async () => { trips++ }, cancel: async () => {}, world: {} }
   await assert.rejects(collectBlock(bot, { names: ['oak_log'], count: 1 }), (err: any) => err.code === 'NO_PATH')
   assert.strictEqual(trips, 3)
+})
+
+test('collectBlock passes over an ore with lava beside or over it (broken, it opens the lava onto the bot)', async () => {
+  const ores = [new Vec3(2, 40, 0), new Vec3(-3, 40, 0)]
+  const lookup = (pos: Vec3): { name: string } => ores.some(o => o.equals(pos)) ? { name: 'iron_ore' } : pos.equals(new Vec3(2, 41, 0)) ? { name: 'lava' } : { name: 'stone' }
+  assert.ok(lavaBeside(lookup, ores[0]))
+  assert.ok(!lavaBeside(lookup, ores[1]))
+  const bot = fakeBot({ position: new Vec3(0.5, 40, 0.5), world: (pos: Vec3) => lookup(pos).name })
+  bot.findBlocks = () => ores
+  // the one away from the lava is the one gone for
+  const targets: string[] = []
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: (block: any) => { targets.push(block.position.toString()); throw new Error('the test stops here') } }
+  await assert.rejects(collectBlock(bot, { names: ['iron_ore'], count: 1 }), /the test stops here/)
+  assert.deepStrictEqual(targets, [ores[1].toString()])
+  // with nothing but lava-touched ore: none found
+  bot.findBlocks = () => [ores[0]]
+  await assert.rejects(collectBlock(bot, { names: ['iron_ore'], count: 1 }), (err: any) => err.code === 'NOT_FOUND')
 })

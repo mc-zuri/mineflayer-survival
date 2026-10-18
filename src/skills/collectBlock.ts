@@ -32,6 +32,18 @@ export interface CollectBlockArgs {
   maxUnreachable?: number
   /** blocks of `names` never broken (the base's walls): their positions */
   exclude?: (pos: Vec3) => boolean
+  /**
+   * Pass over blocks of `names` with lava beside or over them (default true): broken, the block's cell opens to the
+   * lava (FlowingFluid spreads into it), and the bot that broke it stands next to it
+   */
+  avoidLava?: boolean
+}
+
+const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, 1, 0), new Vec3(0, -1, 0)]
+
+/** whether lava touches the block at `pos` (a side, above or below) */
+export function lavaBeside (lookup: (pos: Vec3) => { name: string } | null, pos: Vec3): boolean {
+  return SIDES.some(d => lookup(pos.plus(d))?.name === 'lava')
 }
 
 export interface CollectBlockResult {
@@ -117,8 +129,9 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       const target = keepBase && COLUMN_PLANTS.has(bot.blockAt(pos)?.name ?? '') ? columnHarvestTarget(p => bot.blockAt(p), pos) : pos
       if (target != null) targets.set(vecKey(target), target)
     }
+    const avoidLava = args.avoidLava !== false
     const found = [...targets.values()]
-      .filter(pos => !tried.has(vecKey(pos)) && args.exclude?.(pos) !== true)
+      .filter(pos => !tried.has(vecKey(pos)) && args.exclude?.(pos) !== true && !(avoidLava && lavaBeside(p => bot.blockAt(p), pos)))
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
     if (found.length === 0) return null
     tried.add(vecKey(found[0]))
