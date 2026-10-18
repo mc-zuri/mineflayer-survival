@@ -9,7 +9,7 @@ import { craft } from './craft'
 import { navigateToReach } from './navigate'
 import { placeBlock } from './placeBlock'
 import { findPlacementNear } from './placement'
-import { countItems, countsDelta, inventoryCounts, inventoryItems, itemId, settleInventory, waitUntil, type Block, type ItemCounts } from './util'
+import { countItems, countsDelta, inventoryCounts, itemId, settleInventory, waitUntil, type Block, type ItemCounts } from './util'
 
 /** AbstractFurnaceBlockEntity: a furnace's smelt takes 200 ticks (the recipe's cooking time) */
 export const SMELT_TICKS = 200
@@ -164,10 +164,12 @@ export async function smelt (bot: Bot, args: SmeltArgs, signal?: AbortSignal): P
       throw new SkillError('NO_SPACE', 'no room in the inventory for what was in the furnace', result())
     }
 
+    // what the furnace window reaches: the main slots and the hotbar, not the off hand (an item there can't be put in)
+    const inWindow = (name: string): number => window.items().filter(i => i.name === name).reduce((n, i) => n + i.count, 0)
     let loaded = window.inputItem()?.count ?? 0
     const load = async (): Promise<void> => {
       const room = 64 - (window.inputItem()?.count ?? 0)
-      const n = Math.min(count - loaded, room, countItems(bot, args.input))
+      const n = Math.min(count - loaded, room, inWindow(args.input))
       if (n > 0) {
         await window.putInput(itemId(bot, args.input), null, n)
         loaded += n
@@ -181,7 +183,7 @@ export async function smelt (bot: Bot, args: SmeltArgs, signal?: AbortSignal): P
       // AbstractFurnaceBlockEntity.serverTick: the fuel slot's next item lights when the burn runs out
       if (window.fuelItem() != null) return true
       const left = (count - smelted) * SMELT_TICKS - Math.max(0, fuelTicks - ticks)
-      const choice = chooseFuel(inventoryItems(bot), Math.max(left, SMELT_TICKS), args.fuel)
+      const choice = chooseFuel(window.items(), Math.max(left, SMELT_TICKS), args.fuel)
       if (choice == null) return false
       await window.putFuel(itemId(bot, choice.name), null, choice.count)
       fuel[choice.name] = (fuel[choice.name] ?? 0) + choice.count
