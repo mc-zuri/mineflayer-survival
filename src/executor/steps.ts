@@ -51,6 +51,9 @@ export type StepRunner<S extends PlanStep = PlanStep> = (step: S, ctx: StepConte
 export const SCAFFOLD_ITEMS = ['cobblestone', 'cobbled_deepslate', 'dirt']
 export const SCAFFOLD_BUFFER = 24
 
+/** the blocks a mine step climbs out of a mine for first */
+export const SURFACE_BLOCKS = /(_log|_leaves|^sand|^red_sand|^sugar_cane|^pumpkin|^melon|^cactus|^bamboo|^short_grass)$/
+
 /** how far under its starting level a mine step for a block that isn't an ore goes (stone, dirt, sand...) */
 export const SHALLOW_DEPTH = 8
 
@@ -143,6 +146,9 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
     }
     // none near the level: deeper after all
     if (!deep && findNear(bot, [...step.blocks, ...subs], SEARCH_RADIUS, exclude) == null && findNear(bot, step.blocks, SEARCH_RADIUS, ctx.protect) != null) deep = true
+    // what grows or lies on the surface (logs, sand) is got from up there: a log 24 blocks over a mine is a dig up
+    // through the rock, into whatever cave is in the way
+    if (shallow && SURFACE_BLOCKS.test(step.block)) await ensureSurface(bot, signal)
     const names = await findBlocks(bot, step.blocks, ctx, subs, exclude)
     const isSub = names !== step.blocks
     const left = isSub ? step.blockCount - substituted : Math.ceil((target - countItems(bot, step.item)) / perBlock - 1e-9)
@@ -183,16 +189,25 @@ export const runSmelt: StepRunner<SmeltStep> = async (step, ctx) => {
   const { bot, signal } = ctx
   const start = startCount(ctx, 'start', () => countItems(bot, step.item))
   const furnace = ctx.furnace != null && bot.entity.position.distanceTo(ctx.furnace) <= 48 ? ctx.furnace : undefined
-  // one kind of fuel the plan chose and the bot has enough of: that; else the skill's choice by preference
-  const fuel = step.fuel.length === 1 && countItems(bot, step.fuel[0].name) >= step.fuel[0].count ? step.fuel[0].name : undefined
+  // the fuels the plan chose, one after the other (it kept the planks a later craft needs out of them), then the
+  // skill's own choice by preference for what's left
+  const fuels: Array<string | undefined> = [...step.fuel.map(f => f.name).filter(n => countItems(bot, n) > 0), undefined]
   for (const input of step.inputs) {
-    const done = countItems(bot, step.item) - start
-    const n = Math.min(input.count, step.count - done, countItems(bot, input.name))
-    if (n <= 0) continue
-    const furnaceDistance = countItems(bot, 'furnace') > 0 ? NEAR_STATION : undefined
-    // a furnace drops nothing to a hand without a pickaxe: it stays where it was put then
-    const canPickUp = bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))
-    await smelt(bot, { input: input.name, count: n, fuel, furnace, furnaceDistance, pickUpFurnace: furnace == null && canPickUp }, signal)
+    for (const fuel of fuels) {
+      const done = countItems(bot, step.item) - start
+      const n = Math.min(input.count, step.count - done, countItems(bot, input.name))
+      if (n <= 0) break
+      if (fuel != null && countItems(bot, fuel) === 0) continue
+      const furnaceDistance = countItems(bot, 'furnace') > 0 ? NEAR_STATION : undefined
+      // a furnace drops nothing to a hand without a pickaxe: it stays where it was put then
+      const canPickUp = bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))
+      try {
+        await smelt(bot, { input: input.name, count: n, fuel, furnace, furnaceDistance, pickUpFurnace: furnace == null && canPickUp }, signal)
+      } catch (err) {
+        // out of this fuel: the next one
+        if (fuel == null || !TaskError.is(err, 'MISSING_ITEMS')) throw err
+      }
+    }
   }
   const gained = countItems(bot, step.item) - start
   if (gained < step.count) throw new SkillError('MISSING_ITEMS', `smelted ${gained} of ${step.count} ${step.item}`, { gained })

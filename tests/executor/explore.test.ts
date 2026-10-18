@@ -78,3 +78,9 @@ test('blockSubstitutes and mobSubstitutes: another wood, deepslate for stone, an
   assert.deepEqual(mobSubstitutes({ mob: 'cow', item: 'beef' }), ['pig', 'sheep', 'chicken', 'rabbit'])
   assert.deepEqual(mobSubstitutes({ mob: 'blaze', item: 'blaze_rod' }), [])
 })
+
+test('SURFACE_BLOCKS: what a mine step climbs out of a mine for', async () => {
+  const { SURFACE_BLOCKS } = await import('../../src/executor/steps')
+  for (const b of ['oak_log', 'birch_log', 'sand', 'sugar_cane', 'pumpkin']) assert.ok(SURFACE_BLOCKS.test(b), b)
+  for (const b of ['stone', 'iron_ore', 'deepslate', 'sandstone', 'gravel']) assert.ok(!SURFACE_BLOCKS.test(b), b)
+})

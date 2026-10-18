@@ -63,7 +63,7 @@ export interface PlayOptions {
   sleep?: boolean
   /** go back for the items when the bot died at most this many ticks ago (default 6000: ItemEntity's 5 min lifespan) */
   deathItemTicks?: number
-  /** a milestone failing this many times in a row stops play (default 3) */
+  /** a milestone failing this many times in a row stops play (default 5) */
   maxFailures?: number
   executor?: ExecutorOptions
   base?: Partial<Omit<BuildBaseOptions, 'executor'>>
@@ -228,7 +228,7 @@ export class Runner {
     const signal = this.options.signal
     const skip = new Set(this.options.skip ?? [])
     const failures = new Map<MilestoneId, number>()
-    const maxFailures = this.options.maxFailures ?? 3
+    const maxFailures = this.options.maxFailures ?? 5
     const stopped = (): boolean => signal?.aborted === true
     this.load()
     for (;;) {
