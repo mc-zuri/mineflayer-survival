@@ -5,7 +5,7 @@ import { fight, type FightOptions } from './fight'
 import { steerToward } from './steer'
 import { navigate } from './navigate'
 import { isAbort } from './errors'
-import { type Entity, metadataValue, TaskError, type SkillOptions, throwIfAborted, waitTicks } from './combatUtil'
+import { type Entity, isAlive, metadataValue, TaskError, type SkillOptions, throwIfAborted, waitTicks } from './combatUtil'
 
 export interface HuntOptions extends FightOptions {
   /** how far to look for the animal (default 64) */
@@ -77,6 +77,9 @@ export function nearestOfType (bot: Bot, names: string[], range: number): Entity
     if (e === bot.entity || e.name == null || !names.includes(e.name)) continue
     // babies drop nothing (AgeableMob.DATA_BABY_ID; Mob.shouldDropLoot)
     if (metadataValue(bot, e, 'baby') === true) continue
+    // one just killed lies there for its death animation (LivingEntity.tickDeath: 20 ticks at health 0), and the
+    // client may keep one it no longer hears of: fight gives up on those at once
+    if (!isAlive(bot, e)) continue
     const d = e.position.distanceTo(bot.entity.position)
     if (d < bestDistance) {
       best = e

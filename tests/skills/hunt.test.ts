@@ -29,3 +29,10 @@ test('hunt gives up with NO_PATH when the pathfinder makes no headway toward the
   for (let i = 0; i < 150; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
   await rejected
 })
+
+test('nearestOfType skips the dead (health 0, still there for the death animation)', () => {
+  const dead = entity({ name: 'cow', position: new Vec3(2, 64, 0), meta: { baby: false, health: 0 } })
+  const cow = entity({ name: 'cow', position: new Vec3(6, 64, 0), meta: { baby: false, health: 10 } })
+  const bot = fakeBot({ position: new Vec3(0, 64, 0), entities: [dead, cow] })
+  assert.strictEqual(nearestOfType(bot, ['cow'], 64), cow)
+})
