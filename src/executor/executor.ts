@@ -276,7 +276,10 @@ export class Executor {
         table: near && base?.table != null ? vec(base.table) : null,
         furnace: near && base != null && base.furnaces.length > 0 ? vec(base.furnaces[0]) : null,
         home: this.home(),
-        protect: base?.bounds != null ? inBox(base.bounds) : undefined
+        protect: base?.bounds != null ? inBox(base.bounds) : undefined,
+        // the logs for a new axe are cut with the worn one: handed back for a new axe, the plan for one started over
+        // 30 times and the milestone failed (seed 5)
+        replacingTools: this.replacing
       }
       return await runner(step, stepCtx)
     }, signal)

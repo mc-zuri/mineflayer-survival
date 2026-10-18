@@ -211,3 +211,25 @@ test('runMine: an ore more than ORE_DEPTH below its level is left (iron at y -29
   await assert.rejects(runMine(step, { bot, memory: new WorldMemory(), signal: new AbortController().signal, state: {}, log: () => {} } as any))
   assert.ok(targets.length > 0 && targets.every(t => t === ore.toString()), targets.join(' '))
 })
+
+test('runMine: a worn tool hands the step back for a new one, unless the step is part of making that one (replacingTools)', async () => {
+  const { runMine } = await import('../../src/executor/steps')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const registry = require('minecraft-data')('1.21.11')
+  const log = new Vec3(3, 64, 0)
+  const axe = item('stone_axe')
+  axe.durabilityUsed = registry.itemsByName.stone_axe.maxDurability - 4
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [axe], world: (pos: Vec3) => pos.equals(log) ? 'oak_log' : pos.y < 64 ? 'stone' : 'air' })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; b.harvestTools = registry.blocksByName[b.name].harvestTools; return b }
+  bot.findBlocks = () => [log]
+  const targets: string[] = []
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: (block: any) => { targets.push(block.position.toString()); throw new Error('the test stops here') } }
+  const step: any = { kind: 'mine', item: 'oak_log', count: 1, block: 'oak_log', blocks: ['oak_log'], blockCount: 1, tool: null, dimension: 'overworld' }
+  const ctx = (replacingTools: boolean): any => ({ bot, memory: new WorldMemory(), signal: new AbortController().signal, state: {}, log: () => {}, replacingTools })
+  assert.deepEqual(await runMine(step, ctx(false)), { gained: 0, replan: true })
+  assert.equal(targets.length, 0)
+  await assert.rejects(runMine(step, ctx(true)))
+  assert.ok(targets.length > 0, 'the log was never gone for')
+})

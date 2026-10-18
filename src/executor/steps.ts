@@ -37,6 +37,11 @@ export interface StepContext {
   home?: Vec3 | null
   /** blocks never mined (the base's shell): their positions */
   protect?: (pos: Vec3) => boolean
+  /**
+   * the step is part of making a new tool for one about to break (Executor.replaceWornTools): it works on with the
+   * worn one instead of handing back for a new one, which is what it is getting
+   */
+  replacingTools?: boolean
 }
 
 export interface StepOutcome {
@@ -149,7 +154,7 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
     const subs = blockSubstitutes(step)
     // the tool about to break: back to the executor, which makes another before the step goes on
     const kind = toolKindFor(bot.registry as any, step.block)
-    if (kind != null && wornOutTools(bot.inventory.items(), { minUses: MIN_TOOL_USES }).some(w => w.kind === kind)) {
+    if (ctx.replacingTools !== true && kind != null && wornOutTools(bot.inventory.items(), { minUses: MIN_TOOL_USES }).some(w => w.kind === kind)) {
       return { gained: countItems(bot, step.item) - start, replan: true }
     }
     // none near the level: deeper after all
