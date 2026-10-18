@@ -25,7 +25,7 @@ import { navigate, navigateNear } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
-import { MILESTONE_HANDLERS } from './milestones'
+import { MILESTONE_HANDLERS, harvestGrownFarms } from './milestones'
 import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 
@@ -325,7 +325,9 @@ export class Runner {
       if (restock != null) {
         try {
           this.log(`food low (${state.inventory.foodPoints()} points): getting more before going on`)
-          await this.executor.obtain(restock, signal)
+          // the renewable food first: the farm's harvest
+          await harvestGrownFarms(this.bot, this.executor, signal, this.log)
+          await this.executor.obtain(restockGoals(progressState(this.bot, this.memory), reachedIds) ?? [], signal)
         } catch (err) {
           if (stopped()) return this.stop('food', 'aborted', err)
           if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {

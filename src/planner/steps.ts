@@ -4,6 +4,7 @@ import type { Dimension, Located } from '../core/memory'
 import type { RegistryLike } from '../core/registry'
 import type { CraftRecipe } from './recipes'
 import { GOLD_ARMOR } from './sources'
+import { itemTags } from '../core/tags'
 
 export type Station = 'crafting_table' | 'furnace'
 
@@ -84,7 +85,20 @@ export interface FillStep extends StepBase {
   dimension: Dimension
 }
 
-export type PlanStep = MineStep | CraftStep | SmeltStep | KillStep | BarterStep | LootStep | FillStep
+/** sow a farm by water (a hoe, the seeds), and harvest it when grown: a crop's items, the seeds back */
+export interface FarmStep extends StepBase {
+  kind: 'farm'
+  /** the crop block (wheat, carrots, potatoes, beetroots) */
+  crop: string
+  /** what it is sown from */
+  seed: string
+  /** plots sown */
+  plots: number
+  /** harvests to make */
+  cycles: number
+}
+
+export type PlanStep = MineStep | CraftStep | SmeltStep | KillStep | BarterStep | LootStep | FillStep | FarmStep
 
 export interface CheckResult {
   ok: boolean
@@ -145,6 +159,10 @@ export function checkPlan (registry: RegistryLike, steps: readonly PlanStep[], s
         return take([step.pay])
       case 'fill':
         return take([{ name: 'bucket', count: step.count }])
+      case 'farm':
+        if (inv.countAny(itemTags(registry).resolve('#hoes')) === 0) return 'no hoe'
+        if (inv.count(step.seed) < step.plots) return `needs ${step.plots} ${step.seed}, has ${inv.count(step.seed)}`
+        return null
       case 'kill':
       case 'loot':
         return null

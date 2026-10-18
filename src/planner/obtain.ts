@@ -11,6 +11,7 @@ import {
   type BarterOffer, type BlockSource, type FluidSource, type MobSource, type SmeltingRecipe
 } from './sources'
 import { checkPlan, type PlanStep, type Station } from './steps'
+import { FARM_PLOTS, GROW_TICKS } from '../core/crops'
 
 export type StrategyKind = PlanStep['kind']
 
@@ -64,6 +65,11 @@ export interface ObtainOptions {
   findCost?: (target: FindTarget) => number | undefined
   /** only what the bot can get down a mine: no surface blocks (logs, sand, plants), no animals (the night's plans) */
   undergroundOnly?: boolean
+  /**
+   * ticks until a farm already sown with the crop can be harvested (0 when grown, plus the walk there), undefined when
+   * none is: such a farm costs that, not a sowing and a growing
+   */
+  farmCost?: (crop: string) => number | undefined
 }
 
 /** what findCost is asked about: a block or mob of a source, and the source's own estimate */
@@ -107,6 +113,20 @@ type Strategy = (s: State, path: string[], limit: number) => State | null
 
 /** blocks a mine step goes down for (ORE_LEVELS' ores, the deep stone): the rest is got at the surface */
 export const UNDERGROUND_BLOCKS = /(_ore|^ancient_debris|^deepslate|^obsidian)$/
+
+/** what a farm grows: the crop block, its seed item, the items a harvest gives a plot, the seeds beyond the replanting */
+export interface FarmCrop { crop: string, seed: string, perHarvest: number, seedsBack: number }
+export const FARM_CROPS: Readonly<Record<string, FarmCrop>> = {
+  // a grown wheat drops 1 wheat and 1 + binomial(3, 0.5714) seeds; carrots and potatoes 1 + binomial(3, 0.5714), one
+  // sown again; beetroots a beetroot and 1 + binomial(3, 0.5714) seeds (the crops' loot tables)
+  wheat: { crop: 'wheat', seed: 'wheat_seeds', perHarvest: 1, seedsBack: 1.7 },
+  carrot: { crop: 'carrots', seed: 'carrot', perHarvest: 1.7, seedsBack: 0 },
+  potato: { crop: 'potatoes', seed: 'potato', perHarvest: 1.7, seedsBack: 0 },
+  beetroot: { crop: 'beetroots', seed: 'beetroot_seeds', perHarvest: 1, seedsBack: 1.7 }
+}
+/** ticks to find water with ground by it, and to till and sow a plot */
+export const FARM_SETUP_TICKS = 300
+export const FARM_PLOT_TICKS = 40
 
 /** blocks a mine has besides its ores: what an undergroundOnly plan may mine */
 export const MINE_BLOCKS = /(_ore|^ancient_debris|^deepslate|^obsidian|^stone|^gravel|^dirt|^clay|^tuff|^andesite|^diorite|^granite)$/
@@ -315,6 +335,7 @@ export class Resolver {
     if (use('mine')) for (const b of this.blockSources.get(item) ?? []) out.push((s, p, l) => this.mine(s, b, item, n, p, l))
     if (use('fill')) { const f = this.fluids.get(item); if (f != null) out.push((s, p, l) => this.fill(s, f, n, p, l)) }
     if (use('kill') && this.opts.undergroundOnly !== true) for (const m of this.mobSources.get(item) ?? []) out.push((s, p, l) => this.kill(s, m, item, n, p, l))
+    if (use('farm') && this.opts.undergroundOnly !== true) { const f = FARM_CROPS[item]; if (f != null) out.push((s, p, l) => this.farm(s, f, item, n, p, l)) }
     if (use('barter')) { const o = this.barter.get(item); if (o != null) out.push((s, p, l) => this.trade(s, o, n, p, l)) }
     return out
   }
@@ -568,6 +589,28 @@ export class Resolver {
     t.dims.add('the_nether')
     const wear = GOLD_ARMOR.find(a => t.inv.has(a)) as string
     t.steps.push({ kind: 'barter', item: offer.item, count: n, pay: { name: 'gold_ingot', count: ingots }, wear, cost: own })
+    return t
+  }
+
+  /**
+   * A farm by water: a hoe and the plots' seeds, a sowing and GROW_TICKS a harvest (the seeds come back with it); a
+   * farm sown already costs what's left of its growing (farmCost). Dear by the clock, it's for when nothing nearer is.
+   */
+  private farm (s: State, src: FarmCrop, item: string, n: number, path: string[], limit: number): State | null {
+    const planted = this.opts.farmCost?.(src.crop)
+    const plots = Math.min(FARM_PLOTS, Math.max(1, Math.ceil(n / src.perHarvest)))
+    const cycles = Math.max(1, Math.ceil(n / (plots * src.perHarvest)))
+    const own = planted != null
+      ? planted + (cycles - 1) * GROW_TICKS
+      : FARM_SETUP_TICKS + plots * FARM_PLOT_TICKS + cycles * GROW_TICKS
+    s.cost += own
+    if (s.cost > limit) return null
+    const t = planted != null ? s : this.meet(s, [{ alts: this.alternatives('#hoes'), count: 1 }, { alts: [src.seed], count: plots }], path, limit)
+    if (t == null) return null
+    t.inv.add(item, n)
+    const extra = src.seedsBack > 0 && src.seed !== item ? [{ name: src.seed, count: Math.floor(src.seedsBack * plots * cycles) }] : []
+    for (const e of extra) t.inv.add(e.name, e.count)
+    t.steps.push({ kind: 'farm', item, count: n, crop: src.crop, seed: src.seed, plots: planted != null ? 0 : plots, cycles, cost: own, ...(extra.length > 0 ? { extra } : {}) })
     return t
   }
 

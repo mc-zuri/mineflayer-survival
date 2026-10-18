@@ -12,6 +12,11 @@ import { enterEnd, fightDragon, isInEnd, leaveEnd } from './end/skills'
 import { enchantGear } from './skills/enchant'
 import { countItems } from './skills/util'
 import { normalizeDimension } from './core/memory'
+import { TaskError } from './core/errors'
+import { FARM_PLOTS } from './core/crops'
+import { findFarmSite, knownFarms, plantFarm, rememberFarm, SEED_OF } from './skills/farm'
+import type { Executor } from './executor/executor'
+import { Vec3 } from 'vec3'
 
 const inNether = (bot: Bot): boolean => normalizeDimension(bot.game?.dimension) === 'the_nether'
 
@@ -78,8 +83,73 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
   await executor.task('out of the End', async (s) => await leaveEnd(bot, { signal: s }), signal)
 }
 
+/** what a farm's start may cost (a hoe and the seeds from grass) before it is left for later */
+export const FARM_START_TICKS = 2000
+
+/**
+ * Sows a farm of wheat by water near home when none is sown yet and its start is cheap (water within 24 blocks with
+ * ground by it, the hoe and seeds for FARM_START_TICKS or less): the renewable food of day 1, harvested when it has
+ * grown, while the hunt or the berries feed the bot now. Resolves whether one was sown.
+ */
+export async function startFarm (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
+  const dimension = normalizeDimension(bot.game?.dimension)
+  if (dimension !== 'overworld' || knownFarms(executor.memory, dimension).length > 0) return false
+  const home = executor.memory.base != null ? new Vec3(executor.memory.base.x, executor.memory.base.y, executor.memory.base.z) : bot.entity.position
+  const site = findFarmSite(pos => bot.blockAt(pos) as any, home, 24)
+  if (site == null) { log('no water with ground by it near: no farm yet'); return false }
+  const plots = Math.min(FARM_PLOTS, site.cells.length)
+  const requests = [{ item: '#hoes', count: 1 }, { item: 'wheat_seeds', count: plots }]
+  const plan = executor.plan(requests)
+  if (!plan.ok || plan.cost > FARM_START_TICKS) { log(`a farm would cost ${plan.ok ? plan.cost : 'no plan'} ticks to start: not now`); return false }
+  await executor.obtain(requests, signal)
+  const res = await executor.task('sow a farm', async (s) => await plantFarm(bot, { seed: 'wheat_seeds', center: site.water, plots, radius: 4 }, s), signal)
+  rememberFarm(executor.memory, res, Number((bot.time as any)?.age ?? 0), dimension)
+  log(`a farm of ${res.cells.length} wheat sown by the water at ${res.water.toString()}`)
+  return true
+}
+
+/** how far a grown farm is gone back to for its harvest when food is wanted */
+export const FARM_RANGE = 96
+
+/**
+ * The renewable food first: a farm the bot sowed that has grown (Executor.farmCost: nothing left to wait), within
+ * FARM_RANGE, harvested and sown again, and its wheat baked into bread. Resolves the bread made.
+ */
+export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const dimension = normalizeDimension(bot.game?.dimension)
+  let bread = 0
+  for (const farm of knownFarms(executor.memory, dimension)) {
+    const walk = bot.entity.position.distanceTo(farm.water)
+    const cost = executor.farmCost(farm.crop)
+    if (walk > FARM_RANGE || cost == null || cost > walk * 5 + 1) continue
+    const item = farm.crop === 'wheat' ? 'wheat' : farm.crop === 'beetroots' ? 'beetroot' : SEED_OF[farm.crop]
+    log(`the ${farm.crop} at ${farm.water.toString()} has grown: harvesting it`)
+    await executor.runStep({ kind: 'farm', item, count: farm.cells.length, crop: farm.crop, seed: SEED_OF[farm.crop], plots: 0, cycles: 1, cost }, signal)
+  }
+  const wheat = countItems(bot, 'wheat')
+  if (wheat >= 3) {
+    const before = countItems(bot, 'bread')
+    await executor.obtain([{ item: 'bread', count: before + Math.floor(wheat / 3) }], signal)
+    bread = countItems(bot, 'bread') - before
+  }
+  return bread
+}
+
+/** food: a grown farm harvested and the farm started (the renewable food), then the points from the cheapest source */
+export const foodHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {
+  try {
+    await harvestGrownFarms(bot, executor, signal, log)
+    await startFarm(bot, executor, signal, log)
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`no farm: ${(err as Error).message}`)
+  }
+  await executor.obtain(milestone.goals(state), signal)
+}
+
 /** the handlers play uses unless bot.survival.handlers or its options name others */
 export const MILESTONE_HANDLERS = {
+  food: foodHandler,
   enchanting: enchantingHandler,
   nether: netherHandler,
   eyes: eyesHandler,

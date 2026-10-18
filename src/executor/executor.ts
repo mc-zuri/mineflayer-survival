@@ -22,6 +22,9 @@ import { wornOutTools } from './durability'
 import { defaultKeep, junkToToss, splitInventory, type KeepRule } from './keep'
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
+import { farmCells, grownPlots, knownFarms } from '../skills/farm'
+import { GROW_TICKS } from '../core/crops'
+import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
 
 /** how far from the bot a failed mine step's remembered blocks are forgotten: all of them in the dimension */
 export const FORGET_RADIUS = Infinity
@@ -72,6 +75,7 @@ export function describeStep (step: PlanStep): string {
     case 'mine': return `mine ${step.count} ${step.item} (${step.blockCount} ${step.block})`
     case 'kill': return `kill ${step.kills} ${step.mob} for ${step.count} ${step.item}`
     case 'smelt': return `smelt ${step.count} ${step.item}`
+    case 'farm': return `farm ${step.count} ${step.item} (${step.plots > 0 ? `${step.plots} plots sown, ` : ''}${step.cycles} harvests)`
     case 'loot': return `loot ${step.count} ${step.item} at ${step.from.x} ${step.from.y} ${step.from.z}`
     default: return `${step.kind} ${step.count} ${step.item}`
   }
@@ -177,7 +181,8 @@ export class Executor {
       position: this.bot.entity.position,
       dimension: this.bot.game?.dimension,
       exclude: this.options.exclude,
-      findCost: t => this.sightings.cost(t)
+      findCost: t => this.sightings.cost(t),
+      farmCost: crop => this.farmCost(crop)
     })
   }
 
@@ -252,6 +257,20 @@ export class Executor {
     const known = this.memory.findBlocks(step.blocks, { dimension, near: this.bot.entity.position, maxDistance: FORGET_RADIUS, count: 256 })
     for (const b of known) this.memory.forgetBlock(b, dimension)
     if (known.length > 0) this.log(`forgot ${known.length} remembered ${step.blocks.join(', ')} after the step failed`)
+  }
+
+  /**
+   * Ticks until the farm of a crop the bot sowed can be harvested, and the walk there: none left once half its plots
+   * have grown (as seen), else what's left of GROW_TICKS since the sowing; undefined with no such farm
+   */
+  farmCost (crop: string): number | undefined {
+    const farm = knownFarms(this.memory, normalizeDimension(this.bot.game?.dimension)).find(f => f.crop === crop)
+    if (farm == null) return undefined
+    const walk = Math.ceil(this.bot.entity.position.distanceTo(farm.water) * WALK_TICKS_PER_BLOCK)
+    const cells = farmCells(farm)
+    if (typeof this.bot.blockAt === 'function' && grownPlots(p => this.bot.blockAt(p) as any, cells, crop).length * 2 >= cells.length) return walk
+    const age = Number((this.bot.time as any)?.age ?? 0)
+    return walk + Math.max(0, farm.sown + GROW_TICKS - age)
   }
 
   /**

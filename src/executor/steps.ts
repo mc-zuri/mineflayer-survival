@@ -6,7 +6,8 @@ import { Vec3 } from 'vec3'
 import { TaskError } from '../core/errors'
 import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
-import type { CraftStep, FillStep, KillStep, LootStep, MineStep, PlanStep, SmeltStep } from '../planner/steps'
+import type { CraftStep, FarmStep, FillStep, KillStep, LootStep, MineStep, PlanStep, SmeltStep } from '../planner/steps'
+import { farmCells, grownPlots, harvestFarm, knownFarms, plantFarm, rememberFarm } from '../skills/farm'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { craft } from '../skills/craft'
@@ -17,7 +18,7 @@ import { hunt, nearestOfType } from '../skills/hunt'
 import type { Entity } from '../skills/combatUtil'
 import { navigate, navigateNear } from '../skills/navigate'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
-import { countItems, trace } from '../skills/util'
+import { countItems, trace, waitUntil } from '../skills/util'
 import { findPlacementNear } from '../skills/placement'
 import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, onTheSurface, openSky, oreLevel, unstick } from './explore'
 import { toolKindFor, wornOutTools } from './durability'
@@ -411,6 +412,38 @@ export const runFill: StepRunner<FillStep> = async (step, ctx) => {
   return { gained: countItems(bot, step.item) - start }
 }
 
+/** ticks a farm step waits at its farm for half the plots to grow before it harvests what has */
+export const FARM_WAIT_TICKS = 2400
+
+/**
+ * A farm step: with no farm of its crop known, one is sown by water near home (the hoe and seeds the plan got) and
+ * noted, and the step hands back (replan): the growing is the next plans', which go for nearer food meanwhile and come
+ * back when the farm costs less than they do. With one known, the bot goes to it, waits a while for the crops, and
+ * harvests the grown ones, each plot sown again.
+ */
+export const runFarm: StepRunner<FarmStep> = async (step, ctx) => {
+  const { bot, signal } = ctx
+  const dimension = dimensionOf(bot)
+  const item = step.item
+  const start = startCount(ctx, 'start', () => countItems(bot, item))
+  const farm = knownFarms(ctx.memory, dimension).find(f => f.crop === step.crop)
+  if (farm == null) {
+    const res = await plantFarm(bot, { seed: step.seed, center: ctx.home ?? undefined, plots: step.plots }, signal)
+    rememberFarm(ctx.memory, res, Number((bot.time as any)?.age ?? 0), dimension)
+    ctx.log(`a farm of ${res.cells.length} ${res.crop} sown by the water at ${res.water.toString()}`)
+    return { gained: countItems(bot, item) - start, replan: true }
+  }
+  const cells = farmCells(farm)
+  await navigateNear(bot, farm.water, 3, signal)
+  const lookup = (p: Vec3): any => bot.blockAt(p)
+  await waitUntil(bot, () => grownPlots(lookup, cells, farm.crop).length * 2 >= cells.length, FARM_WAIT_TICKS, signal)
+  const got = await harvestFarm(bot, { cells, crop: farm.crop }, signal)
+  ctx.log(`harvested the ${farm.crop}: ${Object.entries(got).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing grown'}`)
+  // sown again: the farm grows from now
+  rememberFarm(ctx.memory, { water: farm.water, cells, crop: farm.crop }, Number((bot.time as any)?.age ?? 0), dimension)
+  return { gained: countItems(bot, item) - start, replan: true }
+}
+
 /** bartering with piglins is the nether skills' (not wired yet): the plan has to do without it */
 export const runBarter: StepRunner = async (step) => {
   throw new TaskError('FAILED', `bartering for ${step.item} is not wired yet`)
@@ -423,5 +456,6 @@ export const DEFAULT_RUNNERS: { [K in PlanStep['kind']]: StepRunner<Extract<Plan
   kill: runKill,
   loot: runLoot,
   fill: runFill,
-  barter: runBarter
+  barter: runBarter,
+  farm: runFarm
 }

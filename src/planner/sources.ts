@@ -83,7 +83,10 @@ export const BLOCK_SOURCES: BlockSource[] = [
   block('deepslate', 'cobbled_deepslate', 900, 6),
   block('grass_block', 'dirt', 5, 5),
   block('dirt', 'dirt', 10, 5),
+  // grass and ferns drop wheat seeds 1 time in 8 without shears (blocks/short_grass, fern; a tall one from its lower half)
   block('short_grass', [{ item: 'wheat_seeds', count: 0.125 }], 10, 3),
+  block('tall_grass', [{ item: 'wheat_seeds', count: 0.125 }], 40, 3),
+  block('fern', [{ item: 'wheat_seeds', count: 0.125 }], 200, 3),
   block('sand', 'sand', 300, 5),
   block('red_sand', 'red_sand', 3000, 5),
   block('gravel', [{ item: 'gravel', count: 0.9 }, { item: 'flint', count: 0.1 }], 200, 8),
