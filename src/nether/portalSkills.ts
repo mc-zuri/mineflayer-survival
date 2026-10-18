@@ -22,6 +22,14 @@ import {
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
 
 /** the world as the portal plans read it: mineflayer's blocks, with their state as properties */
+/**
+ * A findBlock matcher for a lava source outside the frame's cells (`x,y,z` keys). findBlocks first asks it about each
+ * section's palette with blocks that have no position: those match on the block alone.
+ */
+export function otherLavaSource (frameCells: ReadonlySet<string>): (b: any) => boolean {
+  return b => isSource(b, 'lava') && (b.position == null || !frameCells.has(`${String(b.position.x)},${String(b.position.y)},${String(b.position.z)}`))
+}
+
 export function blockGetter (bot: Bot): BlockGetter {
   return (pos: Pos) => {
     const block = bot.blockAt(v3(pos))
@@ -243,7 +251,7 @@ async function castStep (bot: Bot, step: CastStep, frameCells: Set<string>, getB
       let pos = v3(step.pos)
       // the planned source can be gone (taken, or turned by water); any other source of the pool does
       if (!isSource(bot.blockAt(pos), 'lava')) {
-        const other = bot.findBlock({ matching: (b: any) => isSource(b, 'lava') && !frameCells.has(`${String(b.position.x)},${String(b.position.y)},${String(b.position.z)}`), maxDistance: 24 })
+        const other = bot.findBlock({ matching: otherLavaSource(frameCells), maxDistance: 24 })
         if (other == null) throw new SkillError('NOT_FOUND', 'no lava source left to fill the bucket from')
         pos = other.position
       }

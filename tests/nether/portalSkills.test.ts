@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import type { Pos } from '../../src/core/memory'
 import { checkPortalFrame, portalFrame, type BlockInfo } from '../../src/nether/portal'
-import { choosePortalSite, frameBuildOrder, portalEntrance } from '../../src/nether/portalSkills'
+import { choosePortalSite, frameBuildOrder, otherLavaSource, portalEntrance } from '../../src/nether/portalSkills'
 import { portalLinkOf, portalNote } from '../../src/nether/portalTravel'
 
 const k = (p: Pos): string => `${p.x},${p.y},${p.z}`
@@ -43,6 +43,15 @@ test('choosePortalSite: flat clear ground near the bot, not over a hole or into 
   // the entrance is the inside's bottom middle
   const e = portalEntrance(frame)
   assert.equal(e.y, 65)
+})
+
+test('otherLavaSource: a source outside the frame; a palette block (no position) matches on the block alone', () => {
+  const source = (position?: Vec3): any => ({ name: 'lava', getProperties: () => ({ level: 0 }), position })
+  const match = otherLavaSource(new Set(['1,2,3']))
+  assert.equal(match(source()), true)
+  assert.equal(match(source(new Vec3(1, 2, 3))), false)
+  assert.equal(match(source(new Vec3(4, 2, 3))), true)
+  assert.equal(match({ name: 'lava', getProperties: () => ({ level: 2 }) }), false)
 })
 
 test('portal notes keep the link to the other side', () => {
