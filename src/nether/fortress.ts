@@ -2,6 +2,9 @@ import type { Pos } from '../core/memory'
 import { NETHER_COMPLEXES, getPotentialStructureChunk, selectStructure, type RandomSpreadPlacement } from '../worldgen/placement'
 import type { Seed } from '../worldgen/random'
 
+// The nether complexes (placement, the fortress or bastion roll, bastions never in basalt deltas) and the fortress pieces
+// are the same in 1.21.11 and 26.3.
+
 /** blocks only a nether fortress is built of (StructurePieceType NETHER_FORTRESS pieces: NetherFortressPieces) */
 export const FORTRESS_BLOCKS = ['nether_bricks', 'nether_brick_fence', 'nether_brick_stairs']
 /** NetherFortressStructure: the start piece is at chunk block (2, 64, 2), then the whole fortress is moved into y 48-70 */

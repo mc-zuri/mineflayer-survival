@@ -1,6 +1,10 @@
 import type { Pos } from '../core/memory'
 
-/** EnderDragonPhase ids, in the order EnderDragonPhase.create numbers them (1.21.11) */
+/**
+ * EnderDragonPhase ids, in the order EnderDragonPhase.create numbers them (1.21.11 and 26.3). The same in both too: the
+ * parts' sizes and places, the sitting phases' timers, the 25% sitting damage, the breath's cloud. 26.3 hurts the neck
+ * as the head (neckTakesFullDamage) and no longer knocks a perched dragon back (EnderDragon.knockback).
+ */
 export const DRAGON_PHASES = [
   'holding_pattern', 'strafe_player', 'landing_approach', 'landing', 'takeoff',
   'sitting_flaming', 'sitting_scanning', 'sitting_attacking', 'charging_player', 'dying', 'hover'

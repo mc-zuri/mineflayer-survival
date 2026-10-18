@@ -35,7 +35,7 @@ export function signalTo (position: Vec, structure: Vec): Vec {
   return { ...structure }
 }
 
-/** EyeOfEnder.updateDeltaMovement (1.21.11): steer the horizontal speed towards the target, ease the vertical one */
+/** EyeOfEnder.updateDeltaMovement (1.21.11 and 26.3): steer the horizontal speed towards the target, ease the vertical one */
 export function updateDeltaMovement (delta: Vec, position: Vec, target: Vec): Vec {
   const lx = target.x - position.x
   const lz = target.z - position.z

@@ -20,7 +20,7 @@ export interface StructureSet<P> {
   structures: StructureSelectionEntry[]
 }
 
-/** data/minecraft/worldgen/structure_set/nether_complexes.json (1.21.11) */
+/** data/minecraft/worldgen/structure_set/nether_complexes.json (1.21.11; the same in 26.3) */
 export const NETHER_COMPLEXES: StructureSet<RandomSpreadPlacement> = {
   placement: { spacing: 27, separation: 4, salt: 30084232, spreadType: 'linear' },
   structures: [{ structure: 'fortress', weight: 2 }, { structure: 'bastion_remnant', weight: 3 }]
@@ -33,7 +33,7 @@ export interface ConcentricRingsPlacement {
   count: number
 }
 
-/** data/minecraft/worldgen/structure_set/strongholds.json (1.21.11) */
+/** data/minecraft/worldgen/structure_set/strongholds.json (1.21.11; the same in 26.3) */
 export const STRONGHOLDS: StructureSet<ConcentricRingsPlacement> = {
   placement: { distance: 32, spread: 3, count: 128 },
   structures: [{ structure: 'stronghold', weight: 1 }]
@@ -107,6 +107,10 @@ export interface RingPosition extends ChunkXZ {
  * ChunkGeneratorStructureState.generateRingPositions, before the biome snap: vanilla then moves
  * each chunk to a preferred biome (#stronghold_biased_to) found within 112 blocks of the chunk's
  * middle, which needs the biome source, so the true chunk can be up to 7 chunks off.
+ *
+ * The same in 26.3: the rings are still around 0,0 (its new dimension origin, the spawn chunk, is read only by the
+ * dimension_origin placement no vanilla structure set uses), and RandomSpreadStructurePlacement doesn't offset by it
+ * either. #stronghold_biased_to has 26.3's sulfur_caves too, which can move the snapped chunk on some seeds.
  */
 export function ringPositions (placement: ConcentricRingsPlacement, levelSeed: Seed): RingPosition[] {
   const { distance: i, count: j } = placement

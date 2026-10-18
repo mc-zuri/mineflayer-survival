@@ -1,6 +1,10 @@
 /**
  * Vanilla's seeded randomness, ported bit for bit so world-seed math (structure placement,
  * end spikes, stronghold rings) gives the server's answers. Java longs are BigInts here.
+ *
+ * The same in 1.21.11 and 26.3: LegacyRandomSource and BitRandomSource, WorldgenRandom's large feature seeds and salts,
+ * Util.shuffle. (26.3's RandomSource.createThreadLocalInstance, which some of it now uses, is a SingleThreadedRandomSource:
+ * the same LCG.)
  */
 
 export type Seed = bigint | number | string

@@ -3,7 +3,8 @@ import type { Pos } from '../core/memory'
 /**
  * Nether portal frames, and casting one from lava without a diamond pickaxe.
  *
- * PortalShape wants an obsidian rectangle round an inside 2-21 wide and 3-21 tall that holds
+ * PortalShape (the same in 26.3, whose #nether_portal_frame holds only obsidian) wants an obsidian rectangle round an
+ * inside 2-21 wide and 3-21 tall that holds
  * only air, fire or portal blocks; the corners can be anything. A bucket of lava poured into a
  * frame cell turns to obsidian the moment water touches it from above or the side
  * (LiquidBlock.shouldSpreadLiquid, called from neighborChanged: a lava source next to water,

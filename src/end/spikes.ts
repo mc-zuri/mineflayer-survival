@@ -1,6 +1,9 @@
 import type { Pos } from '../core/memory'
 import { LegacyRandomSource, floor, shuffledRange, toLong, type Seed } from '../worldgen/random'
 
+// SpikeFeature in 1.21.11, EndSpikeFeature in 26.3 (its SpikeFeature is a new, unrelated feature): the same layout,
+// radii, heights, cages and crystals from the same seed. The exit portal (EndPodiumFeature) is the same too.
+
 /** SpikeFeature.NUMBER_OF_SPIKES */
 export const NUMBER_OF_SPIKES = 10
 /** SpikeFeature.SPIKE_DISTANCE: the spikes' centers are on this circle around 0,0 */
