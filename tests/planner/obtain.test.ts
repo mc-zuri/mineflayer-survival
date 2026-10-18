@@ -264,3 +264,15 @@ test('every source names blocks and items of the 1.21.11 registry (but the popla
   for (const m of MOB_SOURCES) for (const d of m.drops) assert.ok(registry.itemsByName[d.item] != null, `${m.mob} ${d.item}`)
   for (const s of SMELTING) assert.ok(registry.itemsByName[s.output] != null, s.output)
 })
+
+test('the logs a plan burns and crafts are cut before the trip down for its ore', () => {
+  const plan = obtainAll(registry, [{ item: 'iron_pickaxe', count: 1 }, { item: 'shield', count: 1 }, { item: 'bucket', count: 1 }], { inventory: { stone_pickaxe: 1, stone_axe: 1, furnace: 1, crafting_table: 1 } })
+  assert.equal(plan.ok, true)
+  assert.equal(checkPlan(registry, plan.steps, { stone_pickaxe: 1, stone_axe: 1, furnace: 1, crafting_table: 1 }).ok, true)
+  const logs = indexOf(plan.steps, s => s.kind === 'mine' && s.item.endsWith('_log'))
+  const iron = indexOf(plan.steps, s => s.kind === 'mine' && s.item === 'raw_iron')
+  assert.ok(logs < iron, plan.steps.map(s => `${s.kind} ${s.item}`).join(', '))
+  // the wood for the first pickaxe still comes before the stone it mines
+  const fresh = obtain(registry, 'stone_pickaxe', 1)
+  assert.equal(checkPlan(registry, fresh.steps, {}).ok, true)
+})

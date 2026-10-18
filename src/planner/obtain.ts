@@ -103,6 +103,9 @@ function clone (s: State): State {
 
 type Strategy = (s: State, path: string[], limit: number) => State | null
 
+/** blocks a mine step goes down for (ORE_LEVELS' ores, the deep stone): the rest is got at the surface */
+export const UNDERGROUND_BLOCKS = /(_ore|^ancient_debris|^deepslate|^obsidian)$/
+
 const PREFERRED_WOOD = ['oak_', 'birch_', 'spruce_']
 
 /**
@@ -195,6 +198,25 @@ export class Resolver {
           break
         }
       }
+    }
+    return this.surfaceFirst(out, start, stations)
+  }
+
+  /**
+   * Moves what is mined at the surface (logs for fuel and sticks, sand, stone) before the first trip down for ore,
+   * where the plan still checks: the iron plan cut its logs after its 33 raw iron, a climb back up from y 16 (17000
+   * ticks for one log on seed 1234567890, a staircase dug up with a wooden pickaxe) and the way down again.
+   */
+  private surfaceFirst (steps: PlanStep[], start: Inventory, stations: readonly Station[]): PlanStep[] {
+    let out = steps
+    const deep = (s: PlanStep): boolean => s.kind === 'mine' && UNDERGROUND_BLOCKS.test(s.block)
+    for (let i = 0; i < out.length; i++) {
+      const s = out[i]
+      if (s.kind !== 'mine' || deep(s)) continue
+      const at = out.findIndex(deep)
+      if (at < 0 || at >= i) continue
+      const candidate = [...out.slice(0, at), s, ...out.slice(at, i), ...out.slice(i + 1)]
+      if (checkPlan(this.registry, candidate, start, stations).ok) out = candidate
     }
     return out
   }
