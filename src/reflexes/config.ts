@@ -135,7 +135,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
     fleeUnarmed: false,
     shootCreepersFrom: 5,
     ignore: ['enderman', 'zombified_piglin', 'piglin', 'piglin_brute', 'ender_dragon', 'wither', 'warden', 'shulker', 'ghast', 'happy_ghast'],
-    retaliate: ['enderman', 'zombified_piglin', 'piglin', 'piglin_brute'],
+    retaliate: ['enderman', 'zombified_piglin', 'piglin', 'piglin_brute', 'polar_bear', 'wolf', 'bee', 'llama', 'trader_llama', 'panda', 'goat', 'dolphin'],
     retaliateTicks: 400,
     fightTicks: 600,
     priority: 60

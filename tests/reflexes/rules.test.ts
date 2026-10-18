@@ -264,3 +264,13 @@ test('armor reflex: better armor in the bag goes on before the fight with the zo
   assert.ok(DEFAULT_REFLEX_CONFIG.armor.priority > DEFAULT_REFLEX_CONFIG.hostiles.priority)
   engine.stop()
 })
+
+test('hostiles reflex: a neutral animal that hurt the bot (a polar bear by its cub) is fought back; let be before', () => {
+  const bear = entity({ name: 'polar_bear', position: at(2) })
+  const hurtBy = (attacker: any) => (e: ReflexEngine): void => { (e as any).onHurt((e as any).bot.entity, attacker) }
+  assert.strictEqual(check(hostilesReflex, { entities: [bear], items: [item('stone_sword')] }), null)
+  assert.strictEqual(check(hostilesReflex, { entities: [bear], items: [item('stone_sword')] }, {}, hurtBy(bear)), 'fight polar_bear')
+  // a cow is never fought, hurt or not (nothing hurts like that)
+  const cow = entity({ name: 'cow', position: at(2) })
+  assert.strictEqual(check(hostilesReflex, { entities: [cow], items: [item('stone_sword')] }, {}, hurtBy(cow)), null)
+})

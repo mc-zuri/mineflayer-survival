@@ -63,6 +63,13 @@ export class ReflexEngine {
 
   sink: TaskSink | undefined
 
+  /** a mob of the retaliate list (not a hostile) that hurt the bot within retaliateTicks */
+  private provokedNeutral (e: { id: number, name?: string }): boolean {
+    if (!this.config.hostiles.retaliate.includes(e.name ?? '')) return false
+    const at = this.attackers.get(e.id)
+    return at != null && this.tick - at <= this.config.hostiles.retaliateTicks
+  }
+
   /** what the reflexes see now */
   context (): ReflexContext {
     const bot = this.bot
@@ -70,7 +77,9 @@ export class ReflexEngine {
     const scan = this.config.combat.scanRange
     const hostiles = Object.values(bot.entities)
       // a mob killed stays in the world for its death animation (LivingEntity.tickDeath, 20 ticks) at health 0: no threat
-      .filter(e => isHostile(bot, e) && isAlive(bot, e) && e.position.distanceTo(pos) <= scan)
+      // and a neutral mob that hurt the bot lately (a polar bear by its cub, a wolf hit by mistake), to be fought back:
+      // on seed 4 a polar bear killed the bot, which never looked at it, not being a hostile
+      .filter(e => (isHostile(bot, e) || this.provokedNeutral(e)) && isAlive(bot, e) && e.position.distanceTo(pos) <= scan)
       .sort((a, b) => a.position.distanceTo(pos) - b.position.distanceTo(pos))
     const ticksSinceHurt = this.tick - this.lastHurtTick
     const inCombat = ticksSinceHurt < this.config.combat.hurtTicks || hostiles.some(e => e.position.distanceTo(pos) <= this.config.combat.range)
