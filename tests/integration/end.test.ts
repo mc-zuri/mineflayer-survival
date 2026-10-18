@@ -113,7 +113,9 @@ describe('the End on 1.21.11: crystals, the dragon at full health, the exit', { 
       'item replace entity survivor armor.head with diamond_helmet', 'item replace entity survivor armor.chest with diamond_chestplate',
       'item replace entity survivor armor.legs with diamond_leggings', 'item replace entity survivor armor.feet with diamond_boots'])
     await toTheIsland(server, bot)
-    assert.strictEqual(Object.values(bot.entities).filter(e => e.name === 'end_crystal').length, 10)
+    // the spikes' chunks come in over the first ticks, and their crystals with them
+    const crystals = (): number => Object.values(bot.entities).filter(e => e.name === 'end_crystal').length
+    assert.ok(await waitFor(bot, () => crystals() === 10, 400), `${crystals()} crystals seen`)
     const result = await timed(t, bot, 'destroyCrystals', async () => await destroyCrystals(bot, { seed: parseSeed(SEED) }))
     assert.deepStrictEqual(result.remaining, [])
     assert.strictEqual(new Set(result.destroyed).size, 10)
