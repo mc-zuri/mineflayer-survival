@@ -10,34 +10,10 @@ import { navigateToReach } from './navigate'
 import { placeBlock } from './placeBlock'
 import { findPlacementNear } from './placement'
 import { countItems, countsDelta, inventoryCounts, itemId, settleInventory, waitUntil, type Block, type ItemCounts } from './util'
+import { burnTicks, SMELT_TICKS } from '../core/items'
 
-/** AbstractFurnaceBlockEntity: a furnace's smelt takes 200 ticks (the recipe's cooking time) */
-export const SMELT_TICKS = 200
-
-/**
- * Burn ticks of the fuels the bot burns, as FuelValues.vanillaBurnTimes gives them (1.21.2+; the same values as
- * AbstractFurnaceBlockEntity.getFuel before). The nether woods (crimson, warped) don't burn.
- */
-export function burnTicks (name: string): number {
-  if (/^(crimson|warped)_/.test(name)) return 0
-  switch (name) {
-    case 'lava_bucket': return 20000
-    case 'coal_block': return 16000
-    case 'dried_kelp_block': return 4001
-    case 'blaze_rod': return 2400
-    case 'coal': case 'charcoal': return 1600
-    case 'stick': case 'bowl': case 'dead_bush': case 'azalea': case 'flowering_azalea': return 100
-    case 'bamboo': case 'scaffolding': return 50
-    case 'crafting_table': case 'chest': case 'trapped_chest': case 'barrel': case 'bookshelf': case 'ladder': return 300
-  }
-  if (/_(log|wood|planks|stem|hyphae)$/.test(name) || name === 'bamboo_block' || name === 'stripped_bamboo_block' || name === 'bamboo_mosaic') return 300
-  if (/_(stairs|fence|fence_gate|pressure_plate|trapdoor)$/.test(name) && /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|bamboo)_/.test(name)) return 300
-  if (/_slab$/.test(name) && /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|bamboo)_/.test(name)) return 150
-  if (/_sapling$/.test(name) || name === 'mangrove_propagule') return 100
-  if (/_wool$/.test(name)) return 100
-  if (/_carpet$/.test(name)) return 67
-  return 0
-}
+// AbstractFurnaceBlockEntity's cook time and the furnace burn times (FuelValues), one table for the planner and the skill
+export { SMELT_TICKS, burnTicks }
 
 /**
  * Fuels the bot burns, the ones it would rather keep last: coal first, then wood it has a use for only as wood (planks,

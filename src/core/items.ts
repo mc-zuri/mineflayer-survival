@@ -48,7 +48,17 @@ const FIXED_BURN: Record<string, number> = {
   azalea: 100,
   flowering_azalea: 100,
   bamboo: 50,
-  scaffolding: 50
+  scaffolding: 50,
+  wooden_spear: 200,
+  loom: 300,
+  barrel: 300,
+  cartography_table: 300,
+  fletching_table: 300,
+  smithing_table: 300,
+  composter: 300,
+  short_dry_grass: 100,
+  tall_dry_grass: 100,
+  leaf_litter: 100
 }
 
 /** wooden item suffix → burn ticks, for every wood family that burns */
@@ -65,6 +75,7 @@ const WOOD_SUFFIX_BURN: Array<[string, number]> = [
   ['_pressure_plate', 300],
   ['_fence_gate', 300],
   ['_fence', 300],
+  ['_shelf', 300],
   ['_sign', 200],
   ['_door', 200],
   ['_button', 100],
