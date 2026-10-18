@@ -20,7 +20,7 @@ import { ensureSurface, exploreForBlocks, exploreSurface, findNear, oreLevel, un
 import { toolKindFor, wornOutTools } from './durability'
 
 /** a mine step hands back to the executor when its tool has this many uses left (the executor's default too) */
-export const MIN_TOOL_USES = 12
+export const MIN_TOOL_USES = 24
 
 export interface StepContext {
   bot: Bot
@@ -190,7 +190,9 @@ export const runSmelt: StepRunner<SmeltStep> = async (step, ctx) => {
     const n = Math.min(input.count, step.count - done, countItems(bot, input.name))
     if (n <= 0) continue
     const furnaceDistance = countItems(bot, 'furnace') > 0 ? NEAR_STATION : undefined
-    await smelt(bot, { input: input.name, count: n, fuel, furnace, furnaceDistance, pickUpFurnace: furnace == null }, signal)
+    // a furnace drops nothing to a hand without a pickaxe: it stays where it was put then
+    const canPickUp = bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))
+    await smelt(bot, { input: input.name, count: n, fuel, furnace, furnaceDistance, pickUpFurnace: furnace == null && canPickUp }, signal)
   }
   const gained = countItems(bot, step.item) - start
   if (gained < step.count) throw new SkillError('MISSING_ITEMS', `smelted ${gained} of ${step.count} ${step.item}`, { gained })

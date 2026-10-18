@@ -148,3 +148,9 @@ test('requestsMet, neededItems and ownedInventory', () => {
   assert.equal(requestsMet(inv, [{ item: 'furnace', count: 1, optional: true }]), true)
   assert.deepEqual(neededItems([{ item: ['iron_pickaxe'], count: 1 }, { item: '#planks', count: 4 }]), { iron_pickaxe: 1 })
 })
+
+test('the executor makes a new tool at the uses left a mine step hands back at (else the step would hand back for good)', async () => {
+  const { MIN_TOOL_USES } = await import('../../src/executor/steps')
+  const ex = new Executor(fakeBot())
+  assert.equal(ex.options.minToolUses, MIN_TOOL_USES)
+})

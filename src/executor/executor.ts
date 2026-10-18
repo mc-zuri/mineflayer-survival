@@ -20,7 +20,7 @@ import { isAbort } from '../skills/errors'
 import { emptySlots, settleInventory, trace } from '../skills/util'
 import { wornOutTools } from './durability'
 import { defaultKeep, junkToToss, splitInventory, type KeepRule } from './keep'
-import { DEFAULT_RUNNERS, type StepContext, type StepOutcome, type StepRunner } from './steps'
+import { DEFAULT_RUNNERS, MIN_TOOL_USES, type StepContext, type StepOutcome, type StepRunner } from './steps'
 
 export interface ExecutorHooks {
   /** before every step (the runner sleeps through the night here) */
@@ -38,7 +38,7 @@ export interface ExecutorOptions {
   maxReplans?: number
   /** a step that failed this many times in a row fails the requests (default 3) */
   maxStepFailures?: number
-  /** make a new tool when the one of the step's kind has this many uses left (default 12) */
+  /** make a new tool when the one of the step's kind has this many uses left (default MIN_TOOL_USES, 24) */
   minToolUses?: number
   /** make room when fewer slots than this are free (default 2) */
   minFreeSlots?: number
@@ -122,7 +122,7 @@ export class Executor {
       keep: opts.keep ?? defaultKeep,
       maxReplans: opts.maxReplans ?? 30,
       maxStepFailures: opts.maxStepFailures ?? 3,
-      minToolUses: opts.minToolUses ?? 12,
+      minToolUses: opts.minToolUses ?? MIN_TOOL_USES,
       minFreeSlots: opts.minFreeSlots ?? 2,
       exclude: opts.exclude ?? ['barter']
     }
