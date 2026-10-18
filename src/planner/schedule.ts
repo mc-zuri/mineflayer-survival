@@ -80,6 +80,10 @@ export function nightGoals (inv: Inventory, reached: readonly MilestoneId[]): Ob
     // and the hostiles reflex blocks their arrows with one (it took to the end of the iron milestone before)
     if (inv.count('shield') === 0) goals.push({ item: 'shield', count: 1, optional: true })
     const iron = inv.count('iron_ingot') + inv.count('raw_iron')
+    // coal for the iron's smelting (a coal burns 8 items): without it the logs carried down were burnt, and the
+    // morning's plan climbed out for wood for the shield (seed 7, 15000 ticks)
+    const coal = Math.ceil(Math.max(0, IRON_FOR_MILESTONE - inv.count('iron_ingot')) / 8)
+    if (inv.count('coal') + inv.count('charcoal') < coal) goals.push({ item: 'coal', count: coal, optional: true })
     if (iron < IRON_FOR_MILESTONE) goals.push({ item: 'raw_iron', count: inv.count('raw_iron') + IRON_FOR_MILESTONE - iron, optional: true })
     return goals
   }
