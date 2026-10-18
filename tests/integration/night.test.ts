@@ -88,7 +88,8 @@ function morning (time: number): () => boolean {
 }
 
 /** from dusk to dawn (or the bot's death) with the reflexes on; the log of the night */
-let nights = 0
+// NIGHT_START=k starts at the k-th patch of ground (to replay one night's spot)
+let nights = Number(process.env.NIGHT_START ?? 0)
 
 /**
  * Where the night's run starts: a fresh patch of ground each night, 48 blocks along from the last (spreadplayers puts
