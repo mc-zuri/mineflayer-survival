@@ -92,14 +92,31 @@ function wearable (item: Item): boolean {
   return armorPiece(item.name) != null && enchantLevel(item, 'binding_curse') === 0
 }
 
-/** For each slot, the inventory piece better than the worn one, if any. */
+const goldWanted = new WeakMap<object, boolean>()
+
+/**
+ * Keep a golden piece on (for the piglins, PiglinAi.isWearingGold): armorUpgrades leaves the last golden piece worn
+ * rather than swap it for a better one.
+ */
+export function requireGoldArmor (bot: Bot, on = true): void {
+  goldWanted.set(bot, on)
+}
+
+export function goldArmorRequired (bot: Bot): boolean {
+  return goldWanted.get(bot) === true
+}
+
+/** For each slot, the inventory piece better than the worn one, if any (the last golden piece kept when requireGoldArmor). */
 export function armorUpgrades (bot: Bot): Partial<Record<ArmorSlot, Item>> {
   const worn = wornArmor(bot)
+  const golden = ARMOR_SLOTS.filter(slot => worn[slot]?.name.startsWith('golden_') === true)
+  const keep = goldArmorRequired(bot) && golden.length === 1 ? golden[0] : null
   const upgrades: Partial<Record<ArmorSlot, Item>> = {}
   for (const item of bot.inventory.items()) {
     const piece = armorPiece(item.name)
     if (piece == null || !wearable(item)) continue
     const slot = piece.slot
+    if (slot === keep && !item.name.startsWith('golden_')) continue
     const current = worn[slot]
     const best = upgrades[slot] ?? current
     if (best == null || armorScore(item, worn) > armorScore(best, worn)) upgrades[slot] = item

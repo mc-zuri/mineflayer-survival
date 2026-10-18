@@ -22,6 +22,8 @@ export interface FightOptions extends SkillOptions {
   maxDistance?: number
   /** pick the inventory's best weapon first (default true) */
   equipWeapon?: boolean
+  /** where on the target to look, as a fraction of its height (default 0.85; an enderman's legs at 0.3 keep the look off its eyes) */
+  aimHeight?: number
 }
 
 export interface FightResult {
@@ -43,6 +45,15 @@ const RANGED = new Set(['skeleton', 'stray', 'bogged', 'pillager', 'piglin', 'dr
 
 export function isUsingItem (bot: Bot, entity: Entity): boolean {
   const flags = (entity.metadata as any)?.[metadataIndex(bot, entityName(entity), 'living_entity_flags', LIVING_FLAGS_INDEX)]
+  return typeof flags === 'number' && (flags & 1) !== 0
+}
+
+// Blaze.DATA_FLAGS_ID (index 16 on 1.21.11): bit 1 is set while it's charged, about to shoot (Blaze.setCharged)
+const BLAZE_FLAGS_INDEX = 16
+
+/** a blaze about to shoot its fireballs (BlazeAttackGoal sets it charged for the volley) */
+export function blazeCharged (bot: Bot, entity: Entity): boolean {
+  const flags = (entity.metadata as any)?.[metadataIndex(bot, 'blaze', 'flags', BLAZE_FLAGS_INDEX)]
   return typeof flags === 'number' && (flags & 1) !== 0
 }
 
@@ -135,7 +146,7 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       const box = entityBox(target)
       const distance = distanceToBox(eye, box)
       if (bot.entity.position.distanceTo(target.position) > maxDistance) throw new TaskError('NO_PATH', `${name} got away`)
-      const center = target.position.offset(0, (target.height ?? 1.8) * 0.85, 0)
+      const center = target.position.offset(0, (target.height ?? 1.8) * (opts.aimHeight ?? 0.85), 0)
 
       // what to do about the shield this tick
       let wantBlock = false
@@ -150,6 +161,9 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
         if (retreating && (fuse === 0 || bot.entity.position.distanceTo(target.position) >= creeperSafe)) retreating = false
         if (retreating && !hasShield()) wantRetreat = true
       } else if (RANGED.has(name) && isUsingItem(bot, target) && distance > reach && hasShield()) {
+        wantBlock = true
+      } else if (name === 'blaze' && blazeCharged(bot, target) && distance > reach && hasShield()) {
+        // its three small fireballs: the shield takes them (Player.isDamageSourceBlocked)
         wantBlock = true
       }
 

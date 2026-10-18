@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { armorPiece, armorUpgrades, damageAfterArmor, damageThrough } from '../../src/skills/armor'
+import { armorPiece, armorUpgrades, damageAfterArmor, damageThrough, requireGoldArmor } from '../../src/skills/armor'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
 const near = (a: number, b: number, eps = 1e-9): void => assert.ok(Math.abs(a - b) <= eps, `${a} != ${b}`)
@@ -50,3 +50,10 @@ test('armorUpgrades: enchantments (item components on 1.21.11) and durability br
   assert.strictEqual(armorUpgrades(bot3).head, undefined)
 })
 
+test('gold armor: worn, and kept on by armorUpgrades once required', () => {
+  const bot = fakeBot({ armor: { feet: item('golden_boots') }, items: [item('iron_boots'), item('iron_helmet')] })
+  assert.deepEqual(Object.keys(armorUpgrades(bot)).sort(), ['feet', 'head'])
+  requireGoldArmor(bot, true)
+  assert.deepEqual(Object.keys(armorUpgrades(bot)), ['head'])
+  requireGoldArmor(bot, false)
+})
