@@ -260,3 +260,15 @@ test('withRoom: no room for a station up here either (on a tree\'s leaves): walk
   assert.equal(out, 'crafted')
   assert.ok(calls >= 2 && trips.length >= 1, `${calls} calls, trips ${trips.join(' ')}`)
 })
+
+test('dryStart: from the middle of a lake, a dry place up to 24 blocks off', async () => {
+  const { dryStart } = await import('../../src/executor/explore')
+  // water at y 60..63 for x < 18 (the bot swims at (0, 63, 0)), dry ground beyond
+  const lookup = (pos: Vec3) => {
+    if (pos.y >= 64) return { name: 'air', boundingBox: 'empty' }
+    if (pos.x < 18 && pos.y >= 60) return { name: 'water', boundingBox: 'empty' }
+    return { name: 'stone', boundingBox: 'block' }
+  }
+  const spot = dryStart(lookup, new Vec3(0, 63, 0))
+  assert.ok(spot != null && spot.x >= 19, String(spot))
+})

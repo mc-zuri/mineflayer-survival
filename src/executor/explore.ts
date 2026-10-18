@@ -554,13 +554,13 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
 }
 
 /**
- * A place to stand a few blocks off (4 to 12, in the eight directions) with no liquid within a block of the column
+ * A place to stand a few blocks off (4 to 24, in the eight directions) with no liquid within a block of the column
  * under it, down a staircase's first few steps: where a way down from the bot's feet opens to water or lava on every
  * side. Null when there's none.
  */
 export function dryStart (lookup: Lookup, feet: Vec3): Vec3 | null {
   const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
-  for (const r of [4, 6, 8, 10, 12]) {
+  for (const r of [4, 6, 8, 10, 12, 16, 20, 24]) {
     for (const [dx, dz] of dirs) {
       const base = feet.offset(dx * r, 0, dz * r)
       for (const dy of [0, 1, -1, 2, -2, 3, -3]) {
