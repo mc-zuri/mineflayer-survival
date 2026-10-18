@@ -53,3 +53,9 @@ test('wearingGold: a golden piece in an armor slot', () => {
   assert.equal(wearingGold(fakeBot({ armor: { feet: item('golden_boots') } })), true)
   assert.equal(wearingGold(fakeBot({ armor: { feet: item('iron_boots') }, items: [item('golden_helmet')] })), false)
 })
+
+test('PIGLIN_GUARDED is #guarded_by_piglins: the copper chests of every age, waxed or not, too', async () => {
+  const { PIGLIN_GUARDED } = await import('../../src/nether/safety')
+  for (const name of ['copper_chest', 'oxidized_copper_chest', 'waxed_weathered_copper_chest', 'chest', 'gold_block', 'red_shulker_box']) assert.ok(PIGLIN_GUARDED.has(name), name)
+  assert.equal([...PIGLIN_GUARDED].filter(n => n.endsWith('copper_chest')).length, 8)
+})

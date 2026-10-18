@@ -17,9 +17,13 @@ export { requireGoldArmor, goldArmorRequired } from '../skills/armor'
 /** the pathfinder's COST_INF: a cost this high forbids the step, break or place */
 export const FORBID = 1000000
 
-/** blocks piglins guard: PiglinAi.angerNearbyPiglins fires when a player breaks one (BlockTags.GUARDED_BY_PIGLINS) or opens a container */
+/**
+ * blocks piglins guard: PiglinAi.angerNearbyPiglins fires when a player breaks one (BlockTags.GUARDED_BY_PIGLINS, the
+ * same in 1.21.11 and 26.3) or opens a container
+ */
 export const PIGLIN_GUARDED = new Set([
   'gold_block', 'gilded_blackstone', 'nether_gold_ore', 'deepslate_gold_ore', 'gold_ore', 'raw_gold_block', 'chest', 'trapped_chest', 'barrel', 'ender_chest',
+  ...['', 'exposed_', 'weathered_', 'oxidized_'].flatMap(age => [`${age}copper_chest`, `waxed_${age}copper_chest`]),
   'shulker_box', ...['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black'].map(c => `${c}_shulker_box`)
 ])
 /** PiglinAi: a piglin within 16 blocks sees the player break or open what it guards */
