@@ -13,3 +13,19 @@ test('nearestOfType skips the babies (they drop nothing)', () => {
   assert.strictEqual(nearestOfType(bot, ['cow', 'pig'], 64), pig)
   assert.strictEqual(nearestOfType(bot, ['cow'], 4), null)
 })
+
+test('hunt gives up with NO_PATH when the pathfinder makes no headway toward the animal (it used to wait forever)', async () => {
+  const cow = entity({ name: 'cow', position: new Vec3(40, 64, 0), meta: { baby: false } })
+  const bot = fakeBot({ position: new Vec3(0, 60, 0), entities: [cow] })
+  let release: (() => void) | null = null
+  bot.pathfinder = {
+    isPathing: false,
+    goto: async () => { bot.pathfinder.isPathing = true; await new Promise<void>(resolve => { release = resolve }); bot.pathfinder.isPathing = false },
+    cancel: async () => { release?.() }
+  }
+  const { hunt } = await import('../../src/skills/hunt')
+  const rejected = assert.rejects(hunt(bot, 'cow'), (err: any) => err.code === 'NO_PATH')
+  // the pathfinder plans and plans, the bot stays in its hole
+  for (let i = 0; i < 150; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  await rejected
+})

@@ -3,6 +3,8 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { Vec3 } from 'vec3'
 import { fight, type FightOptions } from './fight'
 import { steerToward } from './steer'
+import { navigate } from './navigate'
+import { isAbort } from './errors'
 import { type Entity, metadataValue, TaskError, type SkillOptions, throwIfAborted, waitTicks } from './combatUtil'
 
 export interface HuntOptions extends FightOptions {
@@ -26,19 +28,18 @@ function inventoryCounts (bot: Bot): Map<string, number> {
   return counts
 }
 
-/** Walks near the position with the pathfinder; resolves false if no path. */
+/**
+ * Walks near the position with the pathfinder; resolves false if there's no path or the bot stops getting anywhere
+ * (navigate's stuck check: a bare goto can go on forever where the pathfinder keeps failing to make a move).
+ */
 async function walkNear (bot: Bot, pos: Vec3, distance: number, signal?: AbortSignal): Promise<boolean> {
   if (bot.pathfinder == null) return false
-  const onAbort = (): void => { void bot.pathfinder.cancel() }
-  signal?.addEventListener('abort', onAbort)
   try {
-    await bot.pathfinder.goto(goals.GoalNear.fromVec(pos.floored(), distance))
+    await navigate(bot, { goal: goals.GoalNear.fromVec(pos.floored(), distance), stuckTicks: 100 }, signal)
     return true
-  } catch {
+  } catch (err) {
+    if (isAbort(err)) throw err
     return false
-  } finally {
-    signal?.removeEventListener('abort', onAbort)
-    throwIfAborted(signal)
   }
 }
 
