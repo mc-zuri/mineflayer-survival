@@ -378,3 +378,15 @@ test('the night\'s goals got, the rest of the night is waited out down the mine 
   await night
   assert.equal(bot.survival.nightWork, false)
 })
+
+test('with the iron the work up next, the night is not waited out (its last logs are a short trip up)', async () => {
+  const bot = fakeBot({ stone_pickaxe: 1, cooked_beef: 8, oak_log: 4 })
+  bot.time = { timeOfDay: 14000, day: 1 }
+  bot.food = 20
+  bot.blockAt = () => ({ name: 'stone', boundingBox: 'block' })
+  const lines: string[] = []
+  const runner = new Runner(bot, { log: l => lines.push(l), skip: ['base'], executor: { log: () => {} } })
+  runner.reached.push(...['wood', 'stone', 'food'].map(id => ({ id: id as any, title: '', tick: 0, wallMs: 0 })))
+  await runner.mineTheNight([])
+  assert.ok(!lines.some(l => /waited out/.test(l)), lines.join('\n'))
+})

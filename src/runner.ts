@@ -638,7 +638,11 @@ export class Runner {
           }
         }
       }
-      if (!ctrl.signal.aborted && typeof bot.blockAt === 'function' && !onSurface(p => bot.blockAt(p) as any, bot.entity.position.floored())) {
+      // (only when the day's work is the surface's: the hunt, the house. The iron's last logs are a short trip up:
+      // waiting for them cost seed 2 7000 ticks)
+      const upNext = nextToWork(progressState(bot, this.memory), this.reached.map(r => r.id), new Set(this.options.skip ?? []))
+      const surfaceWork = upNext != null && MILESTONES.indexOf(upNext) < MILESTONES.findIndex(m => m.id === 'iron')
+      if (!ctrl.signal.aborted && surfaceWork && typeof bot.blockAt === 'function' && !onSurface(p => bot.blockAt(p) as any, bot.entity.position.floored())) {
         this.log(`night (time ${bot.time.timeOfDay}): the rest of it waited out down the mine`)
         await new Promise<void>(resolve => {
           if (ctrl.signal.aborted) return resolve()
