@@ -179,7 +179,7 @@ export interface MeleeWindow {
   ticksLeft: number
   /** the breath to keep out of now (flaming) or next (attacking: it flames where it faces) */
   breath: BreathZone | null
-  /** sitting damage dealt so far this perch; 50 makes it take off */
+  /** sitting damage dealt since it last took off for it (it carries over from perch to perch); over 50 makes it take off */
   sittingDamage: number
 }
 
@@ -204,7 +204,9 @@ export class DragonPhaseTracker {
     if (name !== this.phase) {
       if (name === 'sitting_scanning' && (this.phase === 'landing' || this.phase === 'landing_approach' || this.phase == null)) this.flames = 0
       if (name === 'sitting_flaming') this.flames++
-      if (name != null && !isSitting(name)) this.sittingDamage = 0
+      // EnderDragon.hurt: sittingDamageReceived goes back to 0 only when it passes the limit (the dragon takes off for
+      // it), not when a perch ends for its timers: the next perch starts from what the last one took
+      if (name != null && !isSitting(name) && this.sittingDamage > SITTING_DAMAGE_LIMIT) this.sittingDamage = 0
       this.phase = name
       this.phaseStart = sample.tick
     }
@@ -250,7 +252,8 @@ export class DragonPhaseTracker {
       default:
         break
     }
-    const open = activity === 'perched' && this.sittingDamage < SITTING_DAMAGE_LIMIT
+    // it takes off once the sitting damage is over the limit (sittingDamageReceived > 0.25F * getMaxHealth())
+    const open = activity === 'perched' && this.sittingDamage <= SITTING_DAMAGE_LIMIT
     return { open, phase, activity, phaseTicks, ticksLeft: open ? ticksLeft : 0, breath, sittingDamage: this.sittingDamage }
   }
 }

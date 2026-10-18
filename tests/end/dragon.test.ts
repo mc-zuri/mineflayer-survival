@@ -62,6 +62,23 @@ test('the tracker opens the melee window while the dragon sits and closes it on 
   assert.equal(t.sittingDamage, 0)
 })
 
+test('the sitting damage carries over to the next perch unless it passed 50 (EnderDragon.sittingDamageReceived)', () => {
+  const t = new DragonPhaseTracker(exitPortal(63).perch)
+  const at = { x: 0.5, y: 67, z: 0.5 }
+  t.update({ tick: 0, phase: 6, position: at, yaw: 0 })
+  t.updateHealth(200)
+  t.updateHealth(170)
+  // the perch ends on its timers: the 30 stay
+  t.update({ tick: 500, phase: 4, position: at, yaw: 0 })
+  assert.equal(t.sittingDamage, 30)
+  t.update({ tick: 900, phase: 6, position: at, yaw: 0 })
+  // 50 in all keeps it sitting; more than 50 makes it leave
+  t.updateHealth(150)
+  assert.equal(t.window(901).open, true)
+  t.updateHealth(149)
+  assert.equal(t.window(902).open, false)
+})
+
 test('without metadata the perch is told by position', () => {
   const t = new DragonPhaseTracker(exitPortal(63).perch)
   t.last = { tick: 0, phase: -1, position: { x: 0.6, y: 67, z: 0.4 }, yaw: 0 }
