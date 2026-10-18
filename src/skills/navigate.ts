@@ -24,6 +24,11 @@ export interface NavigateArgs {
    * the ticks, and in some terrain it never ends.
    */
   planTicks?: number
+  /**
+   * The most ticks a trip takes before it's given up (default MAX_TRIP_TICKS): one that keeps moving and searching
+   * again (a bot bobbing in the sea after a respawn, searching for the surface) never counts as stuck
+   */
+  maxTicks?: number
   /** goes again this many times after getting stuck (default 2) */
   unstick?: number
 }
@@ -61,6 +66,9 @@ export function goalReached (bot: Bot, goal: Goal): boolean {
  * end) is left behind rather than holding the skill, and with it the task, for good
  */
 export const CANCEL_TICKS = 100
+
+/** the most ticks a navigate's trip takes (NavigateArgs.maxTicks): 5000 ticks walk about 1000 blocks */
+export const MAX_TRIP_TICKS = 5000
 
 /** how many times the stuck ticks a dig of one block may hold the bot still (a stone block by hand takes 150 ticks) */
 export const DIG_STUCK_FACTOR = 5
@@ -104,10 +112,16 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
   let planning = false
   const start = bot.entity.position.clone()
   const planTicks = args.planTicks ?? 600
+  const maxTicks = args.maxTicks ?? MAX_TRIP_TICKS
+  let overTime = false
 
   let digAt: string | null = null
   const onTick = (): void => {
     ticks++
+    if (ticks >= maxTicks && !overTime && !stuck && !aborted) {
+      overTime = true
+      void bot.pathfinder.cancel()
+    }
     if (!moved && bot.entity.position.distanceTo(start) >= 0.5) moved = true
     // (the search runs over many ticks before the first path comes: the bot standing still then isn't stuck)
     if (!pathFound && !moved) {
@@ -148,7 +162,7 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
   // once navigate has called the trip off (stuck, aborted, no path in time), goto gets CANCEL_TICKS to return
   let cancelledFor = 0
   let hung = false
-  const onCancelTick = (): void => { if (stuck || aborted || planning) cancelledFor++ }
+  const onCancelTick = (): void => { if (stuck || aborted || planning || overTime) cancelledFor++ }
   bot.on('physicsTick', onCancelTick)
   const stopWaiting = new AbortController()
   try {
@@ -171,6 +185,7 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
   trace('navigate:', goal.constructor.name, 'ended at', result.position.toString(), 'after', ticks, 'ticks', aborted ? 'aborted' : stuck ? 'stuck' : '', error != null ? `error ${(error as Error).message}` : '')
   if (aborted) throw abortError(signal, result)
   if (stuck) throw new SkillError('STUCK', `no progress for ${stuckTicks} ticks at ${result.position.toString()}`, result)
+  if (overTime && !reached()) throw new SkillError('STUCK', `no arrival in ${maxTicks} ticks, at ${result.position.toString()}`, result)
   if (planning && !reached()) throw new SkillError('NO_PATH', `no path found in ${planTicks} ticks`, result)
   if (reached()) return result
   if (error != null) throw new SkillError('NO_PATH', `the pathfinder failed: ${(error as Error).message ?? String(error)}`, result, { cause: error })

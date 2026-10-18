@@ -126,3 +126,13 @@ test('navigate: a goto that does not return once called off is left behind after
     assert.equal(bot.listenerCount('physicsTick'), 1)
   } finally { bot.stop() }
 })
+
+test('navigate gives a trip up after maxTicks however it moves (bobbing in the sea, searching again and again)', async () => {
+  const bot = pathBot('stuck')
+  // the bot keeps moving back and forth, more than the stuck check's half block
+  let t = 0
+  bot.on('physicsTick', () => { bot.entity.position = new Vec3(0.5 + ((t++ % 2) * 0.8), 64, 0.5) })
+  try {
+    await assert.rejects(navigate(bot, { goal: new goals.GoalBlock(50, 64, 0), stuckTicks: 10, unstick: 0, maxTicks: 60 }), (err: unknown) => isSkillError(err, 'STUCK') && /no arrival in 60 ticks/.test((err as Error).message))
+  } finally { bot.stop() }
+})
