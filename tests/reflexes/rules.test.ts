@@ -139,3 +139,12 @@ test('hostiles and creeper reflexes leave alone what has no line of sight to the
   const above = entity({ name: 'zombie', position: new Vec3(0.5, 64, 0.5) })
   assert.strictEqual(check(hostilesReflex, { position: new Vec3(0.5, 61, 0.5), entities: [above], world: hole }), null)
 })
+
+test('hostiles reflex: a skeleton shooting from 12 blocks is taken on (the ones that shoot count to rangedRange, 16), a zombie there isn\'t', () => {
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(12) })] }), 'fight skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'pillager', position: at(14) })] }), 'fight pillager')
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'zombie', position: at(12) })] }), null)
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(15) })] }, { hostiles: { rangedRange: 8 } }), null)
+  const wall = (pos: Vec3): string => pos.y < 64 ? 'stone' : pos.x === 4 && pos.y <= 66 ? 'stone' : 'air'
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(12) })], world: wall }), null)
+})

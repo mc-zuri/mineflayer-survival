@@ -124,15 +124,20 @@ export const creeperReflex: Reflex = {
   }
 }
 
+/** the mobs that shoot (RangedBowAttackGoal's 15 blocks, RangedCrossbowAttackGoal's 8 and more, the witch's RangedAttackGoal 10) */
+export const RANGED_HOSTILES = new Set(['skeleton', 'stray', 'bogged', 'parched', 'pillager', 'witch'])
+
 /**
- * The hostiles within the reflex's range that the bot can see, nearest first (the ignored ones left out). One without
- * a line of sight can't hit or shoot the bot either (MeleeAttackGoal and RangedBowAttackGoal need one): a zombie on the
- * far side of a wall, or over a shelter's roof, is left alone.
+ * The hostiles within the reflex's range that the bot can see, nearest first (the ignored ones left out): within
+ * `range`, or `rangedRange` for the ones that shoot (a skeleton 12 blocks off shot the bot for 500 ticks while it stood
+ * there). One without a line of sight can't hit or shoot the bot either (MeleeAttackGoal and RangedBowAttackGoal need
+ * one): a zombie on the far side of a wall, or over a shelter's roof, is left alone.
  */
 export function hostilesInRange (ctx: ReflexContext): Entity[] {
   const { bot, config } = ctx
   return ctx.hostiles.filter(e => !config.hostiles.ignore.includes(e.name ?? '') &&
-    distance(bot, e) <= config.hostiles.range && Math.abs(e.position.y - bot.entity.position.y) <= config.hostiles.maxDy &&
+    distance(bot, e) <= (RANGED_HOSTILES.has(e.name ?? '') ? Math.max(config.hostiles.range, config.hostiles.rangedRange) : config.hostiles.range) &&
+    Math.abs(e.position.y - bot.entity.position.y) <= config.hostiles.maxDy &&
     hasLineOfSight(bot, e))
 }
 

@@ -21,6 +21,8 @@ export interface ReflexConfig {
     enabled: boolean
     /** fight or flee hostiles this close (default 8) */
     range: number
+    /** and the ones that shoot from further (skeletons, pillagers, witches) this close, in sight (default 16) */
+    rangedRange: number
     /** most height difference that counts (default 4) */
     maxDy: number
     /** flee instead at or below this health (default 6) */
@@ -99,6 +101,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
   hostiles: {
     enabled: true,
     range: 8,
+    rangedRange: 16,
     maxDy: 4,
     fleeHealth: 6,
     maxFight: 3,
