@@ -14,6 +14,8 @@ export interface ReflexConfig {
     food: number
     /** eat at or below this health even in combat, if no hostile is within reach (default 10) */
     health: number
+    /** hurt and out of combat, eat while the food level is under this (default 18: FoodData.tick heals only from 18 up) */
+    regenFood: number
     /** the reflex's priority (default 50) */
     priority: number
   }
@@ -112,7 +114,7 @@ export interface ReflexConfig {
 
 export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
   combat: { scanRange: 16, range: 8, hurtTicks: 60 },
-  eat: { enabled: true, food: 14, health: 10, priority: 50 },
+  eat: { enabled: true, food: 14, health: 10, regenFood: 18, priority: 50 },
   hostiles: {
     enabled: true,
     range: 8,

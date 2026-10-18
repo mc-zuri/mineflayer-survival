@@ -180,3 +180,15 @@ test('hostiles reflex: a skeleton shooting from 12 blocks is taken on (the ones 
   const wall = (pos: Vec3): string => pos.y < 64 ? 'stone' : pos.x === 4 && pos.y <= 66 ? 'stone' : 'air'
   assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(12) })], world: wall }), null)
 })
+
+test('eat reflex: hurt and out of combat, eat up to food 18, where the health comes back (FoodData.tick)', () => {
+  const bread = [item('bread', 5)]
+  assert.strictEqual(check(eatReflex, { food: 16, health: 14, items: bread }), 'eat')
+  assert.strictEqual(check(eatReflex, { food: 17, health: 19, items: bread }), 'eat')
+  // full health, or food 18 already: no need
+  assert.strictEqual(check(eatReflex, { food: 16, health: 20, items: bread }), null)
+  assert.strictEqual(check(eatReflex, { food: 18, health: 14, items: bread }), null)
+  // not in a fight
+  assert.strictEqual(check(eatReflex, { food: 16, health: 14, items: bread, entities: [entity({ name: 'zombie', position: at(5) })] }), null)
+  assert.strictEqual(check(eatReflex, { food: 16, health: 14, items: bread }, { eat: { regenFood: 0 } }), null)
+})

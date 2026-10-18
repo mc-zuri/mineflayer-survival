@@ -188,7 +188,10 @@ export const hostilesReflex: Reflex = {
   }
 }
 
-/** Eat at or below the food threshold out of combat, or at low health when no hostile is in reach. */
+/**
+ * Eat at or below the food threshold out of combat, or at low health when no hostile is in reach, or hurt out of
+ * combat with the food level under 18 (FoodData.tick heals only from 18 up: a bot at food 15 to 17 never healed).
+ */
 export const eatReflex: Reflex = {
   name: 'eat',
   priority: 50,
@@ -197,7 +200,8 @@ export const eatReflex: Reflex = {
     if (!config.eat.enabled || bot.food >= 20) return null
     const hungry = bot.food <= config.eat.food && !ctx.inCombat
     const hurt = bot.health <= config.eat.health && hostilesInRange(ctx).length === 0
-    if (!hungry && !hurt) return null
+    const regen = bot.health < 20 && bot.food < config.eat.regenFood && !ctx.inCombat
+    if (!hungry && !hurt && !regen) return null
     if (bestFoodInInventory(bot) == null) return null
     return { name: 'eat', priority: config.eat.priority, run: async (signal) => await eat(bot, { signal }) }
   }
