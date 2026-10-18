@@ -153,7 +153,7 @@ export class Executor {
     // a village passed by is noted, with its farms' crops and hay, for the food plans
     let nextVillageCheck = 0
     bot.on('physicsTick', () => {
-      if (this.tasks.tick < nextVillageCheck || typeof bot.findBlock !== 'function' || bot.entity == null) return
+      if (this.tasks.tick < nextVillageCheck || typeof bot.findBlock !== 'function' || typeof bot.findBlocks !== 'function' || bot.entity == null) return
       nextVillageCheck = this.tasks.tick + VILLAGE_CHECK_TICKS
       if (normalizeDimension(bot.game?.dimension) !== 'overworld') return
       const before = this.memory.getPois('village').length

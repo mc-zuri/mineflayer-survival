@@ -282,3 +282,41 @@ test('the death messages are told from the other system lines about the bot', as
   assert.equal(isDeathMessage('miner has made the advancement [Stone Age]'), false)
   assert.equal(isDeathMessage('miner joined the game'), false)
 })
+
+test('dusk cuts the day\'s work off for the night\'s mine, and the milestone goes on after', async () => {
+  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, torch: 20, cooked_beef: 8 })
+  bot.time = { timeOfDay: 11000, day: 0 }
+  bot.findBlock = () => null
+  const mined: string[] = []
+  const runners = { mine: async (step: any) => { mined.push(step.item); bot.give(step.item, step.count); return { gained: step.count } } }
+  let calls = 0
+  const lines: string[] = []
+  const runner = new Runner(bot, {
+    log: l => lines.push(l),
+    until: 'iron',
+    skip: ['base'],
+    executor: { runners, log: () => {} },
+    handlers: {
+      iron: async ({ signal }) => {
+        calls++
+        if (calls === 1) {
+          // a hunt that runs on past dusk
+          await new Promise<void>((resolve, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason))
+          })
+        }
+        for (const n of ['iron_pickaxe', 'iron_sword', 'iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots', 'shield', 'bucket']) bot.give(n, 1)
+      }
+    }
+  })
+  runner.reached.push(...['wood', 'stone', 'food'].map(id => ({ id: id as any, title: '', tick: 0, wallMs: 0 })))
+  const result = runner.play()
+  for (let i = 0; i < 400 && calls === 0; i++) await new Promise(resolve => setImmediate(resolve))
+  bot.time = { timeOfDay: 11600, day: 0 }
+  for (let i = 0; i < 40; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  const r = await result
+  assert.equal(r.reason, 'until')
+  assert.equal(calls, 2)
+  assert.ok(lines.some(l => /dusk: iron left for the night's mine/.test(l)), lines.join('\n'))
+  assert.deepEqual(mined, ['raw_iron'])
+})

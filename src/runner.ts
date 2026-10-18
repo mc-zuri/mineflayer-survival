@@ -355,9 +355,11 @@ export class Runner {
       if (restock != null) {
         try {
           this.log(`food low (${state.inventory.foodPoints()} points): getting more before going on`)
-          // the renewable food first: the farm's harvest
-          await harvestGrownFarms(this.bot, this.executor, signal, this.log)
-          await this.executor.obtain(restockGoals(progressState(this.bot, this.memory), reachedIds) ?? [], signal)
+          await this.untilDusk(signal, async (s) => {
+            // the renewable food first: the farm's harvest
+            await harvestGrownFarms(this.bot, this.executor, s, this.log)
+            await this.executor.obtain(restockGoals(progressState(this.bot, this.memory), reachedIds) ?? [], s)
+          })
         } catch (err) {
           if (stopped()) return this.stop('food', 'aborted', err)
           if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
@@ -380,8 +382,12 @@ export class Runner {
       }
       this.log(`working on ${m.id}: ${m.title}`)
       try {
-        await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal, log: this.log })
+        const how = await this.untilDusk(signal, async (s) => await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log }))
         if (stopped()) return this.stop(m.id, 'aborted')
+        if (how === 'dusk') {
+          this.log(`dusk: ${m.id} left for the night's mine`)
+          continue
+        }
         failures.delete(m.id)
       } catch (err) {
         if (stopped()) return this.stop(m.id, 'aborted', err)
@@ -480,12 +486,20 @@ export class Runner {
    * night; the bed and the shelter are nightCheck's and the night reflex's
    */
   async nightSchedule (signal?: AbortSignal): Promise<void> {
+    const due = this.nightDue()
+    if (due == null) return
+    this.nightMinedDay = due.day
+    await this.mineTheNight(due.goals, signal)
+  }
+
+  /** the night's mining when the schedule calls for it now (nightAction 'mine', not mined yet this night), else null */
+  nightDue (): { day: number, goals: ObtainRequest[] } | null {
     const bot = this.bot
-    if (this.inNightWork || this.options.nightMining === false || bot.time == null) return
+    if (this.inNightWork || this.options.nightMining === false || bot.time == null || bot.entity == null) return null
     const day = (bot.time as any).day ?? Math.floor(((bot.time as any).age ?? 0) / 24000)
-    if (day === this.nightMinedDay) return
+    if (day === this.nightMinedDay) return null
     const phase = dayPhase(bot.time.timeOfDay)
-    if (phase === 'day') return
+    if (phase === 'day') return null
     const reached = this.reached.map(r => r.id)
     const inv = ownedInventory(bot)
     const goals = nightGoals(inv, reached)
@@ -496,9 +510,37 @@ export class Runner {
       pickaxe: inv.bestTool('pickaxe'),
       goals: goals.length > 0
     })
-    if (action !== 'mine') return
-    this.nightMinedDay = day
-    await this.mineTheNight(goals, signal)
+    return action === 'mine' ? { day, goals } : null
+  }
+
+  /**
+   * Runs the day's work under a signal that also fires at dusk when the night is to be mined (nightDue, looked at
+   * every 20 ticks): a hunt or a walk that runs on into the night is cut off for the mine instead of the night reflex
+   * digging in on the surface (seed 7: the hunt ran into the night and the shelter waited 11000 ticks). Resolves
+   * 'dusk' when cut off so.
+   */
+  async untilDusk (signal: AbortSignal, fn: (s: AbortSignal) => Promise<void>): Promise<'done' | 'dusk'> {
+    const bot = this.bot
+    const ctrl = new AbortController()
+    const onOuter = (): void => ctrl.abort(signal.reason)
+    if (signal.aborted) onOuter()
+    signal.addEventListener('abort', onOuter, { once: true })
+    let n = 0
+    const watch = (): void => {
+      if (++n % 20 !== 0 || ctrl.signal.aborted || this.nightDue() == null) return
+      ctrl.abort(new TaskError('ABORTED', 'dusk: the night is for the mine'))
+    }
+    bot.on('physicsTick', watch)
+    try {
+      await fn(ctrl.signal)
+      return 'done'
+    } catch (err) {
+      if (!signal.aborted && ctrl.signal.aborted) return 'dusk'
+      throw err
+    } finally {
+      bot.off('physicsTick', watch)
+      signal.removeEventListener('abort', onOuter)
+    }
   }
 
   /**
