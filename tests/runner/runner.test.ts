@@ -34,7 +34,7 @@ function fakeBot (items: Record<string, number> = {}): any {
   return bot
 }
 
-test('play works the milestones in order, an event for each reached, and stops at the nether while it is unwired', async () => {
+test('play works the milestones in order, an event for each reached, and stops before the one stopAt names', async () => {
   const bot = fakeBot()
   const worked: string[] = []
   const events: string[] = []
@@ -53,13 +53,13 @@ test('play works the milestones in order, an event for each reached, and stops a
     diamonds: give({ diamond_pickaxe: 1, diamond_sword: 1 }),
     enchanting: async () => { worked.push('enchanting'); bot.survival.memory.addPoi('enchanting_table', { x: 1, y: 40, z: 1 }); enchantedPick.done = true }
   }
-  const runner = new Runner(bot, { handlers, log: () => {} })
+  const runner = new Runner(bot, { handlers, stopAt: 'nether', log: () => {} })
   // the enchanted check reads item.enchants: the fake's pickaxe gets one once the handler ran
   const items = bot.inventory.items
   bot.inventory.items = () => items().map((i: any) => i.name === 'diamond_pickaxe' && enchantedPick.done ? { ...i, enchants: [{ name: 'efficiency', lvl: 1 }] } : i)
   const result = await runner.play()
   assert.deepEqual(worked, ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting'])
-  assert.equal(result.reason, 'unwired')
+  assert.equal(result.reason, 'until')
   assert.equal(result.stoppedAt, 'nether')
   assert.deepEqual(events, ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting'])
   assert.deepEqual(result.reached.map(r => r.id), events)
@@ -136,4 +136,12 @@ test('maxTicks: play stops when its tick budget runs out, the work in hand abort
   assert.equal(aborted, true)
   assert.equal(r.reason, 'budget')
   assert.equal(r.stoppedAt, 'wood')
+})
+
+test('netherNeeds: the rods and pearls still wanted for the eyes', async () => {
+  const { netherNeeds } = await import('../../src/milestones')
+  const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
+  assert.deepEqual(netherNeeds(inv({})), { rods: 7, pearls: 14 })
+  assert.deepEqual(netherNeeds(inv({ blaze_rod: 3, ender_pearl: 10, ender_eye: 2 })), { rods: 3, pearls: 2 })
+  assert.deepEqual(netherNeeds(inv({ ender_eye: 14 })), { rods: 0, pearls: 0 })
 })

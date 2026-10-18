@@ -2,8 +2,8 @@
 // executor (the base by buildBase, the enchanting by its handler), the night slept through when there's a bed, a death
 // recovered from (back to the death spot while the items last, else to the base for a kit), the memory saved to a
 // JSON file after each milestone so a run can resume, and an event with the tick count at each milestone reached.
-// The nether, eyes and end milestones run only once a handler is registered for them (bot.survival.handlers): until
-// the nether and End skills are wired, play stops there.
+// The enchanting, nether, eyes and End milestones run through src/milestones.ts (the enchanting, nether, stronghold and
+// End skills); bot.survival.handlers or play's options replace any milestone's handler, and stopAt stops play before one.
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { Bot } from 'mineflayer'
@@ -22,7 +22,7 @@ import { navigate, navigateNear } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
-import { enchantGear } from './skills/enchant'
+import { MILESTONE_HANDLERS } from './milestones'
 import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 
@@ -38,8 +38,11 @@ export interface MilestoneContext {
 /** works on a milestone; play checks `done` again after it returns */
 export type MilestoneHandler = (ctx: MilestoneContext) => Promise<void>
 
-/** the milestones that need skills play doesn't have: a handler has to be registered for them */
-export const UNWIRED: readonly MilestoneId[] = ['nether', 'eyes', 'end']
+/**
+ * The milestones that need skills play doesn't have: a handler has to be registered for them (bot.survival.handlers).
+ * The nether, eyes and End have theirs now (src/milestones.ts); `stopAt` stops play before one all the same.
+ */
+export const UNWIRED: readonly MilestoneId[] = []
 
 export interface MilestoneEvent {
   id: MilestoneId
@@ -53,6 +56,8 @@ export interface MilestoneEvent {
 export interface PlayOptions {
   /** stop once this milestone is reached */
   until?: MilestoneId
+  /** stop before working on this milestone */
+  stopAt?: MilestoneId
   /** milestones treated as done (not worked on) */
   skip?: MilestoneId[]
   /** handlers by milestone, over bot.survival.handlers and the defaults */
@@ -139,10 +144,7 @@ const defaultHandlers: Partial<Record<MilestoneId, MilestoneHandler>> = {
     const opts = (bot as any).survival?.playOptions?.base ?? {}
     await buildBase(bot, { ...opts, executor, signal, log })
   },
-  enchanting: async ({ bot, milestone, state, executor, signal }) => {
-    await executor.obtain(milestone.goals(state), signal)
-    await enchantGear(bot, { executor, signal })
-  }
+  ...MILESTONE_HANDLERS
 }
 
 export class Runner {
@@ -266,6 +268,7 @@ export class Runner {
       if (this.options.until != null && this.reached.some(r => r.id === this.options.until)) return this.stop(null, 'until')
       const m = MILESTONES.find(x => !skip.has(x.id) && !x.done(state)) ?? null
       if (m == null) return this.stop(null, 'finished')
+      if (this.options.stopAt === m.id) return this.stop(m.id, 'until')
       const handler = this.handlerFor(m.id)
       if (handler == null) {
         this.log(`milestone ${m.id} needs skills that aren't wired yet: stopping (register bot.survival.handlers.${m.id})`)
