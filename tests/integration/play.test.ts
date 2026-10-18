@@ -32,7 +32,15 @@ async function freshGame (name: string): Promise<{ server: TestServer, bot: Bot,
   return { server, bot, saveFile }
 }
 
-describe('play from a fresh 1.21.11 world', { timeout: 90 * 60 * 1000 }, () => {
+// Each test runs on a tick budget (play's maxTicks: the game's time, whatever the machine's speed), and its wall
+// timeout leaves room for that budget at about 50 ticks a second (the lockstep server runs 100 to 600 on a free
+// machine): a run that goes nowhere stops at its budget, minutes in, not hours.
+const FOOD_TICKS = Number(process.env.PLAY_FOOD_TICKS ?? 30000)
+const IRON_TICKS = Number(process.env.PLAY_IRON_TICKS ?? 80000)
+const DIAMOND_TICKS = Number(process.env.PLAY_DIAMOND_TICKS ?? 200000)
+const wallFor = (ticks: number): number => (ticks / 50 + 300) * 1000
+
+describe('play from a fresh 1.21.11 world', { timeout: wallFor(FOOD_TICKS) }, () => {
   let server: TestServer
   let bot: Bot
   let saveFile: string
@@ -45,7 +53,7 @@ describe('play from a fresh 1.21.11 world', { timeout: 90 * 60 * 1000 }, () => {
   })
 
   test('wood, stone and food', async (t) => {
-    const result = await bot.survival.play({ until: 'food', saveFile })
+    const result = await bot.survival.play({ until: 'food', saveFile, maxTicks: FOOD_TICKS })
     report(t, result)
     assert.strictEqual(result.reason, 'until', `stopped: ${result.reason} ${String((result.error as Error)?.message ?? '')}`)
     for (const id of ['wood', 'stone', 'food']) assert.ok(ids(result.reached).includes(id), `${id} not reached`)
@@ -56,7 +64,7 @@ describe('play from a fresh 1.21.11 world', { timeout: 90 * 60 * 1000 }, () => {
   })
 })
 
-describe('play on to iron', { timeout: 180 * 60 * 1000 }, () => {
+describe('play on to iron', { timeout: wallFor(IRON_TICKS) }, () => {
   let server: TestServer
   let bot: Bot
   let saveFile: string
@@ -69,7 +77,7 @@ describe('play on to iron', { timeout: 180 * 60 * 1000 }, () => {
   })
 
   test('an iron pickaxe and sword, iron armor, a shield and a bucket (the base left out)', async (t) => {
-    const result = await bot.survival.play({ until: 'iron', skip: ['base'], saveFile })
+    const result = await bot.survival.play({ until: 'iron', skip: ['base'], saveFile, maxTicks: IRON_TICKS })
     report(t, result)
     assert.strictEqual(result.reason, 'until', `stopped: ${result.reason} ${String((result.error as Error)?.message ?? '')}`)
     assert.ok(ids(result.reached).includes('iron'))
@@ -82,7 +90,7 @@ describe('play on to iron', { timeout: 180 * 60 * 1000 }, () => {
 })
 
 // optional (PLAY_DIAMONDS=1): on to the diamonds within a tick budget (PLAY_DIAMOND_TICKS, default 200000)
-describe('play on to diamonds', { timeout: 240 * 60 * 1000, skip: process.env.PLAY_DIAMONDS == null }, () => {
+describe('play on to diamonds', { timeout: wallFor(DIAMOND_TICKS), skip: process.env.PLAY_DIAMONDS == null }, () => {
   let server: TestServer
   let bot: Bot
   let saveFile: string
@@ -95,8 +103,7 @@ describe('play on to diamonds', { timeout: 240 * 60 * 1000, skip: process.env.PL
   })
 
   test('a diamond pickaxe and sword within the tick budget (the base left out)', async (t) => {
-    const maxTicks = Number(process.env.PLAY_DIAMOND_TICKS ?? 200000)
-    const result = await bot.survival.play({ until: 'diamonds', skip: ['base'], saveFile, maxTicks })
+    const result = await bot.survival.play({ until: 'diamonds', skip: ['base'], saveFile, maxTicks: DIAMOND_TICKS })
     report(t, result)
     assert.strictEqual(result.reason, 'until', `stopped: ${result.reason} ${String((result.error as Error)?.message ?? '')}`)
     assert.ok(ids(result.reached).includes('diamonds'))
