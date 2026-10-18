@@ -12,7 +12,7 @@ import { eat, bestFoodInInventory } from './eat'
 import { armorPiece } from './armor'
 import { hitDamage } from './weapons'
 import { CARDINALS, countItems, trace, vecKey, waitUntil, type Block } from './util'
-import type { BlockLookup, BlockView } from './placement'
+import { findBedPlacement, type BlockLookup, type BlockView } from './placement'
 import { SCAFFOLD_ITEMS, towerUp } from '../end/skills/world'
 
 /** how deep the hole goes: the feet three blocks down, the head two, the seal one (flush with the ground) */
@@ -509,6 +509,27 @@ async function climbOut (bot: Bot, surface: Vec3, signal?: AbortSignal): Promise
   await navigate(bot, { goal: new goals.GoalNear(surface.x + 3, surface.y, surface.z, 2), reached: () => bot.entity.position.y >= surface.y - 1.01 }, signal)
 }
 
+/** The nearest cell within radius to stand in with room for a bed beside it (findBedPlacement), or null. */
+export function roomForBed (lookup: BlockLookup, from: Vec3, radius: number): Vec3 | null {
+  const start = from.floored()
+  let best: Vec3 | null = null
+  let bestD = Infinity
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dy = -3; dy <= 3; dy++) {
+        const pos = start.offset(dx, dy, dz)
+        const d = Math.hypot(dx, dz) + Math.abs(dy)
+        if (d >= bestD) continue
+        if (!isOpen(lookup(pos)) || !isOpen(lookup(pos.offset(0, 1, 0))) || !isSolid(lookup(pos.offset(0, -1, 0)))) continue
+        if (findBedPlacement(lookup, pos.offset(0.5, 0, 0.5)) == null) continue
+        best = pos
+        bestD = d
+      }
+    }
+  }
+  return best
+}
+
 /** Player.startSleepInBed's check: the monsters (Monster.isPreventingPlayerRest) within 8 blocks across and 5 up or down of the bed, nearest first */
 export function monstersPreventingRest (bot: Bot, bed: Vec3): Array<Bot['entities'][string]> {
   const c = bed.offset(0.5, 0, 0.5)
@@ -533,6 +554,7 @@ export async function sleepThroughNight (bot: Bot, opts: SleepThroughNightOption
   const signal = opts.signal
   let fought = 0
   let last: unknown = null
+  let moved = false
   const fightOff = async (monster: Bot['entities'][string]): Promise<void> => {
     await fight(bot, monster, { signal, maxTicks: 600 }).catch((e) => { if (isAbort(e)) throw e })
     fought++
@@ -553,6 +575,18 @@ export async function sleepThroughNight (bot: Bot, opts: SleepThroughNightOption
       return { slept: true, fought }
     } catch (err) {
       trace('sleepThroughNight: try', attempt, (err as Error).message)
+      // no room for the bed here (up a tree, in a corner): down to the ground, or a few steps to where there is, once
+      if (isSkillError(err, 'CANNOT_PLACE') && !moved) {
+        moved = true
+        if (onTree(bot)) {
+          await climbDownTree(bot, signal)
+        } else {
+          const room = roomForBed((pos) => bot.blockAt(pos) as BlockView | null, bot.entity.position, 8)
+          if (room == null) throw err
+          await navigate(bot, { goal: new goals.GoalBlock(room.x, room.y, room.z) }, signal)
+        }
+        continue
+      }
       if (!isSkillError(err, 'REFUSED')) throw err
       last = err
       const bed = (err.partial as any)?.bed as Vec3 | undefined

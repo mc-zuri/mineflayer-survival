@@ -2,7 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import {
-  armorPoints, celestialAngle, defaultDigCost, findShelterSpot, isBrightOutside, isEnclosed, leaveAtDay, monstersPreventingRest, nightPlan, sealItem, shelterAt, skyDarken
+  armorPoints, celestialAngle, defaultDigCost, findShelterSpot, isBrightOutside, isEnclosed, leaveAtDay, monstersPreventingRest, nightPlan, roomForBed, sealItem,
+  shelterAt, skyDarken
 } from '../../src/skills/shelter'
 import type { BlockLookup } from '../../src/skills/placement'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
@@ -147,4 +148,18 @@ test('leaveAtDay: out once bright with no hostile within 8 blocks (burning or no
   bot.entities[zombie.id] = zombie
   bot.time.timeOfDay = 23600 + 2400 - 24000
   assert.strictEqual(leave(), true)
+})
+
+test('roomForBed: the nearest cell with two free cells in a line beside it, over solid ground', () => {
+  // the bot boxed in by logs on three sides and its back; room two blocks off
+  const boxed = (p: Vec3): string => {
+    if (p.y < 64) return 'grass_block'
+    if (p.y > 65) return 'air'
+    if (Math.abs(p.x) <= 1 && Math.abs(p.z) <= 1 && !(p.x === 0 && p.z === 0)) return 'oak_log'
+    return 'air'
+  }
+  const room = roomForBed(world(boxed), new Vec3(0.5, 64, 0.5), 6)
+  assert.ok(room != null)
+  assert.ok(room.distanceTo(new Vec3(0, 64, 0)) >= 2)
+  assert.deepStrictEqual(roomForBed(world(plains), new Vec3(0.5, 64, 0.5), 6), new Vec3(0, 64, 0))
 })
