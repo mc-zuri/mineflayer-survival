@@ -15,6 +15,7 @@ import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './co
 import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { comeUp, dayPhase, nightAction, nightGoals } from './planner/schedule'
+import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
 import { buildBase, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
@@ -168,6 +169,16 @@ export function deathSpotWorthIt (death: { x: number, y: number, z: number, dime
 /** a system message about the player that isn't an advancement or a join: a death message (DeathMessageType's) */
 export function isDeathMessage (message: string): boolean {
   return !/ has (made|completed|reached) the (advancement|challenge|goal)| joined the game| left the game/.test(message)
+}
+
+/** logs cut at dusk for a night down the mine with no wood carried, if they cost DUSK_WOOD_TICKS or less */
+export const DUSK_LOGS = 4
+export const DUSK_WOOD_TICKS = 800
+
+/** the wood carried, in logs (a log is 4 planks, a plank 2 sticks) */
+export function woodCarried (inv: Inventory): number {
+  const tags = itemTags(inv.registry)
+  return inv.countAny(tags.resolve('#logs_that_burn')) + inv.countAny(tags.resolve('#planks')) / 4 + inv.count('stick') / 8
 }
 
 /** reflexes firing again within this many ticks of the last are counted, not logged each */
@@ -586,6 +597,18 @@ export class Runner {
     ;(bot as any).survival.nightWork = true
     this.log(`night (time ${bot.time.timeOfDay}): down the mine for ${goals.map(g => `${g.count} ${String(g.item)}`).join(', ')}`)
     try {
+      // the sticks of the torches and the tools down there are the day's wood: some cut first when trees are near
+      // and none is carried (a respawn at dusk had none, and the night got no torches and no stone pickaxe on seed 4)
+      if (woodCarried(ownedInventory(bot)) < 2) {
+        const wood = [{ item: '#logs_that_burn', count: DUSK_LOGS }]
+        const plan = this.executor.plan(wood)
+        if (plan.ok && plan.cost <= DUSK_WOOD_TICKS) {
+          await this.executor.obtain(wood, ctrl.signal).catch(err => {
+            if (signal?.aborted === true || TaskError.is(err, 'DIED') || bot.health <= 0) throw err
+            this.log(`night: no wood: ${(err as Error).message}`)
+          })
+        }
+      }
       for (const goal of goals) {
         if (ctrl.signal.aborted) break
         try {

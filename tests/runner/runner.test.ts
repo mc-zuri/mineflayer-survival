@@ -251,7 +251,7 @@ test('a death after the iron: the milestones reached stay reached, the food is g
 })
 
 test('at night with a pickaxe and no bed the runner mines the night: the iron down there, once a night, the reflex left out', async () => {
-  const bot = fakeBot({ stone_pickaxe: 1, stone_sword: 1, torch: 20, crafting_table: 1, furnace: 1, cooked_beef: 8, shield: 1 })
+  const bot = fakeBot({ stone_pickaxe: 1, stone_sword: 1, torch: 20, crafting_table: 1, furnace: 1, cooked_beef: 8, shield: 1, oak_log: 4 })
   bot.time = { timeOfDay: 13000, day: 1 }
   bot.findBlock = () => null
   const lines: string[] = []
@@ -308,7 +308,7 @@ test('the death messages are told from the other system lines about the bot', as
 })
 
 test('dusk cuts the day\'s work off for the night\'s mine, and the milestone goes on after', async () => {
-  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, torch: 20, cooked_beef: 8, shield: 1 })
+  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, torch: 20, cooked_beef: 8, shield: 1, oak_log: 4 })
   bot.time = { timeOfDay: 11000, day: 0 }
   bot.findBlock = () => null
   const mined: string[] = []
@@ -343,4 +343,20 @@ test('dusk cuts the day\'s work off for the night\'s mine, and the milestone goe
   assert.equal(calls, 2)
   assert.ok(lines.some(l => /dusk: iron left for the night's mine/.test(l)), lines.join('\n'))
   assert.deepEqual(mined, ['raw_iron'])
+})
+
+test('a night down the mine with no wood carried cuts a few logs first, for its torches and tools', async () => {
+  const { woodCarried, DUSK_LOGS } = await import('../../src/runner')
+  const { Inventory } = await import('../../src/core/inventory')
+  assert.equal(woodCarried(new Inventory(registry, { oak_log: 1, oak_planks: 4, stick: 8 })), 3)
+  const bot = fakeBot({ wooden_pickaxe: 1, cooked_beef: 8 })
+  bot.time = { timeOfDay: 12000, day: 3 }
+  bot.findBlock = () => null
+  const mined: string[] = []
+  const runners = { mine: async (step: any) => { mined.push(step.item); bot.give(step.item, step.count); return { gained: step.count } } }
+  const runner = new Runner(bot, { log: () => {}, executor: { runners, log: () => {} } })
+  runner.reached.push(...['wood', 'stone', 'food'].map(id => ({ id: id as any, title: '', tick: 0, wallMs: 0 })))
+  await runner.nightSchedule()
+  assert.equal(mined[0], 'oak_log')
+  assert.ok(progressState(bot, bot.survival.memory).inventory.count('oak_log') >= DUSK_LOGS)
 })
