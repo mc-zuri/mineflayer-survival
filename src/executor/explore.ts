@@ -10,6 +10,7 @@ import { normalizeDimension } from '../core/memory'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { navigate } from '../skills/navigate'
+import { headInWater, surface } from '../skills/escape'
 import { placeBlock } from '../skills/placeBlock'
 import { AIR_BLOCKS, CARDINALS, countItems, trace } from '../skills/util'
 
@@ -212,6 +213,20 @@ export function openSky (lookup: Lookup, feet: Vec3, limit = 64): boolean {
     if (b.boundingBox === 'block' || LIQUIDS.has(b.name)) return false
   }
   return true
+}
+
+/**
+ * What tops a column in the loaded chunks, looked down from 40 blocks above `y` to 40 below: the first block that
+ * isn't air or a tree (water for the sea), or null where the column isn't loaded or is all air
+ */
+export function columnSurface (lookup: Lookup, x: number, z: number, y: number): string | null {
+  for (let at = y + 40; at > y - 40; at--) {
+    const b = lookup(new Vec3(x, at, z))
+    if (b == null) return null
+    if (AIR_BLOCKS.has(b.name) || TREE.test(b.name)) continue
+    return b.name
+  }
+  return null
 }
 
 /** the highest block of a column a body can't pass (trees left out), from `from` up; `from.y` when there's none */
@@ -457,10 +472,18 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
   if (args.found()) return true
   const center = args.center ?? bot.entity.position.clone()
   const waypoints = spiralWaypoints(center, args.step ?? 16, args.maxRadius ?? 192)
+  const lookup = lookupOf(bot)
   for (let i = args.progress?.leg ?? 0; i < waypoints.length; i++) {
     const wp = waypoints[i]
     throwIfAborted(signal)
     if (args.progress != null) args.progress.leg = i
+    // a leg out over the sea or a lake is passed over (no animal or tree out there): on seed 7 the hunt's legs went out
+    // over the ocean, the bot sank where a leg ended short, and it drowned
+    if (columnSurface(lookup, wp.x, wp.z, Math.floor(bot.entity.position.y)) === 'water') {
+      trace('explore: leg to', wp.x, wp.z, 'is over water: passed over')
+      if (args.progress != null) args.progress.leg = i + 1
+      continue
+    }
     trace('explore: surface leg to', wp.x, wp.z)
     try {
       await onTheSurface(bot, async () => await navigate(bot, { goal: new goals.GoalNearXZ(wp.x, wp.z, 4) }, signal))
@@ -469,6 +492,8 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
       trace('explore: leg failed', (err as Error).message)
     }
     if (args.progress != null) args.progress.leg = i + 1
+    // a leg that ended in the water: up to the air before the next (a body still in water sinks)
+    if (headInWater(bot)) await surface(bot, { signal, maxTicks: 200 }).catch(err => { if (isAbort(err)) throw err })
     if (args.memory != null && args.remember != null) rememberAround(bot, args.memory, args.remember)
     if (args.found()) return true
   }

@@ -311,3 +311,12 @@ test('a ravine\'s floor is open to the sky but not the surface: GoalSurface and 
   assert.equal(goal.isEnd({ x: 0, y: 8, z: 0 }), false)
   assert.equal(goal.isEnd({ x: 0, y: 70, z: 0 }), true)
 })
+
+test('columnSurface: what tops a column, trees and air passed; the sea is water; an unloaded column nothing', async () => {
+  const { columnSurface } = await import('../../src/executor/explore')
+  const sea = (p: Vec3): any => ({ name: p.y > 62 ? 'air' : p.y > 40 ? 'water' : 'sand', boundingBox: p.y > 62 ? 'empty' : 'block' })
+  assert.equal(columnSurface(sea, 0, 0, 64), 'water')
+  const forest = (p: Vec3): any => ({ name: p.y > 70 ? 'air' : p.y > 64 ? 'oak_leaves' : 'grass_block' })
+  assert.equal(columnSurface(forest, 0, 0, 64), 'grass_block')
+  assert.equal(columnSurface(() => null, 0, 0, 64), null)
+})
