@@ -219,3 +219,13 @@ test('night reflex: by day, a bot still down its shelter\'s column (cut off clim
   assert.strictEqual(shelterToLeave(bot), null)
   engine.stop()
 })
+
+test('creeper reflex: leaves a creeper the hostiles reflex is fighting with a shield to the fight (it blocks the blast itself)', () => {
+  const creeper = entity({ name: 'creeper', position: at(2.2) })
+  const fighting = (e: ReflexEngine): void => { (e as any).running = { task: { name: 'hostiles', priority: 60, detail: 'fight creeper' }, cancel: () => {} } }
+  assert.strictEqual(check(creeperReflex, { entities: [creeper], offhand: item('shield') }, {}, fighting), null)
+  // no shield: run
+  assert.strictEqual(check(creeperReflex, { entities: [creeper] }, {}, fighting), 'evade creeper')
+  // not fighting it: run
+  assert.strictEqual(check(creeperReflex, { entities: [creeper], offhand: item('shield') }), 'evade creeper')
+})

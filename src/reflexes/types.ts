@@ -32,7 +32,7 @@ export interface ReflexContext {
   /** a task is using the off hand (a raised shield): leave it alone */
   offhandLocked: boolean
   /** the urgent task now running, if any */
-  running: { name: string, priority: number } | null
+  running: { name: string, priority: number, detail?: string } | null
 }
 
 /** An always-on rule, evaluated each physics tick. */

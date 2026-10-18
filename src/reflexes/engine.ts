@@ -78,7 +78,7 @@ export class ReflexEngine {
       swell: this.swell,
       armorChanged: this.armorChanged,
       offhandLocked: this.offhandLocked || ((bot as any).usingHeldItem === true && bot.inventory.slots[45]?.name === 'shield'),
-      running: this.running == null ? null : { name: this.running.task.name, priority: this.running.task.priority }
+      running: this.running == null ? null : { name: this.running.task.name, priority: this.running.task.priority, detail: this.running.task.detail }
     }
   }
 

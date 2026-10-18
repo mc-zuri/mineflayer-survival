@@ -20,6 +20,10 @@ function distance (bot: Bot, e: Entity): number {
   return bot.entity.position.distanceTo(e.position)
 }
 
+function hasShield (bot: Bot): boolean {
+  return bot.inventory.slots[45]?.name === 'shield' || bot.inventory.items().some(i => i.name === 'shield')
+}
+
 function hasBowAndArrows (bot: Bot): boolean {
   const items = bot.inventory.items()
   return items.some(i => i.name === 'bow') && items.some(i => /arrow$/.test(i.name))
@@ -109,6 +113,10 @@ export const creeperReflex: Reflex = {
     if (!config.creeper.enabled) return null
     const creeper = threateningCreeper(ctx)
     if (creeper == null) return null
+    // the hostiles reflex fighting it with a shield: fight() blocks the blast itself once the fuse is along (and hits and
+    // backs off); running from it each time it came within 3 blocks kept the bot from ever hitting it, 600 ticks under
+    // the skeletons' arrows
+    if (ctx.running?.name === 'hostiles' && ctx.running.detail === 'fight creeper' && hasShield(bot)) return null
     return {
       name: 'creeper',
       priority: config.creeper.priority,
@@ -166,7 +174,7 @@ export const hostilesReflex: Reflex = {
     const target = near.find(e => {
       if (e.name !== 'creeper') return true
       if (hasBowAndArrows(bot) && distance(bot, e) >= config.hostiles.shootCreepersFrom) return true
-      return bot.inventory.items().some(i => i.name === 'shield') || bot.inventory.slots[45]?.name === 'shield'
+      return hasShield(bot)
     })
     if (target == null) {
       // only creepers it can't take on: keep away (past their follow range, Creeper's FOLLOW_RANGE 16)
