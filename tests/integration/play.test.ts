@@ -35,9 +35,10 @@ async function freshGame (name: string): Promise<{ server: TestServer, bot: Bot,
 // Each test runs on a tick budget (play's maxTicks: the game's time, whatever the machine's speed), and its wall
 // timeout leaves room for that budget at about 50 ticks a second (the lockstep server runs 100 to 600 on a free
 // machine): a run that goes nowhere stops at its budget, minutes in, not hours.
-const FOOD_TICKS = Number(process.env.PLAY_FOOD_TICKS ?? 30000)
-const IRON_TICKS = Number(process.env.PLAY_IRON_TICKS ?? 80000)
-const DIAMOND_TICKS = Number(process.env.PLAY_DIAMOND_TICKS ?? 200000)
+// (the night reflex digs in and waits for dawn without a bed: a night is about 11000 ticks of it)
+const FOOD_TICKS = Number(process.env.PLAY_FOOD_TICKS ?? 40000)
+const IRON_TICKS = Number(process.env.PLAY_IRON_TICKS ?? 150000)
+const DIAMOND_TICKS = Number(process.env.PLAY_DIAMOND_TICKS ?? 300000)
 const wallFor = (ticks: number): number => (ticks / 50 + 300) * 1000
 
 describe('play from a fresh 1.21.11 world', { timeout: wallFor(FOOD_TICKS) }, () => {
