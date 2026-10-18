@@ -29,6 +29,11 @@ export interface ReflexConfig {
     maxDy: number
     /** flee instead at or below this health (default 6) */
     fleeHealth: number
+    /**
+     * but fight on at low health against a single hostile with this many armor points and a weapon (default 10): a
+     * zombie is as quick as the bot, and running from it never ended (300 ticks 'still chased', no eating meanwhile)
+     */
+    fightOnArmor: number
     /** flee instead from more than this many hostiles in range (default 3) */
     maxFight: number
     /** flee until none is this close (default 16) */
@@ -121,6 +126,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
     rangedRange: 16,
     maxDy: 4,
     fleeHealth: 6,
+    fightOnArmor: 10,
     maxFight: 3,
     fleeDistance: 16,
     fleeUnarmed: false,

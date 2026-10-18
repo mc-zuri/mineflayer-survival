@@ -4,7 +4,7 @@ import { eat, bestFoodInInventory } from '../skills/eat'
 import { escapeHazard, evadeCreeper, fleeFrom, headInWater, inHazard, surface } from '../skills/escape'
 import { creeperSwelling, fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
-import { botIsBrightOutside, isEnclosed, nightPlan, shelter, sleepThroughNight, type NightPlan } from '../skills/shelter'
+import { armorPoints, botIsBrightOutside, isEnclosed, nightPlan, shelter, sleepThroughNight, type NightPlan } from '../skills/shelter'
 import { bestMeleeWeapon } from '../skills/weapons'
 import { hasLineOfSight, type Entity } from '../skills/combatUtil'
 import { GHAST_FIREBALL, deflectFireball, fireballIncoming } from '../nether/safety'
@@ -151,7 +151,8 @@ export const hostilesReflex: Reflex = {
     if (!config.hostiles.enabled) return null
     const near = hostilesInRange(ctx)
     if (near.length === 0) return null
-    const flee = bot.health <= config.hostiles.fleeHealth || near.length > config.hostiles.maxFight ||
+    const fightOn = near.length === 1 && armorPoints(bot) >= config.hostiles.fightOnArmor && bestMeleeWeapon(bot) != null
+    const flee = (bot.health <= config.hostiles.fleeHealth && !fightOn) || near.length > config.hostiles.maxFight ||
       (config.hostiles.fleeUnarmed && bestMeleeWeapon(bot) == null)
     if (flee) {
       return {

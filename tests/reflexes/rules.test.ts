@@ -192,3 +192,13 @@ test('eat reflex: hurt and out of combat, eat up to food 18, where the health co
   assert.strictEqual(check(eatReflex, { food: 16, health: 14, items: bread, entities: [entity({ name: 'zombie', position: at(5) })] }), null)
   assert.strictEqual(check(eatReflex, { food: 16, health: 14, items: bread }, { eat: { regenFood: 0 } }), null)
 })
+
+test('hostiles reflex: at low health an armored bot with a weapon fights on against one hostile, flees from two', () => {
+  const zombie = (x: number): any => entity({ name: 'zombie', position: at(x) })
+  const iron = { head: item('iron_helmet'), torso: item('iron_chestplate'), legs: item('iron_leggings'), feet: item('iron_boots') }
+  assert.strictEqual(check(hostilesReflex, { entities: [zombie(4)], health: 5, armor: iron, items: [item('iron_sword')] }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombie(4), zombie(6)], health: 5, armor: iron, items: [item('iron_sword')] }), 'flee')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombie(4)], health: 5, armor: iron }), 'flee')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombie(4)], health: 5, armor: { torso: item('leather_chestplate') }, items: [item('iron_sword')] }), 'flee')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombie(4)], health: 5, armor: iron, items: [item('iron_sword')] }, { hostiles: { fightOnArmor: 21 } }), 'flee')
+})
