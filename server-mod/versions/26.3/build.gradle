@@ -1,0 +1,14 @@
+plugins {
+    // 26.x is unobfuscated: no mappings and no remapping, the mod compiles against the official names
+    id 'net.fabricmc.fabric-loom'
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.name}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    // no Fabric API: the payload, the commands and the gate are plain mixins
+}
+
+loom {
+    serverOnlyMinecraftJar()
+}

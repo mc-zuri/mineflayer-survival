@@ -1,0 +1,15 @@
+plugins {
+    // 1.21.11 is still obfuscated: the remapping Loom maps the official Mojang names to intermediary for the jar
+    id 'net.fabricmc.fabric-loom-remap'
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.name}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    // no Fabric API: the payload, the commands and the gate are plain mixins
+}
+
+loom {
+    serverOnlyMinecraftJar()
+}

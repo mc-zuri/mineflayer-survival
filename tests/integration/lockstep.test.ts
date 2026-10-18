@@ -1,18 +1,19 @@
-// The lockstep server mod and client against a real 1.21.11 Fabric server: the server advances a tick only once the
-// bot acked the last one, so 2000 ticks take far less than 2000 x 50 ms, and both sides count the same ticks.
+// The lockstep server mod and client against a real Fabric server of the SURVIVAL_VERSION (default 1.21.11): the
+// server advances a tick only once the bot acked the last one, so 2000 ticks take far less than 2000 x 50 ms, and both
+// sides count the same ticks.
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert'
 import { performance } from 'node:perf_hooks'
 import type { Bot } from 'mineflayer'
-import { botCommand, connectLockstepBot, quitBot, startServer } from '../harness'
+import { botCommand, connectLockstepBot, DEFAULT_VERSION, quitBot, startServer } from '../harness'
 import type { TestServer } from '../harness'
 
 const TICKS = 2000
 
 // "/lockstep status": "lockstep on, timeout 5000 ms, tick 1234, ..." (MinecraftServer.tickCount)
 const statusTick = (status: string): number => Number(/, tick (\d+),/.exec(status)?.[1] ?? NaN)
-// "/time query gametime": "The time is 1234"
-const gametime = (answer: string): number => Number(/^The time is (\d+)/.exec(answer)?.[1] ?? NaN)
+// "/time query gametime": "The time is 1234" (1.21.11), "The game time is 1234 tick(s)" (26.x)
+const gametime = (answer: string): number => Number(/^The (?:game )?time is (\d+)/.exec(answer)?.[1] ?? NaN)
 // "/data get entity Bot Pos": "Bot has the following entity data: [0.5d, -60.0d, 0.5d]"
 function entityPos (answer: string): [number, number, number] {
   const m = /\[(-?[\d.E-]+)d, (-?[\d.E-]+)d, (-?[\d.E-]+)d\]/.exec(answer)
@@ -20,7 +21,7 @@ function entityPos (answer: string): [number, number, number] {
   return [Number(m[1]), Number(m[2]), Number(m[3])]
 }
 
-describe('lockstep (1.21.11 server mod and client)', () => {
+describe(`lockstep (${DEFAULT_VERSION} server mod and client)`, () => {
   let server: TestServer
   let bot: Bot
 
@@ -42,7 +43,7 @@ describe('lockstep (1.21.11 server mod and client)', () => {
     // the server waits between two ticks while the bot holds the ack: its counters stand still
     const n1 = await bot.lockstep.step()
     const tick1 = statusTick(await botCommand(bot, 'lockstep status', /^lockstep on/))
-    const time1 = gametime(await botCommand(bot, 'time query gametime', /^The time is/))
+    const time1 = gametime(await botCommand(bot, 'time query gametime', /^The (game )?time is/))
     assert.strictEqual(tick1, n1, 'the tick message carries the server\'s tick count')
     const botTicks1 = bot.lockstep.lockstepTicks
 
@@ -51,7 +52,7 @@ describe('lockstep (1.21.11 server mod and client)', () => {
     const wallMs = performance.now() - start
 
     const tick2 = statusTick(await botCommand(bot, 'lockstep status', /^lockstep on/))
-    const time2 = gametime(await botCommand(bot, 'time query gametime', /^The time is/))
+    const time2 = gametime(await botCommand(bot, 'time query gametime', /^The (game )?time is/))
     assert.strictEqual(bot.lockstep.lockstepTicks - botTicks1, TICKS, 'the bot ran one tick a server tick')
     assert.strictEqual(n2 - n1, TICKS)
     assert.strictEqual(tick2 - tick1, TICKS, 'the server\'s tick count went up by the ticks the bot ran')

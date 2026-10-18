@@ -7,16 +7,44 @@ import * as fs from 'node:fs'
 import * as net from 'node:net'
 import * as path from 'node:path'
 
-export const DEFAULT_VERSION = '1.21.11'
-export const FABRIC_LOADER_VERSION = '0.18.4'
-export const FABRIC_INSTALLER_VERSION = '1.1.2'
+/** What each supported version's server needs */
+export interface VersionSetup {
+  /** the Fabric loader (meta.fabricmc.net/v2/versions/loader/<version>) */
+  loader: string
+  /** the Fabric installer whose server launcher is downloaded */
+  installer: string
+  /** the Java major version the server needs (the version json's javaVersion.majorVersion) */
+  java: number
+  /**
+   * the game jar is obfuscated: the loader remaps it to intermediary on the first start (.fabric/remappedJars). 26.x is
+   * unobfuscated (intermediary 0.0.0) and runs the vanilla jar as it is.
+   */
+  obfuscated: boolean
+}
+
+export const VERSIONS: Record<string, VersionSetup> = {
+  '1.21.11': { loader: '0.18.4', installer: '1.1.2', java: 21, obfuscated: true },
+  '26.3': { loader: '0.20.0', installer: '1.1.2', java: 25, obfuscated: false }
+}
+
+/** The integration tests' version: SURVIVAL_VERSION, else 1.21.11 */
+export const DEFAULT_VERSION = process.env.SURVIVAL_VERSION ?? '1.21.11'
+/** the Java major version Gradle runs on to build the lockstep mod (Fabric Loom 1.19 needs 25, for every version) */
+export const GRADLE_JAVA = 25
+
+export function versionSetup (version: string): VersionSetup {
+  const setup = VERSIONS[version]
+  if (setup == null) throw new Error(`no server setup for Minecraft ${version} (the harness knows ${Object.keys(VERSIONS).join(', ')})`)
+  return setup
+}
 
 const REPO_DIR = path.resolve(__dirname, '..', '..')
 export const SERVERS_DIR = path.join(REPO_DIR, 'tests', '.servers')
 export const SERVER_MOD_DIR = path.join(REPO_DIR, 'server-mod')
 
 // the directories of the shared install every instance links to: the launcher's (.fabric/server: the vanilla jar, the
-// loader and its libraries), the loader's remapped game jar, and the vanilla bundler's extracted libraries
+// loader and its libraries), the loader's remapped game jar (obfuscated versions), and the vanilla bundler's extracted
+// libraries
 const SHARED_DIRS = [path.join('.fabric', 'server'), path.join('.fabric', 'remappedJars'), 'libraries', 'versions']
 
 export type GameruleValue = boolean | number | string
@@ -27,7 +55,7 @@ const CLASSIC_FLAT = {
 }
 
 export interface ServerOptions {
-  /** Minecraft version (default 1.21.11) */
+  /** Minecraft version (default DEFAULT_VERSION: SURVIVAL_VERSION, else 1.21.11), one of VERSIONS */
   version?: string
   /** level-seed */
   seed?: string
@@ -39,7 +67,7 @@ export interface ServerOptions {
   gamemode?: 'survival' | 'creative' | 'adventure' | 'spectator'
   /** default: easy */
   difficulty?: 'peaceful' | 'easy' | 'normal' | 'hard'
-  /** set with /gamerule once the server is up (1.21.11 names, e.g. advance_time, spawn_mobs) */
+  /** set with /gamerule once the server is up (the snake_case ids, the same in 1.21.11 and 26.3: advance_time, spawn_mobs...) */
   gamerules?: Record<string, GameruleValue>
   /** extra server.properties entries (they win over the harness's) */
   properties?: Record<string, GameruleValue>
@@ -51,7 +79,7 @@ export interface ServerOptions {
   mods?: string[]
   /** players to op once the server is up */
   ops?: string[]
-  /** the java binary (JDK 21+); default: LOCKSTEP_JAVA, JAVA21_HOME, a JDK 21 in the usual places, then java */
+  /** the java binary; default: findJava of the version's Java (21 for 1.21.11, 25 for 26.x) */
   java?: string
   jvmArgs?: string[]
   /** how long to wait for "Done" (default 5 min: the first start downloads and remaps the server) */
@@ -83,16 +111,32 @@ export interface TestServer extends EventEmitter {
 
 /** A log line: "[10:26:16] [Server thread/INFO]: message" */
 const LOG_LINE = /^\[[^\]]*\] \[([^\]/]+)\/([A-Z]+)\]: (.*)$/
+/**
+ * 26.x logs what the server sends itself (MinecraftServer.sendSystemMessage: the console's command feedback, the chat
+ * broadcasts) as "System chat: <message>"; 1.21.11 logs the message alone
+ */
+const SYSTEM_CHAT = /^System chat: /
 
+/** The thread, the level and the message of a log line, the message without 26.x's "System chat: " */
 export function parseLogLine (line: string): { thread: string, level: string, message: string } | null {
   const m = LOG_LINE.exec(line)
-  return m == null ? null : { thread: m[1], level: m[2], message: m[3] }
+  return m == null ? null : { thread: m[1], level: m[2], message: m[3].replace(SYSTEM_CHAT, '') }
 }
 
-export function findJava (): string {
+/** whether a JDK directory's name is of that major version: jdk-21.0.11, jdk-25.0.3, temurin-21-jdk, zulu21... */
+export function isJdkOfMajor (name: string, major: number): boolean {
+  const m = /(\d+)/.exec(name)
+  return m != null && Number(m[1]) === major
+}
+
+/**
+ * A java binary of that major version (default the integration version's): LOCKSTEP_JAVA (any version), JAVA<n>_HOME,
+ * JAVA_HOME_<n>_X64, a JDK <n> in the usual places, then java on PATH
+ */
+export function findJava (major: number = versionSetup(DEFAULT_VERSION).java): string {
   const exe = process.platform === 'win32' ? 'java.exe' : 'java'
   if (process.env.LOCKSTEP_JAVA != null) return process.env.LOCKSTEP_JAVA
-  for (const home of [process.env.JAVA21_HOME, process.env.JAVA_HOME_21_X64]) {
+  for (const home of [process.env[`JAVA${major}_HOME`], process.env[`JAVA_HOME_${major}_X64`]]) {
     if (home != null && fs.existsSync(path.join(home, 'bin', exe))) return path.join(home, 'bin', exe)
   }
   const roots = process.platform === 'win32'
@@ -100,7 +144,7 @@ export function findJava (): string {
     : ['/usr/lib/jvm', '/Library/Java/JavaVirtualMachines']
   for (const root of roots) {
     if (!fs.existsSync(root)) continue
-    for (const name of fs.readdirSync(root).filter(n => /21/.test(n)).sort().reverse()) {
+    for (const name of fs.readdirSync(root).filter(n => isJdkOfMajor(n, major)).sort().reverse()) {
       for (const bin of [path.join(root, name, 'bin', exe), path.join(root, name, 'Contents', 'Home', 'bin', exe)]) {
         if (fs.existsSync(bin)) return bin
       }
@@ -135,28 +179,41 @@ function installDir (version: string): string {
 }
 
 function launcherJar (version: string): string {
-  return path.join(installDir(version), `fabric-server-launch-${FABRIC_LOADER_VERSION}-${FABRIC_INSTALLER_VERSION}.jar`)
+  const { loader, installer } = versionSetup(version)
+  return path.join(installDir(version), `fabric-server-launch-${loader}-${installer}.jar`)
+}
+
+/**
+ * The file the first start leaves once the install is complete: the remapped game jar of an obfuscated version, the
+ * loader's server jar of an unobfuscated one (the vanilla jar runs as it is)
+ */
+function installedMarker (version: string): string {
+  const { loader, obfuscated } = versionSetup(version)
+  return obfuscated
+    ? path.join(installDir(version), '.fabric', 'remappedJars', `minecraft-${version}-${loader}`)
+    : path.join(installDir(version), '.fabric', 'server', `fabric-loader-server-${loader}-minecraft-${version}.jar`)
 }
 
 const installs = new Map<string, Promise<void>>()
 
 /**
  * The shared install of a version: the Fabric server launcher from meta.fabricmc.net, run once with --initSettings,
- * which downloads the vanilla server and the loader, and has the loader remap the game.
+ * which downloads the vanilla server and the loader, and has the loader remap the game (obfuscated versions).
  */
-export async function ensureInstalled (version: string = DEFAULT_VERSION, java: string = findJava()): Promise<string> {
+export async function ensureInstalled (version: string = DEFAULT_VERSION, java: string = findJava(versionSetup(version).java)): Promise<string> {
+  const { loader, installer } = versionSetup(version)
   const dir = installDir(version)
   let install = installs.get(version)
   if (install == null) {
     install = (async () => {
       const jar = launcherJar(version)
       if (!fs.existsSync(jar)) {
-        await download(`https://meta.fabricmc.net/v2/versions/loader/${version}/${FABRIC_LOADER_VERSION}/${FABRIC_INSTALLER_VERSION}/server/jar`, jar)
+        await download(`https://meta.fabricmc.net/v2/versions/loader/${version}/${loader}/${installer}/server/jar`, jar)
       }
-      const remapped = path.join(dir, '.fabric', 'remappedJars', `minecraft-${version}-${FABRIC_LOADER_VERSION}`)
-      if (!fs.existsSync(remapped)) {
+      const marker = installedMarker(version)
+      if (!fs.existsSync(marker)) {
         const run = spawnSync(java, ['-jar', jar, '--initSettings', '--nogui'], { cwd: dir, encoding: 'utf8', timeout: 10 * 60 * 1000 })
-        if (!fs.existsSync(remapped)) throw new Error(`the Fabric ${version} install failed:\n${run.stdout ?? ''}${run.stderr ?? ''}${String(run.error ?? '')}`)
+        if (!fs.existsSync(marker)) throw new Error(`the Fabric ${version} install failed:\n${run.stdout ?? ''}${run.stderr ?? ''}${String(run.error ?? '')}`)
       }
     })()
     installs.set(version, install)
@@ -166,34 +223,45 @@ export async function ensureInstalled (version: string = DEFAULT_VERSION, java: 
   return dir
 }
 
-function newestMtime (dir: string): number {
+function newestMtime (p: string): number {
+  if (!fs.existsSync(p)) return 0
+  const stat = fs.statSync(p)
+  if (!stat.isDirectory()) return stat.mtimeMs
   let newest = 0
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    const p = path.join(dir, entry.name)
-    newest = Math.max(newest, entry.isDirectory() ? newestMtime(p) : fs.statSync(p).mtimeMs)
+  for (const entry of fs.readdirSync(p, { withFileTypes: true })) {
+    if (entry.name === 'build' || entry.name === '.gradle') continue
+    newest = Math.max(newest, newestMtime(path.join(p, entry.name)))
   }
   return newest
 }
 
-/** The built lockstep mod jar (server-mod/build/libs), built with the Gradle wrapper when missing or out of date */
-export function lockstepModJar (java: string = findJava()): string {
-  const libs = path.join(SERVER_MOD_DIR, 'build', 'libs')
+/**
+ * The version's lockstep mod jar (server-mod/versions/<version>/build/libs/lockstep-<mod>+<version>.jar), built with
+ * the Gradle wrapper when missing or out of date. Gradle runs on Java 25 (GRADLE_JAVA) for every version.
+ */
+export function lockstepModJar (version: string = DEFAULT_VERSION, java: string = findJava(GRADLE_JAVA)): string {
+  const project = path.join(SERVER_MOD_DIR, 'versions', version)
+  if (!fs.existsSync(path.join(project, 'build.gradle'))) throw new Error(`the lockstep mod has no ${version} project (server-mod/versions/${version})`)
+  const libs = path.join(project, 'build', 'libs')
   const find = (): string | undefined => fs.existsSync(libs)
-    ? fs.readdirSync(libs).filter(n => /^lockstep-.*\.jar$/.test(n) && !/-(sources|dev)\.jar$/.test(n)).map(n => path.join(libs, n))[0]
+    ? fs.readdirSync(libs).filter(n => n.startsWith('lockstep-') && n.endsWith(`+${version}.jar`)).map(n => path.join(libs, n))[0]
     : undefined
   let jar = find()
-  const sources = Math.max(newestMtime(path.join(SERVER_MOD_DIR, 'src')), fs.statSync(path.join(SERVER_MOD_DIR, 'build.gradle')).mtimeMs)
+  const sources = Math.max(
+    newestMtime(path.join(SERVER_MOD_DIR, 'common')), newestMtime(project),
+    ...['build.gradle', 'settings.gradle', 'gradle.properties'].map(f => newestMtime(path.join(SERVER_MOD_DIR, f))))
   if (jar == null || fs.statSync(jar).mtimeMs < sources) {
     const win = process.platform === 'win32'
     const javaHome = java === 'java' ? process.env.JAVA_HOME : path.dirname(path.dirname(java))
     // the wrapper by its full path (cmd may not look in the working directory: NoDefaultCurrentDirectoryInExePath)
     const gradlew = path.join(SERVER_MOD_DIR, win ? 'gradlew.bat' : 'gradlew')
-    const [cmd, args] = win ? ['cmd.exe', ['/d', '/c', gradlew, 'build', '--no-daemon', '-q']] : [gradlew, ['build', '--no-daemon', '-q']]
+    const task = [`:${version}:build`, '--no-daemon', '-q']
+    const [cmd, args] = win ? ['cmd.exe', ['/d', '/c', gradlew, ...task]] : [gradlew, task]
     const run = spawnSync(cmd, args, {
       cwd: SERVER_MOD_DIR, encoding: 'utf8', env: { ...process.env, ...(javaHome != null ? { JAVA_HOME: javaHome } : {}) }
     })
     jar = find()
-    if (run.status !== 0 || jar == null) throw new Error(`building the lockstep mod failed:\n${run.stdout ?? ''}${run.stderr ?? ''}`)
+    if (run.status !== 0 || jar == null) throw new Error(`building the ${version} lockstep mod failed:\n${run.stdout ?? ''}${run.stderr ?? ''}`)
   }
   return jar
 }
@@ -205,7 +273,7 @@ function link (target: string, at: string): void {
 }
 
 /** removes the links first: a recursive delete must not go through them into the shared install */
-function removeInstance (dir: string): void {
+export function removeInstance (dir: string): void {
   for (const rel of SHARED_DIRS) {
     const p = path.join(dir, rel)
     try {
@@ -223,20 +291,22 @@ let instanceSeq = 0
 
 export async function startServer (options: ServerOptions = {}): Promise<TestServer> {
   const version = options.version ?? DEFAULT_VERSION
-  const java = options.java ?? findJava()
+  const java = options.java ?? findJava(versionSetup(version).java)
   const shared = await ensureInstalled(version, java)
   const port = options.port ?? await freePort()
   const host = '127.0.0.1'
   const dir = path.join(shared, 'instances', `${Date.now()}-${process.pid}-${++instanceSeq}`)
   fs.mkdirSync(path.join(dir, 'mods'), { recursive: true })
   for (const rel of SHARED_DIRS) link(path.join(shared, rel), path.join(dir, rel))
-  const mods = [...(options.lockstep ?? true ? [lockstepModJar(java)] : []), ...(options.mods ?? [])]
+  const mods = [...(options.lockstep ?? true ? [lockstepModJar(version)] : []), ...(options.mods ?? [])]
   for (const mod of mods) fs.copyFileSync(mod, path.join(dir, 'mods', path.basename(mod)))
 
   fs.writeFileSync(path.join(dir, 'eula.txt'), 'eula=true\n')
   fs.writeFileSync(path.join(dir, 'server.properties'), propertiesFile({
     'online-mode': false,
     'enforce-secure-profile': false,
+    // 26.x turns the allowlist on by default (DedicatedServerProperties: white-list true; false in 1.21.11)
+    'white-list': false,
     'server-ip': host,
     'server-port': port,
     'level-name': 'world',
@@ -348,7 +418,9 @@ export async function startServer (options: ServerOptions = {}): Promise<TestSer
     await waitForLine(/^Done \(/, options.startTimeoutMs ?? 5 * 60 * 1000)
     for (const [rule, value] of Object.entries(options.gamerules ?? {})) {
       const out = await command(`gamerule ${rule} ${String(value)}`)
-      if (!out.some(l => /^Game ?rule .* is now set to/i.test(l))) throw new Error(`gamerule ${rule} ${String(value)}: ${out.join(' | ')}`)
+      // "Gamerule x is now set to: v" (1.21.11), "Game rule x is now set to v" (26.x), which refuses a value the rule already
+      // has: "Game rule x is already set to v" (GameRuleCommand ERROR_GAME_RULE_NOT_SET)
+      if (!out.some(l => /^Game ?rule .* is (now|already) set to/i.test(l))) throw new Error(`gamerule ${rule} ${String(value)}: ${out.join(' | ')}`)
     }
     for (const name of options.ops ?? []) await command(`op ${name}`)
   } catch (err) {

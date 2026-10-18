@@ -4,6 +4,7 @@
   "package": "mineflayer.lockstep.mixin",
   "compatibilityLevel": "JAVA_21",
   "server": [
+    "BlockableEventLoopInvoker",
     "CommandsMixin",
     "DiscardedPayloadMixin",
     "MinecraftServerMixin",

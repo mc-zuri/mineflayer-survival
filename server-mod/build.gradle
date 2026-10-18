@@ -1,40 +1,40 @@
 plugins {
-    // 1.21.11 is still obfuscated: the remapping Loom maps the official Mojang names to intermediary for the jar
-    id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+    // one Loom for every version: the remapping plugin for the obfuscated versions (1.21.11 and older: the official
+    // Mojang names are remapped to intermediary for the jar), the plain one for the unobfuscated 26.x (the jar keeps
+    // the official names, intermediary 0.0.0)
+    id 'net.fabricmc.fabric-loom-remap' version "${loom_version}" apply false
+    id 'net.fabricmc.fabric-loom' version "${loom_version}" apply false
 }
 
-version = project.mod_version
-group = project.maven_group
+subprojects {
+    version = "${project.mod_version}+${project.name}"
+    group = project.maven_group
 
-base {
-    archivesName = project.archives_base_name
-}
+    // the shared code (the payload, the gate, the commands and the mixins) and the version's own, if any
+    plugins.withId('java') {
+        sourceSets.main.java.srcDirs = [rootProject.file('common/src/main/java'), 'src/main/java']
+        sourceSets.main.resources.srcDirs = [rootProject.file('common/src/main/resources'), 'src/main/resources']
 
-dependencies {
-    minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    mappings loom.officialMojangMappings()
-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    // no Fabric API: the payload, the commands and the gate are plain mixins
-}
+        base {
+            archivesName = project.archives_base_name
+        }
 
-loom {
-    serverOnlyMinecraftJar()
-}
+        processResources {
+            def props = [version: project.version, minecraft: project.name, java: project.java_version]
+            inputs.properties props
+            filesMatching('fabric.mod.json') {
+                expand props
+            }
+        }
 
-processResources {
-    def version = project.version
-    inputs.property "version", version
-    filesMatching("fabric.mod.json") {
-        expand "version": version
+        java {
+            sourceCompatibility = JavaVersion.toVersion(project.java_version)
+            targetCompatibility = JavaVersion.toVersion(project.java_version)
+        }
+
+        tasks.withType(JavaCompile).configureEach {
+            it.options.release = project.java_version as int
+            it.options.encoding = 'UTF-8'
+        }
     }
-}
-
-java {
-    sourceCompatibility = JavaVersion.VERSION_21
-    targetCompatibility = JavaVersion.VERSION_21
-}
-
-tasks.withType(JavaCompile).configureEach {
-    it.options.release = 21
-    it.options.encoding = 'UTF-8'
 }

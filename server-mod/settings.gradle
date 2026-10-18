@@ -10,3 +10,9 @@ pluginManagement {
 }
 
 rootProject.name = 'lockstep'
+
+// one subproject per Minecraft version (versions/<version>), all built from the shared sources in common/
+new File(rootDir, 'versions').listFiles().findAll { new File(it, 'build.gradle').exists() }.sort().each {
+    include ":${it.name}"
+    project(":${it.name}").projectDir = it
+}

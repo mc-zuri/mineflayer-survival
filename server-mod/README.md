@@ -1,4 +1,4 @@
-# lockstep: a Fabric server mod for 1.21.11
+# lockstep: a Fabric server mod for 1.21.11 and 26.3
 
 The server advances one tick only once every opted-in client has acked the previous one. A bot under test then runs as
 fast as the CPU allows instead of 50 ms a tick, and the server and the bot count the same ticks.
@@ -9,12 +9,44 @@ plain mixins on the official Mojang names.
 ## Build
 
 ```
-./gradlew build        # build/libs/lockstep-<version>.jar
+./gradlew build                 # every version
+./gradlew :26.3:build           # one version
 ```
 
-Gradle 9.4.0 (the wrapper) runs Fabric Loom 1.16.1 (`net.fabricmc.fabric-loom-remap`, since 1.21.11 is still
-obfuscated), which needs a Java 21+ JVM to run; the mod is compiled for Java 21. Loom 1.17+ needs Gradle 9.5+, and 1.18+
-a Java 25 JVM.
+| version | jar | Fabric loader | Java | Loom plugin |
+| --- | --- | --- | --- | --- |
+| 1.21.11 | `versions/1.21.11/build/libs/lockstep-0.1.0+1.21.11.jar` | 0.18.4 | 21 | `net.fabricmc.fabric-loom-remap` |
+| 26.3 | `versions/26.3/build/libs/lockstep-0.1.0+26.3.jar` | 0.20.0 | 25 | `net.fabricmc.fabric-loom` |
+
+Gradle 9.8.1 (the wrapper) runs Fabric Loom 1.19.1 for every version. Loom 1.19 needs Gradle 9.8+ and a Java 25 JVM
+(`JAVA_HOME`), also for the 1.21.11 jar, which is still compiled for Java 21 (`--release 21`).
+
+Layout:
+
+- `common/src/main/`: everything the versions share, i.e. all of the mod's code (the payload, the gate, the command, the
+  mixins) and its resources. `fabric.mod.json` takes the Minecraft and Java versions from the subproject.
+- `versions/<version>/`: one Gradle subproject per Minecraft version (`settings.gradle` includes every directory there
+  with a `build.gradle`): its `gradle.properties` (`loader_version`, `java_version`), its Loom setup, and its own
+  `src/main/java` if a version ever needs code of its own (none does yet).
+
+### What 26.3 changed
+
+- **No obfuscation.** 26.x ships with the official names (Fabric's intermediary for it is 0.0.0). The 26.3 project uses
+  the plain `net.fabricmc.fabric-loom` plugin, with no mappings and no remapping: the jar keeps the official names, which
+  the 26.3 loader runs as they are. 1.21.11 stays on `fabric-loom-remap` with `loom.officialMojangMappings()`, which
+  remaps the jar to intermediary.
+- **Java 25.** 26.3's classes are Java 25 class files, so the 26.3 project compiles with `--release 25` and needs a
+  Java 25 server; `fabric.mod.json` depends on `java >= 25` there.
+- **`ReentrantBlockableEventLoop`'s constructor** is `(String)` in 1.21.11 and `(String, boolean propagatesCrashes)` in
+  26.3. `MinecraftServerMixin` used to extend it to call the protected `runAllTasks`; it now goes through an invoker
+  mixin on `BlockableEventLoop` (`BlockableEventLoopInvoker`), so the same mixin builds on both.
+- **Everything else the mod touches is the same in 26.3**: `MinecraftServer.runServer`, `processPacketsAndTick`,
+  `waitUntilNextTick`, `haveTime`, `nextTickTimeNanos`, `managedBlock`, `getTickCount`; `DiscardedPayload.codec(Identifier,
+  int)` and `CustomPacketPayload.codec`; `ServerGamePacketListenerImpl.handleCustomPayload` (still empty, on the netty
+  thread); `PlayerList.remove`; the `Commands` constructor and `Commands.hasPermission(Commands.LEVEL_ADMINS)`.
+- **The server around it** (the test harness handles these): the server needs Java 25, `white-list` defaults to true in
+  26.x's `server.properties`, and the server logs what it sends itself (the console's command feedback, chat broadcasts)
+  as `System chat: <message>`.
 
 ## Protocol: the `lockstep:v1` custom payload
 
