@@ -255,3 +255,22 @@ test('at night with a pickaxe and no bed the runner mines the night: the iron do
   await day.nightSchedule()
   assert.equal(mined.length, 1)
 })
+
+test('the reflexes that fire are logged, a run of the same one counted', async () => {
+  const bot = fakeBot()
+  const lines: string[] = []
+  const runner = new Runner(bot, {
+    log: l => lines.push(l),
+    until: 'wood',
+    handlers: {
+      wood: async () => {
+        for (let i = 0; i < 5; i++) bot.emit('reflex', 'drowning')
+        bot.emit('reflex', 'eat')
+        bot.give('wooden_pickaxe', 1)
+        bot.give('crafting_table', 1)
+      }
+    }
+  })
+  await runner.play()
+  assert.deepEqual(lines.filter(l => l.startsWith('reflex')), ['reflex drowning', 'reflex drowning 4 times more', 'reflex eat'])
+})

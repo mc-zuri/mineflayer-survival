@@ -140,6 +140,9 @@ export function deathSpotWorthIt (death: { x: number, y: number, z: number, dime
   return true
 }
 
+/** reflexes firing again within this many ticks of the last are counted, not logged each */
+export const REFLEX_LOG_TICKS = 200
+
 /** food points under which a bot past the food milestone gets food again (up to FOOD_POINTS) before going on */
 export const FOOD_RESTOCK = FOOD_POINTS / 2
 
@@ -286,12 +289,23 @@ export class Runner {
       controller.abort(new TaskError('TIMEOUT', `play ran out of its ${this.options.maxTicks} ticks`))
     }
     this.bot.on('physicsTick', onTick)
+    // the reflexes that preempt the work, in the log: one line a reflex, repeats within REFLEX_LOG_TICKS counted
+    let last: { name: string, tick: number, repeats: number } | null = null
+    const onReflex = (name: string): void => {
+      const tick = this.tick
+      if (last != null && last.name === name && tick - last.tick < REFLEX_LOG_TICKS) { last.repeats++; last.tick = tick; return }
+      if (last != null && last.repeats > 0) this.log(`reflex ${last.name} ${last.repeats} times more`)
+      this.log(`reflex ${name}`)
+      last = { name, tick, repeats: 0 }
+    }
+    this.bot.on('reflex' as any, onReflex)
     try {
       const result = await this.loop(controller.signal)
       if (overBudget && result.reason === 'aborted') result.reason = 'budget'
       return result
     } finally {
       this.bot.off('physicsTick', onTick)
+      this.bot.off('reflex' as any, onReflex)
       outer?.removeEventListener('abort', onOuter)
     }
   }
