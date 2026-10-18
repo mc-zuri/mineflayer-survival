@@ -1,4 +1,4 @@
-// The enchanting skills against a real 1.21.11 server (the tests/harness lockstep server and bot), on a superflat
+// The enchanting skills against a real server (SURVIVAL_VERSION, default 1.21.11) (the tests/harness lockstep server and bot), on a superflat
 // patch set up with commands: the table and its 15 shelves set up from the parts and checked by the offers, gear
 // enchanted with levels from /xp, experience gained by mining and smelting, and sugar cane harvested into paper.
 import { describe, it, before, after, beforeEach, afterEach } from 'node:test'
@@ -6,7 +6,7 @@ import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
-import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { collectBlock, countItems, craft, harvestSugarCane, waitUntil } from '../../src/skills/gather'
 import { BOOKSHELF_OFFSETS, MAX_BOOKSHELVES, countBookshelves, enchant, enchantAll, setupEnchanting } from '../../src/skills/enchant'
 import { experience, gainLevels } from '../../src/skills/xp'
@@ -16,7 +16,7 @@ const USERNAME = 'enchantbot'
 // the superflat's grass is at y = -61; the bot stands at -60
 const GROUND = -61
 
-describe('enchanting skills on a 1.21.11 server', { timeout: 20 * 60 * 1000 }, () => {
+describe(`enchanting skills on a ${DEFAULT_VERSION} server`, { timeout: 20 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
   let origin: Vec3

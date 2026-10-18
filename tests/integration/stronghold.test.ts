@@ -1,4 +1,4 @@
-// The eyes milestone against a real 1.21.11 server (the tests/harness lockstep server and bot), on the seed
+// The eyes milestone against a real server (SURVIVAL_VERSION, default 1.21.11) (the tests/harness lockstep server and bot), on the seed
 // 'nether-skills', whose nearest stronghold to the plains at -1336, -118 has its locate pos at -1648, -80: eyes
 // thrown 200 blocks apart, the rays crossed, the crossing reached and an eye thrown there until it comes down, checked
 // against /locate (within 50 blocks); then the way dug down and the portal room found. Logs ticks and wall time.
@@ -6,14 +6,14 @@ import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
 import { createPlugin } from '../../src'
-import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { findPortalRoom, locateStronghold, reachStronghold } from '../../src/end/strongholdSkills'
 import type { EyeRay } from '../../src/end/triangulate'
 import { countItems, waitUntil } from '../../src/skills/gather'
 
 const USERNAME = 'eyebot'
 
-describe('stronghold skills on a 1.21.11 server', { timeout: 40 * 60 * 1000 }, () => {
+describe(`stronghold skills on a ${DEFAULT_VERSION} server`, { timeout: 40 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
 

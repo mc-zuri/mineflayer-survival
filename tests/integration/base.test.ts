@@ -1,4 +1,4 @@
-// buildBase on a 1.21.11 superflat with a block of stone where the base goes (as a hillside would be, with holes in it
+// buildBase on a SURVIVAL_VERSION (default 1.21.11) superflat with a block of stone where the base goes (as a hillside would be, with holes in it
 // where caves and ore were): the room and airlock dug out, the holes in the shell filled, the furniture placed. Then
 // creepers ignited at the cells a mob reaches all around it, charged ones among them: every chest is still there with
 // what was stored in it, as /data get block reads it.
@@ -10,7 +10,7 @@ import { createPlugin } from '../../src'
 import { BASE_BLUEPRINT, buildBase } from '../../src/base/build'
 import { generateBlueprint } from '../../src/base/blueprint'
 import { Executor } from '../../src/executor/executor'
-import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { countItems, waitUntil } from '../../src/skills/gather'
 
 const USER = 'builder'
@@ -26,7 +26,7 @@ export function parseItems (answer: string): Record<string, number> {
   return out
 }
 
-describe('the base on a 1.21.11 superflat, against creepers', { timeout: 60 * 60 * 1000 }, () => {
+describe(`the base on a ${DEFAULT_VERSION} superflat, against creepers`, { timeout: 60 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
   const run = async (cmd: string): Promise<string> => (await server.command(cmd)).join(' ')

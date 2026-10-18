@@ -20,12 +20,15 @@ export interface RunLog {
 }
 
 // the 1.21.11 damage_type registry in the order the server sends it (the vanilla data pack's, by key)
-const DAMAGE_TYPES = ['arrow', 'bad_respawn_point', 'cactus', 'campfire', 'cramming', 'dragon_breath', 'drown', 'dry_out', 'ender_pearl',
+const DAMAGE_TYPES_1_21_11 = ['arrow', 'bad_respawn_point', 'cactus', 'campfire', 'cramming', 'dragon_breath', 'drown', 'dry_out', 'ender_pearl',
   'explosion', 'fall', 'falling_anvil', 'falling_block', 'falling_stalactite', 'fireball', 'fireworks', 'fly_into_wall', 'freeze', 'generic',
   'generic_kill', 'hot_floor', 'in_fire', 'in_wall', 'indirect_magic', 'lava', 'lightning_bolt', 'mace_smash', 'magic', 'mob_attack',
   'mob_attack_no_aggro', 'mob_projectile', 'on_fire', 'out_of_world', 'outside_border', 'player_attack', 'player_explosion', 'sonic_boom',
   'spear', 'spit', 'stalagmite', 'starve', 'sting', 'sweet_berry_bush', 'thorns', 'thrown', 'trident', 'unattributed_fireball', 'wind_charge',
   'wither', 'wither_skull']
+// 26.3's adds sulfur_cube_hot (the sulfur cube's), after sting
+const DAMAGE_TYPES_26_3 = [...DAMAGE_TYPES_1_21_11.slice(0, DAMAGE_TYPES_1_21_11.indexOf('sting') + 1), 'sulfur_cube_hot', ...DAMAGE_TYPES_1_21_11.slice(DAMAGE_TYPES_1_21_11.indexOf('sting') + 1)]
+const damageTypes = (bot: Bot): string[] => bot.registry.version['>=']('26.3') ? DAMAGE_TYPES_26_3 : DAMAGE_TYPES_1_21_11
 
 const isHostile = (bot: Bot, e: Entity | undefined): boolean => e != null && (bot.registry.entitiesByName as any)[e.name ?? '']?.type === 'hostile'
 
@@ -54,7 +57,7 @@ export class NightLog {
       if (packet.entityId !== bot.entity?.id) return
       const source = bot.entities[packet.sourceCauseId - 1] ?? bot.entities[packet.sourceDirectId - 1]
       this.lastSourceEntity = source
-      this.lastSource = source?.name ?? `${DAMAGE_TYPES[packet.sourceTypeId] ?? 'damage type ' + String(packet.sourceTypeId)}`
+      this.lastSource = source?.name ?? `${damageTypes(bot)[packet.sourceTypeId] ?? 'damage type ' + String(packet.sourceTypeId)}`
       this.lastSourceTick = this.tick
     })
     on(bot, 'health', () => {

@@ -1,4 +1,4 @@
-// The combat skills and reflexes against a real 1.21.11 server (the tests/harness lockstep server and bot): a zombie
+// The combat skills and reflexes against a real server (SURVIVAL_VERSION, default 1.21.11) (the tests/harness lockstep server and bot): a zombie
 // killed, a creeper survived, hunger eaten away, armor worn, a cow hunted, beef cooked, an end crystal shot, and an arrow's flight
 // checked against the server's.
 import { after, before, describe, test } from 'node:test'
@@ -10,7 +10,7 @@ import { shoot } from '../../src/skills/shoot'
 import { hunt } from '../../src/skills/hunt'
 import { cookFood } from '../../src/skills/cookFood'
 import { simulateArrow } from '../../src/skills/arrow'
-import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 
 const USER = 'survivor'
 // the superflat's ground: grass at y -61, the bot standing at -60
@@ -47,7 +47,7 @@ async function reset (): Promise<void> {
   await bot.waitForTicks(20)
 }
 
-describe('combat skills and reflexes on 1.21.11', { timeout: 15 * 60 * 1000 }, () => {
+describe(`combat skills and reflexes on ${DEFAULT_VERSION}`, { timeout: 15 * 60 * 1000 }, () => {
   before(async () => {
     server = await startServer({
       flat: true,

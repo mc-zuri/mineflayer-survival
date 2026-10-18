@@ -1,4 +1,4 @@
-// Nights in the open on a 1.21.11 normal-seed world (the tests/harness lockstep server, normal difficulty, real mob
+// Nights in the open on a SURVIVAL_VERSION (default 1.21.11) normal-seed world (the tests/harness lockstep server, normal difficulty, real mob
 // spawning, the reflexes on): from dusk (13000) to dawn (23500) with a kit, the bot doing a simple foreground task.
 // NIGHT_RUNS=n repeats each night (default 1); NIGHT_VERBOSE=1 logs each hit, kill and reflex; NIGHT_SEED picks the world (default
 // 'survival': the spawn on open grass; '1234567890' spawns on a jungle's canopy).
@@ -11,7 +11,7 @@ import { createPlugin } from '../../src'
 import { navigate } from '../../src/skills/navigate'
 import { isEnclosed, shelterToLeave } from '../../src/skills/shelter'
 import { outInTheNight } from '../../src/reflexes/rules'
-import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { NightLog, summary, type RunLog } from './nightLog'
 
 const USER = 'nightbot'
@@ -131,7 +131,7 @@ async function night (setup: () => Promise<void>, foreground: (home: Vec3) => { 
   return log.finish()
 }
 
-describe('nights in the open on 1.21.11 (normal difficulty, real spawning)', { timeout: 120 * 60 * 1000 }, () => {
+describe(`nights in the open on ${DEFAULT_VERSION} (normal difficulty, real spawning)`, { timeout: 120 * 60 * 1000 }, () => {
   before(async () => {
     server = await startServer({
       seed: process.env.NIGHT_SEED ?? 'survival',

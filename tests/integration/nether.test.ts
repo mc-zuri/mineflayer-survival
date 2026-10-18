@@ -1,4 +1,4 @@
-// The nether skills against a real 1.21.11 server (the tests/harness lockstep server and bot), on seed 4: a portal
+// The nether skills against a real server (SURVIVAL_VERSION, default 1.21.11) (the tests/harness lockstep server and bot), on seed 4: a portal
 // cast from a lava pool and lit, the way into the nether and back; the fortress the seed puts at 18, -78 (its blaze
 // spawners at 7 77 -72, 42 77 -69 and 82 70 117) found from the far end of its bridges and 2 blaze rods taken
 // there with a kit; gold bartered with summoned piglins for pearls. Each scenario logs its ticks and wall time.
@@ -8,7 +8,7 @@ import { appendFileSync } from 'node:fs'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
-import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { buildPortal } from '../../src/nether/portalSkills'
 import { enterNether, returnOverworld } from '../../src/nether/portalTravel'
 import { collectBlazeRods, findBlazeSpawner, findFortress } from '../../src/nether/fortressSkills'
@@ -19,7 +19,7 @@ import { countItems, waitUntil } from '../../src/skills/gather'
 const USERNAME = 'netherbot'
 const SEED = '4'
 
-describe('nether skills on a 1.21.11 server (seed 4)', { timeout: 40 * 60 * 1000 }, () => {
+describe(`nether skills on a ${DEFAULT_VERSION} server (seed 4)`, { timeout: 40 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
 

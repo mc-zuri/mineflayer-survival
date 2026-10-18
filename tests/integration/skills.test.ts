@@ -1,11 +1,11 @@
-// The gathering skills against a real 1.21.11 server (the tests/harness lockstep server and bot): each scenario sets up
+// The gathering skills against a real server (SURVIVAL_VERSION, default 1.21.11) (the tests/harness lockstep server and bot): each scenario sets up
 // a patch of a superflat world with commands, runs the skills, and checks the inventory and the world.
 import { describe, it, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
-import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import {
   castObsidian, collectBlock, countItems, craft, emptyBucket, fillBucket, retrieveItems, sleep, smelt, storeItems, waitTicks, waitUntil
 } from '../../src/skills/gather'
@@ -14,7 +14,7 @@ const USERNAME = 'skillbot'
 // the superflat's grass is at y = -61; the bot stands at -60
 const GROUND = -61
 
-describe('gathering skills on a 1.21.11 server', { timeout: 15 * 60 * 1000 }, () => {
+describe(`gathering skills on a ${DEFAULT_VERSION} server`, { timeout: 15 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
   let origin: Vec3

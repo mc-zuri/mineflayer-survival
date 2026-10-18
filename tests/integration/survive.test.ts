@@ -1,4 +1,4 @@
-// The reflexes keeping the bot alive on a 1.21.11 superflat (the tests/harness lockstep server, normal difficulty):
+// The reflexes keeping the bot alive on a SURVIVAL_VERSION (default 1.21.11) superflat (the tests/harness lockstep server, normal difficulty):
 // a crowd of summoned mobs (three zombies, two skeletons, a spider and a creeper) against the iron kit, the shield
 // against the skeletons' arrows, a bed placed and slept in at dusk (the monsters that keep the bot up dealt with
 // first), and the lava, drowning and totem reflexes in game. SURVIVE_RUNS=n repeats each scenario (default 1).
@@ -9,7 +9,7 @@ import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
 import { equipArmor } from '../../src/skills/armor'
-import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { NightLog, summary, type RunLog } from './nightLog'
 
 const USER = 'survivor'
@@ -106,7 +106,7 @@ async function repeat (t: any, name: string, scenario: (log: NightLog) => Promis
   assert.deepStrictEqual(fails, [])
 }
 
-describe('surviving on 1.21.11 (reflexes on, normal difficulty)', { timeout: 120 * 60 * 1000 }, () => {
+describe(`surviving on ${DEFAULT_VERSION} (reflexes on, normal difficulty)`, { timeout: 120 * 60 * 1000 }, () => {
   before(async () => {
     server = await startServer({
       flat: true,

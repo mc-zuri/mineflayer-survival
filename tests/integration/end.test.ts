@@ -1,4 +1,4 @@
-// The End skills against a real 1.21.11 server (the tests/harness lockstep server and bot): the 10 crystals destroyed,
+// The End skills against a real server (SURVIVAL_VERSION, default 1.21.11) (the tests/harness lockstep server and bot): the 10 crystals destroyed,
 // the dragon killed at full health and the exit portal opened, the credits and the respawn; and on a second server a
 // portal frame built with /setblock completed with eyes and walked into, and a dragon with lowered health killed.
 // Each test logs its wall time and the ticks it ran.
@@ -11,7 +11,7 @@ import { createPlugin } from '../../src'
 import { parseSeed } from '../../src/worldgen/random'
 import { exitPortal } from '../../src/end/spikes'
 import { blockGetter, destroyCrystals, enterEnd, exitPortalOpen, fightDragon, findPortalY, isInEnd, leaveEnd } from '../../src/end/skills'
-import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 
 const USER = 'survivor'
 const SEED = 'endfight'
@@ -90,7 +90,7 @@ async function dragonDeadAndAdvancement (server: TestServer, bot: Bot): Promise<
   assert.ok(await passes(server, `execute in minecraft:the_end if block 1 ${portalY} 0 minecraft:end_portal`), 'the server has no end_portal in the exit portal')
 }
 
-describe('the End on 1.21.11: crystals, the dragon at full health, the exit', { timeout: 40 * 60 * 1000 }, () => {
+describe(`the End on ${DEFAULT_VERSION}: crystals, the dragon at full health, the exit`, { timeout: 40 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
 
@@ -144,7 +144,7 @@ describe('the End on 1.21.11: crystals, the dragon at full health, the exit', { 
   })
 })
 
-describe('the End on 1.21.11: into the End through a frame of /setblock, a dragon with lowered health', { timeout: 30 * 60 * 1000 }, () => {
+describe(`the End on ${DEFAULT_VERSION}: into the End through a frame of /setblock, a dragon with lowered health`, { timeout: 30 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
 
