@@ -2,11 +2,13 @@
 // a crowd of summoned mobs (three zombies, two skeletons, a spider and a creeper) against the iron kit, the shield
 // against the skeletons' arrows, a bed placed and slept in at dusk (the monsters that keep the bot up dealt with
 // first), and the lava, drowning and totem reflexes in game. SURVIVE_RUNS=n repeats each scenario (default 1).
+// SURVIVE_ARMOR_IN_BAG=1 leaves the iron kit's armor in the bag for the armor reflex.
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
+import { equipArmor } from '../../src/skills/armor'
 import { connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { NightLog, summary, type RunLog } from './nightLog'
 
@@ -37,8 +39,12 @@ async function give (item: string, count = 1): Promise<void> {
 async function ironKit (): Promise<void> {
   for (const item of ['iron_sword', 'shield', 'iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots']) await give(item)
   await give('cooked_beef', 16)
-  // the armor reflex puts it on
-  await waitFor(() => bot.inventory.slots[6]?.name === 'iron_chestplate', 100)
+  await waitFor(() => bot.inventory.items().some(i => i.name === 'iron_boots'), 100)
+  // SURVIVE_ARMOR_IN_BAG=1: left in the bag for the armor reflex to put on as the mobs come
+  if (process.env.SURVIVE_ARMOR_IN_BAG != null) return
+  // on before the mobs come (the reflexes are off between scenarios)
+  await equipArmor(bot)
+  assert.deepStrictEqual([5, 6, 7, 8].map(i => bot.inventory.slots[i]?.name), ['iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots'])
 }
 
 /** a clean slate at the origin: no mobs, the patch rebuilt, an empty inventory, full health and food, at noon */
