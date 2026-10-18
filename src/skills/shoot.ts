@@ -13,6 +13,8 @@ export interface ShootOptions extends SkillOptions {
   highArc?: boolean
   /** check the shot against the world's blocks (default true) */
   checkBlocks?: boolean
+  /** where on an entity to aim, from its position (default: its middle, else high on its box when the middle's line is blocked) */
+  aimOffset?: Vec3
 }
 
 export interface ShootResult {
@@ -60,6 +62,14 @@ function targetPoint (target: Entity | Vec3): Vec3 {
   return target.position.offset(0, (target.height ?? 1) / 2, 0)
 }
 
+/** the points to try aiming at: the given one, or the middle and then near the top (a line over a ledge, a spike's rim) */
+function aimPoints (target: Entity | Vec3, offset?: Vec3): Vec3[] {
+  if (target instanceof Vec3) return [target]
+  if (offset != null) return [target.position.plus(offset)]
+  const h = target.height ?? 1
+  return [targetPoint(target), target.position.offset(0, h - Math.min(0.2, h / 4), 0)]
+}
+
 /**
  * Aims and looses arrows at an entity or a position: the bow drawn to full power, the aim solved over vanilla's
  * arrow physics each tick of the draw, a moving target (the dragon) led by its velocity from the motion tracker.
@@ -91,13 +101,13 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
       bot.activateItem()
       for (let t = 0; t < drawTicks; t++) {
         // the arrow leaves after the rest of the draw and the release's trip to the server
-        solution = aim(bot, target, { leadTicks: drawTicks - t + 1, highArc: opts.highArc, world })
+        solution = aim(bot, target, { leadTicks: drawTicks - t + 1, highArc: opts.highArc, world, offset: opts.aimOffset })
         if (solution != null) await bot.look(solution.yaw, solution.pitch, true)
         await waitTicks(bot, 1, signal)
         if (isEntity && !isAlive(bot, target)) break
       }
       if (isEntity && !isAlive(bot, target)) { bot.deactivateItem(); return { shots, hit: true, solution } }
-      solution = aim(bot, target, { leadTicks: 1, highArc: opts.highArc, world })
+      solution = aim(bot, target, { leadTicks: 1, highArc: opts.highArc, world, offset: opts.aimOffset })
       if (solution == null) {
         bot.deactivateItem()
         throw new TaskError('NO_PATH', 'no arc reaches the target')
@@ -122,22 +132,27 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
   }
 }
 
-/** The aim for a full-power shot now, or null if no arc reaches (or blocks are in the way of every one). */
-export function aim (bot: Bot, target: Entity | Vec3, opts: { leadTicks?: number, highArc?: boolean, world?: ArrowWorld } = {}): AimSolution | null {
+/**
+ * The aim for a full-power shot now, or null if no arc reaches (or blocks are in the way of every one). The flat arc
+ * is tried at each aim point before the high one (a high arc flies for seconds and drifts).
+ */
+export function aim (bot: Bot, target: Entity | Vec3, opts: { leadTicks?: number, highArc?: boolean, world?: ArrowWorld, offset?: Vec3 } = {}): AimSolution | null {
   const start = arrowStart(bot)
   const isEntity = !(target instanceof Vec3)
   const velocity = isEntity ? motionTrackerOf(bot).velocity(target) : undefined
   const shooterVelocity = bot.entity.onGround ? new Vec3(bot.entity.velocity.x, 0, bot.entity.velocity.z) : bot.entity.velocity
   const common = { speed: bowArrowSpeed(20), shooterVelocity, targetVelocity: velocity, leadTicks: opts.leadTicks ?? 0, world: opts.world }
   for (const highArc of opts.highArc === true ? [true, false] : [false, true]) {
-    const solution = solveAim(start, targetPoint(target), { ...common, highArc })
-    if (solution == null) continue
-    if (opts.world == null) return solution
-    // the arc has to reach the (predicted) box before any block
-    const box = targetBox(target)
-    const offset = solution.aimPoint.minus(targetPoint(target))
-    const flight = arrowHits(start, solution.yaw, solution.pitch, { min: box.min.plus(offset), max: box.max.plus(offset) }, common)
-    if (flight.hit != null) return solution
+    for (const point of aimPoints(target, opts.offset)) {
+      const solution = solveAim(start, point, { ...common, highArc })
+      if (solution == null) continue
+      if (opts.world == null) return solution
+      // the arc has to reach the (predicted) box before any block
+      const box = targetBox(target)
+      const offset = solution.aimPoint.minus(point)
+      const flight = arrowHits(start, solution.yaw, solution.pitch, { min: box.min.plus(offset), max: box.max.plus(offset) }, common)
+      if (flight.hit != null) return solution
+    }
   }
   return null
 }
