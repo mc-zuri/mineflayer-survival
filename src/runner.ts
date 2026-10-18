@@ -12,13 +12,13 @@ import { TaskError } from './core/errors'
 import { isBed } from './core/items'
 import { Inventory, type ItemCount } from './core/inventory'
 import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './core/memory'
-import { FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
-import type { ObtainRequest } from './planner/obtain'
+import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
+import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import type { Station } from './planner/steps'
 import { buildBase, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
-import { Executor, type ExecutorOptions } from './executor/executor'
-import { defaultKeep } from './executor/keep'
+import { Executor, ownedInventory, type ExecutorOptions } from './executor/executor'
+import { defaultKeep, SPARE_FOOD_POINTS, spareKitGoals } from './executor/keep'
 import { isAbort } from './skills/errors'
 import { navigate, navigateNear } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
@@ -368,10 +368,49 @@ export class Runner {
     if (Math.hypot(p.x - base.origin.x, p.y - base.origin.y, p.z - base.origin.z) > 96) return
     try {
       await this.executor.storeAtBase({}, signal)
+      await this.stashSpareKit(signal)
     } catch (err) {
       if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
       this.log(`storing failed: ${(err as Error).message}`)
     }
+  }
+
+  /**
+   * A spare kit in the base's chests before the next trip out (spareKitGoals: a second pickaxe, sword and axe of the
+   * tier carried, and food), made when they lack one and stored, for rekit to take after a death
+   */
+  async stashSpareKit (signal?: AbortSignal): Promise<void> {
+    const base = baseRecord(this.memory)
+    if (base == null || base.chests.length === 0) return
+    const dimension = this.memory.base?.dimension ?? 'overworld'
+    const stored: Record<string, number> = {}
+    for (const c of base.chests) {
+      for (const [name, n] of Object.entries(this.memory.chestAt(c, dimension)?.items ?? {})) stored[name] = (stored[name] ?? 0) + n
+    }
+    const carried = ownedInventory(this.bot)
+    const goals = spareKitGoals(carried, stored)
+    if (goals.length === 0) return
+    this.log('a spare kit for the base')
+    await this.executor.obtain(goals, signal)
+    // one of each tool made, and food for the points short
+    const inv = ownedInventory(this.bot)
+    const items: ItemCount[] = []
+    for (const g of goals) {
+      if (g.unit === 'nutrition') {
+        // the points the chests are short of (the goal is what was carried and those)
+        let points = Math.min(SPARE_FOOD_POINTS, g.count - heldFor(carried, FOOD_GOAL, g))
+        for (const name of [...FOOD_GOAL].sort((a, b) => unitValue(g, b) - unitValue(g, a))) {
+          const n = Math.min(inv.count(name), Math.ceil(Math.max(0, points) / unitValue(g, name)))
+          if (n <= 0) continue
+          items.push({ name, count: n })
+          points -= n * unitValue(g, name)
+        }
+      } else {
+        const name = (g.item as readonly string[]).find(a => inv.count(a) > 1) ?? (g.item as readonly string[]).find(a => inv.count(a) > 0)
+        if (name != null) items.push({ name, count: 1 })
+      }
+    }
+    await this.executor.storeExact(items, signal)
   }
 
   /** sleeps through the night when a bed is at hand: one held, the base's when near, or one standing nearby */

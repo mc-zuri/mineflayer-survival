@@ -1,8 +1,10 @@
 // What the bot carries on a trip and what goes into the base's chests, and what it may throw away when the
 // inventory is full far from the base. Pure, over item names and counts.
-import { isBed, isSafeFood, parseTool } from '../core/items'
-import type { ItemCount } from '../core/inventory'
+import { isBed, isSafeFood, parseTool, type ToolKind } from '../core/items'
+import type { Inventory, ItemCount } from '../core/inventory'
 import type { RegistryLike } from '../core/registry'
+import { heldFor, unitValue, type ObtainRequest } from '../planner/obtain'
+import { FOOD_GOAL, toolsAtLeast } from '../planner/progression'
 
 /** how many of an item to carry; Infinity: all of them (the registry: the version's, for what is food) */
 export type KeepRule = (name: string, registry?: RegistryLike) => number | null
@@ -108,4 +110,33 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number 
   pick(name => JUNK.has(name))
   if (opts.anything === true) pick(name => !JUNK.has(name) && (keepRule(name, opts.registry) ?? 0) !== Infinity)
   return out
+}
+
+/** the tool kinds a spare kit holds one of, at the tier of the best one carried */
+export const SPARE_TOOLS: readonly ToolKind[] = ['pickaxe', 'sword', 'axe']
+
+/** food points the spare kit holds */
+export const SPARE_FOOD_POINTS = 20
+
+/**
+ * What the base's chests are short of for a spare kit, as requests on top of what the bot carries (the spare is made,
+ * then stored): for each of SPARE_TOOLS a second tool at least as good as the best carried, and SPARE_FOOD_POINTS of
+ * food, so a death on a dangerous trip is a re-kit at the base, not the tools and food gathered again.
+ */
+export function spareKitGoals (carried: Inventory, stored: Readonly<Record<string, number>>): ObtainRequest[] {
+  const goals: ObtainRequest[] = []
+  for (const kind of SPARE_TOOLS) {
+    const best = carried.bestTool(kind)
+    const tool = best == null ? null : parseTool(best)
+    // a wooden or golden one is no loss
+    if (tool == null || tool.kind !== kind || tool.material === 'wooden' || tool.material === 'golden') continue
+    const alts = toolsAtLeast(kind, tool.material)
+    if (alts.some(a => (stored[a] ?? 0) > 0)) continue
+    goals.push({ item: alts, count: carried.countAny(alts) + 1 })
+  }
+  const storedPoints = Object.entries(stored).reduce((n, [name, c]) => n + c * unitValue({ unit: 'nutrition' }, name), 0)
+  if (storedPoints < SPARE_FOOD_POINTS) {
+    goals.push({ item: FOOD_GOAL, count: heldFor(carried, FOOD_GOAL, { unit: 'nutrition' }) + SPARE_FOOD_POINTS - storedPoints, unit: 'nutrition' })
+  }
+  return goals
 }

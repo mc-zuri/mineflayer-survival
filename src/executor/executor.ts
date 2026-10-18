@@ -428,6 +428,32 @@ export class Executor {
     return moved
   }
 
+  /** puts these counts in the base's chests (the first with room), the remembered contents updated; what was stored */
+  async storeExact (items: readonly ItemCount[], signal?: AbortSignal): Promise<Record<string, number>> {
+    const base = this.base
+    const moved: Record<string, number> = {}
+    if (base == null || base.chests.length === 0) return moved
+    const dimension = this.memory.base?.dimension ?? 'overworld'
+    for (const it of items) {
+      let left = it.count
+      for (const pos of base.chests) {
+        if (left <= 0) break
+        throwIfOwnerAborted(signal)
+        try {
+          const res = await this.task(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter: [it.name], count: left }, s), signal)
+          const n = res.moved[it.name] ?? 0
+          this.rememberStored(pos, it.name, n, dimension)
+          moved[it.name] = (moved[it.name] ?? 0) + n
+          left -= n
+        } catch (err) {
+          if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true) throw err
+        }
+      }
+    }
+    if (Object.keys(moved).length > 0) this.log(`stored ${Object.entries(moved).map(([n, c]) => `${c} ${n}`).join(', ')}`)
+    return moved
+  }
+
   private rememberStored (pos: { x: number, y: number, z: number }, name: string, n: number, dimension: string): void {
     if (n <= 0) return
     const known = this.memory.chestAt(pos, dimension)

@@ -44,3 +44,25 @@ test('junkToToss frees whole slots of junk, never what is kept or needed', () =>
   const all = junkToToss(stacks, 6, { anything: true })
   assert.deepEqual(all.slice(4), [{ name: 'cobblestone', count: 64 }, { name: 'raw_iron', count: 9 }])
 })
+
+test('spare kit: a second pickaxe, sword and axe at the carried tier, and 20 food points, less what the chests hold', async () => {
+  const { spareKitGoals, SPARE_FOOD_POINTS } = await import('../../src/executor/keep')
+  const { Inventory } = await import('../../src/core/inventory')
+  const { FOOD_GOAL } = await import('../../src/planner/progression')
+  const registry = require('minecraft-data')('1.21.11')
+  const carried = new Inventory(registry, { iron_pickaxe: 1, iron_sword: 1, stone_axe: 1, wooden_shovel: 1, cooked_beef: 5 })
+  const goals = spareKitGoals(carried, {})
+  assert.deepEqual(goals.map(g => g.item).slice(0, 3), [
+    ['iron_pickaxe', 'diamond_pickaxe', 'netherite_pickaxe'],
+    ['iron_sword', 'diamond_sword', 'netherite_sword'],
+    ['stone_axe', 'copper_axe', 'iron_axe', 'diamond_axe', 'netherite_axe']
+  ].map(alts => alts.filter(a => registry.itemsByName[a] != null)))
+  assert.deepEqual(goals.map(g => g.count), [2, 2, 2, 40 + SPARE_FOOD_POINTS])
+  assert.deepEqual(goals[3].item, FOOD_GOAL)
+  // the chests hold a diamond pickaxe and 12 points of bread: the rest
+  const rest = spareKitGoals(carried, { diamond_pickaxe: 1, bread: 2, cobblestone: 64 })
+  assert.equal(rest.length, 3)
+  assert.equal(rest[2].count, 40 + SPARE_FOOD_POINTS - 10)
+  // wooden tools are no loss
+  assert.deepEqual(spareKitGoals(new Inventory(registry, { wooden_pickaxe: 1 }), { bread: 4 }), [])
+})
