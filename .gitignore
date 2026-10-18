@@ -1,0 +1,7 @@
+node_modules
+dist
+.worktrees
+server-mod/build
+server-mod/.gradle
+server-mod/run
+tests/.servers

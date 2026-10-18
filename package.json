@@ -1,0 +1,33 @@
+{
+  "name": "mineflayer-survival",
+  "version": "0.1.0",
+  "description": "A mineflayer plugin that plays survival from a fresh spawn to the Ender Dragon, and a lockstep server mod to run it as fast as the CPU allows",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "license": "GPL-3.0",
+  "scripts": {
+    "build": "tsc -p ./tsconfig.json",
+    "test": "node --test tests/run.cjs",
+    "test:integration": "node --test tests/integration/run.cjs",
+    "e2e": "node tests/e2e/run.cjs",
+    "lint": "ts-standard -y --fix"
+  },
+  "dependencies": {
+    "@nxg-org/mineflayer-pathfinder": "workspace:*",
+    "@nxg-org/mineflayer-physics-util": "workspace:*",
+    "minecraft-data": "^3.109.0",
+    "mineflayer": "workspace:*",
+    "mineflayer-crafting-util": "^0.5.0",
+    "prismarine-item": "^1.18.0",
+    "vec3": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.2",
+    "ts-standard": "^12.0.2",
+    "typescript": "^5.3.3"
+  },
+  "ts-standard": {
+    "ignore": ["tests", "dist", "server-mod"]
+  }
+}
