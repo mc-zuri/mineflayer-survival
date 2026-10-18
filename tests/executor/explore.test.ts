@@ -152,3 +152,15 @@ test('surfaceStepCost: a step under a roof (a cave, a ravine\'s overhang) costs 
   assert.equal(cost({ position: new Vec3(5, 64, 0) }), 0)
   assert.equal(cost({ position: new Vec3(3, 64, 0) }), 0)
 })
+
+test('outOfTheWay: an animal in a cave (under a roof) or far below is left alone by a hunt from the surface', async () => {
+  const { outOfTheWay } = await import('../../src/executor/steps')
+  // rock up to y 63; a cave at y 40 under column 10,10
+  const lookup = (pos: Vec3) => (pos.y <= 63 && !(pos.x === 10 && pos.z === 10 && pos.y >= 40 && pos.y <= 41)) ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  const bot: any = { entity: { position: new Vec3(0.5, 64, 0.5) }, blockAt: lookup }
+  assert.equal(outOfTheWay(bot, new Vec3(5.5, 64, 5.5)), false)
+  assert.equal(outOfTheWay(bot, new Vec3(10.5, 40, 10.5)), true)
+  // a bot down in the cave goes for the one beside it
+  bot.entity.position = new Vec3(10.5, 40, 10.5)
+  assert.equal(outOfTheWay(bot, new Vec3(10.5, 41, 10.5)), false)
+})

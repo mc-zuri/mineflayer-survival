@@ -17,7 +17,7 @@ import { hunt, nearestOfType } from '../skills/hunt'
 import type { Entity } from '../skills/combatUtil'
 import { navigateNear } from '../skills/navigate'
 import { countItems, trace } from '../skills/util'
-import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, onTheSurface, oreLevel, unstick } from './explore'
+import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, onTheSurface, openSky, oreLevel, unstick } from './explore'
 import { toolKindFor, wornOutTools } from './durability'
 
 /** a mine step hands back to the executor when its tool has this many uses left (the executor's default too) */
@@ -240,6 +240,19 @@ export const runSmelt: StepRunner<SmeltStep> = async (step, ctx) => {
   return { gained }
 }
 
+/** how far below the bot an animal is left alone (down a ravine, a cliff) */
+export const PREY_BELOW = 12
+
+/**
+ * Whether an animal is in a place a hunt from the surface doesn't go: under a roof (a cave it fell into) while the bot
+ * is under the sky, or far below the bot. A rabbit in a cave on seed 4 led a hunt down to y 0, into the mobs.
+ */
+export function outOfTheWay (bot: Bot, pos: Vec3): boolean {
+  const lookup = (p: Vec3): { name: string, boundingBox: string } | null => bot.blockAt(p) as any
+  if (pos.y < bot.entity.position.y - PREY_BELOW) return true
+  return openSky(lookup, bot.entity.position.floored()) && !openSky(lookup, pos.floored())
+}
+
 export const runKill: StepRunner<KillStep> = async (step, ctx) => {
   const { bot, signal } = ctx
   const start = startCount(ctx, 'start', () => countItems(bot, step.item))
@@ -249,7 +262,7 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
   let substituted = 0
   // animals the bot couldn't get to (across a ravine, up a cliff): passed over for the others
   const passed = new Set<number>()
-  const nearest = (mobs: string[], range: number): Entity | null => nearestOfType(bot, mobs, range, e => passed.has(e.id))
+  const nearest = (mobs: string[], range: number): Entity | null => nearestOfType(bot, mobs, range, e => passed.has(e.id) || outOfTheWay(bot, e.position))
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     let mob = step.mob
