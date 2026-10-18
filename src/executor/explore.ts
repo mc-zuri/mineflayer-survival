@@ -538,6 +538,13 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
   return false
 }
 
+/**
+ * How a dug route's cells are broken: with any tool (the way through, not the drop), and their drops not walked
+ * after: the route's next step goes into the cell they fell in, which picks them up. Each pickup was a walk of 20 to
+ * 100 ticks, and a staircase up from y 18 on seed 7 took some 10000 ticks
+ */
+export const ROUTE_DIG = { anyTool: true, pickup: false } as const
+
 /** the cells left to break (air and the plants a body walks through stay), in order */
 async function open (bot: Bot, cells: Vec3[], signal?: AbortSignal): Promise<void> {
   for (const cell of cells) {
@@ -547,7 +554,7 @@ async function open (bot: Bot, cells: Vec3[], signal?: AbortSignal): Promise<voi
       if (block == null) throw new SkillError('NOT_FOUND', `the chunk at ${cell.toString()} isn't loaded`)
       if (block.boundingBox === 'empty' && !LIQUIDS.has(block.name)) break
       // the way out matters more than the drop: a block the bag's tools don't harvest is broken by hand
-      await collectBlock(bot, { positions: [cell], anyTool: true }, signal)
+      await collectBlock(bot, { positions: [cell], ...ROUTE_DIG }, signal)
     }
     if (!isOpen(bot, cell)) throw new SkillError('VERIFY_FAILED', `${bot.blockAt(cell)?.name ?? 'nothing'} still at ${cell.toString()}`)
   }

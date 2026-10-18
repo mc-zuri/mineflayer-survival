@@ -367,3 +367,8 @@ test('nearestShore: from the sea, the nearest column topped by land in the eight
   assert.ok(shore != null && shore.x >= 10 && shore.x <= 12, String(shore))
   assert.equal(nearestShore((p: Vec3): any => ({ name: p.y > 62 ? 'air' : 'water', boundingBox: 'empty' }), new Vec3(0, 60, 0)), null)
 })
+
+test('a dug route breaks its cells with any tool and walks after no drops (its next step picks them up)', async () => {
+  const { ROUTE_DIG } = await import('../../src/executor/explore')
+  assert.deepEqual(ROUTE_DIG, { anyTool: true, pickup: false })
+})
