@@ -8,7 +8,7 @@ import { collectBlock } from './collectBlock'
 import { craft } from './craft'
 import { navigateToReach } from './navigate'
 import { placeBlock } from './placeBlock'
-import { findPlacement } from './placement'
+import { findPlacementNear } from './placement'
 import { countItems, countsDelta, inventoryCounts, inventoryItems, itemId, settleInventory, waitUntil, type Block, type ItemCounts } from './util'
 
 /** AbstractFurnaceBlockEntity: a furnace's smelt takes 200 ticks (the recipe's cooking time) */
@@ -123,7 +123,7 @@ async function getFurnace (bot: Bot, args: SmeltArgs, signal?: AbortSignal): Pro
   const found = bot.findBlock({ matching: ids, maxDistance: args.furnaceDistance ?? 16 })
   if (found != null) return { furnace: found, placed: false }
   if (countItems(bot, 'furnace') === 0) await craft(bot, { item: 'furnace' }, signal)
-  const pos = findPlacement(pos => bot.blockAt(pos), bot.entity.position)
+  const pos = findPlacementNear(pos => bot.blockAt(pos), bot.entity.position)
   if (pos == null) throw new SkillError('CANNOT_PLACE', 'no room next to the bot for a furnace')
   await placeBlock(bot, { pos, item: 'furnace' }, signal)
   const furnace = bot.blockAt(pos)

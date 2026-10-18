@@ -69,3 +69,14 @@ test('yawFor: the yaw that faces a cardinal direction (mineflayer: 0 to -z, pi/2
   assert.strictEqual(yawFor(new Vec3(1, 0, 0)), -Math.PI / 2)
   assert.strictEqual(Math.abs(yawFor(new Vec3(0, 0, 1))), Math.PI)
 })
+
+test('findPlacementNear: further off when every cell around the bot is taken (leaves up a tree)', async () => {
+  const { findPlacementNear } = await import('../../src/skills/placement')
+  const extra: Record<string, string> = {}
+  for (let x = -2; x <= 2; x++) for (let y = -61; y <= -58; y++) for (let z = -2; z <= 2; z++) if (x !== 0 || z !== 0) extra[`${x},${y},${z}`] = 'oak_leaves'
+  const world = flat(extra)
+  assert.strictEqual(findPlacement(world, new Vec3(0.5, -60, 0.5)), null)
+  const pos = findPlacementNear(world, new Vec3(0.5, -60, 0.5))
+  assert.ok(pos != null)
+  assert.strictEqual(Math.max(Math.abs(pos.x), Math.abs(pos.z)), 3)
+})

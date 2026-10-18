@@ -74,6 +74,14 @@ export function findPlacement (lookup: BlockLookup, botPosition: Vec3, opts: Fin
   return candidates[0]?.pos ?? null
 }
 
+/**
+ * findPlacement next to the bot, then further off (the bot walks there to place it: placeBlock goes within reach)
+ * when the cells around it are all taken, as up a tree among the leaves or in a one-wide tunnel.
+ */
+export function findPlacementNear (lookup: BlockLookup, botPosition: Vec3, opts: Omit<FindPlacementOptions, 'radius'> = {}): Vec3 | null {
+  return findPlacement(lookup, botPosition, { ...opts, radius: 2 }) ?? findPlacement(lookup, botPosition, { ...opts, radius: 5 })
+}
+
 export interface BedPlacement {
   foot: Vec3
   head: Vec3

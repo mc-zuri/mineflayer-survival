@@ -7,7 +7,7 @@ import { SkillError, throwIfAborted } from './errors'
 import { collectBlock } from './collectBlock'
 import { navigateToReach } from './navigate'
 import { placeBlock } from './placeBlock'
-import { findPlacement } from './placement'
+import { findPlacementNear } from './placement'
 import { countItems, inventoryItems, itemId, resyncInventory, settleInventory, type Block } from './util'
 
 type CraftingFunc = Awaited<ReturnType<typeof buildStatic>>
@@ -82,7 +82,7 @@ async function getTable (bot: Bot, args: CraftArgs, signal?: AbortSignal): Promi
   if (found != null) return { table: found, placed: false }
 
   if (countItems(bot, 'crafting_table') === 0) await craft(bot, { item: 'crafting_table' }, signal)
-  const pos = findPlacement(pos => bot.blockAt(pos), bot.entity.position)
+  const pos = findPlacementNear(pos => bot.blockAt(pos), bot.entity.position)
   if (pos == null) throw new SkillError('CANNOT_PLACE', 'no room next to the bot for a crafting table')
   await placeBlock(bot, { pos, item: 'crafting_table' }, signal)
   const table = bot.blockAt(pos)
