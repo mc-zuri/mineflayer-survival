@@ -161,7 +161,12 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
   // an ore with water against it is left: mined, it lets the water in, and on seed 3 the bot drowned mining iron under
   // a lake (the raw iron floating up out of reach, the drowning reflex too late)
   const submerged = level != null ? (pos: Vec3): boolean => waterBeside(p => bot.blockAt(p) as any, pos) : () => false
-  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || unripe(pos) || submerged(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos)
+  // what grows on the surface is taken from under the open sky (a tree's leaves and logs over it count as open):
+  // the azaleas of a lush cave have oak logs, and on seed 4 the wood for a new pickaxe was cut 55 blocks down one,
+  // in the dark among its pools, where a skeleton, a drowned and the water killed the bot four times
+  const lookup = (p: Vec3): any => bot.blockAt(p)
+  const underRoof = shallow && SURFACE_BLOCKS.test(step.block) ? (pos: Vec3): boolean => !openSky(lookup, pos) : () => false
+  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos)
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     const subs = blockSubstitutes(step)
