@@ -36,3 +36,10 @@ test('nearestOfType skips the dead (health 0, still there for the death animatio
   const bot = fakeBot({ position: new Vec3(0, 64, 0), entities: [dead, cow] })
   assert.strictEqual(nearestOfType(bot, ['cow'], 64), cow)
 })
+
+test('nearestOfType passes over the excluded (the ones the bot couldn\'t get to)', () => {
+  const near = entity({ name: 'cow', position: new Vec3(2, 64, 0), meta: { baby: false } })
+  const far = entity({ name: 'cow', position: new Vec3(9, 64, 0), meta: { baby: false } })
+  const bot = fakeBot({ position: new Vec3(0, 64, 0), entities: [near, far] })
+  assert.strictEqual(nearestOfType(bot, ['cow'], 64, e => e.id === near.id), far)
+})

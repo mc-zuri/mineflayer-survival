@@ -14,6 +14,7 @@ import { smelt } from '../skills/smelt'
 import { retrieveItems } from '../skills/chest'
 import { fillBucket, isSource } from '../skills/bucket'
 import { hunt, nearestOfType } from '../skills/hunt'
+import type { Entity } from '../skills/combatUtil'
 import { navigateNear } from '../skills/navigate'
 import { countItems, trace } from '../skills/util'
 import { ensureSurface, exploreForBlocks, exploreSurface, findNear, oreLevel, unstick } from './explore'
@@ -223,30 +224,36 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
   const subs = mobSubstitutes(step)
   let failures = 0
   let substituted = 0
+  // animals the bot couldn't get to (across a ravine, up a cliff): passed over for the others
+  const passed = new Set<number>()
+  const nearest = (mobs: string[], range: number): Entity | null => nearestOfType(bot, mobs, range, e => passed.has(e.id))
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     let mob = step.mob
-    if (nearestOfType(bot, [step.mob], SEARCH_RADIUS) == null) {
-      const sub = subs.find(m => nearestOfType(bot, [m], SEARCH_RADIUS) != null)
+    if (nearest([step.mob], SEARCH_RADIUS) == null) {
+      const sub = subs.find(m => nearest([m], SEARCH_RADIUS) != null)
       if (sub != null) mob = sub
       else {
         ctx.log(`exploring for a ${[step.mob, ...subs].join(' or ')}`)
-        const found = await exploreSurface(bot, { found: () => nearestOfType(bot, [step.mob, ...subs], 32) != null, center: ctx.home ?? undefined }, signal)
+        passed.clear()
+        const found = await exploreSurface(bot, { found: () => nearest([step.mob, ...subs], 32) != null, center: ctx.home ?? undefined }, signal)
         if (!found) throw new SkillError('NOT_FOUND', `no ${step.mob} found exploring`)
         continue
       }
     }
+    const prey = nearest([mob], SEARCH_RADIUS)
+    if (prey == null) continue
     // a trip to an animal from the bottom of a mine is a search the pathfinder doesn't finish: climb out first
-    const prey = nearestOfType(bot, [mob], SEARCH_RADIUS)
-    if (prey != null && prey.position.distanceTo(bot.entity.position) > 8) await ensureSurface(bot, signal)
+    if (prey.position.distanceTo(bot.entity.position) > 8) await ensureSurface(bot, signal)
     try {
       trace('executor: hunting a', mob, 'for', step.item, countItems(bot, step.item), '/', target)
-      const res = await hunt(bot, mob, { signal, range: SEARCH_RADIUS })
+      const res = await hunt(bot, prey, { signal, range: SEARCH_RADIUS })
       trace('executor: hunt', res.killed ? 'killed' : 'lost', 'the', mob, 'drops', res.drops)
       if (mob !== step.mob && res.killed) substituted++
     } catch (err) {
       if (isAbort(err) || TaskError.is(err, 'DIED', 'INVENTORY_FULL')) throw err
-      if (++failures > 4) throw err
+      passed.add(prey.id)
+      if (++failures > 8) throw err
       trace('executor: hunt failed', (err as Error).message)
       if (TaskError.is(err, 'NO_PATH')) await unstick(bot, signal)
     }
