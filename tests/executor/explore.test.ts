@@ -151,6 +151,10 @@ test('surfaceStepCost: a step under a roof (a cave, a ravine\'s overhang) costs 
   assert.equal(cost({ position: new Vec3(0, 64, 0) }), 0)
   assert.equal(cost({ position: new Vec3(5, 64, 0) }), 0)
   assert.equal(cost({ position: new Vec3(3, 64, 0) }), 0)
+  // down a ravine, open to the sky: as dear
+  const ravine = surfaceStepCost((pos: Vec3) => pos.x === 20 && pos.y > 40 ? { name: 'air', boundingBox: 'empty' } : lookup(pos), 64)
+  assert.equal(ravine({ position: new Vec3(20, 41, 0) }), UNDER_ROOF_STEP_COST)
+  assert.equal(ravine({ position: new Vec3(20, 60, 0) }), 0)
 })
 
 test('outOfTheWay: an animal in a cave (under a roof) or far below is left alone by a hunt from the surface', async () => {

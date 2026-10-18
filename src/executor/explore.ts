@@ -371,7 +371,7 @@ export const UNDER_ROOF_STEP_COST = 30
 
 /**
  * A step cost for the pathfinder (an exclusion area) that keeps a trip over the surface on it: a step into a cell with
- * a block over it (trees left out) costs UNDER_ROOF_STEP_COST more, so a way down a ravine or through a cave, where
+ * a block over it (trees left out), or more than SURFACE_DIP below `refY`, costs UNDER_ROOF_STEP_COST more, so a way down a ravine or through a cave, where
  * the mobs spawn in the dark at any hour (Monster.isDarkEnoughToSpawn), is taken only when it saves a long way round.
  * Each column's top is looked up once.
  */
@@ -391,9 +391,15 @@ export function surfaceStepCost (lookup: Lookup, refY: number, range = 64): (blo
       }
       tops.set(key, top)
     }
+    // a cell well below where the trip set out from is down in a ravine (open to the sky, as dark at its bottom as a
+    // cave): as dear (seed 4's legs went down one to y 20 and the bot died there)
+    if (pos.y < refY - SURFACE_DIP) return UNDER_ROOF_STEP_COST
     return top != null && pos.y < top ? UNDER_ROOF_STEP_COST : 0
   }
 }
+
+/** how far below the level a surface trip sets out from a step counts as down a ravine (surfaceStepCost) */
+export const SURFACE_DIP = 10
 
 /**
  * runs `fn` with surfaceStepCost added to the pathfinder's step costs and no drop into water deeper than maxDropDown
