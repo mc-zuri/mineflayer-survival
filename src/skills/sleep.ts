@@ -93,7 +93,7 @@ export async function sleep (bot: Bot, args: SleepArgs = {}, signal?: AbortSigna
   if (!canSleepNow(bot.time.timeOfDay, thundering)) throw new SkillError('NOT_NIGHT', `it's day (time of day ${bot.time.timeOfDay})`)
 
   const { bed, placed } = await getBed(bot, args, signal)
-  // BedBlock.use: the bed within reach (mineflayer's bot.sleep asks for 2 blocks around the head)
+  // BedBlock.use: the bed within reach (vanilla's bedInRange: 3 across and 2 up or down of the head or foot)
   await navigate(bot, { goal: new goals.GoalNear(bed.position.x, bed.position.y, bed.position.z, 1), reached: () => bot.entity.position.distanceTo(bed.position.offset(0.5, 0, 0.5)) <= 2.5 }, signal)
 
   try {

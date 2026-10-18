@@ -562,8 +562,8 @@ export async function sleepThroughNight (bot: Bot, opts: SleepThroughNightOption
   }
   for (let attempt = 0; attempt < (opts.tries ?? 6); attempt++) {
     throwIfAborted(signal)
-    // the ones the server will see first (the bed goes next to the bot): mineflayer's own check is a box off by one
-    // each way, and the server's refusal ("You may not rest now") only shows as mineflayer's 3 s timeout
+    // the ones the server will see first (the bed goes next to the bot), fought before the bed goes down rather than
+    // after bot.sleep rejects with the server's refusal ("You may not rest now")
     const near = monstersPreventingRest(bot, bot.entity.position.floored())[0]
     if (near != null) {
       await fightOff(near)
