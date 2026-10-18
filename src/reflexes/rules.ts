@@ -229,10 +229,10 @@ export const eatReflex: Reflex = {
   }
 }
 
-/** Wear armor better than what's worn when some comes into the inventory. */
+/** Wear armor better than what's worn when some comes into the inventory, a fight or not (it's a few clicks). */
 export const armorReflex: Reflex = {
   name: 'armor',
-  priority: 20,
+  priority: 70,
   check (ctx) {
     const { bot, config } = ctx
     if (!config.armor.enabled || !ctx.armorChanged) return null

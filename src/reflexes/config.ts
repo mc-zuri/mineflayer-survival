@@ -143,7 +143,8 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
   creeper: { enabled: true, triggerDistance: 3, safeDistance: 7.5, blockAtSwell: 24, blockDistance: 5, maxTicks: 200, priority: 80 },
   hazard: { enabled: true, searchRadius: 6, waterRadius: 6, maxTicks: 200, priority: 90 },
   drowning: { enabled: true, air: 6, recoverTo: 18, searchRadius: 8, maxTicks: 300, priority: 85 },
-  armor: { enabled: true, priority: 20 },
+  // above fighting (60): a few clicks, and a fight in bare skin took every hit at full (a zombie's 3, not 1.2 through iron)
+  armor: { enabled: true, priority: 70 },
   fireball: { enabled: true, range: 12, priority: 92 },
   night: { enabled: true, sleep: true, shelter: true, minArmor: 10, minDamage: 6, bedDistance: 16, shelterRadius: 8, priority: 40 },
   totem: { enabled: true, always: true, health: 10, priority: 95 },

@@ -3,7 +3,7 @@ import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import { armorReflex, creeperReflex, drowningReflex, eatReflex, hazardReflex, hostilesReflex, nightReflex, totemReflex } from '../../src/reflexes/rules'
 import { ReflexEngine } from '../../src/reflexes/engine'
-import type { ReflexConfigInput } from '../../src/reflexes/config'
+import { DEFAULT_REFLEX_CONFIG, type ReflexConfigInput } from '../../src/reflexes/config'
 import type { Reflex } from '../../src/reflexes/types'
 import { CREEPER_IGNITED_INDEX, CREEPER_SWELL_DIR_INDEX, creeperSwelling } from '../../src/skills/fight'
 import { metadataIndex } from '../../src/skills/combatUtil'
@@ -252,5 +252,13 @@ test('night reflex: no ground to dig in about (the sea all round): tried again o
   await assert.rejects(task!.run(new AbortController().signal), /NOT_FOUND/)
   assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 100 }), null)
   assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 200 })?.detail, 'shelter')
+  engine.stop()
+})
+
+test('armor reflex: better armor in the bag goes on before the fight with the zombie at hand (it outranks the hostiles reflex)', () => {
+  const bot = fakeBot({ entities: [entity({ name: 'zombie', position: at(3) })], items: [item('iron_sword'), item('iron_chestplate')] })
+  const engine = new ReflexEngine(bot, { enabled: false })
+  assert.strictEqual(engine.evaluate()?.name, 'armor')
+  assert.ok(DEFAULT_REFLEX_CONFIG.armor.priority > DEFAULT_REFLEX_CONFIG.hostiles.priority)
   engine.stop()
 })
