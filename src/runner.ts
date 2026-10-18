@@ -23,6 +23,7 @@ import { pickupDrops } from './skills/pickupDrops'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
 import { enchantGear } from './skills/enchant'
+import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 
 export interface MilestoneContext {
@@ -335,7 +336,19 @@ export class Runner {
       this.log(`back to the death spot at ${death.x} ${death.y} ${death.z}`)
       try {
         const spot = new Vec3(death.x, death.y, death.z)
-        await this.executor.task('to the death spot', async (s) => { await navigateNear(bot, spot, 2, s); return await pickupDrops(bot, { near: spot.offset(0.5, 0.5, 0.5), radius: 10 }, s) }, signal)
+        await this.executor.task('to the death spot', async (s) => {
+          // a long trip the pathfinder may plan short of: a few tries, getting moving by hand between them
+          for (let i = 0; ; i++) {
+            try {
+              await navigateNear(bot, spot, 3, s)
+              break
+            } catch (err) {
+              if (isAbort(err) || i >= 3) throw err
+              await unstick(bot, s)
+            }
+          }
+          return await pickupDrops(bot, { near: spot.offset(0.5, 0.5, 0.5), radius: 10 }, s)
+        }, signal)
         this.memory.death = null
         return
       } catch (err) {
