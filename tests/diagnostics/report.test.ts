@@ -5,7 +5,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { Vec3 } from 'vec3'
-import { Diagnostics, buildReport, diagnose, errorChain, type StuckReport } from '../../src/diagnostics'
+import { Diagnostics, buildReport, crosshairFacts, diagnose, errorChain, faceVector, idleFacts, type StuckReport } from '../../src/diagnostics'
 import { SkillError } from '../../src/skills/errors'
 
 type XYZ = [number, number, number]
@@ -208,4 +208,38 @@ test('Diagnostics reports a failed move of the pathfinder, at most one in moveFa
   check.tick = 150
   bot.emit('pathfinderMoveFailed', {})
   assert.deepStrictEqual(diagnostics.lastReports().map((r) => `${r.kind}: ${r.message}`), ['move_failed: no progress in 60 ticks', 'move_failed: no progress in 60 ticks'])
+})
+
+test('idleFacts and its rule: a move that holds the bot with no movement key (a real case: sprint alone, 0.018 off the exit)', () => {
+  const samples = Array.from({ length: 30 }, (_, i) => ({ tick: 1000 + i, pos: [-1.5004, 64, 5.4821] as XYZ, vel: [0, -0.0784, 0] as XYZ, onGround: true, controls: i < 5 ? 'forward+sprint' : 'sprint', yaw: 3.2, pitch: 0, delta: 0, velDelta: 0 }))
+  const path: any = { currentMove: { type: 'Forward', from: [-1.5, 64, 4.7], to: [-1.5, 64, 5.5], cost: 15, breaks: [], places: [] }, settings: { canDig: true } }
+  const r = emptyReport({ kind: 'move_failed', path, recent: recent({ samples }) })
+  r.facts.idle = idleFacts(r)
+  assert.deepStrictEqual(r.facts.idle, { ticks: 25, controls: 'sprint', exitDistance: 0.018, exit: [-1.5, 64, 5.5] })
+  assert.strictEqual(diagnose(r), 'no movement key held for 25 ticks (keys: sprint), 0.018 from the move\'s exit (-1.5, 64, 5.5): the Forward executor isn\'t driving the bot')
+})
+
+test('crosshairFacts and its rule: the dig\'s block isn\'t the one in the crosshair (a real case: a Forward move\'s dig, looking along the diagonal)', () => {
+  const samples = [{ tick: 7187, pos: [3.3, 35, 50.3] as XYZ, vel: [0, 0, 0] as XYZ, onGround: true, controls: 'forward+sprint', yaw: 0.7854, pitch: 0, delta: 0, velDelta: 0, dig: [2, 35, 50] as XYZ }]
+  const r = emptyReport({ kind: 'move_failed', bot: { ...emptyReport().bot, yaw: 0.7854, cursorBlock: { pos: [3, 36, 49], block: 'stone#1' } }, recent: recent({ samples }) })
+  r.facts.crosshair = crosshairFacts(r)
+  assert.deepStrictEqual(r.facts.crosshair, { digTarget: [2, 35, 50], cursor: { pos: [3, 36, 49], block: 'stone#1' }, onTarget: false })
+  assert.strictEqual(diagnose(r), 'crosshair on stone at (3, 36, 49), not the dig\'s block at (2, 35, 50) (yaw 0.7854, pitch 0)')
+  r.bot.cursorBlock = { pos: [2, 35, 50], block: 'stone#1' }
+  assert.strictEqual(crosshairFacts(r)?.onTarget, true)
+})
+
+test('faceVector: mineflayer\'s targetDigFace numbers (prismarine-world BlockFace) as vectors', () => {
+  assert.deepStrictEqual(faceVector(0)?.toArray(), [0, -1, 0])
+  assert.deepStrictEqual(faceVector(3)?.toArray(), [0, 0, 1])
+  assert.deepStrictEqual(faceVector(5)?.toArray(), [1, 0, 0])
+  assert.deepStrictEqual(faceVector(new Vec3(0, 1, 0))?.toArray(), [0, 1, 0])
+  assert.strictEqual(faceVector(null), null)
+})
+
+test('enclosure: air and plants about the bot aren\'t unbreakable walls', () => {
+  const bot = mockBot((p) => p.y === 64 && p.x === 1 ? 'bedrock' : null)
+  const enclosed = buildReport(bot, { kind: 'stuck' }).facts.enclosed
+  assert.strictEqual(enclosed.solid, false)
+  assert.deepStrictEqual(enclosed.unbreakable, ['bedrock'])
 })

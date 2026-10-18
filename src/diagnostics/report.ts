@@ -39,6 +39,13 @@ export interface ReportFacts {
   enclosed: { solid: boolean, unbreakable: string[], blocks: string[] }
   /** leaves in the blocks around */
   leavesAround: number
+  /**
+   * The last ticks the bot stood still with no movement key held (forward, back, left, right, jump): the keys it held,
+   * and how far it was from the current move's exit
+   */
+  idle: { ticks: number, controls: string, exitDistance: number | null, exit: XYZ | null } | null
+  /** the block the last dig (in the last 20 ticks) was of, and whether the crosshair is on it */
+  crosshair: { digTarget: XYZ, cursor: { pos: XYZ, block: string } | null, onTarget: boolean } | null
 }
 
 export interface StuckReport {
@@ -87,6 +94,15 @@ const xyz = (v: { x: number, y: number, z: number }): XYZ => [v.x, v.y, v.z]
 const round = (n: number, d = 4): number => Math.round(n * 10 ** d) / 10 ** d
 const rxyz = (v: { x: number, y: number, z: number }): XYZ => [round(v.x), round(v.y), round(v.z)]
 
+/** a dig's face as a vector: mineflayer's targetDigFace is the face's number (prismarine-world's BlockFace) */
+export function faceVector (face: unknown): Vec3 | null {
+  if (face == null) return null
+  if (face instanceof Vec3) return face
+  const faces: XYZ[] = [[0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]]
+  const f = typeof face === 'number' ? faces[face] : null
+  return f != null ? new Vec3(f[0], f[1], f[2]) : null
+}
+
 /** the error and its causes, outermost first */
 export function errorChain (err: unknown): StuckReport['errors'] {
   const out: StuckReport['errors'] = []
@@ -115,7 +131,7 @@ function isSolid (block: any): boolean {
 }
 
 function isUnbreakable (block: any): boolean {
-  return block != null && (block.diggable === false || block.hardness == null || block.hardness < 0)
+  return isSolid(block) && (block.diggable === false || block.hardness == null || block.hardness < 0)
 }
 
 /** the block the bot pushes into, when it holds forward and collided horizontally (the move's direction by yaw) */
@@ -157,7 +173,7 @@ export function digFacts (bot: Bot): DigFacts | null {
     const hit = (bot.world as any)?.raycast?.(eye, dir, distance + 0.5)
     if (hit?.position != null && !hit.position.equals(pos)) raycastBlockedBy = { pos: xyz(hit.position), block: blockName(hit) }
   } catch {}
-  const face: Vec3 | null = (bot as any).targetDigFace ?? null
+  const face = faceVector((bot as any).targetDigFace)
   let faceTowardsBot: boolean | null = null
   if (face != null) {
     // the face's plane: the bot's eyes on its outer side
@@ -265,7 +281,7 @@ export function buildReport (bot: Bot, opts: BuildReportOptions): StuckReport {
       food: bot.food ?? null,
       heldItem: held != null ? `${held.name} x${held.count as number}` : null,
       cursorBlock,
-      digging: dig?.position != null ? { pos: xyz(dig.position), block: blockName(dig), face: (bot as any).targetDigFace != null ? xyz((bot as any).targetDigFace) : null } : null
+      digging: dig?.position != null ? { pos: xyz(dig.position), block: blockName(dig), face: ((f) => f != null ? xyz(f) : null)(faceVector((bot as any).targetDigFace)) } : null
     },
     path,
     recent: {
@@ -277,13 +293,48 @@ export function buildReport (bot: Bot, opts: BuildReportOptions): StuckReport {
       stats: check?.stats != null ? { ...check.stats } : null
     },
     blocks,
-    facts: { blockedAhead: blockedAhead(bot), dig: digFacts(bot), enclosed: enclosure(bot), leavesAround },
+    facts: { blockedAhead: blockedAhead(bot), dig: digFacts(bot), enclosed: enclosure(bot), leavesAround, idle: null, crosshair: null },
     entities: entities.slice(0, 20),
     errors,
     context: opts.context
   }
+  report.facts.idle = idleFacts(report)
+  report.facts.crosshair = crosshairFacts(report)
   report.diagnosis = diagnose(report)
   return report
+}
+
+/** the last dig's block (the dig now, else one in the samples of the last 20 ticks) against the block in the crosshair */
+export function crosshairFacts (r: StuckReport): ReportFacts['crosshair'] {
+  let target: XYZ | null = r.bot.digging?.pos ?? null
+  const samples = r.recent.samples
+  const end = samples[samples.length - 1]?.tick ?? r.tick
+  for (let i = samples.length - 1; target == null && i >= 0 && samples[i].tick > end - 20; i--) target = samples[i].dig ?? null
+  if (target == null) return null
+  const cursor = r.bot.cursorBlock
+  const onTarget = cursor != null && cursor.pos.every((v, i) => v === target?.[i])
+  return { digTarget: target, cursor, onTarget }
+}
+
+const MOVE_KEYS = /(^|\+)(forward|back|left|right|jump)(\+|$)/
+
+/** the run of samples at the end with no movement key and no movement (idle) */
+export function idleFacts (r: StuckReport): ReportFacts['idle'] {
+  const samples = r.recent.samples
+  const last = samples[samples.length - 1]
+  if (last == null) return null
+  let ticks = 0
+  for (let i = samples.length - 1; i >= 0; i--) {
+    const s = samples[i]
+    if (MOVE_KEYS.test(s.controls)) break
+    const d = Math.hypot(s.pos[0] - last.pos[0], s.pos[1] - last.pos[1], s.pos[2] - last.pos[2])
+    if (d > 0.01) break
+    ticks++
+  }
+  if (ticks === 0) return null
+  const exit = r.path?.currentMove?.to ?? null
+  const exitDistance = exit != null ? round(Math.hypot(exit[0] - last.pos[0], exit[2] - last.pos[2]), 3) : null
+  return { ticks, controls: last.controls, exitDistance, exit }
 }
 
 const fmt = (p: XYZ): string => `(${p.map((n) => Math.round(n * 100) / 100).join(', ')})`
@@ -306,6 +357,18 @@ export function diagnose (r: StuckReport): string {
     if (!dig.inReach) why.push(`out of reach (${dig.distance} blocks)`)
     if (dig.raycastBlockedBy != null) why.push(`raycast blocked by ${shortBlock(dig.raycastBlockedBy.block)} at ${fmt(dig.raycastBlockedBy.pos)}`)
     add(`dig of ${shortBlock(dig.block)} at ${fmt(dig.pos)} not progressing${why.length > 0 ? ` (${why.join(', ')})` : ''}`)
+  }
+
+  // a dig whose block isn't in the crosshair (vanilla digs only the block the crosshair hits)
+  const crosshair = r.facts.crosshair
+  if (crosshair != null && !crosshair.onTarget && (r.kind === 'stuck' || r.kind === 'move_failed')) {
+    add(`crosshair on ${crosshair.cursor != null ? `${shortBlock(crosshair.cursor.block)} at ${fmt(crosshair.cursor.pos)}` : 'nothing'}, not the dig's block at ${fmt(crosshair.digTarget)} (yaw ${r.bot.yaw}, pitch ${r.bot.pitch})`)
+  }
+
+  // a move that holds the bot with no key to move it: the executor waits on something that doesn't come
+  const idle = r.facts.idle
+  if (idle != null && idle.ticks >= 20 && (r.kind === 'stuck' || r.kind === 'move_failed') && dig == null && r.path?.currentMove != null) {
+    add(`no movement key held for ${idle.ticks} ticks (keys: ${idle.controls === '' ? 'none' : idle.controls})${idle.exit != null ? `, ${String(idle.exitDistance)} from the move's exit ${fmt(idle.exit)}` : ''}: the ${r.path.currentMove.type} executor isn't driving the bot`)
   }
 
   const corrections = r.recent.events.filter((e) => e.type === 'position_correction').length
