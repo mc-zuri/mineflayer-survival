@@ -2,3 +2,4 @@
 export * from './world'
 export * from './danger'
 export * from './destroyCrystals'
+export * from './fightDragon'
