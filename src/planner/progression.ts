@@ -144,12 +144,12 @@ export const MILESTONES: readonly Milestone[] = [
   },
   {
     id: 'base',
-    title: 'a creeper-proof storage base',
-    // the base skill builds it; the goals are its materials
+    title: 'a minimal house: dug in, a door, the table and a furnace, chests, lit, a bed with wool',
+    // the base skill builds it (HOUSE_BLUEPRINT); the goals are its materials
     done: s => s.memory.base != null,
     goals: () => [
-      { item: '#stone_crafting_materials', count: 128 },
-      { item: 'torch', count: 16 },
+      { item: '#stone_crafting_materials', count: 48 },
+      { item: 'torch', count: 8 },
       { item: 'chest', count: 2 }
     ]
   },

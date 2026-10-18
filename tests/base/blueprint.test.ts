@@ -125,3 +125,18 @@ test('the airlock bends: no straight line from outside into the room, even with 
   assert.deepStrictEqual(path[0], bp.entrance.outerDoor)
   assert.ok(doors.has(key(bp.entrance.innerDoor)) && doors.has(key(bp.entrance.outerDoor)))
 })
+
+test('the house of day 1: the smallest room the furniture fits, one block of shell, a door, a table, a furnace, chests and light', async () => {
+  const { HOUSE_BLUEPRINT } = await import('../../src/base/build')
+  const bp = generateBlueprint(HOUSE_BLUEPRINT)
+  const blocks = bp.placements.map(p => p.block)
+  assert.ok(blocks.includes('crafting_table'))
+  assert.ok(blocks.includes('furnace'))
+  assert.ok(blocks.some(b => b.endsWith('_door')))
+  assert.ok(blocks.includes('torch') || blocks.includes('wall_torch'))
+  assert.ok(bp.storage.length >= 2)
+  // a third of the blocks of the full base's shell
+  const { BASE_BLUEPRINT } = await import('../../src/base/build')
+  const shell = (b: typeof bp): number => b.placements.filter(p => p.stage !== 'furniture').length
+  assert.ok(shell(bp) * 2 < shell(generateBlueprint(BASE_BLUEPRINT)), `${shell(bp)} vs ${shell(generateBlueprint(BASE_BLUEPRINT))}`)
+})

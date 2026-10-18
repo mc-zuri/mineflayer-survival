@@ -40,6 +40,8 @@ const FOOD_TICKS = Number(process.env.PLAY_FOOD_TICKS ?? 40000)
 const IRON_TICKS = Number(process.env.PLAY_IRON_TICKS ?? 150000)
 const DIAMOND_TICKS = Number(process.env.PLAY_DIAMOND_TICKS ?? 300000)
 const wallFor = (ticks: number): number => (ticks / 50 + 300) * 1000
+// the iron and diamond runs leave the base (the house of day 1) out unless PLAY_BASE is set
+const SKIP: Array<'base'> = process.env.PLAY_BASE != null ? [] : ['base']
 
 describe('play from a fresh 1.21.11 world', { timeout: wallFor(FOOD_TICKS) }, () => {
   let server: TestServer
@@ -78,7 +80,7 @@ describe('play on to iron', { timeout: wallFor(IRON_TICKS) }, () => {
   })
 
   test('an iron pickaxe and sword, iron armor, a shield and a bucket (the base left out)', async (t) => {
-    const result = await bot.survival.play({ until: 'iron', skip: ['base'], saveFile, maxTicks: IRON_TICKS })
+    const result = await bot.survival.play({ until: 'iron', skip: SKIP, saveFile, maxTicks: IRON_TICKS })
     report(t, result)
     assert.strictEqual(result.reason, 'until', `stopped: ${result.reason} ${String((result.error as Error)?.message ?? '')}`)
     assert.ok(ids(result.reached).includes('iron'))
@@ -104,7 +106,7 @@ describe('play on to diamonds', { timeout: wallFor(DIAMOND_TICKS), skip: process
   })
 
   test('a diamond pickaxe and sword within the tick budget (the base left out)', async (t) => {
-    const result = await bot.survival.play({ until: 'diamonds', skip: ['base'], saveFile, maxTicks: DIAMOND_TICKS })
+    const result = await bot.survival.play({ until: 'diamonds', skip: SKIP, saveFile, maxTicks: DIAMOND_TICKS })
     report(t, result)
     assert.strictEqual(result.reason, 'until', `stopped: ${result.reason} ${String((result.error as Error)?.message ?? '')}`)
     assert.ok(ids(result.reached).includes('diamonds'))

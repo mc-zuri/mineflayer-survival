@@ -27,6 +27,15 @@ import { BASE_POI } from './pois'
  */
 export const BASE_BLUEPRINT: BlueprintOptions = { width: 6, height: 3, depth: 4, furnaces: 1, chestLayers: 1 }
 
+/**
+ * The house of day 1, before the first night: the smallest room the furniture fits (6 × 2 × 3: a door, a crafting
+ * table, a furnace, chests along a wall, the bed when there's wool, lit), its walls one block of the ground it's dug
+ * into a few blocks under the surface: cheap to build from what the stone tools dig. The full base comes later.
+ */
+export const HOUSE_BLUEPRINT: BlueprintOptions = { width: 6, height: 2, depth: 3, thickness: 1, furnaces: 1, chestLayers: 1 }
+/** how deep under the surface the house's site is looked for */
+export const HOUSE_DEPTHS = [3, 4, 6]
+
 export interface BuildBaseOptions {
   /** gathers the materials and stores the valuables (its memory gets the base) */
   executor: Executor

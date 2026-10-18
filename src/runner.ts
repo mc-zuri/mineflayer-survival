@@ -16,7 +16,7 @@ import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type Mil
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { comeUp, dayPhase, nightAction, nightGoals } from './planner/schedule'
 import type { Station } from './planner/steps'
-import { buildBase, type BuildBaseOptions } from './base/build'
+import { buildBase, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
 import { Executor, ownedInventory, type ExecutorOptions } from './executor/executor'
 import { defaultKeep, SPARE_FOOD_POINTS, spareKitGoals } from './executor/keep'
@@ -180,7 +180,9 @@ const obtainGoals: MilestoneHandler = async ({ milestone, state, executor, signa
 const defaultHandlers: Partial<Record<MilestoneId, MilestoneHandler>> = {
   base: async ({ bot, executor, signal, log }) => {
     const opts = (bot as any).survival?.playOptions?.base ?? {}
-    await buildBase(bot, { ...opts, executor, signal, log })
+    // the first base is the minimal house of day 1, dug in a few blocks under the ground (HOUSE_BLUEPRINT); the full
+    // creeper-proof base is play's base options' (BASE_BLUEPRINT) for later
+    await buildBase(bot, { blueprint: HOUSE_BLUEPRINT, depths: HOUSE_DEPTHS, chests: 2, ...opts, executor, signal, log })
   },
   ...MILESTONE_HANDLERS
 }
