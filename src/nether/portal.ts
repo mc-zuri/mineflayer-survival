@@ -179,7 +179,11 @@ export interface LavaCastOptions {
   lavaBuckets?: number
   /** the mould's block (default cobblestone) */
   scaffoldItem?: string
-  /** keep the frame this far from any lava, horizontally (default 4) */
+  /**
+   * keep the frame this far from any lava, horizontally (default 9): the water poured over each cast cell falls to the
+   * ground in front of the frame and spreads 7 blocks before it is scooped back (WaterFluid: slope 4, a level less a
+   * block), and turns the pool's sources it reaches to obsidian and its flowing lava to cobblestone
+   */
   lavaClearance?: number
 }
 
@@ -234,7 +238,7 @@ function siteFits (getBlock: BlockGetter, origin: Pos, axis: Axis, back: number,
 export function chooseFrameSite (getBlock: BlockGetter, lava: Pos[], opts: LavaCastOptions = {}): { origin: Pos, axis: Axis, back: number } | null {
   if (lava.length === 0) return null
   const radius = opts.siteRadius ?? 12
-  const clearance = opts.lavaClearance ?? 4
+  const clearance = opts.lavaClearance ?? 9
   const c = { x: 0, y: 0, z: 0 }
   for (const l of lava) { c.x += l.x / lava.length; c.y += l.y / lava.length; c.z += l.z / lava.length }
   const center = { x: Math.round(c.x), y: Math.round(c.y), z: Math.round(c.z) }

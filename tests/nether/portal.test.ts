@@ -112,8 +112,8 @@ test('the lava cast plan builds a frame PortalShape accepts, with no diamond pic
   assert.equal(new Set(plan.sources.map(k)).size, 10)
   // the mould is the 4 × 6 wall behind the frame, on flat ground
   assert.equal(plan.scaffold.length, 24)
-  // the frame keeps clear of the pool
-  for (const p of plan.frame.obsidian) assert.ok(lava.every(l => Math.abs(l.x - p.x) >= 4 || Math.abs(l.z - p.z) >= 4))
+  // the frame keeps out of the reach of its water from the pool
+  for (const p of plan.frame.obsidian.filter(o => o.y === Math.min(...plan.frame.obsidian.map(b => b.y)))) assert.ok(lava.every(l => Math.abs(l.x - p.x) >= 9 || Math.abs(l.z - p.z) >= 9))
   run(plan, w)
   const check = checkPortalFrame(get, plan.frame)
   assert.deepEqual(check, { valid: true, missing: [], blocked: [] })
