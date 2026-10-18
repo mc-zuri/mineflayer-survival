@@ -167,9 +167,10 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
     }
     if (!bot.pathfinder.isPathing) return
     // a block being dug holds the bot still for a while: a new block starts the count again, the same one gets
-    // DIG_STUCK_FACTOR times the ticks (a dig that never ends, or a dig target left set, is stuck too)
+    // DIG_STUCK_FACTOR times the ticks (a dig that never ends, or a dig target left set, is stuck too), and the dig's
+    // end starts it again too (a long dig counted on, the bot was stuck the tick it ended: an iron ore dug by hand)
     const dig = (bot as any).targetDigBlock?.position?.toString() ?? null
-    if (bot.entity.position.distanceTo(anchor) >= 0.5 || (dig != null && dig !== digAt)) {
+    if (bot.entity.position.distanceTo(anchor) >= 0.5 || dig !== digAt) {
       anchor = bot.entity.position.clone()
       still = 0
       digAt = dig

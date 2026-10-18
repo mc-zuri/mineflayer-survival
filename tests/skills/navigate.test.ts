@@ -136,3 +136,37 @@ test('navigate gives a trip up after maxTicks however it moves (bobbing in the s
     await assert.rejects(navigate(bot, { goal: new goals.GoalBlock(50, 64, 0), stuckTicks: 10, unstick: 0, maxTicks: 60 }), (err: unknown) => isSkillError(err, 'STUCK') && /no arrival in 60 ticks/.test((err as Error).message))
   } finally { bot.stop() }
 })
+
+test('navigate counts the stuck ticks again from the end of a dig: a long dig (an ore by hand) isn\'t stuck the tick it ends', async () => {
+  const { EventEmitter } = await import('node:events')
+  const { navigate } = await import('../../src/skills/navigate')
+  const bot: any = new EventEmitter()
+  bot.entity = { position: new Vec3(0.5, 64, 0.5) }
+  bot.targetDigBlock = { position: new Vec3(1, 64, 0) }
+  let release: (() => void) | null = null
+  bot.pathfinder = {
+    isPathing: false,
+    goto: async () => {
+      bot.pathfinder.isPathing = true
+      setImmediate(() => bot.emit('pathGenerated', { path: [] }))
+      await new Promise<void>(resolve => { release = resolve })
+      bot.pathfinder.isPathing = false
+    },
+    cancel: async () => { release?.() }
+  }
+  const tick = async (n: number): Promise<void> => {
+    for (let i = 0; i < n; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  }
+  const rejected = assert.rejects(navigate(bot, { goal: new GoalReachBlock(new Vec3(30, 64, 0), 1), stuckTicks: 20, unstick: 0 }), (err: any) => err.reason === 'STUCK')
+  let settled = false
+  void rejected.then(() => { settled = true })
+  for (let i = 0; i < 300 && release == null; i++) await tick(1)
+  // a dig of 60 ticks (under 5 times 20), then the block broke and the bot sets off: the next ticks aren't stuck
+  await tick(60)
+  bot.targetDigBlock = null
+  await tick(10)
+  assert.strictEqual(settled, false, 'stuck as the dig ended')
+  // still standing 20 ticks after it: that is stuck
+  await tick(30)
+  await rejected
+})
