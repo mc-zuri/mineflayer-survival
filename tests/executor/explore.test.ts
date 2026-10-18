@@ -298,3 +298,16 @@ test('exploreSurface picks up at the leg its progress kept: a step preempted and
   assert.equal(await exploreSurface(bot, { found: () => false, center: new Vec3(0, 64, 0), maxRadius: 96, progress: fresh }), false)
   assert.equal(fresh.leg, legs)
 })
+
+test('a ravine\'s floor is open to the sky but not the surface: GoalSurface and ensureSurface want y 50 and up in the overworld', async () => {
+  const { GoalSurface, onSurface, SURFACE_MIN_Y } = await import('../../src/executor/explore')
+  const sky = (): any => ({ name: 'air', boundingBox: 'empty' })
+  assert.equal(onSurface(sky, new Vec3(0, 8, 0)), false)
+  assert.equal(onSurface(sky, new Vec3(0, 64, 0)), true)
+  assert.equal(onSurface(sky, new Vec3(0, SURFACE_MIN_Y, 0)), true)
+  // the End's islands are what there is
+  assert.equal(onSurface(sky, new Vec3(0, 8, 0), false), true)
+  const goal = new GoalSurface(sky)
+  assert.equal(goal.isEnd({ x: 0, y: 8, z: 0 }), false)
+  assert.equal(goal.isEnd({ x: 0, y: 70, z: 0 }), true)
+})

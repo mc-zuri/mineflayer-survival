@@ -229,14 +229,30 @@ function columnTop (lookup: Lookup, from: Vec3, limit = 64): number {
  * A goal to be under the open sky (out of a pit, a cave or a mine): a short climb the pathfinder plans quickly, where a
  * trip far off from the bottom of a shaft is a search it doesn't finish.
  */
+/**
+ * The overworld's surface is no lower than this: a ravine's floor or a pit is open to the sky as well, but no way
+ * to the animals or the trees (seed 4: the bot climbed out of the night's mine into a ravine at y 8, took it for the
+ * surface, and its search for animals went round the ravine's floor for 10000 ticks until a zombie killed it)
+ */
+export const SURFACE_MIN_Y = 50
+
+/** under the open sky and, in the overworld, no lower than SURFACE_MIN_Y */
+export function onSurface (lookup: Lookup, feet: Vec3, overworld = true): boolean {
+  return openSky(lookup, feet) && (!overworld || feet.y >= SURFACE_MIN_Y)
+}
+
+function inOverworld (bot: Bot): boolean {
+  return normalizeDimension(bot.game?.dimension) === 'overworld'
+}
+
 export class GoalSurface extends goals.Goal {
   private readonly tops = new Map<string, number>()
-  constructor (private readonly lookup: Lookup) {
+  constructor (private readonly lookup: Lookup, private readonly overworld = true) {
     super()
   }
 
   isEnd (node: { x: number, y: number, z: number }): boolean {
-    return openSky(this.lookup, new Vec3(node.x, node.y, node.z))
+    return onSurface(this.lookup, new Vec3(node.x, node.y, node.z), this.overworld)
   }
 
   private top (node: { x: number, y: number, z: number }): number {
@@ -298,7 +314,7 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
   for (let i = 0; i < maxSteps; i++) {
     throwIfAborted(signal)
     const feet = feetOf(bot)
-    if (openSky(lookup, feet)) return true
+    if (onSurface(lookup, feet, inOverworld(bot))) return true
     const turns = [dir, new Vec3(-dir.z, 0, dir.x), new Vec3(dir.z, 0, -dir.x), dir.scaled(-1)]
     let stepped = false
     for (const d of turns) {
@@ -322,21 +338,22 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
     }
     if (!stepped) return false
   }
-  return openSky(lookup, feetOf(bot))
+  return onSurface(lookup, feetOf(bot), inOverworld(bot))
 }
 
 /** climbs out to the open sky first when the bot is underground; resolves whether it's out */
 export async function ensureSurface (bot: Bot, signal?: AbortSignal): Promise<boolean> {
   const lookup = lookupOf(bot)
-  if (openSky(lookup, feetOf(bot))) return true
+  const overworld = inOverworld(bot)
+  if (onSurface(lookup, feetOf(bot), overworld)) return true
   trace('explore: underground at', feetOf(bot).toString(), ': up to the surface first')
   try {
-    await navigate(bot, { goal: new GoalSurface(lookup) }, signal)
+    await navigate(bot, { goal: new GoalSurface(lookup, overworld) }, signal)
   } catch (err) {
     if (isAbort(err)) throw err
     trace('explore: no way up', (err as Error).message)
   }
-  if (openSky(lookup, feetOf(bot))) return true
+  if (onSurface(lookup, feetOf(bot), overworld)) return true
   // the pathfinder planned no way up (or none it could walk): a staircase dug by hand
   trace('explore: digging a staircase up from', feetOf(bot).toString())
   return await climbOut(bot, {}, signal)
