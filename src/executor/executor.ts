@@ -22,6 +22,9 @@ import { wornOutTools } from './durability'
 import { defaultKeep, junkToToss, splitInventory, type KeepRule } from './keep'
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, type StepContext, type StepOutcome, type StepRunner } from './steps'
 
+/** how far from the bot a failed mine step's remembered blocks are forgotten */
+export const FORGET_RADIUS = 128
+
 export interface ExecutorHooks {
   /** before every step (the runner sleeps through the night here) */
   beforeStep?: (step: PlanStep) => Promise<void>
@@ -216,6 +219,7 @@ export class Executor {
           const n = (failures.get(key) ?? 0) + 1
           failures.set(key, n)
           this.log(`step failed (${n}): ${describeStep(step)}: ${(err as Error).message}`)
+          if (step.kind === 'mine') this.forgetFailedBlocks(step)
           if (n >= this.options.maxStepFailures) throw err
           if (TaskError.is(err, 'INVENTORY_FULL')) await this.makeRoom(needed, signal, true)
           break
@@ -225,6 +229,18 @@ export class Executor {
         if (outcome.gained < step.count) { this.log(`replan: ${describeStep(step)} gained ${outcome.gained}`); break }
       }
     }
+  }
+
+  /**
+   * A mine step that failed: the remembered blocks of its kinds near the bot are forgotten, so the next plan prices
+   * them as blocks yet to be found. One diamond ore remembered under a lake kept the iron milestone planning a diamond
+   * sword, and the step failed the same way five times over.
+   */
+  private forgetFailedBlocks (step: Extract<PlanStep, { kind: 'mine' }>): void {
+    const dimension = normalizeDimension(this.bot.game?.dimension)
+    const known = this.memory.findBlocks(step.blocks, { dimension, near: this.bot.entity.position, maxDistance: FORGET_RADIUS, count: 256 })
+    for (const b of known) this.memory.forgetBlock(b, dimension)
+    if (known.length > 0) this.log(`forgot ${known.length} remembered ${step.blocks.join(', ')} after the step failed`)
   }
 
   /**

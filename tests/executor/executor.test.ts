@@ -154,3 +154,19 @@ test('the executor makes a new tool at the uses left a mine step hands back at (
   const ex = new Executor(fakeBot())
   assert.equal(ex.options.minToolUses, MIN_TOOL_USES)
 })
+
+test('a mine step that fails forgets the remembered blocks of its kinds near the bot (the next plan prices them as yet to find)', async () => {
+  const bot = fakeBot()
+  const memory: WorldMemory = bot.survival.memory
+  memory.rememberBlock('oak_log', { x: 10, y: 64, z: 0 })
+  memory.rememberBlock('oak_log', { x: 2000, y: 64, z: 0 })
+  memory.rememberBlock('stone', { x: 5, y: 60, z: 0 })
+  let tries = 0
+  const ex = new Executor(bot, { runners: { mine: async () => { tries++; throw new TaskError('NO_PATH', 'no safe way down') } }, maxStepFailures: 1, log: () => {} })
+  await assert.rejects(ex.obtain([{ item: 'oak_log', count: 1 }]), /no safe way down/)
+  assert.equal(tries, 1)
+  assert.equal(memory.findBlocks('oak_log', { near: { x: 0, y: 64, z: 0 } as any, maxDistance: 128 }).length, 0)
+  // far off, and of other kinds: kept
+  assert.equal(memory.findBlocks('oak_log').length, 1)
+  assert.equal(memory.findBlocks('stone').length, 1)
+})
