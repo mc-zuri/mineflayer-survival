@@ -67,6 +67,17 @@ export const SITTING_DAMAGE_LIMIT = 0.25 * 200
 export const BREATH_RADIUS = 5
 /** EnderDragon.aiStep: the head part is 6.5 blocks out along (sin yRot, -cos yRot), 1 below the body when sitting */
 export const HEAD_DISTANCE = 6.5
+/** EnderDragon.aiStep: the neck part (3 × 3) 5.5 blocks out, at the head's height */
+export const NECK_DISTANCE = 5.5
+
+/**
+ * EnderDragon.hurt: a hit on a part other than these does f / 4 + min(f, 1). 1.21.11: the head only
+ * (`enderDragonPart != this.head`); 26.3: the neck too (`part != this.head && part != this.neck`). 26.1 and 26.2 weren't
+ * checked: they count as 1.21.11.
+ */
+export function neckTakesFullDamage (version: { '>=': (other: string) => boolean }): boolean {
+  return version['>=']('26.3')
+}
 /** DragonSittingFlamingPhase: the cloud is 5 / 2 further out than the head */
 export const BREATH_OFFSET = 2.5
 /** player entity interaction range (Attributes.ENTITY_INTERACTION_RANGE default) */
@@ -95,6 +106,20 @@ export function headPosition (dragon: DragonView, sitting = true): Pos {
   return { x: dragon.position.x + d.x * HEAD_DISTANCE, y: dragon.position.y + (sitting ? -1 : 0), z: dragon.position.z + d.z * HEAD_DISTANCE }
 }
 
+/** where the neck part is: the bottom middle of its 3 × 3 box, NECK_DISTANCE out at the head's height */
+export function neckPosition (dragon: DragonView, sitting = true): Pos {
+  const d = headDirection(dragon.yaw)
+  return { x: dragon.position.x + d.x * NECK_DISTANCE, y: dragon.position.y + (sitting ? -1 : 0), z: dragon.position.z + d.z * NECK_DISTANCE }
+}
+
+/** a perched dragon's part boxes (EnderDragonPart sizes: head 1 × 1, neck 3 × 3, body 5 × 3 half a block forward) */
+export function partBox (dragon: DragonView, part: 'head' | 'neck' | 'body'): { min: Pos, max: Pos } {
+  const d = headDirection(dragon.yaw)
+  const body = { x: dragon.position.x + d.x * 0.5, y: dragon.position.y, z: dragon.position.z + d.z * 0.5 }
+  const [at, w, h] = part === 'head' ? [headPosition(dragon), 1, 1] : part === 'neck' ? [neckPosition(dragon), 3, 3] : [body, 5, 3]
+  return { min: { x: at.x - w / 2, y: at.y, z: at.z - w / 2 }, max: { x: at.x + w / 2, y: at.y + h, z: at.z + w / 2 } }
+}
+
 export interface BreathZone {
   /** the cloud's middle; it lies on the first block below the head's height, so y is the ground there */
   center: { x: number, z: number }
@@ -109,8 +134,11 @@ export function breathZone (dragon: DragonView): BreathZone {
 }
 
 export interface MeleeSpot extends Pos {
-  /** what can be hit from here: the head takes full damage, other parts f / 4 + min(f, 1) (EnderDragon.hurt) */
-  target: 'head' | 'body'
+  /**
+   * what can be hit from here: the head takes full damage, and on 26.3 the neck (neckTakesFullDamage); other parts
+   * f / 4 + min(f, 1) (EnderDragon.hurt). Where the neck does no more than the body it counts as the body.
+   */
+  target: 'head' | 'neck' | 'body'
   /** eye-to-box distance to that part */
   reach: number
   /** horizontal distance from the breath cloud's edge, less the margin (Infinity with no breath) */
@@ -124,8 +152,9 @@ export interface MeleeSpot extends Pos {
  * `margin` for the player's width and drift, are left out; the head is then out of reach,
  * since the cloud lands just past it, and the spots under the body by the pillar remain.
  */
-export function meleeSpots (dragon: DragonView, groundY: number, breath: BreathZone | null = null, margin = 0.8): MeleeSpot[] {
+export function meleeSpots (dragon: DragonView, groundY: number, breath: BreathZone | null = null, margin = 0.8, neckFullDamage = false): MeleeSpot[] {
   const head = headPosition(dragon)
+  const neck = partBox(dragon, 'neck')
   const d = headDirection(dragon.yaw)
   const out: MeleeSpot[] = []
   const cx = Math.floor(dragon.position.x)
@@ -146,12 +175,15 @@ export function meleeSpots (dragon: DragonView, groundY: number, breath: BreathZ
       const bx = dragon.position.x + d.x * 0.5
       const bz = dragon.position.z + d.z * 0.5
       const toBody = Math.hypot(Math.max(Math.abs(x - bx) - 2.5, 0), Math.max(dragon.position.y - eyeY, eyeY - (dragon.position.y + 3), 0), Math.max(Math.abs(z - bz) - 2.5, 0))
+      const toNeck = Math.hypot(Math.max(neck.min.x - x, x - neck.max.x, 0), Math.max(neck.min.y - eyeY, eyeY - neck.max.y, 0), Math.max(neck.min.z - z, z - neck.max.z, 0))
       if (toHead <= MELEE_REACH) out.push({ x, y: groundY, z, target: 'head', reach: toHead, breathClearance: clearance })
+      else if (neckFullDamage && toNeck <= MELEE_REACH) out.push({ x, y: groundY, z, target: 'neck', reach: toNeck, breathClearance: clearance })
       else if (toBody <= MELEE_REACH) out.push({ x, y: groundY, z, target: 'body', reach: toBody, breathClearance: clearance })
     }
   }
-  // head first; then up to 2 blocks of clearance from the cloud is worth more than reach; then the closest
-  const rank = (s: MeleeSpot): number => s.target === 'head' ? 0 : 1
+  // head first, then a neck that takes full damage; then up to 2 blocks of clearance from the cloud is worth more than
+  // reach; then the closest
+  const rank = (s: MeleeSpot): number => s.target === 'head' ? 0 : s.target === 'neck' ? 1 : 2
   out.sort((a, b) => {
     if (rank(a) !== rank(b)) return rank(a) - rank(b)
     const clear = Math.min(b.breathClearance, 2) - Math.min(a.breathClearance, 2)

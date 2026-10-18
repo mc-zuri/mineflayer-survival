@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DragonPhaseTracker, activityOf, breathZone, headDirection, meleeSpots, phaseName, vanillaYaw } from '../../src/end/dragon'
+import minecraftData from 'minecraft-data'
+import { DragonPhaseTracker, activityOf, breathZone, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, vanillaYaw } from '../../src/end/dragon'
 import { exitPortal } from '../../src/end/spikes'
 
 test('phase ids are the EnderDragonPhase creation order', () => {
@@ -34,6 +35,24 @@ test('the breath lands 9 blocks out along the head, and melee spots keep out of 
   assert.ok(spots.length > 0)
   for (const s of spots) assert.ok(Math.hypot(s.x - b.center.x, s.z - b.center.z) >= b.radius + 0.8)
   assert.ok(spots.every(s => s.target === 'body'))
+})
+
+test('26.3 hurts the neck as the head (EnderDragon.hurt): with the head out of reach, the neck before the body', () => {
+  assert.equal(neckTakesFullDamage(minecraftData('1.21.11').version as any), false)
+  assert.equal(neckTakesFullDamage(minecraftData('26.3').version as any), true)
+  const perch = exitPortal(63).perch
+  const dragon = { position: perch, yaw: 0 }
+  const neck = partBox(dragon, 'neck')
+  assert.deepEqual([neck.min.z, neck.max.z], [perch.z - 5.5 - 1.5, perch.z - 5.5 + 1.5])
+  assert.equal(neck.min.y, perch.y - 1)
+  const b = breathZone(dragon)
+  // 1.21.11: the neck takes body damage, so it is no target of its own
+  assert.ok(meleeSpots(dragon, 63, b).every(s => s.target === 'body'))
+  const spots = meleeSpots(dragon, 63, b, 0.8, true)
+  assert.equal(spots[0].target, 'neck')
+  for (const s of spots) assert.ok(Math.hypot(s.x - b.center.x, s.z - b.center.z) >= b.radius + 0.8)
+  // without the breath the head still comes first
+  assert.equal(meleeSpots(dragon, 63, null, 0.8, true)[0].target, 'head')
 })
 
 test('the tracker opens the melee window while the dragon sits and closes it on takeoff', () => {

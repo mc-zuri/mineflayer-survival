@@ -8,7 +8,7 @@ import { attackStrengthOf } from '../../skills/weapons'
 import { bestFoodInInventory } from '../../skills/eat'
 import { steerToward } from '../../skills/steer'
 import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataIndex, metadataValue, eyePosition, yawPitchOf, distanceToBox } from '../../skills/combatUtil'
-import { DragonPhaseTracker, headPosition, meleeSpots, vanillaYaw, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
+import { DragonPhaseTracker, headPosition, meleeSpots, neckTakesFullDamage, partBox, vanillaYaw, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
 import { exitPortal } from '../spikes'
 import { destroyCrystals } from './destroyCrystals'
 import { blockGetter, groundY, isOpenAt, VoidGuard, findPortalY, exitPortalOpen, worldMinY, type BlockGetter } from './world'
@@ -26,7 +26,7 @@ export function dragonPartId (dragon: { id: number }, part: 'head' | 'neck' | 'b
 
 export interface MeleeChoice {
   spot: Vec3
-  target: 'head' | 'body'
+  target: 'head' | 'neck' | 'body'
 }
 
 /**
@@ -35,16 +35,16 @@ export interface MeleeChoice {
  * little short of full reach is preferred over the closest (the head and neck hurt what touches them: EnderDragon's
  * hurt(head box inflated 1)).
  */
-export function chooseMeleeSpot (get: BlockGetter, view: DragonView, portalY: number, window: MeleeWindow, dangers: Danger[], guard: VoidGuard | null): MeleeChoice | null {
-  const spots: Array<{ spot: Vec3, target: 'head' | 'body', score: number }> = []
+export function chooseMeleeSpot (get: BlockGetter, view: DragonView, portalY: number, window: MeleeWindow, dangers: Danger[], guard: VoidGuard | null, neckFullDamage = false): MeleeChoice | null {
+  const spots: Array<{ spot: Vec3, target: MeleeChoice['target'], score: number }> = []
   for (const g of [portalY, portalY + 1, portalY - 1]) {
-    for (const s of meleeSpots(view, g, window.breath)) {
+    for (const s of meleeSpots(view, g, window.breath, undefined, neckFullDamage)) {
       const cell = new Vec3(Math.floor(s.x), g, Math.floor(s.z))
       if (groundY(get, s.x, s.z, g + 2, g - 2) !== g) continue
       if (!isOpenAt(get, cell) || !isOpenAt(get, cell.offset(0, 1, 0))) continue
       if (inDanger(s, dangers, 1) != null) continue
       if (guard?.risky(s) === true) continue
-      const score = (s.target === 'head' ? 0 : 10) + Math.abs(s.reach - 2.2)
+      const score = (s.target === 'head' ? 0 : s.target === 'neck' ? 1 : 10) + Math.abs(s.reach - 2.2)
       spots.push({ spot: new Vec3(s.x, g, s.z), target: s.target, score })
     }
   }
@@ -234,7 +234,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       if (window.open && dragon != null) {
         stopDraw()
         const view = { position: dragon.position, yaw: vanillaYaw(dragon.yaw) }
-        const choice = chooseMeleeSpot(get, view, portalY, window, dangers, guard)
+        const choice = chooseMeleeSpot(get, view, portalY, window, dangers, guard, neckTakesFullDamage(bot.registry.version as any))
         const weapon = sword()
         if (weapon != null) await hold(weapon)
         const head = headPosition(view)
@@ -248,8 +248,9 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         }
         bot.setControlState('forward', false)
         bot.setControlState('sprint', false)
-        const target = choice?.target === 'body' && reach > MELEE_REACH ? 'body' : 'head'
-        const aimAt = target === 'head' ? new Vec3(head.x, head.y + 0.5, head.z) : dragon.position.offset(0, 1.5, 0)
+        const target = choice != null && choice.target !== 'head' && reach > MELEE_REACH ? choice.target : 'head'
+        const box = partBox(view, target)
+        const aimAt = target === 'body' ? dragon.position.offset(0, 1.5, 0) : new Vec3((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2)
         const { yaw, pitch } = yawPitchOf(aimAt.minus(eyePosition(bot)))
         await bot.look(yaw, pitch, true)
         const airborne = tick - jumpedAt <= 14 && !bot.entity.onGround
@@ -261,7 +262,11 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         } else {
           bot.setControlState('jump', false)
         }
-        const inReach = target === 'head' ? reach <= MELEE_REACH : distanceToBox(eyePosition(bot), { min: dragon.position.offset(-2.5, 0, -2.5), max: dragon.position.offset(2.5, 3, 2.5) }) <= MELEE_REACH
+        const inReach = target === 'head'
+          ? reach <= MELEE_REACH
+          : target === 'neck'
+            ? distanceToBox(eyePosition(bot), { min: new Vec3(box.min.x, box.min.y, box.min.z), max: new Vec3(box.max.x, box.max.y, box.max.z) }) <= MELEE_REACH
+            : distanceToBox(eyePosition(bot), { min: dragon.position.offset(-2.5, 0, -2.5), max: dragon.position.offset(2.5, 3, 2.5) }) <= MELEE_REACH
         if (inReach && strength.scale(0.5) >= 1 && (falling || (bot.entity.onGround && tick - jumpedAt > 14))) {
           strength.attack({ id: dragonPartId(dragon, target) } as any)
           meleeHits++
