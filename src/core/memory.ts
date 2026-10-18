@@ -226,6 +226,20 @@ export class WorldMemory {
     }
   }
 
+  /** replaces everything remembered with what the JSON holds (a run resumed from a saved memory, in place) */
+  restore (json: WorldMemoryJSON | string): void {
+    const loaded = WorldMemory.fromJSON(json, { maxPerBlock: this.maxPerBlock })
+    this.blocks.clear()
+    this.blockAt.clear()
+    this.chests.clear()
+    for (const [name, byPos] of loaded.blocks) this.blocks.set(name, byPos)
+    for (const [k, name] of loaded.blockAt) this.blockAt.set(k, name)
+    for (const [k, chest] of loaded.chests) this.chests.set(k, chest)
+    this.pois = loaded.pois
+    this.base = loaded.base
+    this.death = loaded.death
+  }
+
   static fromJSON (json: WorldMemoryJSON | string, opts: WorldMemoryOptions = {}): WorldMemory {
     const data: WorldMemoryJSON = typeof json === 'string' ? JSON.parse(json) : json
     if (data.version !== 1) throw new Error(`unknown world memory version ${String(data.version)}`)

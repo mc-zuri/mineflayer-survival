@@ -71,3 +71,18 @@ test('points of interest replace the same kind at the same spot and normalise th
   assert.equal(normalizeDimension('minecraft:the_end'), 'the_end')
   assert.equal(normalizeDimension(undefined), 'overworld')
 })
+
+test('restore replaces what a memory holds with a saved one, in place', () => {
+  const saved = JSON.stringify(sample().toJSON())
+  const mem = new WorldMemory()
+  mem.rememberBlock('oak_log', { x: 1, y: 70, z: 1 })
+  const same = mem
+  mem.restore(saved)
+  assert.equal(same, mem)
+  assert.deepEqual(mem.findBlocks('oak_log'), [])
+  assert.equal(mem.findBlocks('iron_ore').length, 2)
+  assert.deepEqual(mem.base, { x: 0, y: 64, z: 0, dimension: 'overworld' })
+  assert.equal(mem.findItem('raw_iron').length, 2)
+  assert.equal(mem.getPois('fortress', { dimension: 'the_nether' }).length, 1)
+  assert.deepEqual(mem.toJSON(), JSON.parse(saved))
+})
