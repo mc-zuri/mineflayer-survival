@@ -60,6 +60,8 @@ export interface CrystalPlanOptions {
   islandRadius?: number
   /** the most it will pillar up to get a line (default 24) */
   maxPillar?: number
+  /** ground to keep off when choosing where to shoot from (the dragon's breath clouds) */
+  avoid?: (x: number, z: number) => boolean
 }
 
 function keyOf (x: number, y: number, z: number): string {
@@ -143,7 +145,9 @@ export function planCrystals (spikes: EndSpike[], opts: CrystalPlanOptions = {})
   const bow = opts.bow ?? true
   const blocks = spikeBlocks(spikes, opts.brokenBars ?? [])
   // a spike's top is no place to shoot from: the ground there is the obsidian's top, 20 to 40 blocks up
-  const onSpike = new Set(spikes.flatMap(s => spikeColumns(s).map(c => `${c.x},${c.z}`)))
+  const spikeCells = new Set(spikes.flatMap(s => spikeColumns(s).map(c => `${c.x},${c.z}`)))
+  const avoid = opts.avoid
+  const offLimits = (x: number, z: number): boolean => spikeCells.has(`${Math.floor(x)},${Math.floor(z)}`) || (avoid?.(x, z) ?? false)
   const blocked = (p: Pos): boolean => blocks.has(keyOf(p.x, p.y, p.z)) || (opts.solidAt?.(p.x, p.y, p.z) ?? false)
   const targets: CrystalTarget[] = []
   for (const spike of spikes) {
@@ -152,7 +156,7 @@ export function planCrystals (spikes: EndSpike[], opts: CrystalPlanOptions = {})
     const insideCage = (p: Pos): boolean => Math.abs(p.x - spike.centerX) <= 2 && Math.abs(p.z - spike.centerZ) <= 2 && p.y >= spike.height && p.y <= spike.height + 3
     // aim at the middle, or high on the box for a steep line over the spike's rim
     const aims = [crystal.center, { ...crystal.center, y: crystal.box.maxY - 0.2 }]
-    const found = bow ? bestShootSpot(spike, crystal, aims, blocked, insideCage, groundY, maxD, island, maxPillar, onSpike) : null
+    const found = bow ? bestShootSpot(spike, crystal, aims, blocked, insideCage, groundY, maxD, island, maxPillar, offLimits) : null
     if (!spike.guarded && found != null) {
       targets.push({ spike, crystal, aim: crystal.center, method: 'shoot', shootFrom: found.spot })
       continue
@@ -172,7 +176,7 @@ export function planCrystals (spikes: EndSpike[], opts: CrystalPlanOptions = {})
 
 /** the cheapest spot with a clear line (cage bars allowed for a caged spike: they get broken) */
 function bestShootSpot (spike: EndSpike, crystal: SpikeCrystal, aims: Pos[], blocked: (p: Pos) => boolean, insideCage: (p: Pos) => boolean,
-  groundY: (x: number, z: number) => number, maxD: number, island: number, maxPillar: number, onSpike: Set<string>): { spot: ShootSpot, bars: Pos[] } | null {
+  groundY: (x: number, z: number) => number, maxD: number, island: number, maxPillar: number, offLimits: (x: number, z: number) => boolean): { spot: ShootSpot, bars: Pos[] } | null {
   const r = Math.hypot(spike.centerX, spike.centerZ)
   const inward = Math.atan2(-spike.centerZ, -spike.centerX)
   let best: { spot: ShootSpot, bars: Pos[], cost: number } | null = null
@@ -185,7 +189,7 @@ function bestShootSpot (spike: EndSpike, crystal: SpikeCrystal, aims: Pos[], blo
       const x = Math.floor(spike.centerX + 0.5 + Math.cos(a) * d) + 0.5
       const z = Math.floor(spike.centerZ + 0.5 + Math.sin(a) * d) + 0.5
       if (Math.hypot(x, z) > island) continue
-      if (onSpike.has(`${Math.floor(x)},${Math.floor(z)}`)) continue
+      if (offLimits(x, z)) continue
       const ground = groundY(x, z)
       for (let h = 0; h <= maxPillar; h++) {
         const cost = d * 0.25 + h * 2 + Math.abs(turn)

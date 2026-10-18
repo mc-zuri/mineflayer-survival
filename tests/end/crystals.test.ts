@@ -62,3 +62,14 @@ test('no shooting spot on a spike\'s top, where the ground a getter reads is the
   assert.ok(!columns.has(`${Math.floor(spot.x)},${Math.floor(spot.z)}`), `spot ${spot.x}, ${spot.z} is on a spike`)
   assert.equal(spot.y - spot.pillar, 65)
 })
+
+test('the shooting spot keeps off the ground to avoid (a breath cloud where the plan stood)', () => {
+  const spikes = getSpikesForLevel(parseSeed('endfight'))
+  const first = planCrystals(spikes, { from: { x: -15, z: -5 }, destroyed: [0, 1, 2, 3, 4, 5, 6, 7, 9] })[0].shootFrom
+  assert.ok(first != null)
+  const cloud = { x: first.x, z: first.z, r: 6 }
+  const avoid = (x: number, z: number): boolean => Math.hypot(x - cloud.x, z - cloud.z) < cloud.r
+  const moved = planCrystals(spikes, { from: { x: -15, z: -5 }, destroyed: [0, 1, 2, 3, 4, 5, 6, 7, 9], avoid })[0].shootFrom
+  assert.ok(moved != null)
+  assert.ok(!avoid(moved.x, moved.z), `spot ${moved.x}, ${moved.z} in the cloud`)
+})
