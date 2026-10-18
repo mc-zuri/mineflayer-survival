@@ -1,9 +1,31 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { createPlugin } from '../src'
+import { EventEmitter } from 'node:events'
+import { createPlugin, TaskError } from '../src'
+
+function fakeBot (): any {
+  const bot: any = new EventEmitter()
+  bot.pathfinder = {}
+  bot.loadPlugin = () => { throw new Error('pathfinder already loaded') }
+  bot.entity = { position: { x: 1.5, y: 64, z: -2.5 } }
+  bot.game = { dimension: 'minecraft:the_nether' }
+  return bot
+}
 
 test('createPlugin sets bot.survival with the default options', () => {
-  const bot: any = { pathfinder: {}, loadPlugin () { throw new Error('pathfinder already loaded') } }
+  const bot = fakeBot()
   createPlugin()(bot)
   assert.deepStrictEqual(bot.survival.options, { loadPathfinder: true })
+})
+
+test('on death the tasks fail with DIED and the death spot is remembered', async () => {
+  const bot = fakeBot()
+  createPlugin()(bot)
+  const task = bot.survival.tasks.run('mine', async (ctx: any) => { await ctx.waitTicks(100) })
+  const rejected = assert.rejects(task, (err: unknown) => TaskError.is(err, 'DIED'))
+  await new Promise(resolve => setImmediate(resolve))
+  bot.emit('physicsTick')
+  bot.emit('death')
+  await rejected
+  assert.deepStrictEqual(bot.survival.memory.death, { x: 1, y: 64, z: -3, dimension: 'the_nether', seen: 1 })
 })
