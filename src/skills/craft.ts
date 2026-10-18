@@ -1,0 +1,148 @@
+// craft: an item from the inventory, through the crafting steps mineflayer-crafting-util plans (planks, sticks, ...),
+// at a crafting table nearby, or one the bot places (and crafts first, when it has none).
+import type { Bot } from 'mineflayer'
+import { Vec3 } from 'vec3'
+import { buildStatic } from 'mineflayer-crafting-util'
+import { SkillError, throwIfAborted } from './errors'
+import { collectBlock } from './collectBlock'
+import { navigateToReach } from './navigate'
+import { placeBlock } from './placeBlock'
+import { findPlacement } from './placement'
+import { countItems, inventoryItems, itemId, resyncInventory, settleInventory, type Block } from './util'
+
+type CraftingFunc = Awaited<ReturnType<typeof buildStatic>>
+export type CraftingPlan = ReturnType<CraftingFunc>
+
+const planners = new WeakMap<object, Promise<CraftingFunc>>()
+
+async function plannerFor (registry: any): Promise<CraftingFunc> {
+  let planner = planners.get(registry)
+  if (planner == null) {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { Recipe } = require('prismarine-recipe')(registry)
+    planner = buildStatic(Recipe)
+    planners.set(registry, planner)
+  }
+  return await planner
+}
+
+/**
+ * The crafting plan for `count` of an item from the given items: every step down to what's there (logs to planks to
+ * sticks), and whether a step needs a crafting table.
+ */
+export async function planCraft (registry: any, available: Array<{ id: number, count: number }>, item: string, count: number): Promise<CraftingPlan> {
+  const planner = await plannerFor(registry)
+  const wanted = registry.itemsByName[item]
+  if (wanted == null) throw new SkillError('NOT_FOUND', `no item named ${item}`)
+  return planner({ id: wanted.id, count }, {
+    availableItems: available.map(entry => ({ ...entry })),
+    careAboutExisting: false,
+    includeRecursion: true,
+    multipleRecipes: true
+  })
+}
+
+async function planFromInventory (bot: Bot, item: string, count: number): Promise<CraftingPlan> {
+  return await planCraft(bot.registry, inventoryItems(bot).map(it => ({ id: it.type, count: it.count })), item, count)
+}
+
+function describe (bot: Bot, items: Array<{ id: number, count: number }>): string {
+  return items.map(it => `${it.count} ${bot.registry.items[it.id]?.name ?? it.id}`).join(', ')
+}
+
+export interface CraftArgs {
+  item: string
+  /** items wanted (default 1); a recipe making more gives the extra too */
+  count?: number
+  /** the crafting table to use (default: the nearest within `tableDistance`, else one the bot places) */
+  table?: Vec3
+  /** how far to look for a table (default 16) */
+  tableDistance?: number
+  /** break the table the bot placed and take it back once done (default false) */
+  pickUpTable?: boolean
+}
+
+export interface CraftResult {
+  item: string
+  /** the inventory's gain of the item */
+  crafted: number
+  /** the table used, if a step needed one */
+  table: Vec3 | null
+  placedTable: boolean
+}
+
+async function getTable (bot: Bot, args: CraftArgs, signal?: AbortSignal): Promise<{ table: Block, placed: boolean }> {
+  const tableId = bot.registry.blocksByName.crafting_table.id
+  if (args.table != null) {
+    const block = bot.blockAt(args.table)
+    if (block?.type !== tableId) throw new SkillError('NOT_FOUND', `no crafting table at ${args.table.toString()}`)
+    return { table: block, placed: false }
+  }
+  const found = bot.findBlock({ matching: tableId, maxDistance: args.tableDistance ?? 16 })
+  if (found != null) return { table: found, placed: false }
+
+  if (countItems(bot, 'crafting_table') === 0) await craft(bot, { item: 'crafting_table' }, signal)
+  const pos = findPlacement(pos => bot.blockAt(pos), bot.entity.position)
+  if (pos == null) throw new SkillError('CANNOT_PLACE', 'no room next to the bot for a crafting table')
+  await placeBlock(bot, { pos, item: 'crafting_table' }, signal)
+  const table = bot.blockAt(pos)
+  if (table?.type !== tableId) throw new SkillError('VERIFY_FAILED', `no crafting table at ${pos.toString()} after placing it`)
+  return { table, placed: true }
+}
+
+export async function craft (bot: Bot, args: CraftArgs, signal?: AbortSignal): Promise<CraftResult> {
+  throwIfAborted(signal)
+  const count = args.count ?? 1
+  itemId(bot, args.item)
+  const before = countItems(bot, args.item)
+  let table: Block | null = null
+  let placedTable = false
+  const result = (): CraftResult => ({ item: args.item, crafted: countItems(bot, args.item) - before, table: table?.position ?? null, placedTable })
+
+  let plan = await planFromInventory(bot, args.item, count)
+  if (plan.status !== 'complete') {
+    throw new SkillError('MISSING_ITEMS', `can't craft ${count} ${args.item}: short of ${describe(bot, plan.itemsRequiredBase)}`, { ...result(), plan })
+  }
+
+  if (plan.requiresCraftingTable) {
+    ({ table, placed: placedTable } = await getTable(bot, args, signal))
+    // the table can have taken planks the plan counted on
+    if (placedTable) {
+      plan = await planFromInventory(bot, args.item, count)
+      if (plan.status !== 'complete') {
+        throw new SkillError('MISSING_ITEMS', `can't craft ${count} ${args.item} after making the table: short of ${describe(bot, plan.itemsRequiredBase)}`, { ...result(), plan })
+      }
+    }
+    await navigateToReach(bot, table.position, signal)
+  }
+
+  for (const step of plan.recipesToDo) {
+    throwIfAborted(signal, result())
+    const recipe: any = step.recipe
+    const needsTable = recipe.requiresTable === true
+    if (needsTable && table == null) throw new SkillError('VERIFY_FAILED', 'the plan needs a crafting table it didn\'t ask for', result())
+    const resultName = bot.registry.items[recipe.result.id]?.name ?? String(recipe.result.id)
+    await settleInventory(bot, signal)
+    const made = countItems(bot, resultName)
+    try {
+      await bot.craft(recipe, step.recipeApplications, needsTable ? table ?? undefined : undefined)
+    } catch (err) {
+      throw new SkillError('VERIFY_FAILED', `crafting ${resultName} x${step.recipeApplications} failed: ${(err as Error).message}`, result(), { cause: err })
+    }
+    const gained = countItems(bot, resultName) - made
+    if (gained < recipe.result.count * step.recipeApplications) {
+      throw new SkillError('VERIFY_FAILED', `crafting ${resultName} x${step.recipeApplications} gave ${gained} of ${recipe.result.count * step.recipeApplications}`, result())
+    }
+  }
+
+  // the count the server has, not the clicks' prediction of it
+  await settleInventory(bot, signal)
+  await resyncInventory(bot, signal)
+  const res = result()
+  if (res.crafted < count) throw new SkillError('VERIFY_FAILED', `crafted ${res.crafted} of ${count} ${args.item}`, res)
+
+  if (placedTable && args.pickUpTable === true && table != null) {
+    await collectBlock(bot, { positions: [table.position] }, signal)
+  }
+  return res
+}
