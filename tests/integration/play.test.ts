@@ -80,3 +80,25 @@ describe('play on to iron', { timeout: 180 * 60 * 1000 }, () => {
     assert.ok(owned.some(n => n.endsWith('bucket')), 'no bucket')
   })
 })
+
+// optional (PLAY_DIAMONDS=1): on to the diamonds within a tick budget (PLAY_DIAMOND_TICKS, default 200000)
+describe('play on to diamonds', { timeout: 240 * 60 * 1000, skip: process.env.PLAY_DIAMONDS == null }, () => {
+  let server: TestServer
+  let bot: Bot
+  let saveFile: string
+
+  before(async () => { ({ server, bot, saveFile } = await freshGame('digger')) })
+  after(async () => {
+    bot?.survival?.reflexes?.stop()
+    if (bot != null) await quitBot(bot)
+    if (server != null) await server.cleanup()
+  })
+
+  test('a diamond pickaxe and sword within the tick budget (the base left out)', async (t) => {
+    const maxTicks = Number(process.env.PLAY_DIAMOND_TICKS ?? 200000)
+    const result = await bot.survival.play({ until: 'diamonds', skip: ['base'], saveFile, maxTicks })
+    report(t, result)
+    assert.strictEqual(result.reason, 'until', `stopped: ${result.reason} ${String((result.error as Error)?.message ?? '')}`)
+    assert.ok(ids(result.reached).includes('diamonds'))
+  })
+})
