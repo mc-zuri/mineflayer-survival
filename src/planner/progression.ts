@@ -37,6 +37,9 @@ export const EYES_TARGET = 14
 export const EYES_FOR_FRAME = 12
 /** bookshelves around the table for level 30 enchantments (vanilla EnchantmentHelper caps at 15) */
 export const BOOKSHELVES = 15
+/** logs the wood milestone cuts beyond its tools: the sticks and planks of the night down the mine */
+export const SPARE_LOGS = 8
+
 /** food points to carry before leaving the spawn area */
 export const FOOD_POINTS = 40
 
@@ -116,7 +119,9 @@ export const MILESTONES: readonly Milestone[] = [
     done: s => ownsAny(s, toolsAtLeast('pickaxe', 'wooden')) && hasStation(s, 'crafting_table'),
     goals: s => [
       ...(hasStation(s, 'crafting_table') ? [] : [{ item: 'crafting_table', count: 1 }]),
-      { item: toolsAtLeast('pickaxe', 'wooden'), count: 1 }
+      { item: toolsAtLeast('pickaxe', 'wooden'), count: 1 },
+      // wood to spare, for the sticks of the night's torches and tools down the mine, where no tree grows
+      { item: '#logs_that_burn', count: SPARE_LOGS, optional: true }
     ]
   },
   {

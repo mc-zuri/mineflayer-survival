@@ -5,7 +5,7 @@ import type { RegistryLike } from '../../src/core/registry'
 import { Inventory } from '../../src/core/inventory'
 import { WorldMemory } from '../../src/core/memory'
 import { checkPlan } from '../../src/planner/steps'
-import { FOOD_GOAL, FOOD_POINTS, MILESTONES, RAW_TO_COOKED, foodGoals, milestone, nextMilestone, planMilestone, toolsAtLeast, eyesAvailable, type ProgressState } from '../../src/planner/progression'
+import { SPARE_LOGS, FOOD_GOAL, FOOD_POINTS, MILESTONES, RAW_TO_COOKED, foodGoals, milestone, nextMilestone, planMilestone, toolsAtLeast, eyesAvailable, type ProgressState } from '../../src/planner/progression'
 import { heldFor, unitValue } from '../../src/planner/obtain'
 import { isGrown } from '../../src/core/crops'
 
@@ -26,6 +26,8 @@ test('a fresh spawn starts at wood, and its plan makes a table and a wooden pick
   assert.equal(plan.ok, true)
   assert.deepEqual(plan.steps.map(st => `${st.kind} ${st.item}`), ['mine oak_log', 'craft oak_planks', 'craft crafting_table', 'craft stick', 'craft wooden_pickaxe'])
   assert.equal(milestone('wood').done({ ...s, inventory: plan.inventory }), true)
+  // and logs to spare for the night down the mine
+  assert.equal(plan.inventory.count('oak_log'), SPARE_LOGS)
 })
 
 test('stone: stone tools from mined cobblestone and the sticks held, and a furnace', () => {
