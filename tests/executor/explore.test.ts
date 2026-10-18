@@ -84,3 +84,11 @@ test('SURFACE_BLOCKS: what a mine step climbs out of a mine for', async () => {
   for (const b of ['oak_log', 'birch_log', 'sand', 'sugar_cane', 'pumpkin']) assert.ok(SURFACE_BLOCKS.test(b), b)
   for (const b of ['stone', 'iron_ore', 'deepslate', 'sandstone', 'gravel']) assert.ok(!SURFACE_BLOCKS.test(b), b)
 })
+
+test('a staircase step up opens the room over the head and the column ahead a block up', async () => {
+  const { staircaseUpStep } = await import('../../src/executor/explore')
+  const s = staircaseUpStep(new Vec3(0, 20, 0), new Vec3(0, 0, 1))
+  assert.deepEqual(s.open.map(p => p.toArray()), [[0, 22, 0], [0, 21, 1], [0, 22, 1]])
+  assert.deepEqual(s.next.toArray(), [0, 21, 1])
+  assert.deepEqual(s.floor.toArray(), [0, 20, 1])
+})

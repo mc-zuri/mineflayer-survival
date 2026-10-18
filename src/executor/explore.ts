@@ -210,6 +210,53 @@ export class GoalSurface extends goals.Goal {
   }
 }
 
+/**
+ * The cells to open for one step of a staircase up from `feet` along `dir`: the room over the bot's head (it jumps),
+ * and the feet and head cells of the column ahead a block up.
+ */
+export function staircaseUpStep (feet: Vec3, dir: Vec3): { open: Vec3[], next: Vec3, floor: Vec3 } {
+  const ahead = feet.plus(dir).offset(0, 1, 0)
+  return { open: [feet.offset(0, 2, 0), ahead, ahead.offset(0, 1, 0)], next: ahead, floor: ahead.offset(0, -1, 0) }
+}
+
+/**
+ * A staircase up and out, dug by hand where the pathfinder plans no way up: a block forward and a block up each
+ * step, turning from lava and water, until the bot is under the open sky.
+ */
+export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: AbortSignal): Promise<boolean> {
+  const lookup = lookupOf(bot)
+  let dir = facingDir(bot.entity.yaw)
+  const maxSteps = args.maxSteps ?? 128
+  for (let i = 0; i < maxSteps; i++) {
+    throwIfAborted(signal)
+    const feet = feetOf(bot)
+    if (openSky(lookup, feet)) return true
+    const turns = [dir, new Vec3(-dir.z, 0, dir.x), new Vec3(dir.z, 0, -dir.x), dir.scaled(-1)]
+    let stepped = false
+    for (const d of turns) {
+      const step = staircaseUpStep(feet, d)
+      // the step stands on the block ahead: it has to be there (or be put there)
+      const why = unsafeStep(lookup, { open: step.open, floor: step.floor })
+      if (why != null) { trace('explore: climb turns from', d.toString(), why); continue }
+      try {
+        await open(bot, step.open, signal)
+        if (!(await ensureFloor(bot, step.floor, signal))) continue
+        await walkInto(bot, step.next, signal)
+      } catch (err) {
+        if (isAbort(err)) throw err
+        trace('explore: climb step failed', (err as Error).message)
+        continue
+      }
+      if (feetOf(bot).y <= feet.y) continue
+      dir = d
+      stepped = true
+      break
+    }
+    if (!stepped) return false
+  }
+  return openSky(lookup, feetOf(bot))
+}
+
 /** climbs out to the open sky first when the bot is underground; resolves whether it's out */
 export async function ensureSurface (bot: Bot, signal?: AbortSignal): Promise<boolean> {
   const lookup = lookupOf(bot)
@@ -221,7 +268,10 @@ export async function ensureSurface (bot: Bot, signal?: AbortSignal): Promise<bo
     if (isAbort(err)) throw err
     trace('explore: no way up', (err as Error).message)
   }
-  return openSky(lookup, feetOf(bot))
+  if (openSky(lookup, feetOf(bot))) return true
+  // the pathfinder planned no way up (or none it could walk): a staircase dug by hand
+  trace('explore: digging a staircase up from', feetOf(bot).toString())
+  return await climbOut(bot, {}, signal)
 }
 
 /**
@@ -311,7 +361,15 @@ async function ensureFloor (bot: Bot, floor: Vec3, signal?: AbortSignal): Promis
 }
 
 async function walkInto (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise<void> {
-  await navigate(bot, { goal: new goals.GoalBlock(cell.x, cell.y, cell.z) }, signal)
+  try {
+    await navigate(bot, { goal: new goals.GoalBlock(cell.x, cell.y, cell.z) }, signal)
+  } catch (err) {
+    if (isAbort(err)) throw err
+    // a step into an open cell next to the bot: by hand (forward, jumping into a step up)
+    const { walkTo } = await import('../skills/navigate')
+    await walkTo(bot, cell.offset(0.5, 0, 0.5), { within: 0.25, maxTicks: 40, until: () => feetOf(bot).equals(cell) }, signal)
+    if (!feetOf(bot).equals(cell)) throw err
+  }
 }
 
 /** the bot's feet cell */
