@@ -2,7 +2,7 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
-import { SkillError, abortError, throwIfAborted } from './errors'
+import { SkillError, abortError, isSkillError, throwIfAborted } from './errors'
 import { eyeHeight, trace, waitUntil } from './util'
 
 type Goal = goals.Goal
@@ -19,6 +19,13 @@ export interface NavigateArgs {
    * onFinish changes the world (GoalMineBlock digs its block) pass their own check.
    */
   reached?: () => boolean
+  /**
+   * Give up when no path has come (and the bot hasn't moved) for this many ticks (default 600): the search runs over
+   * the ticks, and in some terrain it never ends.
+   */
+  planTicks?: number
+  /** goes again this many times after getting stuck (default 2) */
+  unstick?: number
 }
 
 export interface NavigateResult {
@@ -49,7 +56,30 @@ export function goalReached (bot: Bot, goal: Goal): boolean {
   return false
 }
 
+/**
+ * goto, checked. A bot pressed into a corner beside its path (the executor steers at the next node, not back onto the
+ * line, so a bot off its block's middle catches on the corner of a wall it passes) is stuck: it steps back to the
+ * middle of its block and goes again, `unstick` times.
+ */
 export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSignal): Promise<NavigateResult> {
+  const tries = 1 + Math.max(0, args.unstick ?? 2)
+  let ticks = 0
+  for (let i = 1; ; i++) {
+    try {
+      const res = await navigateOnce(bot, args, signal)
+      return { ...res, ticks: ticks + res.ticks }
+    } catch (err) {
+      if (!isSkillError(err, 'STUCK') || i >= tries) throw err
+      ticks += (err.partial as NavigateResult | undefined)?.ticks ?? 0
+      const pos = bot.entity.position
+      const middle = new Vec3(Math.floor(pos.x) + 0.5, pos.y, Math.floor(pos.z) + 0.5)
+      trace('navigate: stuck at', pos.toString(), 'stepping to', middle.toString(), 'and going again')
+      await walkTo(bot, middle, { within: 0.1, maxTicks: 20 }, signal)
+    }
+  }
+}
+
+async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal): Promise<NavigateResult> {
   throwIfAborted(signal)
   const { goal } = args
   const stuckTicks = args.stuckTicks ?? 200
@@ -61,9 +91,22 @@ export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSign
   let stuck = false
   let aborted = false
   let pathFound = false
+  let moved = false
+  let planning = false
+  const start = bot.entity.position.clone()
+  const planTicks = args.planTicks ?? 600
 
   const onTick = (): void => {
     ticks++
+    if (!moved && bot.entity.position.distanceTo(start) >= 0.5) moved = true
+    // (the search runs over many ticks before the first path comes: the bot standing still then isn't stuck)
+    if (!pathFound && !moved) {
+      if (ticks >= planTicks && !planning && bot.pathfinder.isPathing) {
+        planning = true
+        void bot.pathfinder.cancel()
+      }
+      return
+    }
     if (!bot.pathfinder.isPathing) return
     const digging = (bot as any).targetDigBlock != null
     if (digging || bot.entity.position.distanceTo(anchor) >= 0.5) {
@@ -100,6 +143,7 @@ export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSign
   trace('navigate:', goal.constructor.name, 'ended at', result.position.toString(), 'after', ticks, 'ticks', aborted ? 'aborted' : stuck ? 'stuck' : '', error != null ? `error ${(error as Error).message}` : '')
   if (aborted) throw abortError(signal, result)
   if (stuck) throw new SkillError('STUCK', `no progress for ${stuckTicks} ticks at ${result.position.toString()}`, result)
+  if (planning && !reached()) throw new SkillError('NO_PATH', `no path found in ${planTicks} ticks`, result)
   if (reached()) return result
   if (error != null) throw new SkillError('NO_PATH', `the pathfinder failed: ${(error as Error).message ?? String(error)}`, result, { cause: error })
   throw new SkillError('NO_PATH', pathFound ? `the path ended at ${result.position.toString()}, short of the goal` : 'no path to the goal', result)

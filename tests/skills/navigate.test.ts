@@ -1,8 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
+import { EventEmitter } from 'node:events'
 import { Vec3 } from 'vec3'
-import { GoalReachBlock, goalReached } from '../../src/skills/navigate'
-import { SkillError } from '../../src/skills/errors'
+import { goals } from '@nxg-org/mineflayer-pathfinder'
+import { GoalReachBlock, goalReached, navigate } from '../../src/skills/navigate'
+import { SkillError, isSkillError } from '../../src/skills/errors'
 import { TaskError } from '../../src/core/errors'
 
 test('GoalReachBlock: within reach of the block, out of it', () => {
@@ -34,4 +36,48 @@ test('SkillError is a TaskError: its code one of the core codes, its reason the 
   assert.strictEqual(new SkillError('NO_SPACE', 'full').code, 'INVENTORY_FULL')
   assert.strictEqual(new SkillError('VERIFY_FAILED', 'no').code, 'FAILED')
   assert.strictEqual(new SkillError('MISSING_ITEMS', 'no').code, 'MISSING_ITEMS')
+})
+
+/** a bot whose pathfinder searches forever (no path) or "walks" without moving (stuck), ticked on setImmediate */
+function pathBot (mode: 'searching' | 'stuck'): any {
+  const bot: any = new EventEmitter()
+  bot.setMaxListeners(50)
+  bot.entity = { position: new Vec3(0.7, 64, 0.5), velocity: new Vec3(0, 0, 0), onGround: true, yaw: 0 }
+  bot.look = async () => {}
+  bot.setControlState = () => {}
+  bot.clearControlStates = () => {}
+  let cancelled: (() => void) | null = null
+  let gotos = 0
+  bot.pathfinder = {
+    isPathing: false,
+    goto: async () => {
+      gotos++
+      bot.pathfinder.isPathing = true
+      if (mode === 'stuck') setImmediate(() => bot.emit('pathGenerated', { path: [] }))
+      await new Promise<void>(resolve => { cancelled = resolve })
+      bot.pathfinder.isPathing = false
+    },
+    cancel: async () => { cancelled?.(); cancelled = null }
+  }
+  let ticking = true
+  const tick = (): void => { if (!ticking) return; bot.emit('physicsTickBegin'); bot.emit('physicsTick'); setImmediate(tick) }
+  setImmediate(tick)
+  bot.stop = () => { ticking = false }
+  bot.gotos = () => gotos
+  return bot
+}
+
+test('navigate: a search that brings no path in planTicks ends with NO_PATH, not STUCK', async () => {
+  const bot = pathBot('searching')
+  try {
+    await assert.rejects(navigate(bot, { goal: new goals.GoalBlock(50, 64, 0), planTicks: 30, stuckTicks: 10 }), (err: unknown) => isSkillError(err, 'NO_PATH') && /no path found in 30 ticks/.test((err as Error).message))
+  } finally { bot.stop() }
+})
+
+test('navigate: stuck on a path, the bot steps to its block\'s middle and goes again, `unstick` times', async () => {
+  const bot = pathBot('stuck')
+  try {
+    await assert.rejects(navigate(bot, { goal: new goals.GoalBlock(50, 64, 0), stuckTicks: 10, unstick: 2 }), (err: unknown) => isSkillError(err, 'STUCK'))
+    assert.strictEqual(bot.gotos(), 3)
+  } finally { bot.stop() }
 })
