@@ -621,6 +621,8 @@ export interface ExploreForBlocksArgs {
   radius?: number
   memory?: WorldMemory
   center?: Vec3
+  /** blocks that don't count as found (the base's walls, an ore too deep) */
+  exclude?: (pos: Vec3) => boolean
 }
 
 /** the nearest block of the names in the loaded chunks, within `radius` */
@@ -637,7 +639,7 @@ export function findNear (bot: Bot, names: readonly string[], radius: number, ex
  */
 export async function exploreForBlocks (bot: Bot, args: ExploreForBlocksArgs, signal?: AbortSignal): Promise<boolean> {
   const radius = args.radius ?? 48
-  const found = (): boolean => findNear(bot, args.names, radius) != null
+  const found = (): boolean => findNear(bot, args.names, radius, args.exclude) != null
   if (found()) return true
   const level = oreLevel(args.names)
   if (level == null) return await exploreSurface(bot, { found, center: args.center, memory: args.memory, remember: args.names }, signal)

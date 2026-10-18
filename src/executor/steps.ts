@@ -58,6 +58,9 @@ export const SURFACE_BLOCKS = /(_log|_leaves|^sand|^red_sand|^sugar_cane|^pumpki
 /** how far under its starting level a mine step for a block that isn't an ore goes (stone, dirt, sand...) */
 export const SHALLOW_DEPTH = 8
 
+/** how far below an ore's level (ORE_LEVELS) a block of it is still mined */
+export const ORE_DEPTH = 24
+
 /** how far a crafting table or furnace may be to be used when the bot carries its own */
 export const NEAR_STATION = 6
 
@@ -115,7 +118,7 @@ async function findBlocks (bot: Bot, names: string[], ctx: StepContext, alternat
   if (near(alternatives)) return alternatives
   ctx.log(`exploring for ${names.join(', ')}`)
   const all = [...names, ...alternatives]
-  if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined }, ctx.signal)) {
+  if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude }, ctx.signal)) {
     if (near(names)) return names
     if (near(alternatives)) return alternatives
   }
@@ -134,9 +137,13 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
   // what isn't an ore is mined near the level the step starts at: a block at a time down the nearest one, the bot
   // ends at the bottom of a shaft it can't plan out of
   const startY = startCount(ctx, 'startY', () => Math.floor(bot.entity.position.y))
-  const shallow = oreLevel(step.blocks) == null
+  const level = oreLevel(step.blocks)
+  const shallow = level == null
   let deep = !shallow
-  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || (!deep && pos.y < startY - SHALLOW_DEPTH)
+  // an ore is mined down to ORE_DEPTH below its level and no deeper: iron at y -29, the nearest by a straight line,
+  // was a trip down through the deep caves (seed 2), where the bot died
+  const tooDeep = (pos: Vec3): boolean => level != null && pos.y < level - ORE_DEPTH
+  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos)
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     const subs = blockSubstitutes(step)

@@ -193,3 +193,21 @@ test('onTheSurface: the pathfinder gets the under-roof step cost and no drop int
   assert.equal(pf.defaultMoveSettings.infiniteLiquidDropdownDistance, true)
   assert.equal(pf.defaultMoveSettings.exclusionAreasStep.length, 0)
 })
+
+test('runMine: an ore more than ORE_DEPTH below its level is left (iron at y -29 is a trip through the deep caves)', async () => {
+  const { runMine, ORE_DEPTH } = await import('../../src/executor/steps')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const registry = require('minecraft-data')('1.21.11')
+  const deepOre = new Vec3(1, 16 - ORE_DEPTH - 5, 0)
+  const ore = new Vec3(6, 20, 0)
+  const bot: any = fakeBot({ position: new Vec3(0.5, 0, 0.5), items: [item('stone_pickaxe')], world: (pos: Vec3) => pos.equals(deepOre) || pos.equals(ore) ? 'iron_ore' : 'stone' })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; b.harvestTools = registry.blocksByName[b.name].harvestTools; return b }
+  bot.findBlocks = () => [deepOre, ore]
+  const targets: string[] = []
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: (block: any) => { targets.push(block.position.toString()); throw new Error('the test stops here') } }
+  const step: any = { kind: 'mine', item: 'raw_iron', count: 1, block: 'iron_ore', blocks: ['iron_ore'], blockCount: 1, tool: 'stone_pickaxe', dimension: 'overworld' }
+  await assert.rejects(runMine(step, { bot, memory: new WorldMemory(), signal: new AbortController().signal, state: {}, log: () => {} } as any))
+  assert.ok(targets.length > 0 && targets.every(t => t === ore.toString()), targets.join(' '))
+})
