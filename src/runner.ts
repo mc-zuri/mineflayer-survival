@@ -12,7 +12,8 @@ import { TaskError } from './core/errors'
 import { isBed } from './core/items'
 import { Inventory, type ItemCount } from './core/inventory'
 import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './core/memory'
-import { MILESTONES, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
+import { FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
+import type { ObtainRequest } from './planner/obtain'
 import type { Station } from './planner/steps'
 import { buildBase, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
@@ -136,6 +137,27 @@ export function deathSpotWorthIt (death: { x: number, y: number, z: number, dime
   return true
 }
 
+/** food points under which a bot past the food milestone gets food again (up to FOOD_POINTS) before going on */
+export const FOOD_RESTOCK = FOOD_POINTS / 2
+
+/** ticks a restock that failed waits before it is tried again (the work goes on meanwhile) */
+export const RESTOCK_RETRY_TICKS = 6000
+
+/**
+ * The milestone to work on: the first not reached in this game and not done now. One reached stays reached when its
+ * items are lost (a death, a broken tool): what a later milestone needs of them its own plan gets, so a death after
+ * the iron doesn't send the bot back to the wood, stone and food (seed 7, where it then ran out of ticks hunting cows).
+ */
+export function nextToWork (state: ProgressState, reached: readonly MilestoneId[], skip: ReadonlySet<MilestoneId> = new Set()): Milestone | null {
+  return MILESTONES.find(m => !skip.has(m.id) && !reached.includes(m.id) && !m.done(state)) ?? null
+}
+
+/** what to get back first of what a reached milestone gave: food, when it ran low (FOOD_RESTOCK) */
+export function restockGoals (state: ProgressState, reached: readonly MilestoneId[]): ObtainRequest[] | null {
+  if (!reached.includes('food') || state.inventory.foodPoints() >= FOOD_RESTOCK) return null
+  return foodGoals(state.inventory, FOOD_POINTS)
+}
+
 /** how near an earlier deadly spot (one the bot died going back to) a death spot is passed over */
 export const DEADLY_SPOT_RADIUS = 16
 
@@ -164,6 +186,7 @@ export class Runner {
   private readonly started = Date.now()
   private readonly log: (line: string) => void
   private sleepCooldownUntil = 0
+  private restockRetryAt = 0
 
   constructor (readonly bot: Bot, readonly options: PlayOptions = {}) {
     this.log = options.log ?? (line => console.log(tickLine(this.tick, line)))
@@ -276,7 +299,25 @@ export class Runner {
       const state = progressState(this.bot, this.memory)
       this.noteReached(state)
       if (this.options.until != null && this.reached.some(r => r.id === this.options.until)) return this.stop(null, 'until')
-      const m = MILESTONES.find(x => !skip.has(x.id) && !x.done(state)) ?? null
+      const reachedIds = this.reached.map(r => r.id)
+      const restock = this.bot.survival.tasks.tick >= this.restockRetryAt ? restockGoals(state, reachedIds) : null
+      if (restock != null) {
+        try {
+          this.log(`food low (${state.inventory.foodPoints()} points): getting more before going on`)
+          await this.executor.obtain(restock, signal)
+        } catch (err) {
+          if (stopped()) return this.stop('food', 'aborted', err)
+          if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+            this.log(`died getting food: ${(err as Error).message}`)
+            await this.recoverFromDeath(signal)
+            continue
+          }
+          this.restockRetryAt = this.bot.survival.tasks.tick + RESTOCK_RETRY_TICKS
+          this.log(`no more food for now: ${(err as Error).message}`)
+        }
+        continue
+      }
+      const m = nextToWork(state, reachedIds, skip)
       if (m == null) return this.stop(null, 'finished')
       if (this.options.stopAt === m.id) return this.stop(m.id, 'until')
       const handler = this.handlerFor(m.id)

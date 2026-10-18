@@ -182,3 +182,46 @@ test('the default log puts the game tick in front of each line', async () => {
   }
   assert.ok(lines.some(l => /^\[survival\] t\d+ milestone wood reached/.test(l)), lines.join('\n'))
 })
+
+test('a death after the iron: the milestones reached stay reached, the food is got back and the diamonds go on', async () => {
+  const bot = fakeBot()
+  bot.waitForTicks = async () => {}
+  const worked: string[] = []
+  const lines: string[] = []
+  const give = (items: Record<string, number>): MilestoneHandler => async ({ milestone }) => {
+    worked.push(milestone.id)
+    for (const [n, c] of Object.entries(items)) bot.give(n, c)
+  }
+  let died = false
+  const handlers = {
+    wood: give({ wooden_pickaxe: 1, crafting_table: 1 }),
+    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1 }),
+    food: give({ cooked_beef: 8 }),
+    iron: give({ iron_pickaxe: 1, iron_sword: 1, iron_helmet: 1, iron_chestplate: 1, iron_leggings: 1, iron_boots: 1, shield: 1, bucket: 1 }),
+    diamonds: async () => {
+      worked.push('diamonds')
+      if (!died) {
+        // dies down the mine: everything is gone, the respawn has nothing
+        died = true
+        for (const i of bot.inventory.items()) bot.give(i.name, -i.count)
+        throw new TaskError('DIED', 'the bot died')
+      }
+      bot.give('diamond_pickaxe', 1)
+      bot.give('diamond_sword', 1)
+    }
+  }
+  // the food comes back through the executor's plan: a hunt and a smelt that do what they say
+  const runners = {
+    kill: async (step: any) => { bot.give(step.item, step.count); return { gained: step.count } },
+    mine: async (step: any) => { bot.give(step.item, step.count); return { gained: step.count } },
+    craft: async (step: any) => { for (const i of step.ingredients) bot.give(i.name, -i.count); bot.give(step.item, step.count); return { gained: step.count } },
+    smelt: async (step: any) => { for (const i of [...step.inputs, ...step.fuel]) bot.give(i.name, -i.count); bot.give(step.item, step.count); return { gained: step.count } }
+  }
+  const runner = new Runner(bot, { handlers, until: 'diamonds', skip: ['base'], log: l => lines.push(l), executor: { runners, log: () => {} } })
+  const result = await runner.play()
+  assert.equal(result.reason, 'until')
+  assert.deepEqual(worked, ['wood', 'stone', 'food', 'iron', 'diamonds', 'diamonds'])
+  assert.ok(lines.some(l => /food low \(0 points\)/.test(l)), lines.join('\n'))
+  assert.ok(progressState(bot, bot.survival.memory).inventory.foodPoints() >= 20)
+  assert.deepEqual(result.reached.map(r => r.id), ['wood', 'stone', 'food', 'iron', 'diamonds'])
+})
