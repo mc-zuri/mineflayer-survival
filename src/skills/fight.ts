@@ -230,9 +230,10 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
         bot.setControlState('jump', false)
       }
       if (!jumpNow && strength.scale(0.5) >= 1 && (!canCrit || falling || !airborne)) {
-        strength.attack(target)
-        hits++
-        if (isCreeper) retreating = true
+        if (strength.attack(target)) {
+          hits++
+          if (isCreeper) retreating = true
+        }
       }
       await waitTicks(bot, 1, signal)
     }

@@ -8,7 +8,8 @@ import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { createPlugin } from '../../src'
-import { dig } from '../../src/core/actions'
+import { aimAtFace, dig, entityInCrosshair, placeAgainst } from '../../src/core/actions'
+import { attackStrengthOf } from '../../src/skills/weapons'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { waitUntil } from '../../src/skills/gather'
 
@@ -94,6 +95,38 @@ describe(`the crosshair on a ${DEFAULT_VERSION} server`, { timeout: 20 * 60 * 10
         assert.ok(await waitUntil(bot, () => bot.blockAt(at(3, 1, 1))?.name === 'air', 40))
         assert.strictEqual(bot.blockAt(at(2, 1, 0))?.name, 'oak_leaves')
         assert.deepStrictEqual(broken, ['oak_log (3, 1, 1)'])
+      })
+
+      it('a block goes only against a face in sight: none behind a leaf, then against it once the leaf is gone', async () => {
+        await setblock(at(3, 1, 0), 'stone')
+        await setblock(at(2, 1, 0), LEAVES)
+        // the stone's west face, toward the bot, is behind the leaf; its top is over the eyes
+        assert.strictEqual(await aimAtFace(bot, bot.blockAt(at(3, 1, 0)) as any, new Vec3(-1, 0, 0)), null)
+        await run(`give ${username} cobblestone 1`)
+        assert.ok(await waitUntil(bot, () => bot.inventory.items().some(i => i.name === 'cobblestone'), 40))
+        await bot.equip(bot.inventory.items().find(i => i.name === 'cobblestone') as any, 'hand')
+        assert.strictEqual(await placeAgainst(bot, bot.blockAt(at(3, 1, 0)) as any, new Vec3(-1, 0, 0)), false)
+        assert.strictEqual(bot.blockAt(at(2, 1, 0))?.name, 'oak_leaves')
+        await setblock(at(2, 1, 0), 'air')
+        assert.strictEqual(await placeAgainst(bot, bot.blockAt(at(3, 1, 0)) as any, new Vec3(-1, 0, 0)), true)
+        assert.ok(await waitUntil(bot, () => bot.blockAt(at(2, 1, 0))?.name === 'cobblestone', 40))
+      })
+
+      it('an attack goes only to the entity the crosshair is on: not to a pig behind a block', async () => {
+        await run(`summon pig ${origin.x + 2.5} ${origin.y} ${origin.z + 0.5} {NoAI:1b,Tags:["target"]}`)
+        assert.ok(await waitUntil(bot, () => Object.values(bot.entities).some(e => e.name === 'pig'), 40))
+        const pig = Object.values(bot.entities).find(e => e.name === 'pig') as any
+        await setblock(at(1, 0, 0), 'stone')
+        await setblock(at(1, 1, 0), 'stone')
+        await bot.lookAt(pig.position.offset(0, 0.45, 0), true)
+        assert.strictEqual(entityInCrosshair(bot, pig), false)
+        assert.strictEqual(attackStrengthOf(bot).attack(pig), false)
+        await setblock(at(1, 0, 0), 'air')
+        await setblock(at(1, 1, 0), 'air')
+        await bot.lookAt(pig.position.offset(0, 0.45, 0), true)
+        assert.strictEqual(entityInCrosshair(bot, pig), true)
+        assert.strictEqual(attackStrengthOf(bot).attack(pig), true)
+        await run('kill @e[type=pig]')
       })
 
       it('a wall of leaves in the way is dug through, as any wall is', async () => {

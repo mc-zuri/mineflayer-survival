@@ -5,6 +5,7 @@ import { SkillError, throwIfAborted } from './errors'
 import { navigateToReach } from './navigate'
 import { isFree, isInteractive, isSolid } from './placement'
 import { FACES, blockAtOrThrow, countItems, findInventoryItem, settleInventory, waitTicks, waitUntil, withinReach, type Block } from './util'
+import { placeAgainst } from '../core/actions'
 
 export interface PlaceBlockArgs {
   pos: Vec3
@@ -41,12 +42,17 @@ export function placedBlockNames (item: string): string[] {
   return names
 }
 
-function chooseAgainst (bot: Bot, pos: Vec3): Block | null {
+function againstCandidates (bot: Bot, pos: Vec3): Block[] {
+  const out: Block[] = []
   for (const face of FACES) {
     const block = bot.blockAt(pos.plus(face))
-    if (block != null && isSolid(block) && !isInteractive(block.name)) return block
+    if (block != null && isSolid(block) && !isInteractive(block.name)) out.push(block)
   }
-  return null
+  return out
+}
+
+function chooseAgainst (bot: Bot, pos: Vec3): Block | null {
+  return againstCandidates(bot, pos)[0] ?? null
 }
 
 export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: AbortSignal): Promise<PlaceBlockResult> {
@@ -81,7 +87,15 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
       await waitTicks(bot, 1, signal)
       await (bot as any)._placeBlockWithOptions(against, face, { swingArm: 'right', forceLook: 'ignore' })
     } else {
-      await bot.placeBlock(against, face)
+      // against a face the crosshair is on, as vanilla's use goes (useItemOn with the hit's block and face): the one
+      // asked for, else any solid block beside the cell with its face toward it in sight; none, the plain place
+      const others = args.against != null ? [] : againstCandidates(bot, pos).filter(b => !b.position.equals(against.position))
+      let placedInSight = await placeAgainst(bot, against, face)
+      for (const other of others) {
+        if (placedInSight) break
+        placedInSight = await placeAgainst(bot, other, pos.minus(other.position))
+      }
+      if (!placedInSight) await bot.placeBlock(against, face)
     }
   } catch (err) {
     // mineflayer's wait for the block can time out though the server placed it: the world tells

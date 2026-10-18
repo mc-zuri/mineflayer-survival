@@ -1,5 +1,6 @@
 import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
+import { entityInCrosshair } from '../core/actions'
 
 // Melee stats of 1.21.11's weapons and tools: the attack damage the tooltip shows (the player's 1 plus the item's
 // attribute modifier) and the attack speed (the player's 4 plus the item's modifier), from Items' sword / axe /
@@ -125,10 +126,15 @@ export class AttackStrength {
     return Math.max(0, Math.ceil(attackStrengthDelay(this.bot.heldItem?.name) - 0.5 - this.ticker))
   }
 
-  /** swings at the entity (MultiPlayerGameMode.attack) and resets the ticker */
-  attack (target: Parameters<Bot['attack']>[0]): void {
+  /**
+   * swings at the entity (MultiPlayerGameMode.attack) and resets the ticker, when the crosshair is on it as vanilla's
+   * attack needs (a mob behind a block or another mob isn't hit); false when it isn't, and nothing is sent
+   */
+  attack (target: Parameters<Bot['attack']>[0]): boolean {
+    if (!entityInCrosshair(this.bot, target as any)) return false
     this.bot.attack(target)
     this.ticker = 0
+    return true
   }
 
   detach (): void {
