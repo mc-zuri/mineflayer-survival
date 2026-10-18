@@ -3,7 +3,7 @@
 import type { Bot, Furnace } from 'mineflayer'
 import type { Item } from 'prismarine-item'
 import { Vec3 } from 'vec3'
-import { SkillError, throwIfAborted } from './errors'
+import { SkillError, isAbort, throwIfAborted } from './errors'
 import { collectBlock } from './collectBlock'
 import { craft } from './craft'
 import { navigateToReach } from './navigate'
@@ -132,6 +132,7 @@ export async function smelt (bot: Bot, args: SmeltArgs, signal?: AbortSignal): P
   // the client's ticks from the furnace's opening (one a server tick under lockstep)
   const onTick = (): void => { ticks++ }
   bot.on('physicsTick', onTick)
+  let failed = false
   try {
     // a furnace someone used: take what's in its output and input first, so all that comes out is the bot's
     if (window.outputItem() != null) await window.takeOutput()
@@ -203,9 +204,20 @@ export async function smelt (bot: Bot, args: SmeltArgs, signal?: AbortSignal): P
     }
     // fuel left in the slot comes back
     if (window.fuelItem() != null) await window.takeFuel().catch(() => {})
+  } catch (err) {
+    // a smelt that failed (out of fuel, stalled) takes back what is in the furnace, and a furnace it put down goes back
+    // in the bag: one left in the world on 'out of fuel' kept the raw iron, and the plan after had neither (seed 5)
+    failed = !isAbort(err)
+    if (failed) {
+      if (window.outputItem() != null) await window.takeOutput().catch(() => {})
+      if (window.inputItem() != null) await window.takeInput().catch(() => {})
+      if (window.fuelItem() != null) await window.takeFuel().catch(() => {})
+    }
+    throw err
   } finally {
     bot.off('physicsTick', onTick)
     window.close()
+    if (failed && placed && args.pickUpFurnace === true) await collectBlock(bot, { positions: [furnaceBlock.position] }, signal).catch(() => {})
   }
 
   const res = result()

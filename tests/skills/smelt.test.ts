@@ -73,3 +73,43 @@ test('smelt fuels the furnace from what its window reaches: not the planks in th
   }
   assert.deepStrictEqual(fuelled, ['stick'])
 })
+
+test('a smelt that runs out of fuel takes what is in the furnace back out before it fails', async () => {
+  const { Vec3 } = await import('vec3')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { smelt } = await import('../../src/skills/smelt')
+  const registry = require('minecraft-data')('1.21.11')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('raw_iron', 3), item('stick', 1)] })
+  bot.findBlock = () => ({ name: 'furnace', type: registry.blocksByName.furnace.id, position: new Vec3(1, 64, 0) })
+  bot._client = { on: () => {}, off: () => {} }
+  const slots: Record<string, any> = { input: null, fuel: null, output: null }
+  const taken: string[] = []
+  const window: any = {
+    totalProgress: 0, fuel: 0, totalFuel: 0, progress: 0,
+    items: () => bot.inventory.items(),
+    inputItem: () => slots.input, fuelItem: () => slots.fuel, outputItem: () => slots.output,
+    putInput: async (type: number, _m: unknown, n: number) => { slots.input = { name: registry.items[type].name, count: n } },
+    putFuel: async (type: number, _m: unknown, n: number) => { slots.fuel = { name: registry.items[type].name, count: n }; window.fuel = 1 },
+    takeOutput: async () => { taken.push(`output ${String(slots.output?.name)}`); slots.output = null },
+    takeInput: async () => { taken.push(`input ${String(slots.input?.name)} ${String(slots.input?.count)}`); slots.input = null },
+    takeFuel: async () => { slots.fuel = null },
+    close: () => {}
+  }
+  bot.openFurnace = async () => window
+  // the stick burns out after one ingot: 2 raw iron left in, nothing more to burn
+  let burnt = 0
+  const tick = setInterval(() => {
+    if (slots.fuel != null && burnt === 0) { burnt++; slots.fuel = null; slots.input = { ...slots.input, count: slots.input.count - 1 }; slots.output = { name: 'iron_ingot', count: 1, stackSize: 64 }; window.fuel = 0 }
+    bot.emit('physicsTick')
+  }, 1)
+  let error: any
+  try {
+    await smelt(bot, { input: 'raw_iron', count: 3, stallTicks: 50 }).catch(err => { error = err })
+  } finally {
+    clearInterval(tick)
+  }
+  assert.ok(error != null && /fuel|get on/.test(error.message), String(error?.message))
+  assert.ok(taken.includes('input raw_iron 2'), taken.join(', '))
+  assert.equal(slots.input, null)
+  assert.equal(slots.output, null)
+})
