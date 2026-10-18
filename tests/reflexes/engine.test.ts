@@ -3,7 +3,9 @@ import assert from 'node:assert'
 import { ReflexEngine } from '../../src/reflexes/engine'
 import { reflexConfig, DEFAULT_REFLEX_CONFIG } from '../../src/reflexes/config'
 import type { Reflex, TaskSink } from '../../src/reflexes/types'
-import { fakeBot } from './fakeBot'
+import { entity, fakeBot, item } from './fakeBot'
+import { hostilesReflex } from '../../src/reflexes/rules'
+import { Vec3 } from 'vec3'
 
 const flush = async (): Promise<void> => await new Promise(resolve => setImmediate(resolve))
 
@@ -109,5 +111,16 @@ test('the engine follows each creeper\'s swell (+1 a tick swelling, -1 not, 0 - 
   delete bot.entities[7]
   bot.emit('physicsTick')
   assert.strictEqual(engine.context().swell.has(7), false)
+  engine.stop()
+})
+
+test('a hostile at health 0 (its death animation) is not in the context: the hostiles reflex goes on to the next one', () => {
+  const dead = entity({ name: 'zombie', position: new Vec3(2.5, 64, 0.5), meta: { health: 0 } })
+  const next = entity({ name: 'zombie', position: new Vec3(4.5, 64, 0.5), meta: { health: 20 } })
+  const bot = fakeBot({ items: [item('iron_sword')], entities: [dead, next] })
+  const engine = new ReflexEngine(bot, { reflexes: [] })
+  const ctx = engine.context()
+  assert.deepStrictEqual(ctx.hostiles.map(e => e.id), [next.id])
+  assert.strictEqual(hostilesReflex.check(ctx)?.detail, 'fight zombie')
   engine.stop()
 })

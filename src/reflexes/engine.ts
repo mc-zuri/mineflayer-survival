@@ -1,7 +1,7 @@
 import type { Bot } from 'mineflayer'
 import { creeperSwelling } from '../skills/fight'
 import { armorPiece } from '../skills/armor'
-import { type Entity, TaskError } from '../skills/combatUtil'
+import { type Entity, isAlive, TaskError } from '../skills/combatUtil'
 import { reflexConfig, type ReflexConfig, type ReflexConfigInput } from './config'
 import { DEFAULT_REFLEXES, isHostile } from './rules'
 import type { Reflex, ReflexContext, TaskSink, UrgentTask } from './types'
@@ -63,7 +63,8 @@ export class ReflexEngine {
     const pos = bot.entity.position
     const scan = this.config.combat.scanRange
     const hostiles = Object.values(bot.entities)
-      .filter(e => isHostile(bot, e) && e.position.distanceTo(pos) <= scan)
+      // a mob killed stays in the world for its death animation (LivingEntity.tickDeath, 20 ticks) at health 0: no threat
+      .filter(e => isHostile(bot, e) && isAlive(bot, e) && e.position.distanceTo(pos) <= scan)
       .sort((a, b) => a.position.distanceTo(pos) - b.position.distanceTo(pos))
     const ticksSinceHurt = this.tick - this.lastHurtTick
     const inCombat = ticksSinceHurt < this.config.combat.hurtTicks || hostiles.some(e => e.position.distanceTo(pos) <= this.config.combat.range)
