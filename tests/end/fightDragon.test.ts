@@ -3,7 +3,8 @@ import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
 import { breathZone, DragonPhaseTracker, DRAGON_PHASES, headPosition } from '../../src/end/dragon'
-import { chooseMeleeSpot, dragonPartId } from '../../src/end/skills/fightDragon'
+import { chooseMeleeSpot, dragonPartId, fightDragon } from '../../src/end/skills/fightDragon'
+import { fakeBot } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
 
 test('dragonPartId: the head is the id after the dragon\'s (EnderDragon.setId)', () => {
@@ -31,4 +32,24 @@ test('chooseMeleeSpot: a standing spot within reach of the perched dragon\'s hea
   assert.ok(flaming != null)
   const breath = breathZone(view)
   assert.ok(Math.hypot(flaming.spot.x - breath.center.x, flaming.spot.z - breath.center.z) > breath.radius)
+})
+
+test('fightDragon waits for the podium\'s chunk to find the exit portal, and is done at once when the portal is open and no dragon is left', async () => {
+  const blocks = endIsland([], 30)
+  for (const p of exitPortal(62).portal) blocks.set(`${p.x},${p.y},${p.z}`, 'end_portal')
+  const get = world(blocks)
+  let ticks = 0
+  const bot = fakeBot({ position: new Vec3(10.5, 62, 0.5) })
+  bot.game.minY = 0
+  // the column at 0, 0 unloaded for the first 30 ticks
+  bot.blockAt = (pos: Vec3) => {
+    const p = pos.floored()
+    if (ticks < 30 && Math.abs(p.x) < 16 && Math.abs(p.z) < 16) return null
+    const b = get(p)
+    return b == null ? null : { ...b, position: p }
+  }
+  bot.waitForTicks = async () => { ticks++; bot.emit('physicsTick') }
+  const result = await fightDragon(bot, { destroyCrystals: false, maxTicks: 50 })
+  assert.ok(result.killed)
+  assert.ok(ticks >= 30)
 })

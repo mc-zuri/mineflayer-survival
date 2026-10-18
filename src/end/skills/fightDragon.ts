@@ -98,8 +98,14 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   const maxTicks = opts.maxTicks ?? 48000
   const eatBelow = opts.eatBelowHealth ?? 12
   const homeRadius = opts.homeRadius ?? 24
-  const portalY = findPortalY(get) ?? 64
-  const portal = exitPortal(portalY)
+  // the podium's chunk may still be on its way when the bot has just come to the island
+  let foundY = findPortalY(get)
+  for (let t = 0; t < 100 && foundY == null; t++) {
+    await waitTicks(bot, 1, signal)
+    foundY = findPortalY(get)
+  }
+  const portalY = foundY ?? 64
+  let portal = exitPortal(portalY)
   const home = new Vec3(0.5, portalY, 0.5)
   const guard = new VoidGuard(get, opts.voidMargin ?? 4, worldMinY(bot))
   const tracker = new DragonPhaseTracker(portal.perch)
@@ -162,6 +168,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         stopDraw()
         bot.clearControlStates()
         // EnderDragon.tickDeath: 200 ticks of dying, then the exit portal (EndDragonFight.setDragonKilled)
+        if (foundY == null) portal = exitPortal(findPortalY(get) ?? portalY)
         for (let t = 0; t < 600 && !exitPortalOpen(get, portal); t++) await waitTicks(bot, 1, signal)
         if (!exitPortalOpen(get, portal)) throw new TaskError('TIMEOUT', 'the dragon died but the exit portal stayed shut')
         log(`dragon dead after ${tick} ticks: ${meleeHits} hits, ${arrows} arrows, ${perches} perches`)
