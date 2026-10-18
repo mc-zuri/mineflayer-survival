@@ -145,3 +145,23 @@ test('netherNeeds: the rods and pearls still wanted for the eyes', async () => {
   assert.deepEqual(netherNeeds(inv({ blaze_rod: 3, ender_pearl: 10, ender_eye: 2 })), { rods: 3, pearls: 2 })
   assert.deepEqual(netherNeeds(inv({ ender_eye: 14 })), { rods: 0, pearls: 0 })
 })
+
+test('a death spot the bot died at again going back for its items is left for good, and so is a death near it', async () => {
+  const bot = fakeBot()
+  bot.waitForTicks = async () => {}
+  bot.blockAt = () => ({ name: 'air' })
+  const logs: string[] = []
+  const runner = new Runner(bot, { log: (l: string) => logs.push(l) })
+  const memory = (runner as any).memory as WorldMemory
+  memory.setDeath(new Vec3(20, 13, 0), 'overworld')
+  const trips: string[] = []
+  ;(runner as any).executor.task = async (name: string) => {
+    trips.push(name)
+    // killed again in the cave on the way: the new death a few blocks from the first
+    memory.setDeath(new Vec3(24, 15, 3), 'overworld')
+    throw new TaskError('DIED', 'the bot died')
+  }
+  await runner.recoverFromDeath()
+  assert.deepEqual(trips, ['to the death spot'])
+  assert.ok(logs.some(l => /not back to the death spot at 24 15 3/.test(l)), logs.join('\n'))
+})

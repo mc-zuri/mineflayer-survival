@@ -132,6 +132,9 @@ export function deathSpotWorthIt (death: { x: number, y: number, z: number, dime
   return true
 }
 
+/** how near an earlier deadly spot (one the bot died going back to) a death spot is passed over */
+export const DEADLY_SPOT_RADIUS = 16
+
 const DEFAULT_LOG = (line: string): void => console.log(`[survival] ${line}`)
 
 /** gets the goals of a milestone through the executor */
@@ -347,6 +350,9 @@ export class Runner {
     }
   }
 
+  /** death spots the bot died again going back to */
+  readonly deadlySpots: Vec3[] = []
+
   /** after a death: respawned, then back for the items, or to the base for a kit */
   async recoverFromDeath (signal?: AbortSignal): Promise<void> {
     const bot = this.bot
@@ -361,7 +367,11 @@ export class Runner {
     await bot.waitForTicks(20)
     this.save()
     const death = this.memory.death
-    const worth = deathSpotWorthIt(death, {
+    // a spot the bot died at again on the way back for its items (mobs in a cave, a fall) is left: a third trip
+    // there ends the same way
+    const deadly = death != null && this.deadlySpots.some(p => p.distanceTo(new Vec3(death.x, death.y, death.z)) < DEADLY_SPOT_RADIUS)
+    if (deadly) this.log(`not back to the death spot at ${death.x} ${death.y} ${death.z}: died there going back before`)
+    const worth = !deadly && deathSpotWorthIt(death, {
       tick: bot.survival.tasks.tick,
       dimension: normalizeDimension(bot.game?.dimension),
       position: bot.entity.position,
@@ -388,7 +398,10 @@ export class Runner {
         this.memory.death = null
         return
       } catch (err) {
-        if (TaskError.is(err, 'DIED')) return await this.recoverFromDeath(signal)
+        if (TaskError.is(err, 'DIED')) {
+          this.deadlySpots.push(new Vec3(death.x, death.y, death.z))
+          return await this.recoverFromDeath(signal)
+        }
         this.log(`couldn't get the items back: ${(err as Error).message}`)
       }
     }
