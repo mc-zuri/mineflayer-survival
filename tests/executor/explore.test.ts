@@ -339,3 +339,22 @@ test('runMine: logs are cut from under the open sky, not from a lush cave\'s aza
   await assert.rejects(runMine(step, { bot, memory: new WorldMemory(), signal: new AbortController().signal, state: {}, log: () => {} } as any))
   assert.ok(targets.length > 0 && targets.every(t => t === treeLog.toString()), targets.join(' '))
 })
+
+test('runMine: stone with water against it is left, like an ore (a flooded cave)', async () => {
+  const { runMine } = await import('../../src/executor/steps')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const registry = require('minecraft-data')('1.21.11')
+  const wet = new Vec3(2, 63, 0)
+  const dry = new Vec3(6, 63, 0)
+  const world = (pos: Vec3): string => pos.equals(wet.offset(0, 1, 0)) ? 'water' : pos.y < 64 ? 'stone' : 'air'
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('stone_pickaxe')], world })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; b.harvestTools = registry.blocksByName[b.name].harvestTools; return b }
+  bot.findBlocks = () => [wet, dry]
+  const targets: string[] = []
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: (block: any) => { targets.push(block.position.toString()); throw new Error('the test stops here') } }
+  const step: any = { kind: 'mine', item: 'cobblestone', count: 1, block: 'stone', blocks: ['stone'], blockCount: 1, tool: 'stone_pickaxe', dimension: 'overworld' }
+  await assert.rejects(runMine(step, { bot, memory: new WorldMemory(), signal: new AbortController().signal, state: {}, log: () => {} } as any))
+  assert.ok(targets.length > 0 && targets.every(t => t === dry.toString()), targets.join(' '))
+})

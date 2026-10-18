@@ -65,6 +65,9 @@ export const SCAFFOLD_BUFFER = 24
 /** the blocks a mine step climbs out of a mine for first */
 export const SURFACE_BLOCKS = /(_log|_leaves|^sand|^red_sand|^sugar_cane|^pumpkin|^melon|^cactus|^bamboo|^short_grass|^sweet_berry_bush|^wheat|^carrots|^potatoes|^beetroots|^hay_block)$/
 
+/** the stone a mine step leaves when water is against it, like an ore (there is always more without) */
+export const STONES = ['stone', 'deepslate', 'granite', 'diorite', 'andesite', 'tuff', 'cobblestone']
+
 /** how far under its starting level a mine step for a block that isn't an ore goes (stone, dirt, sand...) */
 export const SHALLOW_DEPTH = 8
 
@@ -160,7 +163,8 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
   const unripe = growsAny(step.blocks) ? (pos: Vec3): boolean => !isGrown(bot.blockAt(pos) as any) : () => false
   // an ore with water against it is left: mined, it lets the water in, and on seed 3 the bot drowned mining iron under
   // a lake (the raw iron floating up out of reach, the drowning reflex too late)
-  const submerged = level != null ? (pos: Vec3): boolean => waterBeside(p => bot.blockAt(p) as any, pos) : () => false
+  // (and stone: on seed 4 the cobblestone for a furnace was dug at y 4 by a flooded cave's water, and the bot drowned)
+  const submerged = level != null || STONES.includes(step.block) ? (pos: Vec3): boolean => waterBeside(p => bot.blockAt(p) as any, pos) : () => false
   // what grows on the surface is taken from under the open sky (a tree's leaves and logs over it count as open):
   // the azaleas of a lush cave have oak logs, and on seed 4 the wood for a new pickaxe was cut 55 blocks down one,
   // in the dark among its pools, where a skeleton, a drowned and the water killed the bot four times
