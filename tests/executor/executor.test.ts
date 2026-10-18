@@ -7,6 +7,8 @@ import { TaskError } from '../../src/core/errors'
 import { WorldMemory } from '../../src/core/memory'
 import { Executor, describeStep, neededItems, ownedInventory, requestsMet } from '../../src/executor/executor'
 import type { StepRunner } from '../../src/executor/steps'
+import { heldFor } from '../../src/planner/obtain'
+import { FOOD_GOAL, FOOD_POINTS } from '../../src/planner/progression'
 
 /* eslint-disable @typescript-eslint/no-var-requires */
 const registry = require('minecraft-data')('1.21.11')
@@ -169,4 +171,25 @@ test('a mine step that fails forgets the remembered blocks of its kinds (the nex
   // far off too (a vein remembered 200 blocks off priced cheaper than one yet to find); of other kinds: kept
   assert.equal(memory.findBlocks('oak_log').length, 0)
   assert.equal(memory.findBlocks('stone').length, 1)
+})
+
+test('a hunt that explored and found no animal makes the next plan go for another food (a snowy taiga)', async () => {
+  const bot = fakeBot({ crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, oak_planks: 16 })
+  const log: string[] = []
+  const runners: Record<string, StepRunner<any>> = {
+    ...honestRunners(bot, log),
+    kill: async (step) => { log.push(describeStep(step)); throw new TaskError('NOT_FOUND', `no ${step.mob} found exploring`) },
+    smelt: async (step) => {
+      log.push(describeStep(step))
+      for (const i of [...step.inputs, ...step.fuel]) bot.take(i.name, i.count)
+      bot.give(step.item, step.count)
+      return { gained: step.count }
+    }
+  }
+  const ex = new Executor(bot, { runners, log: () => {} })
+  await ex.obtain([{ item: FOOD_GOAL, count: FOOD_POINTS, unit: 'nutrition' }])
+  assert.ok(log[0].startsWith('kill'), log.join('; '))
+  assert.equal(log.filter(l => l.startsWith('kill')).length, 1, log.join('; '))
+  assert.ok(ex.sightings.isScarce('cow') && ex.sightings.isScarce('rabbit'))
+  assert.ok(heldFor(ownedInventory(bot), FOOD_GOAL, { unit: 'nutrition' }) >= FOOD_POINTS)
 })

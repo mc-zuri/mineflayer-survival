@@ -148,8 +148,9 @@ export const MOB_SOURCES: MobSource[] = [
   mob('sheep', [{ item: 'mutton', count: 1.5 }, { item: 'white_wool', count: 1 }], 400, 100),
   mob('chicken', [{ item: 'chicken', count: 1 }, { item: 'feather', count: 1 }], 400, 100),
   mob('rabbit', [{ item: 'rabbit', count: 0.5 }, { item: 'rabbit_hide', count: 0.5 }, { item: 'rabbit_foot', count: 0.1 }], 1500, 200),
-  mob('cod', [{ item: 'cod', count: 1 }], 800, 100),
-  mob('salmon', [{ item: 'salmon', count: 1 }], 800, 100),
+  // in the water, a swim and a fight there (the hunt's): dearer than the animals on land
+  mob('cod', [{ item: 'cod', count: 1 }], 3000, 150),
+  mob('salmon', [{ item: 'salmon', count: 1 }], 3000, 150),
   mob('squid', [{ item: 'ink_sac', count: 2 }], 1000, 200),
   mob('spider', [{ item: 'string', count: 1 }, { item: 'spider_eye', count: 0.33 }], 1200, 300),
   mob('zombie', [{ item: 'rotten_flesh', count: 1 }], 600, 200),

@@ -20,7 +20,8 @@ import { isAbort } from '../skills/errors'
 import { emptySlots, settleInventory, trace } from '../skills/util'
 import { wornOutTools } from './durability'
 import { defaultKeep, junkToToss, splitInventory, type KeepRule } from './keep'
-import { DEFAULT_RUNNERS, MIN_TOOL_USES, type StepContext, type StepOutcome, type StepRunner } from './steps'
+import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, type StepContext, type StepOutcome, type StepRunner } from './steps'
+import { SIGHTED_BLOCKS, Sightings } from './sight'
 
 /** how far from the bot a failed mine step's remembered blocks are forgotten: all of them in the dimension */
 export const FORGET_RADIUS = Infinity
@@ -110,6 +111,8 @@ export function neededItems (requests: readonly ObtainRequest[], plan?: ObtainPl
 export class Executor {
   readonly memory: WorldMemory
   readonly tasks: TaskRunner
+  /** what's in sight and what wasn't found, for the plans' find costs */
+  readonly sightings: Sightings
   readonly options: Required<Omit<ExecutorOptions, 'memory' | 'tasks' | 'runners' | 'hooks' | 'log' | 'home'>>
   private readonly runners: Record<PlanStep['kind'], StepRunner<any>>
   private readonly hooks: ExecutorHooks
@@ -134,6 +137,7 @@ export class Executor {
     this.hooks = opts.hooks ?? {}
     this.logFn = opts.log ?? (line => trace('executor:', line))
     this.home = opts.home ?? (() => null)
+    this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos))
   }
 
   log (line: string): void {
@@ -168,7 +172,8 @@ export class Executor {
       memory: this.memory,
       position: this.bot.entity.position,
       dimension: this.bot.game?.dimension,
-      exclude: this.options.exclude
+      exclude: this.options.exclude,
+      findCost: t => this.sightings.cost(t)
     })
   }
 
@@ -221,6 +226,7 @@ export class Executor {
           failures.set(key, n)
           this.log(`step failed (${n}): ${describeStep(step)}: ${(err as Error).message}`)
           if (step.kind === 'mine') this.forgetFailedBlocks(step)
+          this.noteMissing(step, err)
           if (n >= this.options.maxStepFailures) throw err
           if (TaskError.is(err, 'INVENTORY_FULL')) await this.makeRoom(needed, signal, true)
           break
@@ -242,6 +248,21 @@ export class Executor {
     const known = this.memory.findBlocks(step.blocks, { dimension, near: this.bot.entity.position, maxDistance: FORGET_RADIUS, count: 256 })
     for (const b of known) this.memory.forgetBlock(b, dimension)
     if (known.length > 0) this.log(`forgot ${known.length} remembered ${step.blocks.join(', ')} after the step failed`)
+  }
+
+  /**
+   * A step that explored and found none (NOT_FOUND): its animals (any meat animal for meat: the hunt looked for all
+   * of them) or its food blocks are dear to the next plans for a while, which go for another source then (berries in a
+   * snowy taiga, where the hunt for cows found none)
+   */
+  private noteMissing (step: PlanStep, err: unknown): void {
+    if (!TaskError.is(err, 'NOT_FOUND')) return
+    const names = step.kind === 'kill'
+      ? [step.mob, ...mobSubstitutes(step)]
+      : step.kind === 'mine' ? step.blocks.filter(b => SIGHTED_BLOCKS.includes(b)) : []
+    if (names.length === 0) return
+    this.sightings.missing(names)
+    this.log(`none of ${names.join(', ')} found: the plans go for another source for a while`)
   }
 
   /**

@@ -629,6 +629,8 @@ export interface ExploreForBlocksArgs {
   center?: Vec3
   /** blocks that don't count as found (the base's walls, an ore too deep) */
   exclude?: (pos: Vec3) => boolean
+  /** how far out the surface spiral goes (default exploreSurface's) */
+  maxRadius?: number
 }
 
 /** the nearest block of the names in the loaded chunks, within `radius` */
@@ -648,7 +650,7 @@ export async function exploreForBlocks (bot: Bot, args: ExploreForBlocksArgs, si
   const found = (): boolean => findNear(bot, args.names, radius, args.exclude) != null
   if (found()) return true
   const level = oreLevel(args.names)
-  if (level == null) return await exploreSurface(bot, { found, center: args.center, memory: args.memory, remember: args.names }, signal)
+  if (level == null) return await exploreSurface(bot, { found, center: args.center, memory: args.memory, remember: args.names, maxRadius: args.maxRadius }, signal)
   const feet = feetOf(bot)
   // the bot may stand in a hole above or below the level: get to within a few blocks of it
   if (feet.y > level + 2) await descendTo(bot, level, { found }, signal)

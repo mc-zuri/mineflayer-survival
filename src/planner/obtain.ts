@@ -57,6 +57,20 @@ export interface ObtainOptions {
   keepFuel?: string[]
   /** recursion limit (default 24) */
   maxDepth?: number
+  /**
+   * ticks to reach the first of a block or mob from what the bot sees now (one in sight; none found the last time it
+   * was looked for), over the memory and the source's estimate; undefined leaves those
+   */
+  findCost?: (target: FindTarget) => number | undefined
+}
+
+/** what findCost is asked about: a block or mob of a source, and the source's own estimate */
+export interface FindTarget {
+  name: string
+  kind: 'block' | 'mob'
+  dimension: Dimension
+  /** BlockSource.find or MobSource.find */
+  find: number
 }
 
 export interface ObtainPlan {
@@ -426,9 +440,11 @@ export class Resolver {
     return s.dims.has(dimension) ? 0 : DIMENSION_TRAVEL
   }
 
-  /** ticks to the first one: less if memory knows where some are */
-  private findCost (s: State, name: string, dimension: Dimension, find: number, each: number): number {
+  /** ticks to the first one: less if one is in sight or memory knows where some are, more if none was found */
+  private findCost (s: State, name: string, kind: FindTarget['kind'], dimension: Dimension, find: number, each: number): number {
     if (s.visited.has(name)) return each
+    const sighted = this.opts.findCost?.({ name, kind, dimension, find })
+    if (sighted != null) return sighted
     const memory = this.opts.memory
     if (memory == null) return find
     const known = memory.findBlocks(name, { dimension, near: this.opts.position, count: 1 })
@@ -466,7 +482,7 @@ export class Resolver {
     const perBlock = src.drops.find(d => d.item === item)?.count ?? 0
     if (perBlock <= 0) return null
     const blockCount = Math.ceil(n / perBlock - 1e-9)
-    const travel = this.dimensionCost(s, src.dimension) + this.findCost(s, src.block, src.dimension, src.find, src.each) + (blockCount - 1) * src.each
+    const travel = this.dimensionCost(s, src.dimension) + this.findCost(s, src.block, 'block', src.dimension, src.find, src.each) + (blockCount - 1) * src.each
     const ownWith = (tool: string | null): number => travel + blockCount * (this.digTicks(src.block, tool) + PICKUP_TICKS)
     const harvest = this.harvestTools(src.block)
     // the cheapest it can be: with the best tool there is
@@ -499,7 +515,7 @@ export class Resolver {
     const perKill = src.drops.find(d => d.item === item)?.count ?? 0
     if (perKill <= 0) return null
     const kills = Math.ceil(n / perKill - 1e-9)
-    const own = this.dimensionCost(s, src.dimension) + this.findCost(s, src.mob, src.dimension, src.find, src.each) + (kills - 1) * src.each + kills * (FIGHT_TICKS + PICKUP_TICKS)
+    const own = this.dimensionCost(s, src.dimension) + this.findCost(s, src.mob, 'mob', src.dimension, src.find, src.each) + (kills - 1) * src.each + kills * (FIGHT_TICKS + PICKUP_TICKS)
     s.cost += own
     if (s.cost > limit) return null
     s.inv.add(item, Math.max(n, Math.floor(kills * perKill)))
