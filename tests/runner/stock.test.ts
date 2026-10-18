@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events'
 import { Vec3 } from 'vec3'
 import { TaskRunner } from '../../src/core/taskRunner'
 import { WorldMemory } from '../../src/core/memory'
-import { Runner, STOCK_RETRY_TICKS } from '../../src/runner'
+import { Runner, STOCK_WAIT_TICKS } from '../../src/runner'
 import { StockPolicy } from '../../src/planner/stock'
 
 /* eslint-disable @typescript-eslint/no-var-requires */
@@ -47,27 +47,35 @@ function giving (bot: any, log: string[]): any {
 
 const at = (ids: string[]): any[] => ids.map(id => ({ id, title: '', tick: 0, wallMs: 0 }))
 
-test('a milestone ends with its stock topped up: the wood milestone cuts a stack of logs by day, and its event has the levels', async () => {
+test('a milestone ends with its stock topped up when that is cheap: the stack of logs waits for the stone axe, and each event has the levels', async () => {
   const bot = fakeBot()
   const steps: string[] = []
   const lines: string[] = []
   const runner = new Runner(bot, {
-    until: 'wood',
+    until: 'stone',
     log: l => lines.push(l),
     executor: { runners: giving(bot, steps), log: () => {} },
-    handlers: { wood: async () => { bot.give('wooden_pickaxe', 1); bot.give('crafting_table', 1); bot.give('oak_log', 8) } }
+    handlers: {
+      wood: async () => { bot.give('wooden_pickaxe', 1); bot.give('crafting_table', 1); bot.give('oak_log', 8) },
+      stone: async () => {
+        for (const n of ['stone_pickaxe', 'stone_sword', 'stone_axe', 'furnace']) bot.give(n, 1)
+        bot.survival.tasks.tick += STOCK_WAIT_TICKS
+      }
+    }
   })
   const result = await runner.play()
   assert.equal(result.reason, 'until')
+  // by hand a log is dearer than the wood's 60 ticks: none cut after the wood milestone, the stack after the stone's
+  assert.ok(lines.some(l => /stock: wood 8\/32-64: not now/.test(l)), lines.join('\n'))
   assert.deepEqual(steps, ['mine 56 oak_log'], lines.join('\n'))
-  assert.deepEqual(result.reached[0].stock?.wood, { carried: 64, stored: 0, low: 32, high: 64 })
-  assert.ok(lines.some(l => /stock at wood: wood 64\/32-64/.test(l)), lines.join('\n'))
+  assert.deepEqual(result.reached.map(r => r.stock?.wood), [{ carried: 8, stored: 0, low: 32, high: 64 }, { carried: 64, stored: 0, low: 32, high: 64 }])
+  assert.ok(lines.some(l => /stock at stone: wood 64\/32-64/.test(l)), lines.join('\n'))
   // the working set is the executor's keep rule: a stack of logs carried
   assert.equal(runner.executor.options.keep('oak_log', registry), 64)
 })
 
 test('the base\'s chests count: logs stored there are stock, not cut again, and a top-up never loots them', async () => {
-  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, oak_log: 8 })
+  const bot = fakeBot({ wooden_pickaxe: 1, stone_axe: 1, crafting_table: 1, oak_log: 8 })
   bot.survival.memory.setBase({ x: 0, y: 40, z: 0 })
   bot.survival.memory.rememberChest({ x: 1, y: 40, z: 0 }, { oak_log: 60 })
   const steps: string[] = []
@@ -93,18 +101,18 @@ test('a top-up waits when its plan is dearer than its budget, and stops when its
   runner.executor.obtain = async () => { obtained++; return { plans: 1, steps: 0 } }
   await runner.topUp(['surface'], new AbortController().signal)
   assert.equal(obtained, 0)
-  assert.ok(lines.some(l => /stock: wood 0\/32-64: not now \(1000000 ticks for 64, over its 6400\)/.test(l)), lines.join('\n'))
-  // waiting STOCK_RETRY_TICKS before the next try
+  assert.ok(lines.some(l => /stock: wood 0\/32-64: not now \(1000000 ticks for 64, over its 3840\)/.test(l)), lines.join('\n'))
+  // waiting STOCK_WAIT_TICKS before the next look
   assert.equal(runner.dueTopUps(['surface']).length, 0)
-  bot.survival.tasks.tick += STOCK_RETRY_TICKS
+  bot.survival.tasks.tick += STOCK_WAIT_TICKS
   assert.equal(runner.dueTopUps(['surface']).length, 1)
-  // a cheap plan whose work runs on: cut off once its 6400 ticks are up
+  // a cheap plan whose work runs on: cut off once its 3840 ticks are up
   runner.executor.plan = () => ({ ok: true, steps: [], cost: 100, inventory: null as any, unresolved: [] })
   runner.executor.obtain = async (_req: any, signal?: AbortSignal) => await new Promise((resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason)))
   const run = runner.topUp(['surface'], new AbortController().signal)
-  for (let i = 0; i < 6400; i++) { bot.emit('physicsTick'); if (i % 500 === 0) await new Promise(resolve => setImmediate(resolve)) }
+  for (let i = 0; i < 3840; i++) { bot.emit('physicsTick'); if (i % 500 === 0) await new Promise(resolve => setImmediate(resolve)) }
   await run
-  assert.ok(lines.some(l => /stock: wood stopped after 6400 ticks: its 6400 ticks are up/.test(l)), lines.join('\n'))
+  assert.ok(lines.some(l => /stock: wood stopped after 3840 ticks: its 3840 ticks are up/.test(l)), lines.join('\n'))
 })
 
 test('at night the stock\'s mine top-ups are the night\'s work: with no milestone goal down there, the bot mines for them', async () => {

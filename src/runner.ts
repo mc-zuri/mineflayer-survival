@@ -206,8 +206,11 @@ export const FOOD_RESTOCK = FOOD_POINTS / 2
 /** ticks a restock that failed waits before it is tried again (the work goes on meanwhile) */
 export const RESTOCK_RETRY_TICKS = 6000
 
-/** ticks a stock top-up that ended short (its budget spent, no plan within it, a failure) waits to be tried again */
+/** ticks a stock top-up that ended short (its budget spent, a failure) waits to be tried again */
 export const STOCK_RETRY_TICKS = 2400
+
+/** ticks a stock top-up left for later (its plan dearer than its budget: no axe yet, its source far) waits to be looked at again */
+export const STOCK_WAIT_TICKS = 600
 
 /**
  * The milestone to work on: the first not reached in this game and not done now. One reached stays reached when its
@@ -616,7 +619,8 @@ export class Runner {
    * The stock's top-ups due here (dueTopUps), the lowest first, each once: planned without looting the base's chests
    * (what they hold is stock already) and, down the mine, with what a mine has; left for later when the plan costs
    * more than the top-up's budget (its source isn't near: no trees in sight, the ore's level far), and stopped when it
-   * has run its budget's ticks. One that ends short waits STOCK_RETRY_TICKS. Throws only for a death or the signal.
+   * has run its budget's ticks. One left waits STOCK_WAIT_TICKS, one that ends short STOCK_RETRY_TICKS. Throws only for a
+   * death or the signal.
    */
   async topUp (places: readonly StockPlace[], signal: AbortSignal, reached: readonly MilestoneId[] = this.reached.map(r => r.id)): Promise<void> {
     const tried = new Set<string>()
@@ -625,12 +629,12 @@ export class Runner {
       const up = this.dueTopUps(places, reached).find(u => !tried.has(u.mark.id))
       if (up == null) return
       tried.add(up.mark.id)
-      const retryLater = (): void => { this.stockRetryAt.set(up.mark.id, this.bot.survival.tasks.tick + STOCK_RETRY_TICKS) }
+      const retryLater = (ticks = STOCK_RETRY_TICKS): void => { this.stockRetryAt.set(up.mark.id, this.bot.survival.tasks.tick + ticks) }
       const options: PlanOptions = { exclude: ['loot'], ...(places.includes('surface') ? {} : { undergroundOnly: true }) }
       const plan = this.executor.plan([up.request], undefined, options)
       if (!plan.ok || plan.cost > up.budget) {
         this.log(`stock: ${describeLevel(up.level)}: not now (${plan.ok ? `${plan.cost} ticks for ${up.units}, over its ${up.budget}` : 'no plan'})`)
-        retryLater()
+        retryLater(STOCK_WAIT_TICKS)
         continue
       }
       this.log(`stock: ${describeLevel(up.level)}: ${up.units} more, in ${up.budget} ticks at most`)
