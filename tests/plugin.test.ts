@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
-import { createPlugin, TaskError } from '../src'
+import { createPlugin, TaskError, nether, end, worldgen } from '../src'
 
 function fakeBot (): any {
   const bot: any = new EventEmitter()
@@ -36,4 +36,10 @@ test('on death the tasks fail with DIED and the death spot is remembered', async
   bot.emit('death')
   await rejected
   assert.deepStrictEqual(bot.survival.memory.death, { x: 1, y: 64, z: -3, dimension: 'the_nether', seen: 1 })
+})
+
+test('the nether, end and worldgen helpers are exported by namespace', () => {
+  assert.equal(typeof nether.planLavaCast, 'function')
+  assert.equal(typeof end.triangulate, 'function')
+  assert.equal(typeof worldgen.getPotentialStructureChunk, 'function')
 })

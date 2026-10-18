@@ -10,6 +10,9 @@ export * from './planner'
 export * as base from './base'
 export * as reflexes from './reflexes'
 export * as combat from './skills/combat'
+export * as nether from './nether'
+export * as end from './end'
+export * as worldgen from './worldgen'
 
 export interface SurvivalOptions {
   /** load the pathfinder if the bot doesn't have it yet (default true) */
