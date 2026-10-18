@@ -102,7 +102,9 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
   const resumeWorld = opts.resume != null ? path.join(opts.resume, 'world') : undefined
   if (opts.resume != null) fs.copyFileSync(path.join(opts.resume, 'save.json'), saveFile)
   const log = (line: string): void => console.log(`[e2e] ${line}`)
-  log(`seed ${opts.seed}, ${opts.version}, normal difficulty, survival, ${opts.maxTicks} ticks at most${opts.resume != null ? `, resumed from ${opts.resume}` : ''}; checkpoints in ${opts.checkpoints}`)
+  // the stuck reports (bot.survival.diagnostics) next to the checkpoints
+  if (process.env.SURVIVAL_STUCK_DIR == null || process.env.SURVIVAL_STUCK_DIR === '') process.env.SURVIVAL_STUCK_DIR = path.join(opts.checkpoints, 'stuck')
+  log(`seed ${opts.seed}, ${opts.version}, normal difficulty, survival, ${opts.maxTicks} ticks at most${opts.resume != null ? `, resumed from ${opts.resume}` : ''}; checkpoints in ${opts.checkpoints}, stuck reports in ${process.env.SURVIVAL_STUCK_DIR}`)
   const serverLog = opts.serverLog
   const server = await startServer({
     version: opts.version,
