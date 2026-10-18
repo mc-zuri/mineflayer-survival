@@ -16,7 +16,7 @@ import { fillBucket, isSource } from '../skills/bucket'
 import { hunt, nearestOfType } from '../skills/hunt'
 import { navigateNear } from '../skills/navigate'
 import { countItems, trace } from '../skills/util'
-import { ensureSurface, exploreForBlocks, exploreSurface, findNear, oreLevel } from './explore'
+import { ensureSurface, exploreForBlocks, exploreSurface, findNear, oreLevel, unstick } from './explore'
 import { toolKindFor, wornOutTools } from './durability'
 
 /** a mine step hands back to the executor when its tool has this many uses left (the executor's default too) */
@@ -158,6 +158,7 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
       if (isSub) substituted += partial?.mined ?? 0
       if (++failures > 4) throw err
       trace('executor: mine failed', (err as Error).message)
+      if (TaskError.is(err, 'NO_PATH')) await unstick(bot, signal)
     }
     if (isSub && substituted >= step.blockCount) return { gained: countItems(bot, step.item) - start, replan: true }
   }
@@ -228,6 +229,7 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
       if (isAbort(err) || TaskError.is(err, 'DIED', 'INVENTORY_FULL')) throw err
       if (++failures > 4) throw err
       trace('executor: hunt failed', (err as Error).message)
+      if (TaskError.is(err, 'NO_PATH')) await unstick(bot, signal)
     }
     if (substituted >= step.kills) return { gained: countItems(bot, step.item) - start, replan: true }
   }

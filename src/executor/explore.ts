@@ -225,6 +225,37 @@ export async function ensureSurface (bot: Bot, signal?: AbortSignal): Promise<bo
 }
 
 /**
+ * Gets the bot moving again where the pathfinder's moves don't (a trip that went nowhere twice from one spot): out to
+ * the open sky when underground, the leaves over its head broken (a jump out of a dip under a tree needs the room),
+ * then a few steps by hand to a free neighbouring cell with ground under it.
+ */
+export async function unstick (bot: Bot, signal?: AbortSignal): Promise<void> {
+  const lookup = lookupOf(bot)
+  const feet = feetOf(bot)
+  trace('explore: unstick at', feet.toString())
+  if (!openSky(lookup, feet)) {
+    if (await ensureSurface(bot, signal)) return
+  }
+  for (const dy of [2, 3]) {
+    const above = bot.blockAt(feet.offset(0, dy, 0))
+    if (above != null && TREE.test(above.name) && above.name.endsWith('_leaves')) {
+      await collectBlock(bot, { positions: [above.position], pickup: false }, signal).catch(err => { if (isAbort(err)) throw err })
+    }
+  }
+  const { walkTo } = await import('../skills/navigate')
+  for (const d of CARDINALS) {
+    const cell = feet.plus(d)
+    const up = cell.offset(0, 1, 0)
+    const ground = (p: Vec3): boolean => bot.blockAt(p.offset(0, -1, 0))?.boundingBox === 'block'
+    let target: Vec3 | null = null
+    if (isOpen(bot, cell) && isOpen(bot, cell.offset(0, 1, 0)) && ground(cell)) target = cell
+    else if (isOpen(bot, up) && isOpen(bot, up.offset(0, 1, 0)) && isOpen(bot, feet.offset(0, 2, 0)) && ground(up)) target = up
+    if (target == null) continue
+    if (await walkTo(bot, target.offset(0.5, 0, 0.5), { within: 0.3, maxTicks: 30 }, signal)) return
+  }
+}
+
+/**
  * A square spiral over the surface around `center`, the pathfinder walking each leg, until `found` holds. Resolves
  * true when found; false when the spiral ran out.
  */

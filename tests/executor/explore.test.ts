@@ -68,3 +68,13 @@ test('openSky: nothing over the cell but trees; GoalSurface ends there and leads
   // the climb left: up to over the column's top
   assert.equal(goal.distHeuristic({ x: 3, y: 65, z: 3 }), 6)
 })
+
+test('blockSubstitutes and mobSubstitutes: another wood, deepslate for stone, another meat animal', async () => {
+  const { blockSubstitutes, mobSubstitutes } = await import('../../src/executor/steps')
+  assert.ok(blockSubstitutes({ block: 'oak_log', blocks: ['oak_log'] }).includes('birch_log'))
+  assert.ok(!blockSubstitutes({ block: 'oak_log', blocks: ['oak_log'] }).includes('oak_log'))
+  assert.deepEqual(blockSubstitutes({ block: 'stone', blocks: ['stone'] }), ['deepslate'])
+  assert.deepEqual(blockSubstitutes({ block: 'iron_ore', blocks: ['iron_ore', 'deepslate_iron_ore'] }), [])
+  assert.deepEqual(mobSubstitutes({ mob: 'cow', item: 'beef' }), ['pig', 'sheep', 'chicken', 'rabbit'])
+  assert.deepEqual(mobSubstitutes({ mob: 'blaze', item: 'blaze_rod' }), [])
+})
