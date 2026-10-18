@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import {
-  armorPoints, celestialAngle, defaultDigCost, findShelterSpot, isBrightOutside, isEnclosed, monstersPreventingRest, nightPlan, sealItem, shelterAt, skyDarken
+  armorPoints, celestialAngle, defaultDigCost, findShelterSpot, isBrightOutside, isEnclosed, leaveAtDay, monstersPreventingRest, nightPlan, sealItem, shelterAt, skyDarken
 } from '../../src/skills/shelter'
 import type { BlockLookup } from '../../src/skills/placement'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
@@ -129,4 +129,22 @@ test('monstersPreventingRest: Player.startSleepInBed\'s box, 8 across and 5 up o
   const corner = zombie(8.4, 64, -7.4)
   const bot = fakeBot({ entities: [zombie(9.6, 64, 0.5), zombie(0.5, 70, 0.5), zombie(1.5, 64, 1.5, 0), corner, near, entity({ name: 'cow', position: new Vec3(1.5, 64, 0.5) })] })
   assert.deepStrictEqual(monstersPreventingRest(bot, new Vec3(0, 64, 0)).map(e => e.id), [near.id, corner.id])
+})
+
+test('leaveAtDay: out once bright with no hostile within 8 blocks (burning or not), or after 2400 ticks of daylight', () => {
+  const zombie = entity({ name: 'zombie', position: new Vec3(2.5, 64, 0.5), meta: { health: 20, shared_flags: 1 } })
+  const bot = fakeBot({ entities: [zombie] })
+  bot.time = { timeOfDay: 20000 }
+  const leave = leaveAtDay(bot)
+  assert.strictEqual(leave(), false)
+  bot.time.timeOfDay = 23600
+  // a zombie burning on the roof still hits
+  assert.strictEqual(leave(), false)
+  bot.time.timeOfDay = 900
+  assert.strictEqual(leave(), false)
+  delete bot.entities[zombie.id]
+  assert.strictEqual(leave(), true)
+  bot.entities[zombie.id] = zombie
+  bot.time.timeOfDay = 23600 + 2400 - 24000
+  assert.strictEqual(leave(), true)
 })

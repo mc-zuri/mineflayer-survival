@@ -196,7 +196,7 @@ export interface ShelterOptions {
   signal?: AbortSignal
   /** how far to look for a column to dig (default 8) */
   radius?: number
-  /** come out once this holds (default: bright outside and no hostile that won't burn within 8 blocks) */
+  /** come out once this holds (default leaveAtDay: bright outside and no hostile within 8 blocks, or 2400 ticks of day) */
   until?: () => boolean
   /** ticks to stay at most (default 14000: a night and then some) */
   maxTicks?: number
@@ -342,17 +342,27 @@ async function putUpTorch (bot: Bot, head: Vec3): Promise<boolean> {
   }
 }
 
-/** a hostile that won't burn come the day (creepers, spiders, ...), within distance */
-function lingeringHostile (bot: Bot, distance: number): boolean {
+/** a living hostile within distance */
+function hostileNear (bot: Bot, distance: number): boolean {
   const pos = bot.entity.position
-  return Object.values(bot.entities).some(e => {
-    if (e === bot.entity || (bot.registry.entitiesByName as any)[e.name ?? '']?.type !== 'hostile') return false
-    if (e.position.distanceTo(pos) > distance) return false
-    // the undead burn in the sun (Mob.isSunBurnTick) unless under a helmet or in water; the flags' bit 0 is on fire
-    const burns = /^(zombie|skeleton|stray|drowned|phantom|zombie_villager|bogged|parched)$/.test(e.name ?? '')
-    const onFire = (((e.metadata as any)?.[0] ?? 0) & 1) !== 0
-    return !burns || !onFire
-  })
+  return Object.values(bot.entities).some(e => e !== bot.entity && (bot.registry.entitiesByName as any)[e.name ?? '']?.type === 'hostile' &&
+    isAlive(bot, e) && e.position.distanceTo(pos) <= distance)
+}
+
+/**
+ * When to come out: the sky bright (the undead burn) and no hostile within `distance`, or `maxWait` ticks of daylight
+ * gone by (a creeper that sits by the hole all morning). A zombie burning on the roof still hits: one with a spear
+ * (1.21.11) took the bot from 20 to 0 as it climbed out at sunrise.
+ */
+export function leaveAtDay (bot: Bot, opts: { distance?: number, maxWait?: number } = {}): () => boolean {
+  let brightSince: number | null = null
+  return () => {
+    if (!botIsBrightOutside(bot)) { brightSince = null; return false }
+    const now = bot.time.timeOfDay
+    brightSince = brightSince ?? now
+    const bright = (now - brightSince + 24000) % 24000
+    return bright >= (opts.maxWait ?? 2400) || !hostileNear(bot, opts.distance ?? 8)
+  }
 }
 
 /**
@@ -365,7 +375,7 @@ export async function shelter (bot: Bot, opts: ShelterOptions = {}): Promise<She
   const lookup = blockLookup(bot)
   const eatAt = opts.eatAt ?? 14
   const maxTicks = opts.maxTicks ?? 14000
-  const until = opts.until ?? (() => botIsBrightOutside(bot) && !lingeringHostile(bot, 8))
+  const until = opts.until ?? leaveAtDay(bot)
   throwIfAborted(signal)
 
   let feet = bot.entity.position.floored()
