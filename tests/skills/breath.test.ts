@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { UNDERWATER_STEP_COST, keepHeadAboveWater, underwaterStepCost } from '../../src/skills/breath'
 
-test('underwaterStepCost: a flooded tunnel (water at the head, rock over it) and a lake\'s bottom are kept out of; swimming at the surface and wading stay', () => {
+test('underwaterStepCost: a flooded tunnel (water at the head, rock over it) and a lake\'s bottom cost more, short of a wall; swimming at the surface and wading stay', () => {
   // a lake from y 60 to 63 (air over it) at x < 0; a flooded tunnel at y 40..41 under rock at x >= 10
   const lookup = (p: Vec3): { name: string } => {
     if (p.x < 0 && p.y >= 60 && p.y <= 63) return { name: 'water' }
