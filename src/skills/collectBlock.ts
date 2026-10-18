@@ -121,8 +121,16 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
 
   // what the blocks drop (minecraft-data's drops): the pathfinder can break one on its way (to stand where it was),
   // and its drop counts as one broken here
+  const dropsOf = (id: number): string[] => (bot.registry.blocks[id]?.drops ?? [])
+    .map(drop => bot.registry.items[typeof drop === 'number' ? drop : (drop as any).drop?.id ?? (drop as any).id]?.name)
+    .filter((n): n is string => n != null)
   const dropNames = new Set<string>()
-  for (const id of ids) for (const drop of bot.registry.blocks[id]?.drops ?? []) dropNames.add(bot.registry.items[typeof drop === 'number' ? drop : (drop as any).drop?.id ?? (drop as any).id]?.name ?? '')
+  for (const id of ids) for (const name of dropsOf(id)) dropNames.add(name)
+  // what the broken blocks drop, the items picked up (not the sticks and saplings of leaves decaying up a tree)
+  const pickupNames = (types: number[]): string[] | undefined => {
+    const names = [...new Set(types.flatMap(dropsOf))]
+    return names.length > 0 ? names : undefined
+  }
   const gainedDrops = (): number => dropNames.size === 0 ? 0 : sumPositive(countsDelta(before, inventoryCounts(bot)), name => dropNames.has(name))
   const enough = (): boolean => positions.length >= count || gainedDrops() >= count
 
@@ -184,14 +192,15 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       // Block.dropResources: the drops spawn on the break, the bot hears of them a tick or two later
       const centre = pos.offset(0.5, 0.5, 0.5)
       if ((bot.registry.blocks[block.type]?.drops?.length ?? 0) > 0) await waitUntil(bot, () => nearbyDrops(bot, centre, 3).length > 0, 10, signal)
-      const picked = await pickupDrops(bot, { near: centre, radius: 6 }, signal)
+      const picked = await pickupDrops(bot, { near: centre, radius: 6, names: pickupNames([block.type]) }, signal)
       trace('collectBlock: picked up', picked.items)
     }
   }
   // drops that fell or showed up late, around every block broken
   if (pickup) {
     for (const pos of positions) {
-      if (nearbyDrops(bot, pos.offset(0.5, 0.5, 0.5), 8).length > 0) await pickupDrops(bot, { near: pos.offset(0.5, 0.5, 0.5), radius: 8 }, signal)
+      const names = pickupNames(minedTypes)
+      if (nearbyDrops(bot, pos.offset(0.5, 0.5, 0.5), 8, names).length > 0) await pickupDrops(bot, { near: pos.offset(0.5, 0.5, 0.5), radius: 8, names }, signal)
     }
   }
 
