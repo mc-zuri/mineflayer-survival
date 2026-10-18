@@ -4,7 +4,7 @@ import { eat, bestFoodInInventory } from '../skills/eat'
 import { escapeHazard, evadeCreeper, fleeFrom, headInWater, inHazard, surface } from '../skills/escape'
 import { creeperSwelling, fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
-import { armorPoints, botIsBrightOutside, isEnclosed, nightPlan, shelter, sleepThroughNight, type NightPlan } from '../skills/shelter'
+import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterToLeave, sleepThroughNight, type NightPlan } from '../skills/shelter'
 import { bestMeleeWeapon } from '../skills/weapons'
 import { hasLineOfSight, type Entity } from '../skills/combatUtil'
 import { GHAST_FIREBALL, deflectFireball, fireballIncoming } from '../nether/safety'
@@ -261,7 +261,11 @@ export const nightReflex: Reflex = {
     const { bot, config } = ctx
     if (!config.night.enabled || bot.isSleeping === true || bot.time == null) return null
     if (bot.game?.dimension != null && !/overworld/.test(String(bot.game.dimension))) return null
-    if (botIsBrightOutside(bot)) return null
+    if (botIsBrightOutside(bot)) {
+      // cut off on its way out of the shelter at sunrise (a fight): out the rest of the way
+      if (shelterToLeave(bot) == null) return null
+      return { name: 'night', priority: config.night.priority, detail: 'leave shelter', run: async (signal) => await leaveShelter(bot, signal) }
+    }
     const plan = cachedNightPlan(ctx)
     if (plan === 'fight') return null
     const dig = async (signal: AbortSignal): Promise<unknown> => await shelter(bot, { signal, radius: config.night.shelterRadius })

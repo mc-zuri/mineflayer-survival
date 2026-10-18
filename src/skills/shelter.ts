@@ -422,6 +422,7 @@ export async function shelter (bot: Bot, opts: ShelterOptions = {}): Promise<She
     if (!isEnclosed(lookup, feet)) throw new SkillError('VERIFY_FAILED', `the hole at ${feet.toString()} isn't shut`)
   }
 
+  rememberShelter(bot, feet.offset(0, SHELTER_DEPTH, 0))
   let ticks = 0
   let eaten = 0
   const seal = feet.offset(0, 2, 0)
@@ -443,10 +444,38 @@ export async function shelter (bot: Bot, opts: ShelterOptions = {}): Promise<She
 
   let left = false
   if (opts.leave !== false) {
-    await climbOut(bot, feet.offset(0, SHELTER_DEPTH, 0), signal)
+    await leaveShelter(bot, signal)
     left = true
   }
   return { feet, dug, ticks, eaten, left }
+}
+
+/** the surface cell of the shelter each bot is in (or was cut off climbing out of) */
+const sheltered = new WeakMap<Bot, Vec3>()
+
+/** the shelter the bot is in, by the surface cell over its column */
+export function rememberShelter (bot: Bot, surface: Vec3): void {
+  sheltered.set(bot, surface.floored())
+}
+
+/** The surface cell over the bot when it's still down its shelter's column (a fight cut it off on its way out), else null. */
+export function shelterToLeave (bot: Bot): Vec3 | null {
+  const surface = sheltered.get(bot)
+  if (surface == null) return null
+  const p = bot.entity.position
+  if (Math.floor(p.x) !== surface.x || Math.floor(p.z) !== surface.z || Math.floor(p.y + 1e-6) >= surface.y) {
+    sheltered.delete(bot)
+    return null
+  }
+  return surface
+}
+
+/** Out of the shelter's column up to the surface (pillared on the dug blocks, else the pathfinder's way). */
+export async function leaveShelter (bot: Bot, signal?: AbortSignal): Promise<void> {
+  const surface = shelterToLeave(bot)
+  if (surface == null) return
+  await climbOut(bot, surface, signal)
+  sheltered.delete(bot)
 }
 
 /** out of the hole to its surface cell: pillared up on the dug blocks (the seal's among them), else the pathfinder's way (it digs stairs) */

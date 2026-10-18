@@ -7,6 +7,7 @@ import type { ReflexConfigInput } from '../../src/reflexes/config'
 import type { Reflex } from '../../src/reflexes/types'
 import { CREEPER_IGNITED_INDEX, CREEPER_SWELL_DIR_INDEX, creeperSwelling } from '../../src/skills/fight'
 import { metadataIndex } from '../../src/skills/combatUtil'
+import { rememberShelter, shelterToLeave } from '../../src/skills/shelter'
 import { entity, fakeBot, item, type FakeBotInput } from './fakeBot'
 
 const at = (x: number, y = 64, z = 0.5): Vec3 => new Vec3(0.5 + x, y, z)
@@ -201,4 +202,20 @@ test('hostiles reflex: at low health an armored bot with a weapon fights on agai
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(4)], health: 5, armor: iron }), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(4)], health: 5, armor: { torso: item('leather_chestplate') }, items: [item('iron_sword')] }), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(4)], health: 5, armor: iron, items: [item('iron_sword')] }, { hostiles: { fightOnArmor: 21 } }), 'flee')
+})
+
+test('night reflex: by day, a bot still down its shelter\'s column (cut off climbing out) is got out; out of it, nothing', () => {
+  const bot = fakeBot({ position: new Vec3(0.5, 62, 0.5), items: [item('stone_sword'), item('dirt', 3)] })
+  bot.time = { timeOfDay: 1000 }
+  bot.game.dimension = 'overworld'
+  const engine = new ReflexEngine(bot, { enabled: false })
+  assert.strictEqual(nightReflex.check(engine.context()), null)
+  rememberShelter(bot, new Vec3(0, 64, 0))
+  assert.strictEqual(nightReflex.check(engine.context())?.detail, 'leave shelter')
+  bot.entity.position = new Vec3(0.5, 64, 0.5)
+  assert.strictEqual(nightReflex.check(engine.context()), null)
+  // and forgotten once out
+  bot.entity.position = new Vec3(0.5, 62, 0.5)
+  assert.strictEqual(shelterToLeave(bot), null)
+  engine.stop()
 })
