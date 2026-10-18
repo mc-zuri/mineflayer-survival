@@ -87,4 +87,26 @@ describe('lockstep (1.21.11 server mod and client)', () => {
     assert.strictEqual(corrections, 0, 'the server never moved the bot back')
     bot.lockstep.resume()
   })
+
+  test('a bot that stops acking stops gating the server after the timeout, and gates it again once it caught up', async () => {
+    await server.command('lockstep timeout 300')
+    try {
+      const warned = server.waitForLine(/^Bot has not acked lockstep tick \d+ in \d+ ms/, 10000)
+      const held = await bot.lockstep.step()
+      await warned
+      // the server ticks on in real time, and the bot runs those ticks too (holding their acks)
+      assert.ok(await bot.lockstep.nextTick() > held)
+      const caughtUp = server.waitForLine(/^Bot caught up with lockstep at tick \d+/, 10000)
+      bot.lockstep.resume()
+      await caughtUp
+      // gated again: the bot holds a tick, and the server stays on it
+      const n = await bot.lockstep.step()
+      const status = await botCommand(bot, 'lockstep status', /^lockstep on/)
+      assert.strictEqual(statusTick(status), n)
+      assert.ok(!status.includes('stalled'), status)
+    } finally {
+      bot.lockstep.resume()
+      await server.command('lockstep timeout 5000')
+    }
+  })
 })
