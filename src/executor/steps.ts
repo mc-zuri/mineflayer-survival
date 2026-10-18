@@ -9,7 +9,7 @@ import { normalizeDimension } from '../core/memory'
 import type { CraftStep, FarmStep, FillStep, KillStep, LootStep, MineStep, PlanStep, SmeltStep } from '../planner/steps'
 import { farmCells, grownPlots, harvestFarm, knownFarms, plantFarm, rememberFarm, SEED_OF, sow } from '../skills/farm'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
-import { collectBlock } from '../skills/collectBlock'
+import { collectBlock, waterBeside } from '../skills/collectBlock'
 import { craft } from '../skills/craft'
 import { smelt } from '../skills/smelt'
 import { retrieveItems } from '../skills/chest'
@@ -158,7 +158,10 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
   const tooDeep = (pos: Vec3): boolean => level != null && pos.y < level - ORE_DEPTH
   // a berry bush or a crop not grown yet drops no food: passed over (GROWN_AGE)
   const unripe = growsAny(step.blocks) ? (pos: Vec3): boolean => !isGrown(bot.blockAt(pos) as any) : () => false
-  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || unripe(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos)
+  // an ore with water against it is left: mined, it lets the water in, and on seed 3 the bot drowned mining iron under
+  // a lake (the raw iron floating up out of reach, the drowning reflex too late)
+  const submerged = level != null ? (pos: Vec3): boolean => waterBeside(p => bot.blockAt(p) as any, pos) : () => false
+  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || unripe(pos) || submerged(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos)
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     const subs = blockSubstitutes(step)

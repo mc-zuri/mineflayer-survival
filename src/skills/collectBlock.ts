@@ -51,6 +51,12 @@ export function lavaBeside (lookup: (pos: Vec3) => { name: string } | null, pos:
   return SIDES.some(d => lookup(pos.plus(d))?.name === 'lava')
 }
 
+/** water (or a plant that grows in it) against a face of the block: an ore under a lake or in a flooded cave */
+export function waterBeside (lookup: (pos: Vec3) => { name: string } | null, pos: Vec3): boolean {
+  return SIDES.some(d => WATER_BLOCKS.has(lookup(pos.plus(d))?.name ?? ''))
+}
+const WATER_BLOCKS = new Set(['water', 'bubble_column', 'kelp', 'kelp_plant', 'seagrass', 'tall_seagrass'])
+
 export interface CollectBlockResult {
   /** blocks broken */
   mined: number

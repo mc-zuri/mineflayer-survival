@@ -127,3 +127,14 @@ test('collectBlock with anyTool breaks a block by hand that the bag has no harve
     clearInterval(ticker)
   }
 })
+
+test('waterBeside: an ore with water or a water plant against a face; not one with water only at a corner', async () => {
+  const { waterBeside } = await import('../../src/skills/collectBlock')
+  const { Vec3 } = await import('vec3')
+  const at = (cells: Record<string, string>) => (p: any) => ({ name: cells[`${p.x},${p.y},${p.z}`] ?? 'stone' })
+  const ore = new Vec3(0, 40, 0)
+  assert.equal(waterBeside(at({}), ore), false)
+  assert.equal(waterBeside(at({ '0,41,0': 'water' }), ore), true)
+  assert.equal(waterBeside(at({ '1,40,0': 'seagrass' }), ore), true)
+  assert.equal(waterBeside(at({ '1,41,1': 'water' }), ore), false)
+})
