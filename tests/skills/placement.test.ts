@@ -60,3 +60,12 @@ test('placedBlockNames: torches and signs go on walls too', () => {
   assert.deepStrictEqual(placedBlockNames('torch'), ['torch', 'wall_torch'])
   assert.deepStrictEqual(placedBlockNames('oak_sign'), ['oak_sign', 'oak_wall_sign'])
 })
+
+test('yawFor: the yaw that faces a cardinal direction (mineflayer: 0 to -z, pi/2 to -x)', async () => {
+  const { yawFor } = await import('../../src/skills/placeBlock')
+  const { Vec3 } = await import('vec3')
+  assert.strictEqual(yawFor(new Vec3(0, 0, -1)) + 0, 0)
+  assert.strictEqual(yawFor(new Vec3(-1, 0, 0)), Math.PI / 2)
+  assert.strictEqual(yawFor(new Vec3(1, 0, 0)), -Math.PI / 2)
+  assert.strictEqual(Math.abs(yawFor(new Vec3(0, 0, 1))), Math.PI)
+})

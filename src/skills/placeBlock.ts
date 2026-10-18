@@ -4,7 +4,7 @@ import { Vec3 } from 'vec3'
 import { SkillError, throwIfAborted } from './errors'
 import { navigateToReach } from './navigate'
 import { isFree, isInteractive, isSolid } from './placement'
-import { FACES, blockAtOrThrow, countItems, findInventoryItem, settleInventory, waitUntil, withinReach, type Block } from './util'
+import { FACES, blockAtOrThrow, countItems, findInventoryItem, settleInventory, waitTicks, waitUntil, withinReach, type Block } from './util'
 
 export interface PlaceBlockArgs {
   pos: Vec3
@@ -12,6 +12,17 @@ export interface PlaceBlockArgs {
   item: string
   /** the block to place against (default: a solid neighbour, the one below first) */
   against?: Vec3
+  /**
+   * The horizontal way the bot faces as it places (a cardinal vector), for the blocks whose state follows the
+   * player's facing (BlockPlaceContext.getHorizontalDirection: a bed's head and a door point that way, a chest or a
+   * furnace faces back at the player). The bot looks that way, down at the face, instead of at the face's middle.
+   */
+  facing?: Vec3
+}
+
+/** mineflayer's yaw for a horizontal direction (0 looks to -z, pi/2 to -x) */
+export function yawFor (dir: Vec3): number {
+  return Math.atan2(-dir.x, -dir.z)
 }
 
 export interface PlaceBlockResult {
@@ -63,7 +74,15 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
   if (item == null) throw new SkillError('MISSING_ITEMS', `no ${args.item} in the inventory`)
   await bot.equip(item, 'hand')
   try {
-    await bot.placeBlock(against, face)
+    if (args.facing != null) {
+      // the server takes the facing from the player's rotation at the use (ServerboundUseItemOnPacket carries none)
+      await bot.look(yawFor(args.facing), -Math.PI / 4, true)
+      // the rotation goes out with the tick's move packet (LocalPlayer.sendPosition): one tick before the use
+      await waitTicks(bot, 1, signal)
+      await (bot as any)._placeBlockWithOptions(against, face, { swingArm: 'right', forceLook: 'ignore' })
+    } else {
+      await bot.placeBlock(against, face)
+    }
   } catch (err) {
     // mineflayer's wait for the block can time out though the server placed it: the world tells
     if (!wanted.includes(bot.blockAt(pos)?.name ?? '')) {
