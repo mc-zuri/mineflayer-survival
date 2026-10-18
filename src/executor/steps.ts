@@ -248,10 +248,24 @@ export async function toRoom (bot: Bot, signal?: AbortSignal): Promise<boolean> 
   return false
 }
 
+/**
+ * The item carried, worn (the armor slots) or in the off hand: the armor reflex puts a crafted chestplate on while the
+ * step is preempted (picking its table up), and the step, resumed, counted it gone and crafted another, "short of 1
+ * iron_chestplate" (seeds 3, 5 and 1234567890)
+ */
+export function ownedCount (bot: Bot, name: string): number {
+  let n = countItems(bot, name)
+  for (const slot of [5, 6, 7, 8]) {
+    const item = bot.inventory.slots[slot]
+    if (item?.name === name) n += item.count
+  }
+  return n
+}
+
 export const runCraft: StepRunner<CraftStep> = async (step, ctx) => {
   const { bot, signal } = ctx
-  const start = startCount(ctx, 'start', () => countItems(bot, step.item))
-  const want = start + step.count - countItems(bot, step.item)
+  const start = startCount(ctx, 'start', () => ownedCount(bot, step.item))
+  const want = start + step.count - ownedCount(bot, step.item)
   if (want > 0) {
     const table = step.table && ctx.table != null && bot.entity.position.distanceTo(ctx.table) <= 48 ? ctx.table : undefined
     // with a table in the bag, one close by or the bag's (put down and taken back): a table left far off up a hill
@@ -259,7 +273,7 @@ export const runCraft: StepRunner<CraftStep> = async (step, ctx) => {
     const tableDistance = countItems(bot, 'crafting_table') > 0 ? NEAR_STATION : undefined
     await withRoom(bot, signal, async () => await craft(bot, { item: step.item, count: want, table, tableDistance, pickUpTable: table == null }, signal))
   }
-  return { gained: countItems(bot, step.item) - start }
+  return { gained: ownedCount(bot, step.item) - start }
 }
 
 export const runSmelt: StepRunner<SmeltStep> = async (step, ctx) => {

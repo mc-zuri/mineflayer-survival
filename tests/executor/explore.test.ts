@@ -272,3 +272,15 @@ test('dryStart: from the middle of a lake, a dry place up to 24 blocks off', asy
   const spot = dryStart(lookup, new Vec3(0, 63, 0))
   assert.ok(spot != null && spot.x >= 19, String(spot))
 })
+
+test('runCraft: a crafted chestplate the armor reflex put on while the step was preempted counts as made', async () => {
+  const { runCraft, ownedCount } = await import('../../src/executor/steps')
+  const slots: any[] = new Array(46).fill(null)
+  const bot: any = { inventory: { slots, items: () => slots.slice(9, 45).filter(s => s != null) } }
+  // the first attempt crafted it (its start count kept in the task's state), the reflex then wore it
+  slots[6] = { name: 'iron_chestplate', count: 1 }
+  assert.equal(ownedCount(bot, 'iron_chestplate'), 1)
+  const step: any = { kind: 'craft', item: 'iron_chestplate', count: 1, table: true }
+  const out = await runCraft(step, { bot, signal: new AbortController().signal, state: { start: 0 }, log: () => {} } as any)
+  assert.deepEqual(out, { gained: 1 })
+})
