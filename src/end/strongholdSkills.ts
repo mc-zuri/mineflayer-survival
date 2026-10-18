@@ -17,6 +17,7 @@ import { TOO_FAR_DISTANCE, inferThrowDirection, type ThrowDirection, type Vec } 
 import { secondThrowPoint, triangulate, type EyeRay, type Triangulation, type XZ } from './triangulate'
 import { guessFromOneThrow } from './stronghold'
 import { analyzePortalRoom, findPortalFrames, type PortalRoom } from './portalRoom'
+import { inWater, toShore } from '../executor/explore'
 
 // ---- eyes
 
@@ -119,7 +120,7 @@ export async function throwEnderEye (bot: Bot, opts: { recover?: boolean } = {},
           if (isAbort(err)) throw err
         }
       } else {
-        trace('throwEnderEye: the eye came down over water: left')
+        trace('throwEnderEye: the eye came down into a frozen sea: left')
       }
       recovered = countItems(bot, 'ender_eye') > had
     }
@@ -132,16 +133,23 @@ export async function throwEnderEye (bot: Bot, opts: { recover?: boolean } = {},
 }
 
 /**
- * Whether an eye that dropped at `at` falls into water (the first block under it that isn't air, within 24): it sinks
- * and floats up under any ice, and the bot that dived after one on 26.3 drowned under a frozen sea. Such an eye is left.
+ * Whether an eye that dropped at `at` falls into a frozen sea: the first block under it that isn't air is water, and
+ * the water's surface there has ice beside it (or over it). An eye in open water floats up to the surface and is
+ * swum to; under a frozen sea it floats up under the ice, and the bot that dived after one on 26.3 drowned there.
  */
 export function overWater (blockAt: (pos: Vec3) => { name: string } | null, at: Vec3): boolean {
   const start = at.floored()
   for (let dy = 0; dy >= -24; dy--) {
-    const name = blockAt(start.offset(0, dy, 0))?.name
+    const pos = start.offset(0, dy, 0)
+    const name = blockAt(pos)?.name
     if (name == null) return false
     if (name === 'air' || name === 'cave_air') continue
-    return name === 'water' || name === 'bubble_column' || name === 'kelp' || name === 'seagrass'
+    if (name !== 'water' && name !== 'bubble_column') return false
+    // the surface: up from the first water block to the top of the water
+    let top = pos
+    for (let i = 0; i < 24 && blockAt(top.offset(0, 1, 0))?.name === 'water'; i++) top = top.offset(0, 1, 0)
+    const ice = (p: Vec3): boolean => /ice$/.test(blockAt(p)?.name ?? '')
+    return ice(top.offset(0, 1, 0)) || [[1, 0], [-1, 0], [0, 1], [0, -1], [2, 0], [-2, 0], [0, 2], [0, -2]].some(([dx, dz]) => ice(top.offset(dx, 0, dz)) || ice(top.offset(dx, 1, dz)))
   }
   return false
 }
@@ -199,9 +207,14 @@ export async function locateStronghold (bot: Bot, args: LocateStrongholdArgs = {
   }
 }
 
-/** a throw whose flight could be read (the bot settled first; another eye when one wasn't seen to fly), 3 tries */
+/**
+ * A throw whose flight could be read (the bot settled first; another eye when one wasn't seen to fly), 3 tries. From
+ * the shore when the bot is in the water (a point 500 blocks off is often out at sea): swimming, it never settles, and
+ * the eyes drop into the sea round it.
+ */
 async function throwReadable (bot: Bot, signal?: AbortSignal): Promise<ThrowEyeResult> {
   let last: ThrowEyeResult | null = null
+  if (inWater(bot)) await toShore(bot, signal)
   for (let i = 0; i < 3; i++) {
     await waitUntil(bot, () => bot.entity.onGround && bot.entity.velocity.norm() < 0.1, 40, signal)
     last = await throwEnderEye(bot, {}, signal)
@@ -258,6 +271,7 @@ export async function reachStronghold (bot: Bot, args: ReachStrongholdArgs = {},
           trace('reachStronghold: travel stopped:', (err as Error).message)
         }
       }
+      if (inWater(bot)) await toShore(bot, signal)
       const t = await throwEnderEye(bot, {}, signal)
       if (t.near != null) {
         bot.survival?.memory.addPoi('stronghold', { x: t.near.x, y: 0, z: t.near.z }, 'overworld', 'eye came down')

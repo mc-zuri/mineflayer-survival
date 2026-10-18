@@ -14,12 +14,14 @@ test('the stronghold blocks are StrongholdPieces\' stone bricks, the iron bars a
   for (const name of ['stone_bricks', 'mossy_stone_bricks', 'cracked_stone_bricks', 'iron_bars', 'end_portal_frame']) assert.ok(STRONGHOLD_BLOCKS.includes(name), name)
 })
 
-test('overWater: an eye dropped over the sea (or into it) is left, one over the ground or on ice is picked up', () => {
+test('overWater: an eye dropped into a frozen sea is left; one over open water, the ground or on the ice is picked up', () => {
   const { Vec3 } = require('vec3')
-  const column = (top: string, topY: number) => (p: any) => ({ name: p.y > topY ? 'air' : p.y > topY - (top === 'water' ? 8 : 1) ? top : 'stone' })
-  assert.strictEqual(overWater(column('water', 62), new Vec3(3.4, 70.2, 8.9)), true)
-  assert.strictEqual(overWater(column('water', 62), new Vec3(3.4, 61.5, 8.9)), true)
-  assert.strictEqual(overWater(column('grass_block', 62), new Vec3(3.4, 70.2, 8.9)), false)
-  assert.strictEqual(overWater(column('ice', 62), new Vec3(3.4, 64, 8.9)), false)
+  // water from 55 to 62, ice on the surface where x >= 10
+  const sea = (frozen: boolean) => (p: any) => ({ name: p.y > 63 ? 'air' : p.y === 63 ? (frozen && p.x >= 10 ? 'ice' : 'air') : p.y >= 55 ? (frozen && p.x >= 10 && p.y === 62 ? 'ice' : 'water') : 'stone' })
+  assert.strictEqual(overWater(sea(false), new Vec3(3.4, 70.2, 8.9)), false)
+  assert.strictEqual(overWater(sea(true), new Vec3(9.4, 70.2, 8.9)), true)
+  assert.strictEqual(overWater(sea(true), new Vec3(9.4, 58.5, 8.9)), true)
+  assert.strictEqual(overWater(sea(true), new Vec3(12.4, 70.2, 8.9)), false)
+  assert.strictEqual(overWater((p: any) => ({ name: p.y > 62 ? 'air' : 'grass_block' }), new Vec3(3.4, 70.2, 8.9)), false)
   assert.strictEqual(overWater(() => null, new Vec3(0, 64, 0)), false)
 })
