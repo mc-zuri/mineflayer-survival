@@ -133,6 +133,17 @@ export const creeperReflex: Reflex = {
   }
 }
 
+/**
+ * A neutral mob that hurt the bot lately (an enderman it looked at, a zombified piglin it hit by mistake): fought back
+ * (NeutralMob stays angry for its anger time; one let be went on hitting a stone-sword bot to death).
+ */
+export function provoked (ctx: ReflexContext, e: Entity): boolean {
+  const { config } = ctx
+  if (!config.hostiles.retaliate.includes(e.name ?? '')) return false
+  const at = ctx.attackers?.get(e.id)
+  return at != null && ctx.tick - at <= config.hostiles.retaliateTicks
+}
+
 /** the mobs that shoot (RangedBowAttackGoal's 15 blocks, RangedCrossbowAttackGoal's 8 and more, the witch's RangedAttackGoal 10) */
 export const RANGED_HOSTILES = new Set(['skeleton', 'stray', 'bogged', 'parched', 'pillager', 'witch'])
 
@@ -144,7 +155,7 @@ export const RANGED_HOSTILES = new Set(['skeleton', 'stray', 'bogged', 'parched'
  */
 export function hostilesInRange (ctx: ReflexContext): Entity[] {
   const { bot, config } = ctx
-  return ctx.hostiles.filter(e => !config.hostiles.ignore.includes(e.name ?? '') &&
+  return ctx.hostiles.filter(e => (!config.hostiles.ignore.includes(e.name ?? '') || provoked(ctx, e)) &&
     distance(bot, e) <= (RANGED_HOSTILES.has(e.name ?? '') ? Math.max(config.hostiles.range, config.hostiles.rangedRange) : config.hostiles.range) &&
     Math.abs(e.position.y - bot.entity.position.y) <= config.hostiles.maxDy &&
     hasLineOfSight(bot, e))
@@ -192,7 +203,8 @@ export const hostilesReflex: Reflex = {
       detail: `${useBow ? 'shoot' : 'fight'} ${target.name ?? ''}`,
       run: async (signal) => useBow
         ? await shoot(bot, target, { signal, maxShots: 3 })
-        : await fight(bot, target, { signal, maxTicks: config.hostiles.fightTicks, maxDistance: config.combat.scanRange * 2 })
+        // an enderman hit low: a look at its eyes (EnderMan.isLookingAtMe) is what angers the others
+        : await fight(bot, target, { signal, maxTicks: config.hostiles.fightTicks, maxDistance: config.combat.scanRange * 2, aimHeight: target.name === 'enderman' ? 0.3 : undefined })
     }
   }
 }

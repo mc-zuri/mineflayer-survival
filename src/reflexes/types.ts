@@ -21,6 +21,8 @@ export interface ReflexContext {
   tick: number
   /** ticks since the bot last took damage (Infinity if never) */
   ticksSinceHurt: number
+  /** the tick each entity last hurt the bot at, by entity id */
+  attackers: Map<number, number>
   /** hostile mobs within config.combat.scanRange, nearest first */
   hostiles: Entity[]
   /** a hostile within config.combat.range, or hurt within config.combat.hurtTicks */

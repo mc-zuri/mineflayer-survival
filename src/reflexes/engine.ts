@@ -38,7 +38,13 @@ export class ReflexEngine {
   private running: Running | null = null
   private readonly cooldownUntil = new Map<string, number>()
   private readonly onTick = (): void => this.physicsTick()
-  private readonly onHurt = (entity: Entity): void => { if (entity === this.bot.entity) this.lastHurtTick = this.tick }
+  /** the tick each entity last hurt the bot at (the damage event's cause) */
+  private readonly attackers = new Map<number, number>()
+  private readonly onHurt = (entity: Entity, source?: Entity): void => {
+    if (entity !== this.bot.entity) return
+    this.lastHurtTick = this.tick
+    if (source != null && source !== this.bot.entity) this.attackers.set(source.id, this.tick)
+  }
   private readonly onCollect = (collector: Entity): void => { if (collector === this.bot.entity) this.armorChanged = true }
   private readonly onSlot = (_slot: number, _old: unknown, item: { name: string } | null): void => {
     if (item != null && armorPiece(item.name) != null) this.armorChanged = true
@@ -73,6 +79,7 @@ export class ReflexEngine {
       config: this.config,
       tick: this.tick,
       ticksSinceHurt,
+      attackers: this.attackers,
       hostiles,
       inCombat,
       swell: this.swell,

@@ -229,3 +229,14 @@ test('creeper reflex: leaves a creeper the hostiles reflex is fighting with a sh
   // not fighting it: run
   assert.strictEqual(check(creeperReflex, { entities: [creeper], offhand: item('shield') }), 'evade creeper')
 })
+
+test('hostiles reflex: an enderman is let be until it hurts the bot, then fought back for a while; a warden never', () => {
+  const enderman = entity({ name: 'enderman', position: at(3) })
+  const warden = entity({ name: 'warden', position: at(3) })
+  assert.strictEqual(check(hostilesReflex, { entities: [enderman], items: [item('stone_sword')] }), null)
+  const hurtBy = (attacker: any) => (e: ReflexEngine): void => { (e as any).onHurt((e as any).bot.entity, attacker) }
+  assert.strictEqual(check(hostilesReflex, { entities: [enderman], items: [item('stone_sword')] }, {}, hurtBy(enderman)), 'fight enderman')
+  assert.strictEqual(check(hostilesReflex, { entities: [warden], items: [item('stone_sword')] }, {}, hurtBy(warden)), null)
+  // long ago: let be again
+  assert.strictEqual(check(hostilesReflex, { entities: [enderman], items: [item('stone_sword')] }, {}, (e) => { hurtBy(enderman)(e); (e as any).tick += 401 }), null)
+})

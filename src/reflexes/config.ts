@@ -44,6 +44,9 @@ export interface ReflexConfig {
     shootCreepersFrom: number
     /** mobs never fought (neutral until provoked, or bosses with their own plans) */
     ignore: string[]
+    /** but these of them fought back for this many ticks after they hurt the bot (an enderman looked at) */
+    retaliate: string[]
+    retaliateTicks: number
     /** ticks a fight may last (default 600) */
     fightTicks: number
     priority: number
@@ -132,6 +135,8 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
     fleeUnarmed: false,
     shootCreepersFrom: 5,
     ignore: ['enderman', 'zombified_piglin', 'piglin', 'piglin_brute', 'ender_dragon', 'wither', 'warden', 'shulker', 'ghast', 'happy_ghast'],
+    retaliate: ['enderman', 'zombified_piglin', 'piglin', 'piglin_brute'],
+    retaliateTicks: 400,
     fightTicks: 600,
     priority: 60
   },
