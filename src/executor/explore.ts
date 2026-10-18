@@ -219,6 +219,28 @@ export function staircaseUpStep (feet: Vec3, dir: Vec3): { open: Vec3[], next: V
   return { open: [feet.offset(0, 2, 0), ahead, ahead.offset(0, 1, 0)], next: ahead, floor: ahead.offset(0, -1, 0) }
 }
 
+type Crafter = (bot: Bot, args: { item: string, pickUpTable?: boolean }, signal?: AbortSignal) => Promise<unknown>
+
+/**
+ * A pickaxe in the bag, made from what's held when there's none (the last one broke down a mine, where the rock
+ * wants one): stone, else wood. Resolves the one there is, or null.
+ */
+export async function ensurePickaxe (bot: Bot, signal?: AbortSignal, craftFn?: Crafter): Promise<string | null> {
+  const held = (): string | null => bot.inventory.items().find(i => i.name.endsWith('_pickaxe'))?.name ?? null
+  if (held() != null) return held()
+  const make = craftFn ?? (await import('../skills/craft')).craft
+  for (const pickaxe of ['stone_pickaxe', 'wooden_pickaxe']) {
+    try {
+      await make(bot, { item: pickaxe, pickUpTable: true }, signal)
+      if (held() != null) return held()
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('explore: no', pickaxe, ':', (err as Error).message)
+    }
+  }
+  return null
+}
+
 /**
  * A staircase up and out, dug by hand where the pathfinder plans no way up: a block forward and a block up each
  * step, turning from lava and water, until the bot is under the open sky.
@@ -227,6 +249,7 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
   const lookup = lookupOf(bot)
   let dir = facingDir(bot.entity.yaw)
   const maxSteps = args.maxSteps ?? 128
+  await ensurePickaxe(bot, signal)
   for (let i = 0; i < maxSteps; i++) {
     throwIfAborted(signal)
     const feet = feetOf(bot)

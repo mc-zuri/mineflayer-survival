@@ -92,3 +92,19 @@ test('a staircase step up opens the room over the head and the column ahead a bl
   assert.deepEqual(s.next.toArray(), [0, 21, 1])
   assert.deepEqual(s.floor.toArray(), [0, 20, 1])
 })
+
+test('ensurePickaxe: the one held, else a stone one made, else a wooden one', async () => {
+  const { ensurePickaxe } = await import('../../src/executor/explore')
+  const bag: string[] = []
+  const bot: any = { inventory: { items: () => bag.map(name => ({ name })) } }
+  const tried: string[] = []
+  const craft = async (_b: unknown, args: { item: string }): Promise<void> => {
+    tried.push(args.item)
+    if (args.item === 'stone_pickaxe') throw new Error('no cobblestone')
+    bag.push(args.item)
+  }
+  assert.equal(await ensurePickaxe(bot, undefined, craft), 'wooden_pickaxe')
+  assert.deepEqual(tried, ['stone_pickaxe', 'wooden_pickaxe'])
+  assert.equal(await ensurePickaxe(bot, undefined, craft), 'wooden_pickaxe')
+  assert.equal(tried.length, 2)
+})
