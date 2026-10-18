@@ -4,6 +4,7 @@ import { TaskRunner } from './core/taskRunner'
 import { WorldMemory, normalizeDimension } from './core/memory'
 import { ReflexEngine, type ReflexEngineOptions } from './reflexes'
 import { play, type MilestoneHandler, type PlayOptions, type PlayResult } from './runner'
+import { keepHeadAboveWater } from './skills/breath'
 import type { MilestoneId } from './planner/progression'
 
 export * from './core'
@@ -53,6 +54,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
   const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, ...opts }
   return function (bot: Bot): void {
     if (options.loadPathfinder && bot.pathfinder == null) bot.loadPlugin(createPathfinder())
+    // no walk or swim with the head under water and no air over it (a flooded cave): the bot drowns on the way
+    keepHeadAboveWater(bot)
     const tasks = new TaskRunner(bot)
     const memory = new WorldMemory()
     const reflexes = options.reflexes === false ? null : new ReflexEngine(bot, { sink: tasks, ...(options.reflexes === true ? {} : options.reflexes) })
