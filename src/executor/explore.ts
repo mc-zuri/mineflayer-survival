@@ -497,6 +497,7 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
   let dir = facingDir(bot.entity.yaw)
   const lookup = lookupOf(bot)
   const maxSteps = args.maxSteps ?? 400
+  let moves = 0
   for (let i = 0; i < maxSteps; i++) {
     throwIfAborted(signal)
     if (args.found?.() === true) return true
@@ -521,9 +522,51 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
       stepped = true
       break
     }
-    if (!stepped) throw new SkillError('NO_PATH', `no safe way down from ${feet.toString()}`)
+    if (stepped) continue
+    // water or lava on every side (a beach, a lake's floor): somewhere drier a few blocks off, and down from there
+    const spot = moves < 3 ? dryStart(lookup, feet) : null
+    if (spot == null) throw new SkillError('NO_PATH', `no safe way down from ${feet.toString()}`)
+    moves++
+    trace('explore: no safe way down from', feet.toString(), ': down from', spot.toString(), 'instead')
+    try {
+      await navigate(bot, { goal: new goals.GoalBlock(spot.x, spot.y, spot.z) }, signal)
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('explore: no way to', spot.toString(), (err as Error).message)
+    }
   }
   return feetOf(bot).y <= y
+}
+
+/**
+ * A place to stand a few blocks off (4 to 12, in the eight directions) with no liquid within a block of the column
+ * under it, down a staircase's first few steps: where a way down from the bot's feet opens to water or lava on every
+ * side. Null when there's none.
+ */
+export function dryStart (lookup: Lookup, feet: Vec3): Vec3 | null {
+  const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
+  for (const r of [4, 6, 8, 10, 12]) {
+    for (const [dx, dz] of dirs) {
+      const base = feet.offset(dx * r, 0, dz * r)
+      for (const dy of [0, 1, -1, 2, -2, 3, -3]) {
+        const cell = base.offset(0, dy, 0)
+        const free = (p: Vec3): boolean => { const b = lookup(p); return b != null && b.boundingBox === 'empty' && !LIQUIDS.has(b.name) }
+        if (!free(cell) || !free(cell.offset(0, 1, 0)) || lookup(cell.offset(0, -1, 0))?.boundingBox !== 'block') continue
+        let wet = false
+        for (let down = 0; down >= -4 && !wet; down--) {
+          for (let ox = -1; ox <= 1 && !wet; ox++) {
+            for (let oz = -1; oz <= 1 && !wet; oz++) {
+              const name = lookup(cell.offset(ox, down, oz))?.name
+              if (name != null && LIQUIDS.has(name)) wet = true
+            }
+          }
+        }
+        if (!wet) return cell
+        break
+      }
+    }
+  }
+  return null
 }
 
 /**

@@ -164,3 +164,17 @@ test('outOfTheWay: an animal in a cave (under a roof) or far below is left alone
   bot.entity.position = new Vec3(10.5, 40, 10.5)
   assert.equal(outOfTheWay(bot, new Vec3(10.5, 41, 10.5)), false)
 })
+
+test('dryStart: off a lake\'s shore (water under every side), a place a few blocks off with no liquid under it', async () => {
+  const { dryStart } = await import('../../src/executor/explore')
+  // ground up to y 63; water at y 60..62 for x < 6 (under the shore the bot stands on); the bot at (0, 64, 0)
+  const lookup = (pos: Vec3) => {
+    if (pos.y >= 64) return { name: 'air', boundingBox: 'empty' }
+    if (pos.x < 6 && pos.y >= 60 && pos.y <= 62) return { name: 'water', boundingBox: 'empty' }
+    return { name: 'stone', boundingBox: 'block' }
+  }
+  const spot = dryStart(lookup, new Vec3(0, 64, 0))
+  assert.ok(spot != null && spot.y === 64 && spot.x >= 7, String(spot))
+  // water under everything in reach: none
+  assert.equal(dryStart((pos: Vec3) => pos.y >= 64 ? { name: 'air', boundingBox: 'empty' } : pos.y >= 60 && pos.y <= 62 ? { name: 'water', boundingBox: 'empty' } : { name: 'stone', boundingBox: 'block' }, new Vec3(0, 64, 0)), null)
+})
