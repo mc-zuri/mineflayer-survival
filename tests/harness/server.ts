@@ -186,8 +186,11 @@ export function lockstepModJar (java: string = findJava()): string {
   if (jar == null || fs.statSync(jar).mtimeMs < sources) {
     const win = process.platform === 'win32'
     const javaHome = java === 'java' ? process.env.JAVA_HOME : path.dirname(path.dirname(java))
-    const run = spawnSync(win ? 'gradlew.bat' : './gradlew', ['build', '--no-daemon', '-q'], {
-      cwd: SERVER_MOD_DIR, encoding: 'utf8', shell: win, env: { ...process.env, ...(javaHome != null ? { JAVA_HOME: javaHome } : {}) }
+    // the wrapper by its full path (cmd may not look in the working directory: NoDefaultCurrentDirectoryInExePath)
+    const gradlew = path.join(SERVER_MOD_DIR, win ? 'gradlew.bat' : 'gradlew')
+    const [cmd, args] = win ? ['cmd.exe', ['/d', '/c', gradlew, 'build', '--no-daemon', '-q']] : [gradlew, ['build', '--no-daemon', '-q']]
+    const run = spawnSync(cmd, args, {
+      cwd: SERVER_MOD_DIR, encoding: 'utf8', env: { ...process.env, ...(javaHome != null ? { JAVA_HOME: javaHome } : {}) }
     })
     jar = find()
     if (run.status !== 0 || jar == null) throw new Error(`building the lockstep mod failed:\n${run.stdout ?? ''}${run.stderr ?? ''}`)
