@@ -81,3 +81,34 @@ test('navigate: stuck on a path, the bot steps to its block\'s middle and goes a
     assert.strictEqual(bot.gotos(), 3)
   } finally { bot.stop() }
 })
+
+test('navigate gives up stuck while a dig target stays set and the bot stays put (it used to wait for good)', async () => {
+  const { EventEmitter } = await import('node:events')
+  const { navigate } = await import('../../src/skills/navigate')
+  const bot: any = new EventEmitter()
+  bot.entity = { position: new Vec3(0.5, 64, 0.5) }
+  // a dig target left set by a dig the pathfinder dropped
+  bot.targetDigBlock = { position: new Vec3(1, 64, 0) }
+  let release: (() => void) | null = null
+  bot.pathfinder = {
+    isPathing: false,
+    goto: async () => {
+      bot.pathfinder.isPathing = true
+      setImmediate(() => bot.emit('pathGenerated', { path: [] }))
+      await new Promise<void>(resolve => { release = resolve })
+      bot.pathfinder.isPathing = false
+    },
+    cancel: async () => { release?.() }
+  }
+  const goal = new GoalReachBlock(new Vec3(30, 64, 0), 1)
+  const rejected = assert.rejects(navigate(bot, { goal, stuckTicks: 20, unstick: 0 }), (err: any) => err.reason === 'STUCK')
+  // 20 ticks are not enough while it digs (the same block): 5 times that are
+  let ticks = 0
+  for (; ticks < 300 && release == null; ticks++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  let settled = false
+  void rejected.then(() => { settled = true })
+  for (let i = 0; i < 50; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  assert.strictEqual(settled, false, 'stuck after 50 ticks on one dig')
+  for (let i = 0; i < 100; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  await rejected
+})

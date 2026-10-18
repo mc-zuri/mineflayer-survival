@@ -56,6 +56,9 @@ export function goalReached (bot: Bot, goal: Goal): boolean {
   return false
 }
 
+/** how many times the stuck ticks a dig of one block may hold the bot still (a stone block by hand takes 150 ticks) */
+export const DIG_STUCK_FACTOR = 5
+
 /**
  * goto, checked. A bot pressed into a corner beside its path (the executor steers at the next node, not back onto the
  * line, so a bot off its block's middle catches on the corner of a wall it passes) is stuck: it steps back to the
@@ -96,6 +99,7 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
   const start = bot.entity.position.clone()
   const planTicks = args.planTicks ?? 600
 
+  let digAt: string | null = null
   const onTick = (): void => {
     ticks++
     if (!moved && bot.entity.position.distanceTo(start) >= 0.5) moved = true
@@ -108,13 +112,16 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
       return
     }
     if (!bot.pathfinder.isPathing) return
-    const digging = (bot as any).targetDigBlock != null
-    if (digging || bot.entity.position.distanceTo(anchor) >= 0.5) {
+    // a block being dug holds the bot still for a while: a new block starts the count again, the same one gets
+    // DIG_STUCK_FACTOR times the ticks (a dig that never ends, or a dig target left set, is stuck too)
+    const dig = (bot as any).targetDigBlock?.position?.toString() ?? null
+    if (bot.entity.position.distanceTo(anchor) >= 0.5 || (dig != null && dig !== digAt)) {
       anchor = bot.entity.position.clone()
       still = 0
+      digAt = dig
       return
     }
-    if (++still >= stuckTicks && !stuck) {
+    if (++still >= stuckTicks * (dig != null ? DIG_STUCK_FACTOR : 1) && !stuck) {
       stuck = true
       void bot.pathfinder.cancel()
     }
