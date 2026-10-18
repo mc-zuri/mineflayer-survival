@@ -1,4 +1,6 @@
 import type { Bot } from 'mineflayer'
+import { dig } from '../core/actions'
+import { isAbort } from './errors'
 import { Vec3 } from 'vec3'
 import { creeperSwelling, lowerShield, raiseShield, SwellCounter } from './fight'
 import { isDangerBlock, steerAway, steerToward, fleeHeading } from './steer'
@@ -118,7 +120,30 @@ export interface SurfaceOptions extends SkillOptions {
   maxTicks?: number
 }
 
-/** Swims up to air and stays there until the air bar is back. */
+/** blocks a bot under water doesn't dig its way up through */
+const UNBREAKABLE_CEILING = new Set(['bedrock', 'barrier', 'end_portal_frame', 'reinforced_deepslate', 'obsidian', 'crying_obsidian', 'lava'])
+
+/**
+ * The block to dig for air when the bot is under a ceiling: up from the eyes' cell through the water (up to 3 cells),
+ * the first block that isn't water when it is solid and can be dug (a frozen sea's ice, a cave's roof), else null
+ * (air there, or nothing to dig). Ice dug over water turns to water (IceBlock.playerDestroy), with the air over it.
+ */
+export function ceilingToDig (nameAt: (pos: Vec3) => { name: string, boundingBox: string } | null, eyes: Vec3): Vec3 | null {
+  for (let dy = 1; dy <= 3; dy++) {
+    const pos = eyes.offset(0, dy, 0)
+    const b = nameAt(pos)
+    if (b == null) return null
+    if (b.name === 'water' || b.name === 'bubble_column') continue
+    if (b.boundingBox !== 'block' || UNBREAKABLE_CEILING.has(b.name)) return null
+    return pos
+  }
+  return null
+}
+
+/**
+ * Swims up to air and stays there until the air bar is back. Under ice with no air in reach (a frozen sea) it digs
+ * the ice over its head (ceilingToDig): the jump alone held it against the ice until it drowned (26.3).
+ */
 export async function surface (bot: Bot, opts: SurfaceOptions = {}): Promise<{ ticks: number }> {
   const recoverTo = opts.recoverTo ?? 18
   const radius = opts.searchRadius ?? 8
@@ -143,6 +168,19 @@ export async function surface (bot: Bot, opts: SurfaceOptions = {}): Promise<{ t
         })
       }
       bot.setControlState('jump', true)
+      if (target == null && t % 10 === 0) {
+        const ceiling = ceilingToDig(p => bot.blockAt(p) as any, eyePosition(bot).floored())
+        const block = ceiling != null ? bot.blockAt(ceiling) : null
+        if (block != null) {
+          try {
+            await dig(bot, block as any, { signal: opts.signal })
+          } catch (err) {
+            if (isAbort(err)) throw err
+          }
+          target = null
+          continue
+        }
+      }
       if (target != null) {
         const dx = target.x + 0.5 - bot.entity.position.x
         const dz = target.z + 0.5 - bot.entity.position.z

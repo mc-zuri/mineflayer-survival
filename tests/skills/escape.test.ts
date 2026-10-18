@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { headInWater, inHazard, isSafeStand, nearestSpot } from '../../src/skills/escape'
+import { ceilingToDig, headInWater, inHazard, isSafeStand, nearestSpot } from '../../src/skills/escape'
 import { fakeBot } from '../reflexes/fakeBot'
 
 // a lava pool: x 0 - 3, y 63 - 64 lava, stone around and below
@@ -29,4 +29,18 @@ test('headInWater', () => {
   const sea = (p: Vec3): string => p.y < 60 ? 'stone' : p.y < 70 ? 'water' : 'air'
   assert.strictEqual(headInWater(fakeBot({ position: new Vec3(0.5, 65, 0.5), world: sea })), true)
   assert.strictEqual(headInWater(fakeBot({ position: new Vec3(0.5, 69, 0.5), world: sea })), false)
+})
+
+test('ceilingToDig: under a frozen sea the ice over the head is dug for air; open water, a roof of bedrock or obsidian is not', () => {
+  const world = (column: Record<number, string>) => (p: Vec3) => {
+    const name = column[p.y] ?? 'air'
+    return { name, boundingBox: name === 'water' || name === 'air' ? 'empty' : 'block' }
+  }
+  const eyes = new Vec3(5, 60, 5)
+  assert.deepStrictEqual(ceilingToDig(world({ 60: 'water', 61: 'water', 62: 'ice' }), eyes), new Vec3(5, 62, 5))
+  assert.deepStrictEqual(ceilingToDig(world({ 60: 'water', 61: 'packed_ice' }), eyes), new Vec3(5, 61, 5))
+  assert.strictEqual(ceilingToDig(world({ 60: 'water', 61: 'water' }), eyes), null)
+  assert.strictEqual(ceilingToDig(world({ 60: 'water', 61: 'bedrock' }), eyes), null)
+  assert.strictEqual(ceilingToDig(world({ 60: 'water', 61: 'obsidian' }), eyes), null)
+  assert.strictEqual(ceilingToDig(world({ 60: 'water', 61: 'water', 62: 'water', 63: 'water', 64: 'stone' }), eyes), null)
 })
