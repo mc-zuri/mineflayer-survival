@@ -65,8 +65,8 @@ export interface ExecutorOptions {
   home?: () => Vec3 | null
 }
 
-/** what a caller adds to the executor's plans (the night's: undergroundOnly) */
-export type PlanOptions = Pick<ObtainOptions, 'undergroundOnly'>
+/** what a caller adds to the executor's plans (the night's: undergroundOnly; a stock top-up's: no loot, exclude) */
+export type PlanOptions = Pick<ObtainOptions, 'undergroundOnly' | 'exclude'>
 
 export interface ObtainOutcome {
   /** plans made */
@@ -201,7 +201,7 @@ export class Executor {
       memory: this.memory,
       position: this.bot.entity.position,
       dimension: this.bot.game?.dimension,
-      exclude: this.options.exclude,
+      exclude: [...this.options.exclude, ...(extra.exclude ?? [])],
       findCost: t => this.sightings.cost(t),
       farmCost: crop => this.farmCost(crop)
     })

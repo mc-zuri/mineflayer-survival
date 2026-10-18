@@ -38,7 +38,7 @@ for (const version of VERSIONS) {
     assert.deepEqual(ups.map(u => u.mark.id), ['wood'])
     assert.equal(ups[0].units, 64 - 20)
     assert.deepEqual(ups[0].request, { item: '#logs_that_burn', count: 64 })
-    assert.equal(ups[0].budget, (64 - 20) * 60)
+    assert.equal(ups[0].budget, (64 - 20) * 100)
     // part of the way (40): still under way
     ups = policy.topUps(inv({ oak_log: 40 }), {}, [], ['surface'])
     assert.equal(ups[0]?.units, 24)

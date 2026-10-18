@@ -4,6 +4,7 @@
 import { Inventory } from '../core/inventory'
 import { FOOD_POINTS, toolsAtLeast, type MilestoneId } from './progression'
 import type { ObtainRequest } from './obtain'
+import type { StockPlace } from './stock'
 
 export type DayPhase = 'day' | 'dusk' | 'night'
 
@@ -105,4 +106,15 @@ export const HUNGRY = 6
  */
 export function comeUp (phase: DayPhase, foodPoints: number, hunger = 20): boolean {
   return phase === 'day' || (hunger <= HUNGRY && foodPoints < FOOD_POINTS / 4)
+}
+
+/**
+ * Where the stock's top-ups (planner/stock.ts) are got now: the surface's (wood, food, arrows) by day and dusk on the
+ * surface, the mine's (stone, coal, the ores, torches) at night down the mine, and by day too when the bot is down
+ * there already (the iron's or the diamonds' work ended at the ores' level): neither a climb up for logs from the mine
+ * nor a trip down for coal in the middle of the day's surface work.
+ */
+export function topUpPlaces (phase: DayPhase, onSurface: boolean): StockPlace[] {
+  if (phase === 'night' || !onSurface) return ['underground']
+  return ['surface']
 }

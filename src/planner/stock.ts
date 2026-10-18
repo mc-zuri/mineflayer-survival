@@ -58,7 +58,7 @@ const STACK = 64
  * - arrows: the End's crystals and the dragon (the End kit's 64), from the diamonds on.
  */
 export const STOCK_MARKS: readonly StockMark[] = [
-  { id: 'wood', counts: { '#logs_that_burn': 1, '#planks': 1 / 4, stick: 1 / 8 }, gather: '#logs_that_burn', low: 32, high: 64, keep: { '#logs_that_burn': 64 }, where: 'surface', ticksPerUnit: 60 },
+  { id: 'wood', counts: { '#logs_that_burn': 1, '#planks': 1 / 4, stick: 1 / 8 }, gather: '#logs_that_burn', low: 32, high: 64, keep: { '#logs_that_burn': 64 }, where: 'surface', ticksPerUnit: 100 },
   { id: 'stone', counts: { '#stone_crafting_materials': 1 }, gather: ['cobblestone', 'cobbled_deepslate'], low: 3 * STACK, high: 5 * STACK, keep: { cobblestone: STACK }, from: 'wood', where: 'underground', ticksPerUnit: 25 },
   { id: 'torch', counts: { torch: 1 }, gather: 'torch', low: 3 * STACK, high: 5 * STACK, keep: { torch: STACK }, from: 'stone', where: 'underground', ticksPerUnit: 20 },
   { id: 'coal', counts: { coal: 1, charcoal: 1, coal_block: 9 }, gather: ['coal', 'charcoal'], low: 32, high: 96, keep: { coal: 32, charcoal: 32 }, from: 'wood', where: 'underground', ticksPerUnit: 80 },

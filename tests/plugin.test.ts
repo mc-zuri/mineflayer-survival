@@ -16,9 +16,23 @@ function fakeBot (): any {
 test('createPlugin sets bot.survival with the default options', () => {
   const bot = fakeBot()
   createPlugin()(bot)
-  assert.deepStrictEqual(bot.survival.options, { loadPathfinder: true, reflexes: true, diagnostics: {} })
+  assert.deepStrictEqual(bot.survival.options, { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {} })
+  assert.ok(bot.survival.stock != null, 'the stock policy is on by default')
   assert.ok(bot.survival.reflexes != null)
   assert.deepStrictEqual(bot.survival.diagnostics.lastReports(), [])
+})
+
+test('createPlugin with stock options, or the stock policy off', () => {
+  const bot = fakeBot()
+  createPlugin({ stock: { overrides: { iron: { low: 8, high: 16 } }, keep: { raw_iron: 4 } } })(bot)
+  assert.deepStrictEqual(bot.survival.stock.marks.find((m: any) => m.id === 'iron')?.high, 16)
+  assert.strictEqual(bot.survival.stock.keepCount('raw_iron'), 4)
+  const off = fakeBot()
+  createPlugin({ stock: false })(off)
+  assert.strictEqual(off.survival.stock, null)
+  const disabled = fakeBot()
+  createPlugin({ stock: { enabled: false } })(disabled)
+  assert.strictEqual(disabled.survival.stock, null)
 })
 
 test('createPlugin without reflexes', () => {

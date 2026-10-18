@@ -15,7 +15,12 @@ import { connectLockstepBot, quitBot, startServer, type TestServer } from '../ha
 const SEED = process.env.PLAY_SEED ?? '2'
 
 function report (t: { diagnostic: (msg: string) => void }, result: PlayResult): void {
-  for (const r of result.reached) t.diagnostic(`${r.id}: tick ${r.tick}, ${(r.wallMs / 1000).toFixed(1)} s wall`)
+  for (const r of result.reached) {
+    t.diagnostic(`${r.id}: tick ${r.tick}, ${(r.wallMs / 1000).toFixed(1)} s wall`)
+    // the stock it ended with (carried+stored/low-high), the marks under their low one marked
+    const stock = Object.entries(r.stock ?? {}).map(([id, s]) => `${id} ${s.carried}${s.stored > 0 ? `+${s.stored}` : ''}/${s.low}-${s.high}${s.carried + s.stored < s.low ? ' (low)' : ''}`)
+    if (stock.length > 0) t.diagnostic(`  stock: ${stock.join(', ')}`)
+  }
   t.diagnostic(`stopped: ${result.reason}${result.stoppedAt != null ? ` at ${result.stoppedAt}` : ''}${result.error != null ? `: ${(result.error as Error).message}` : ''}`)
 }
 

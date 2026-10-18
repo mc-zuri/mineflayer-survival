@@ -14,14 +14,15 @@ import { Inventory, type ItemCount } from './core/inventory'
 import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './core/memory'
 import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
-import { comeUp, dayPhase, nightAction, nightGoals } from './planner/schedule'
+import { comeUp, dayPhase, nightAction, nightGoals, topUpPlaces } from './planner/schedule'
+import { describeLevel, StockPolicy, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
 import { onSurface } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
 import { buildBase, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
-import { Executor, describeRequest, ownedInventory, type ExecutorOptions } from './executor/executor'
-import { defaultKeep, SPARE_FOOD_POINTS, spareKitGoals } from './executor/keep'
+import { Executor, describeRequest, ownedInventory, type ExecutorOptions, type PlanOptions } from './executor/executor'
+import { SPARE_FOOD_POINTS, spareKitGoals, stockKeepRule } from './executor/keep'
 import { isAbort } from './skills/errors'
 import { navigate, navigateNear } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
@@ -64,6 +65,8 @@ export interface MilestoneEvent {
   tick: number
   /** wall-clock milliseconds since play started (this run) */
   wallMs: number
+  /** the stock's levels then, carried and stored, by mark (planner/stock.ts; none without a stock policy) */
+  stock?: Record<string, { carried: number, stored: number, low: number, high: number }>
 }
 
 export interface PlayOptions {
@@ -87,6 +90,8 @@ export interface PlayOptions {
   deathItemTicks?: number
   /** a milestone failing this many times in a row stops play (default 5) */
   maxFailures?: number
+  /** the stock policy's top-ups: false for none, options for another policy than bot.survival.stock (createPlugin's) */
+  stock?: false | StockOptions
   executor?: ExecutorOptions
   base?: Partial<Omit<BuildBaseOptions, 'executor'>>
   /** stop after this many ticks of this run (the work in hand is aborted) */
@@ -201,6 +206,9 @@ export const FOOD_RESTOCK = FOOD_POINTS / 2
 /** ticks a restock that failed waits before it is tried again (the work goes on meanwhile) */
 export const RESTOCK_RETRY_TICKS = 6000
 
+/** ticks a stock top-up that ended short (its budget spent, no plan within it, a failure) waits to be tried again */
+export const STOCK_RETRY_TICKS = 2400
+
 /**
  * The milestone to work on: the first not reached in this game and not done now. One reached stays reached when its
  * items are lost (a death, a broken tool): what a later milestone needs of them its own plan gets, so a death after
@@ -262,6 +270,10 @@ export class Runner {
   private inNightWork = false
   private restockRetryAt = 0
   private readonly store: SaveStore | null
+  /** what play keeps on hand beyond the milestones' needs (planner/stock.ts), null for nothing */
+  readonly stock: StockPolicy | null
+  /** a stock mark's next top-up, by id: STOCK_RETRY_TICKS after one ended short */
+  private readonly stockRetryAt = new Map<string, number>()
 
   constructor (readonly bot: Bot, readonly options: PlayOptions = {}) {
     this.log = options.log ?? (line => console.log(tickLine(this.tick, line)))
@@ -270,10 +282,14 @@ export class Runner {
     // checkpoints have them then
     const diag = this.diagnostics
     if (diag != null && !diag.dirChosen && diag.dir == null && options.saveFile != null) diag.dir = path.join(path.dirname(path.resolve(options.saveFile)), 'stuck')
+    const stock = options.stock
+    this.stock = stock === false || stock?.enabled === false ? null : stock != null ? new StockPolicy(stock) : (bot as any).survival?.stock ?? null
     this.executor = new Executor(bot, {
       log: this.log,
       home: () => this.home(),
       ...options.executor,
+      // the stock's working set carried, the rest stored at the base
+      keep: options.executor?.keep ?? (this.stock != null ? stockKeepRule(this.stock) : undefined),
       hooks: {
         ...options.executor?.hooks,
         beforeStep: async (step) => {
@@ -340,9 +356,14 @@ export class Runner {
       if (this.reached.some(r => r.id === m.id)) continue
       if (!m.done(state)) continue
       const event: MilestoneEvent = { id: m.id, title: m.title, tick: this.tick, wallMs: Date.now() - this.started }
+      const levels = this.stockLevels()
+      if (levels != null) {
+        event.stock = Object.fromEntries(levels.map(l => [l.mark.id, { carried: Math.floor(l.carried), stored: Math.floor(l.stored), low: l.mark.low, high: l.mark.high }]))
+      }
       this.reached.push(event)
       this.log(`milestone ${m.id} reached at tick ${event.tick} (${(event.wallMs / 1000).toFixed(1)} s)`)
       this.diagnostics?.milestoneReached(m.id)
+      if (levels != null) this.log(`stock at ${m.id}: ${levels.map(describeLevel).join(', ')}`)
       this.bot.emit('survivalMilestone' as any, event)
     }
   }
@@ -457,7 +478,13 @@ export class Runner {
       this.log(`working on ${m.id}: ${m.title}`)
       this.diagnostics?.milestoneStarted(m.id, m.title, describeGoals(m, state))
       try {
-        const how = await this.untilDusk(signal, async (s) => await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log }))
+        const how = await this.untilDusk(signal, async (s) => {
+          await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log })
+          // the milestone ends with the stock topped up for the ones after it, what can be got where the bot is
+          // (topUpPlaces: the surface's by day, the mine's down there); the milestone's own marks apply once it's done
+          const done = m.done(progressState(this.bot, this.memory))
+          await this.topUp(this.topUpPlacesNow(), s, done ? [...reachedIds, m.id] : reachedIds)
+        })
         if (stopped()) return this.stop(m.id, 'aborted')
         if (how === 'dusk') {
           this.log(`dusk: ${m.id} left for the night's mine`)
@@ -555,6 +582,88 @@ export class Runner {
     await this.executor.storeExact(items, signal)
   }
 
+  /** what the base's chests hold, summed (the memory's contents, as seen or stored last) */
+  stockStored (): Record<string, number> {
+    const base = baseRecord(this.memory)
+    if (base == null) return {}
+    const dimension = this.memory.base?.dimension ?? 'overworld'
+    return storedAtBase(base.chests.map(c => this.memory.chestAt(c, dimension)))
+  }
+
+  /** the stock's levels now (carried and at the base), null without a stock policy */
+  stockLevels (): StockLevel[] | null {
+    if (this.stock == null || this.bot.entity == null) return null
+    return this.stock.update(ownedInventory(this.bot), this.stockStored(), this.reached.map(r => r.id))
+  }
+
+  /** where the top-ups are got now (topUpPlaces): the surface's by day up there, the mine's at night or down there */
+  private topUpPlacesNow (): StockPlace[] {
+    const bot = this.bot
+    if (bot.entity == null) return []
+    const surface = typeof bot.blockAt !== 'function' || onSurface(p => bot.blockAt(p) as any, bot.entity.position.floored())
+    return topUpPlaces(dayPhase(bot.time?.timeOfDay ?? 0), surface)
+  }
+
+  /** the stock's top-ups due at these places (in the overworld, where their sources are), not waiting for a retry */
+  dueTopUps (places: readonly StockPlace[], reached: readonly MilestoneId[] = this.reached.map(r => r.id)): TopUp[] {
+    if (this.stock == null || places.length === 0 || this.bot.entity == null) return []
+    if (normalizeDimension(this.bot.game?.dimension) !== 'overworld') return []
+    const now = this.bot.survival.tasks.tick
+    return this.stock.topUps(ownedInventory(this.bot), this.stockStored(), reached, places).filter(u => (this.stockRetryAt.get(u.mark.id) ?? 0) <= now)
+  }
+
+  /**
+   * The stock's top-ups due here (dueTopUps), the lowest first, each once: planned without looting the base's chests
+   * (what they hold is stock already) and, down the mine, with what a mine has; left for later when the plan costs
+   * more than the top-up's budget (its source isn't near: no trees in sight, the ore's level far), and stopped when it
+   * has run its budget's ticks. One that ends short waits STOCK_RETRY_TICKS. Throws only for a death or the signal.
+   */
+  async topUp (places: readonly StockPlace[], signal: AbortSignal, reached: readonly MilestoneId[] = this.reached.map(r => r.id)): Promise<void> {
+    const tried = new Set<string>()
+    for (;;) {
+      if (signal.aborted) throw signal.reason
+      const up = this.dueTopUps(places, reached).find(u => !tried.has(u.mark.id))
+      if (up == null) return
+      tried.add(up.mark.id)
+      const retryLater = (): void => { this.stockRetryAt.set(up.mark.id, this.bot.survival.tasks.tick + STOCK_RETRY_TICKS) }
+      const options: PlanOptions = { exclude: ['loot'], ...(places.includes('surface') ? {} : { undergroundOnly: true }) }
+      const plan = this.executor.plan([up.request], undefined, options)
+      if (!plan.ok || plan.cost > up.budget) {
+        this.log(`stock: ${describeLevel(up.level)}: not now (${plan.ok ? `${plan.cost} ticks for ${up.units}, over its ${up.budget}` : 'no plan'})`)
+        retryLater()
+        continue
+      }
+      this.log(`stock: ${describeLevel(up.level)}: ${up.units} more, in ${up.budget} ticks at most`)
+      const start = this.bot.survival.tasks.tick
+      try {
+        await this.withBudget(up.budget, signal, async (s) => await this.executor.obtain([up.request], s, options))
+      } catch (err) {
+        if (signal.aborted || TaskError.is(err, 'DIED') || this.bot.health <= 0) throw err
+        this.log(`stock: ${up.mark.id} stopped after ${this.bot.survival.tasks.tick - start} ticks: ${(err as Error).message}`)
+        retryLater()
+      }
+    }
+  }
+
+  /** runs fn under a signal that also fires once it has run `ticks` ticks */
+  private async withBudget<T> (ticks: number, signal: AbortSignal, fn: (s: AbortSignal) => Promise<T>): Promise<T> {
+    const ctrl = new AbortController()
+    const onOuter = (): void => ctrl.abort(signal.reason)
+    if (signal.aborted) onOuter()
+    signal.addEventListener('abort', onOuter, { once: true })
+    const end = this.bot.survival.tasks.tick + ticks
+    const watch = (): void => {
+      if (!ctrl.signal.aborted && this.bot.survival.tasks.tick >= end) ctrl.abort(new TaskError('TIMEOUT', `its ${ticks} ticks are up`))
+    }
+    this.bot.on('physicsTick', watch)
+    try {
+      return await fn(ctrl.signal)
+    } finally {
+      this.bot.off('physicsTick', watch)
+      signal.removeEventListener('abort', onOuter)
+    }
+  }
+
   /** whether a bed is at hand: one held, the base's when near, or one standing nearby */
   private bedAtHand (): boolean {
     const bot = this.bot
@@ -591,7 +700,8 @@ export class Runner {
       overworld: normalizeDimension(bot.game?.dimension) === 'overworld',
       bed: this.options.sleep !== false && this.bedAtHand(),
       pickaxe: inv.bestTool('pickaxe'),
-      goals: goals.length > 0
+      // the stock's mine top-ups are the night's work too (the ores by night)
+      goals: goals.length > 0 || this.dueTopUps(['underground'], reached).length > 0
     })
     return action === 'mine' ? { day, goals } : null
   }
@@ -684,6 +794,14 @@ export class Runner {
             if (signal?.aborted === true || TaskError.is(err, 'DIED') || bot.health <= 0) throw err
             if (!ctrl.signal.aborted) this.log(`night: ${next.id} stopped: ${(err as Error).message}`)
           }
+        }
+      }
+      // the rest of the night for the stock's mine top-ups (stone, coal, torches, the ores), down here at their level
+      if (!ctrl.signal.aborted) {
+        try {
+          await this.topUp(['underground'], ctrl.signal)
+        } catch (err) {
+          if (signal?.aborted === true || TaskError.is(err, 'DIED') || bot.health <= 0) throw err
         }
       }
       // (only when the day's work is the surface's: the hunt, the house. The iron's last logs are a short trip up:
@@ -824,7 +942,7 @@ export class Runner {
     }
     for (const chest of base.chests) {
       const known = this.memory.chestAt(chest, dimension)
-      const wanted = Object.keys(known?.items ?? {}).filter(name => (defaultKeep(name, bot.registry) ?? 0) > 0)
+      const wanted = Object.keys(known?.items ?? {}).filter(name => (this.executor.options.keep(name, bot.registry) ?? 0) > 0)
       if (wanted.length === 0) continue
       try {
         const res = await this.executor.task('kit', async (s) => await retrieveItems(bot, { chest: new Vec3(chest.x, chest.y, chest.z), filter: wanted }, s), signal)

@@ -8,6 +8,7 @@ import { keepHeadAboveWater } from './skills/breath'
 import { openSky } from './executor/explore'
 import type { MilestoneId } from './planner/progression'
 import { Diagnostics, type DiagnosticsOptions } from './diagnostics'
+import { StockPolicy, type StockOptions } from './planner/stock'
 
 export * from './core'
 export * from './planner'
@@ -36,6 +37,8 @@ export interface SurvivalOptions {
   reflexes?: boolean | ReflexEngineOptions
   /** the stuck reports (bot.survival.diagnostics): where they're written, how many kept */
   diagnostics?: DiagnosticsOptions
+  /** the stock policy (planner/stock.ts): its marks, overrides and working set; false or enabled: false for none */
+  stock?: StockOptions | false
 }
 
 export interface Survival {
@@ -57,10 +60,12 @@ export interface Survival {
   play: (options?: PlayOptions) => Promise<PlayResult>
   /** stuck reports: lastReports(), onReport(cb), dump() */
   diagnostics: Diagnostics
+  /** what play keeps on hand beyond the milestones' needs (null when turned off) */
+  stock: StockPolicy | null
 }
 
 export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
-  const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, diagnostics: {}, ...opts }
+  const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, ...opts }
   return function (bot: Bot): void {
     if (options.loadPathfinder && bot.pathfinder == null) bot.loadPlugin(createPathfinder())
     // no walk or swim with the head under water and no air over it (a flooded cave): the bot drowns on the way
@@ -69,7 +74,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     const memory = new WorldMemory()
     const reflexes = options.reflexes === false ? null : new ReflexEngine(bot, { sink: tasks, ...(options.reflexes === true ? {} : options.reflexes) })
     const diagnostics = new Diagnostics(bot, options.diagnostics)
-    bot.survival = { options, tasks, memory, reflexes, handlers: {}, advancements: new Set(), play: async (playOptions) => await play(bot, playOptions), diagnostics }
+    const stock = options.stock === false || options.stock.enabled === false ? null : new StockPolicy(options.stock)
+    bot.survival = { options, tasks, memory, reflexes, handlers: {}, advancements: new Set(), play: async (playOptions) => await play(bot, playOptions), diagnostics, stock }
     bot.on('physicsTick', () => { memory.now = tasks.tick })
     bot.on('death', () => {
       // the running and queued tasks can't go on; the death spot is where the items are
