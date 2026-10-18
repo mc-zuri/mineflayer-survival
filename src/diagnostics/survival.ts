@@ -7,10 +7,11 @@ import type { Bot } from 'mineflayer'
 import type { PlanStep } from '../planner/steps'
 import type { ItemCount } from '../core/inventory'
 import type { StallTrigger } from './watchdog'
+import { diagnoseDeath, type DeathFacts } from './death'
 
 type XYZ = [number, number, number]
 
-export type SurvivalReportKind = 'stall' | 'skill_failed'
+export type SurvivalReportKind = 'stall' | 'skill_failed' | 'death'
 
 /** what a step is about, for the rules: its kind and item, the blocks a mine step looks for, what a craft or smelt uses */
 export interface StepFacts {
@@ -73,6 +74,9 @@ export interface PlanTrace {
   n: number
   requests: string[]
   steps: string[]
+  /** in a report: the steps run and the ones left (from the one running) */
+  done?: string[]
+  left?: string[]
   /** the step running (or that ran last) */
   index: number
   /** the blocks its mine steps look for */
@@ -134,6 +138,8 @@ export interface SurvivalReport {
   trigger?: StallTrigger
   /** the skill that threw (skill_failed) */
   skill?: SkillFacts
+  /** how the bot died, and the recovery (death) */
+  death?: DeathFacts
   work: {
     milestone: MilestoneTrace | null
     plan: PlanTrace | null
@@ -372,6 +378,7 @@ function lastErrorOf (r: SurvivalReport, key: string): ErrorEntry | null {
  * diamond_ore: no known diamond_ore, explored 96 blocks"); for a skill that threw, what and why.
  */
 export function diagnoseSurvival (r: SurvivalReport): string {
+  if (r.kind === 'death' && r.death != null) return diagnoseDeath(r.death)
   const milestone = r.work.milestone?.id ?? 'none'
   if (r.kind === 'stall' && r.trigger != null) {
     const t = r.trigger
@@ -404,6 +411,7 @@ export interface SurvivalReportInput {
   message: string
   trigger?: StallTrigger
   skill?: SkillFacts
+  death?: DeathFacts
   work: SurvivalReport['work']
   errors: ErrorEntry[]
   movement: ReportSummary[]
@@ -425,6 +433,7 @@ export function buildSurvivalReport (bot: Bot, input: SurvivalReportInput): Surv
     diagnosis: '',
     ...(input.trigger != null ? { trigger: input.trigger } : {}),
     ...(input.skill != null ? { skill: input.skill } : {}),
+    ...(input.death != null ? { death: input.death } : {}),
     work: input.work,
     bot: botState(bot),
     memory,

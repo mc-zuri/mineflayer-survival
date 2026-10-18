@@ -9,16 +9,18 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { buildReport, type BuildReportOptions, type ReportKind, type StuckReport } from './report'
 import {
-  buildSurvivalReport, errorEntry, plain, stepFacts, xyzOf,
-  type ErrorEntry, type MilestoneTrace, type PlanTrace, type ReportSummary, type SkillFacts, type StepTrace,
+  botState, buildSurvivalReport, diagnoseSurvival, errorEntry, plain, stepFacts, xyzOf,
+  type BotState, type ErrorEntry, type MilestoneTrace, type PlanTrace, type ReportSummary, type SkillFacts, type StepTrace,
   type SurvivalReport, type SurvivalReportKind, type TasksSnapshot, type WindowSnapshot
 } from './survival'
 import { StallWatchdog, type StallTrigger, type WatchdogOptions } from './watchdog'
+import { DEATH_TICKS, isDeathMessage, type DamageSample, type DeathFacts, type EntityFacts, type HealthSample, type Recovery, type ReflexSample } from './death'
 import type { PlanStep } from '../planner/steps'
 
 export * from './report'
 export * from './survival'
 export * from './watchdog'
+export * from './death'
 
 /** any report the diagnostics keep */
 export type DiagnosticReport = StuckReport | SurvivalReport
@@ -86,6 +88,16 @@ export class Diagnostics {
   private highWater = new Map<string, number>()
   private window: { snapshot: WindowSnapshot, live: any } | null = null
   private lastSkill: { key: string, tick: number, record: ReportRecord } | null = null
+  // --- for the death reports ---
+  private readonly healthLog: HealthSample[] = []
+  private readonly damageLog: DamageSample[] = []
+  private readonly reflexLog: ReflexSample[] = []
+  private readonly deathLines: Array<{ tick: number, message: string }> = []
+  /** the bot every 20 ticks, and when the server said it was killed (death_combat_event): what it had */
+  private lastState: BotState | null = null
+  private killedState: { tick: number, state: BotState } | null = null
+  /** the last death's report, until its recovery is done (and its death message, when that comes after) */
+  private lastDeath: { record: ReportRecord, tick: number } | null = null
 
   constructor (private readonly bot: Bot, private readonly opts: DiagnosticsOptions = {}) {
     this.dir = opts.dir !== undefined ? opts.dir : envDir()
@@ -111,6 +123,7 @@ export class Diagnostics {
     bot.on('windowClose' as any, (w: any) => {
       if (this.window?.live === w || this.window == null) this.window = { snapshot: this.windowSnapshot(w, this.now()), live: null }
     })
+    this.watchDeaths()
   }
 
   /** the tick reports are stamped with: play's (over a resumed game's runs), else the task runner's */
@@ -196,6 +209,130 @@ export class Diagnostics {
     }
   }
 
+  // --- deaths ---
+
+  private watchDeaths (): void {
+    const bot = this.bot as any
+    const recent = <T extends { tick: number }>(list: T[], item: T): void => {
+      list.push(item)
+      const since = item.tick - DEATH_TICKS
+      // (the last one before the window too: the health it started from)
+      while (list.length > 1 && list[1].tick < since) list.shift()
+      if (list.length > 400) list.splice(0, list.length - 400)
+    }
+    bot.on('health', () => {
+      const last = this.healthLog[this.healthLog.length - 1]
+      if (last != null && last.health === bot.health && last.food === bot.food) return
+      recent(this.healthLog, { tick: this.now(), health: bot.health, food: bot.food })
+    })
+    bot.on('reflex', (name: string) => recent(this.reflexLog, { tick: this.now(), name }))
+    bot.on('reflexFailed', (name: string, err: unknown) => recent(this.reflexLog, { tick: this.now(), name, failed: String((err as Error)?.message ?? err) }))
+    bot.on('messagestr', (message: string) => {
+      if (typeof message !== 'string' || !message.startsWith(`${String(bot.username)} `) || !isDeathMessage(message)) return
+      recent(this.deathLines, { tick: this.now(), message })
+      // a death message after the death: onto its report
+      const d = this.lastDeath
+      const death = (d?.record.report as SurvivalReport | undefined)?.death
+      if (d != null && death != null && death.message == null && this.now() - d.tick <= 100) {
+        death.message = message
+        this.deathLines.length = 0
+        this.rediagnose(d.record)
+      }
+    })
+    // the hits (ClientboundDamageEventPacket: the type, the entity that caused it and the one that hit), and the
+    // server's word that the bot was killed (ClientboundPlayerCombatKillPacket, before the inventory drops)
+    const client = bot._client
+    if (typeof client?.on === 'function') {
+      client.on('damage_event', (p: any) => {
+        if (p?.entityId !== bot.entity?.id) return
+        recent(this.damageLog, { tick: this.now(), type: p.sourceTypeId ?? null, cause: this.entityFacts(bot.entities?.[p.sourceCauseId - 1]), direct: this.entityFacts(bot.entities?.[p.sourceDirectId - 1]), health: null })
+      })
+      client.on('death_combat_event', (p: any) => {
+        if (p?.playerId !== bot.entity?.id) return
+        try { this.killedState = { tick: this.now(), state: botState(this.bot) } } catch {}
+      })
+    } else {
+      bot.on('entityHurt', (e: any, source: any) => {
+        if (e == null || e !== bot.entity) return
+        recent(this.damageLog, { tick: this.now(), type: null, cause: this.entityFacts(source), direct: null, health: bot.health ?? null })
+      })
+    }
+    bot.on('death', () => {
+      try { this.death() } catch {}
+    })
+  }
+
+  private entityFacts (e: any): EntityFacts | null {
+    if (e == null) return null
+    const me = this.bot.entity?.position
+    return { id: e.id, name: e.name ?? e.username ?? 'unknown', type: e.type ?? 'unknown', pos: xyzOf(e.position), distance: me != null && e.position != null ? Math.round(me.distanceTo(e.position) * 10) / 10 : null }
+  }
+
+  /** a death report: the message, the last ticks of health, hits and reflexes, where, and what the bot had */
+  private death (): SurvivalReport {
+    const tick = this.now()
+    // died again before the last death's recovery was done (on the way back to the spot)
+    const before = (this.lastDeath?.record.report as SurvivalReport | undefined)?.death
+    if (this.lastDeath != null && before?.recovery != null && before.recovery.done == null) {
+      before.recovery = { ...before.recovery, deathSpot: before.recovery.deathSpot ?? 'failed: died again on the way', done: tick }
+      this.rediagnose(this.lastDeath.record)
+    }
+    const since = tick - DEATH_TICKS
+    const now = botState(this.bot)
+    // (what it had: the inventory now when the server hasn't emptied it yet)
+    const had = now.inventory.length > 0 ? now : (this.killedState != null && tick - this.killedState.tick <= 20 ? this.killedState.state : this.lastState ?? now)
+    const damage = this.damageLog.filter(d => d.tick >= since)
+    const attackers: Record<string, number> = {}
+    for (const d of damage) if (d.cause != null) attackers[d.cause.name] = (attackers[d.cause.name] ?? 0) + 1
+    const near: EntityFacts[] = []
+    for (const e of Object.values(this.bot.entities ?? {}) as any[]) {
+      if (e === this.bot.entity || e?.position == null || ['object', 'orb', 'projectile', 'other'].includes(e.type)) continue
+      const f = this.entityFacts(e)
+      if (f?.distance != null && f.distance <= 16) near.push(f)
+    }
+    near.sort((a, b) => (a.distance ?? 0) - (b.distance ?? 0))
+    const facts: DeathFacts = {
+      message: [...this.deathLines].reverse().find(l => l.tick >= tick - 40)?.message ?? null,
+      pos: xyzOf(this.bot.entity?.position),
+      dimension: (this.bot.game as any)?.dimension ?? null,
+      health: this.healthLog.filter((h, i, all) => h.tick >= since || all[i + 1]?.tick >= since),
+      damage,
+      attackers,
+      reflexes: this.reflexLog.filter(r => r.tick >= since),
+      near: near.slice(0, 12),
+      had,
+      dropped: had.inventory,
+      recovery: null
+    }
+    const report = this.survivalReport('death', facts.message ?? 'died', { death: facts })
+    const record = this.records.find(r => r.report === report)
+    if (record != null) this.lastDeath = { record, tick }
+    this.killedState = null
+    // (a death message goes on one report)
+    this.deathLines.length = 0
+    return report
+  }
+
+  /** the last death's recovery, as the runner goes (the death spot, the kit, done): its report written again */
+  recovery (update: Partial<Omit<Recovery, 'started'>>): void {
+    const d = this.lastDeath
+    const death = (d?.record.report as SurvivalReport | undefined)?.death
+    if (d == null || death == null) return
+    death.recovery = { started: this.now(), deathSpot: null, picked: null, kit: null, done: null, ...death.recovery, ...update }
+    this.rediagnose(d.record)
+    if (update.done != null) {
+      // what's held now is the count to beat
+      this.resetStock()
+      this.progress('recovered')
+    }
+  }
+
+  private rediagnose (record: ReportRecord): void {
+    const report = record.report as SurvivalReport
+    report.diagnosis = diagnoseSurvival(report)
+    this.rewrite(record)
+  }
+
   // --- the stall watchdog ---
 
   /**
@@ -234,7 +371,10 @@ export class Diagnostics {
   private physicsTick (): void {
     this.ticks++
     // the cheap part every tick: a counter; the rest every 20
-    if (this.armed === 0 || this.ticks % 20 !== 0) return
+    if (this.ticks % 20 !== 0) return
+    // what the bot has, for a death report (the server empties the inventory before the health says it died)
+    try { if (this.bot.entity != null && this.bot.health > 0) this.lastState = botState(this.bot) } catch {}
+    if (this.armed === 0) return
     try {
       const tick = this.now()
       this.sampleStep()
@@ -428,7 +568,7 @@ export class Diagnostics {
     return { ...snap, reflex: (this.bot as any).survival?.reflexes?.current?.name ?? null }
   }
 
-  private survivalReport (kind: SurvivalReportKind, message: string, extra: { trigger?: StallTrigger, skill?: SkillFacts }): SurvivalReport {
+  private survivalReport (kind: SurvivalReportKind, message: string, extra: { trigger?: StallTrigger, skill?: SkillFacts, death?: DeathFacts }): SurvivalReport {
     const movement = this.history.filter(h => MOVEMENT_KINDS.includes(h.kind)).slice(-5)
     const needed = [...new Set([...(this.step?.blocks ?? []), ...(this.plan?.blocks ?? [])])]
     const report = buildSurvivalReport(this.bot, {
@@ -438,7 +578,7 @@ export class Diagnostics {
       ...extra,
       work: {
         milestone: this.milestone != null ? { ...this.milestone } : null,
-        plan: this.plan != null ? { ...this.plan } : null,
+        plan: this.plan != null ? { ...this.plan, done: this.plan.steps.slice(0, Math.max(0, this.plan.index)), left: this.plan.steps.slice(Math.max(0, this.plan.index)) } : null,
         step: this.step != null ? { ...this.step, state: plain(this.step.state, 1000) } : null,
         tasks: this.tasksSnapshot(),
         waiting: this.watchdog.waiting,

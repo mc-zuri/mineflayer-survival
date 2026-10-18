@@ -31,6 +31,7 @@ import { MILESTONE_HANDLERS, harvestGrownFarms } from './milestones'
 import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { Diagnostics, WatchdogOptions } from './diagnostics'
+import { isDeathMessage } from './diagnostics/death'
 
 export interface MilestoneContext {
   bot: Bot
@@ -177,9 +178,7 @@ export function deathSpotWorthIt (death: { x: number, y: number, z: number, dime
 }
 
 /** a system message about the player that isn't an advancement or a join: a death message (DeathMessageType's) */
-export function isDeathMessage (message: string): boolean {
-  return !/ has (made|completed|reached) the (advancement|challenge|goal)| joined the game| left the game/.test(message)
-}
+export { isDeathMessage }
 
 /** logs cut at dusk for a night down the mine with no wood carried, if they cost DUSK_WOOD_TICKS or less */
 export const DUSK_LOGS = 4
@@ -728,9 +727,20 @@ export class Runner {
   /** death spots the bot died again going back to */
   readonly deadlySpots: Vec3[] = []
 
-  /** after a death: respawned, then back for the items, or to the base for a kit */
+  /** after a death: respawned, then back for the items, or to the base for a kit (the death report told how it went) */
   async recoverFromDeath (signal?: AbortSignal): Promise<void> {
+    try {
+      await this.recoverOnce(signal)
+      this.diagnostics?.recovery({ done: this.bot.survival.tasks.tick })
+    } catch (err) {
+      this.diagnostics?.recovery({ done: this.bot.survival.tasks.tick, ...(TaskError.is(err, 'DIED') ? {} : { deathSpot: `failed: ${(err as Error).message}` }) })
+      throw err
+    }
+  }
+
+  private async recoverOnce (signal?: AbortSignal): Promise<void> {
     const bot = this.bot
+    const diag = this.diagnostics
     if (bot.health <= 0 || (bot as any).isAlive === false) {
       await new Promise<void>(resolve => {
         const done = (): void => { bot.off('spawn', done); resolve() }
@@ -740,12 +750,14 @@ export class Runner {
     }
     // the respawn's position and chunks come a few ticks after
     await bot.waitForTicks(20)
+    diag?.recovery({})
     this.save()
     const death = this.memory.death
     // a spot the bot died at again on the way back for its items (mobs in a cave, a fall) is left: a third trip
     // there ends the same way
     const deadly = death != null && this.deadlySpots.some(p => p.distanceTo(new Vec3(death.x, death.y, death.z)) < DEADLY_SPOT_RADIUS)
     if (deadly) this.log(`not back to the death spot at ${death.x} ${death.y} ${death.z}: died there going back before`)
+    if (deadly) diag?.recovery({ deathSpot: 'skipped: died there going back before' })
     const worth = !deadly && deathSpotWorthIt(death, {
       tick: bot.survival.tasks.tick,
       dimension: normalizeDimension(bot.game?.dimension),
@@ -753,11 +765,12 @@ export class Runner {
       minY: (bot.game as any)?.minY ?? -64,
       blockAt: pos => bot.blockAt(pos)
     }, this.options.deathItemTicks ?? 6000)
+    if (!deadly && !worth) diag?.recovery({ deathSpot: death == null ? 'skipped: no death spot' : 'skipped: not worth it (another dimension, underground, lava, the void, or the items gone first)' })
     if (death != null && worth) {
       this.log(`back to the death spot at ${death.x} ${death.y} ${death.z}`)
       try {
         const spot = new Vec3(death.x, death.y, death.z)
-        await this.executor.task('to the death spot', async (s) => {
+        const picked = await this.executor.task('to the death spot', async (s) => {
           // a long trip the pathfinder may plan short of: a few tries, getting moving by hand between them
           for (let i = 0; ; i++) {
             try {
@@ -770,23 +783,27 @@ export class Runner {
           }
           return await pickupDrops(bot, { near: spot.offset(0.5, 0.5, 0.5), radius: 10 }, s)
         }, signal)
+        diag?.recovery({ deathSpot: 'went', picked: { ...picked.items } })
         this.memory.death = null
         return
       } catch (err) {
         if (TaskError.is(err, 'DIED')) {
           this.deadlySpots.push(new Vec3(death.x, death.y, death.z))
-          return await this.recoverFromDeath(signal)
+          return await this.recoverOnce(signal)
         }
         this.log(`couldn't get the items back: ${(err as Error).message}`)
+        diag?.recovery({ deathSpot: `failed: ${(err as Error).message}` })
       }
     }
-    await this.rekit(signal)
+    const kit = await this.rekit(signal)
+    diag?.recovery({ kit: kit ?? 'no base' })
   }
 
-  /** takes the kit (what the keep rule keeps: tools, armor, food, torches...) out of the base's chests */
-  async rekit (signal?: AbortSignal): Promise<void> {
+  /** takes the kit (what the keep rule keeps: tools, armor, food, torches...) out of the base's chests; what it took, null with no base */
+  async rekit (signal?: AbortSignal): Promise<Record<string, number> | null> {
     const base = baseRecord(this.memory)
-    if (base == null || base.chests.length === 0) return
+    if (base == null || base.chests.length === 0) return null
+    const took: Record<string, number> = {}
     const bot = this.bot
     const dimension = this.memory.base?.dimension ?? 'overworld'
     this.log('to the base for a kit')
@@ -804,12 +821,14 @@ export class Runner {
         const res = await this.executor.task('kit', async (s) => await retrieveItems(bot, { chest: new Vec3(chest.x, chest.y, chest.z), filter: wanted }, s), signal)
         const items = { ...(known?.items ?? {}) }
         for (const [name, n] of Object.entries(res.moved)) items[name] = Math.max(0, (items[name] ?? 0) - n)
+        for (const [name, n] of Object.entries(res.moved)) took[name] = (took[name] ?? 0) + n
         this.memory.rememberChest(chest, items, dimension)
       } catch (err) {
         if (TaskError.is(err, 'DIED')) throw err
         this.log(`kit from ${chest.x} ${chest.y} ${chest.z} failed: ${(err as Error).message}`)
       }
     }
+    return took
   }
 }
 
