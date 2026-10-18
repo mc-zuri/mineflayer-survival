@@ -137,3 +137,18 @@ test('nookCell: a wall block beside the feet with rock under it, none next to la
   assert.equal(nookCell(world({ ...tunnel, '0,20,-2': 'lava', '0,20,2': 'water' }), feet), null)
   assert.equal(nookCell(world(tunnel, 'bedrock'), feet), null)
 })
+
+test('surfaceStepCost: a step under a roof (a cave, a ravine\'s overhang) costs more, one on the ground or under a tree none', async () => {
+  const { surfaceStepCost, UNDER_ROOF_STEP_COST } = await import('../../src/executor/explore')
+  // ground up to y 63 (rock), a cave cell at 40 in column 0,0; an oak's leaves over column 5,0
+  const lookup = (pos: Vec3) => {
+    if (pos.x === 0 && pos.z === 0 && (pos.y === 40 || pos.y === 41)) return { name: 'air', boundingBox: 'empty' }
+    if (pos.x === 5 && pos.z === 0 && pos.y >= 67 && pos.y <= 68) return { name: 'oak_leaves', boundingBox: 'block' }
+    return pos.y <= 63 ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  }
+  const cost = surfaceStepCost(lookup, 64)
+  assert.equal(cost({ position: new Vec3(0, 40, 0) }), UNDER_ROOF_STEP_COST)
+  assert.equal(cost({ position: new Vec3(0, 64, 0) }), 0)
+  assert.equal(cost({ position: new Vec3(5, 64, 0) }), 0)
+  assert.equal(cost({ position: new Vec3(3, 64, 0) }), 0)
+})

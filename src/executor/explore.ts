@@ -366,9 +366,51 @@ export async function unstick (bot: Bot, signal?: AbortSignal): Promise<void> {
   }
 }
 
+/** the extra cost, in ticks, of each step a trip over the surface takes under a roof (see surfaceStepCost) */
+export const UNDER_ROOF_STEP_COST = 30
+
 /**
- * A square spiral over the surface around `center`, the pathfinder walking each leg, until `found` holds. Resolves
- * true when found; false when the spiral ran out.
+ * A step cost for the pathfinder (an exclusion area) that keeps a trip over the surface on it: a step into a cell with
+ * a block over it (trees left out) costs UNDER_ROOF_STEP_COST more, so a way down a ravine or through a cave, where
+ * the mobs spawn in the dark at any hour (Monster.isDarkEnoughToSpawn), is taken only when it saves a long way round.
+ * Each column's top is looked up once.
+ */
+export function surfaceStepCost (lookup: Lookup, refY: number, range = 64): (block: { position: Vec3 }) => number {
+  const tops = new Map<string, number | null>()
+  return (block) => {
+    const pos = block.position
+    const key = `${pos.x},${pos.z}`
+    let top = tops.get(key)
+    if (top === undefined) {
+      // the column's highest block a body can't pass (trees left out): the ground, or a roof over it
+      top = null
+      for (let y = refY + range; y >= refY - range; y--) {
+        const b = lookup(new Vec3(pos.x, y, pos.z))
+        if (b == null) continue
+        if (!TREE.test(b.name) && (b.boundingBox === 'block' || LIQUIDS.has(b.name))) { top = y; break }
+      }
+      tops.set(key, top)
+    }
+    return top != null && pos.y < top ? UNDER_ROOF_STEP_COST : 0
+  }
+}
+
+/** runs `fn` with surfaceStepCost added to the pathfinder's step costs, and puts the old settings back */
+export async function onTheSurface<T> (bot: Bot, fn: () => Promise<T>): Promise<T> {
+  const pf = bot.pathfinder as any
+  if (pf?.setMoveOptions == null || pf.defaultMoveSettings == null) return await fn()
+  const before = { ...pf.defaultMoveSettings }
+  pf.setMoveOptions({ ...before, exclusionAreasStep: [...(before.exclusionAreasStep ?? []), surfaceStepCost(lookupOf(bot), Math.floor(bot.entity.position.y))] })
+  try {
+    return await fn()
+  } finally {
+    pf.setMoveOptions(before)
+  }
+}
+
+/**
+ * A square spiral over the surface around `center`, the pathfinder walking each leg (kept out from under a roof:
+ * onTheSurface), until `found` holds. Resolves true when found; false when the spiral ran out.
  */
 export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: AbortSignal): Promise<boolean> {
   if (args.found()) return true
@@ -379,7 +421,7 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
     throwIfAborted(signal)
     trace('explore: surface leg to', wp.x, wp.z)
     try {
-      await navigate(bot, { goal: new goals.GoalNearXZ(wp.x, wp.z, 4) }, signal)
+      await onTheSurface(bot, async () => await navigate(bot, { goal: new goals.GoalNearXZ(wp.x, wp.z, 4) }, signal))
     } catch (err) {
       if (isAbort(err)) throw err
       trace('explore: leg failed', (err as Error).message)

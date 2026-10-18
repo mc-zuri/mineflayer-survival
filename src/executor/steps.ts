@@ -17,7 +17,7 @@ import { hunt, nearestOfType } from '../skills/hunt'
 import type { Entity } from '../skills/combatUtil'
 import { navigateNear } from '../skills/navigate'
 import { countItems, trace } from '../skills/util'
-import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, oreLevel, unstick } from './explore'
+import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, onTheSurface, oreLevel, unstick } from './explore'
 import { toolKindFor, wornOutTools } from './durability'
 
 /** a mine step hands back to the executor when its tool has this many uses left (the executor's default too) */
@@ -270,7 +270,8 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
     if (prey.position.distanceTo(bot.entity.position) > 8) await ensureSurface(bot, signal)
     try {
       trace('executor: hunting a', mob, 'for', step.item, countItems(bot, step.item), '/', target)
-      const res = await hunt(bot, prey, { signal, range: SEARCH_RADIUS })
+      // after an animal over the surface, not down a ravine or through a cave on the way
+      const res = await onTheSurface(bot, async () => await hunt(bot, prey, { signal, range: SEARCH_RADIUS }))
       trace('executor: hunt', res.killed ? 'killed' : 'lost', 'the', mob, 'drops', res.drops)
       if (mob !== step.mob && res.killed) substituted++
     } catch (err) {
