@@ -65,7 +65,7 @@ test('play works the milestones in order, an event for each reached, and stops a
   assert.deepEqual(result.reached.map(r => r.id), events)
 })
 
-test('until and skip; a milestone failing three times stops play; the save file resumes the run', async () => {
+test('until and skip; a milestone failing five times stops play; the save file resumes the run', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-test-'))
   const saveFile = path.join(dir, 'save.json')
   const bot = fakeBot()
@@ -92,7 +92,7 @@ test('until and skip; a milestone failing three times stops play; the save file 
   const runner2 = new Runner(bot2, { saveFile, skip: ['food'], log: () => {}, handlers: { base: async () => { tries++; throw new TaskError('NO_PATH', 'no way to the site') } } })
   const result2 = await runner2.play()
   assert.equal(bot2.survival.memory.findBlocks('iron_ore').length, 1)
-  assert.equal(tries, 3)
+  assert.equal(tries, 5)
   assert.equal(result2.reason, 'failed')
   assert.equal(result2.stoppedAt, 'base')
   assert.deepEqual(result2.reached.map(r => r.id), ['wood', 'stone'])
@@ -120,4 +120,20 @@ test('the death spot is worth going back to only while the items last and away f
   assert.equal(deathSpotWorthIt({ ...death, y: -70 }, now, 6000), false)
   assert.equal(deathSpotWorthIt({ ...death, dimension: 'the_nether' }, now, 6000), false)
   assert.equal(deathSpotWorthIt(null, now, 6000), false)
+})
+
+test('maxTicks: play stops when its tick budget runs out, the work in hand aborted', async () => {
+  const bot = fakeBot()
+  let aborted = false
+  const runner = new Runner(bot, {
+    maxTicks: 50,
+    log: () => {},
+    handlers: { wood: async ({ signal }) => { await new Promise<void>(resolve => signal.addEventListener('abort', () => { aborted = true; resolve() })) } }
+  })
+  const result = runner.play()
+  for (let i = 0; i < 60; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  const r = await result
+  assert.equal(aborted, true)
+  assert.equal(r.reason, 'budget')
+  assert.equal(r.stoppedAt, 'wood')
 })

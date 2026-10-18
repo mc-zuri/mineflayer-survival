@@ -67,6 +67,8 @@ export interface PlayOptions {
   maxFailures?: number
   executor?: ExecutorOptions
   base?: Partial<Omit<BuildBaseOptions, 'executor'>>
+  /** stop after this many ticks of this run (the work in hand is aborted) */
+  maxTicks?: number
   /** a line per milestone, plan and failure (default: console.log with a [survival] prefix) */
   log?: (line: string) => void
   signal?: AbortSignal
@@ -76,7 +78,7 @@ export interface PlayResult {
   reached: MilestoneEvent[]
   /** the milestone play stopped before, null when the dragon is dead or `until` was reached */
   stoppedAt: MilestoneId | null
-  reason: 'until' | 'finished' | 'unwired' | 'failed' | 'aborted'
+  reason: 'until' | 'finished' | 'unwired' | 'failed' | 'aborted' | 'budget'
   error?: unknown
 }
 
@@ -225,15 +227,40 @@ export class Runner {
   }
 
   async play (): Promise<PlayResult> {
-    const signal = this.options.signal
+    // the caller's signal and the tick budget, as one
+    const controller = new AbortController()
+    const outer = this.options.signal
+    const onOuter = (): void => controller.abort(outer?.reason)
+    if (outer?.aborted === true) onOuter()
+    outer?.addEventListener('abort', onOuter, { once: true })
+    const startTick = this.bot.survival.tasks.tick
+    let overBudget = false
+    const onTick = (): void => {
+      if (this.options.maxTicks == null || overBudget || this.bot.survival.tasks.tick - startTick < this.options.maxTicks) return
+      overBudget = true
+      this.log(`out of ticks (${this.options.maxTicks})`)
+      controller.abort(new TaskError('TIMEOUT', `play ran out of its ${this.options.maxTicks} ticks`))
+    }
+    this.bot.on('physicsTick', onTick)
+    try {
+      const result = await this.loop(controller.signal)
+      if (overBudget && result.reason === 'aborted') result.reason = 'budget'
+      return result
+    } finally {
+      this.bot.off('physicsTick', onTick)
+      outer?.removeEventListener('abort', onOuter)
+    }
+  }
+
+  private async loop (signal: AbortSignal): Promise<PlayResult> {
     const skip = new Set(this.options.skip ?? [])
     const failures = new Map<MilestoneId, number>()
     const maxFailures = this.options.maxFailures ?? 5
-    const stopped = (): boolean => signal?.aborted === true
+    const stopped = (): boolean => signal.aborted
     this.load()
     for (;;) {
       if (stopped()) return this.stop(null, 'aborted')
-      if (this.bot.health <= 0 || (this.bot as any).isAlive === false) await this.recoverFromDeath()
+      if (this.bot.health <= 0 || (this.bot as any).isAlive === false) await this.recoverFromDeath(signal)
       const state = progressState(this.bot, this.memory)
       this.noteReached(state)
       if (this.options.until != null && this.reached.some(r => r.id === this.options.until)) return this.stop(null, 'until')
@@ -246,13 +273,14 @@ export class Runner {
       }
       this.log(`working on ${m.id}: ${m.title}`)
       try {
-        await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: signal ?? new AbortController().signal, log: this.log })
+        await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal, log: this.log })
+        if (stopped()) return this.stop(m.id, 'aborted')
         failures.delete(m.id)
       } catch (err) {
         if (stopped()) return this.stop(m.id, 'aborted', err)
         if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
           this.log(`died working on ${m.id}: ${(err as Error).message}`)
-          await this.recoverFromDeath()
+          await this.recoverFromDeath(signal)
           continue
         }
         const n = (failures.get(m.id) ?? 0) + 1
@@ -260,7 +288,12 @@ export class Runner {
         this.log(`milestone ${m.id} failed (${n}): ${(err as Error).message}`)
         if (n >= maxFailures) return this.stop(m.id, 'failed', err)
       }
-      await this.afterTrip(signal)
+      try {
+        await this.afterTrip(signal)
+      } catch (err) {
+        if (stopped()) return this.stop(m.id, 'aborted', err)
+        throw err
+      }
       this.save()
     }
   }
