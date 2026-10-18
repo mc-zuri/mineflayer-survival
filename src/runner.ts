@@ -49,6 +49,12 @@ export type MilestoneHandler = (ctx: MilestoneContext) => Promise<void>
  */
 export const UNWIRED: readonly MilestoneId[] = []
 
+/**
+ * Milestones the game can be won without (enchanted gear helps, but the dragon dies to unenchanted diamond): one that
+ * fails maxFailures times in a row is left out and play goes on, where any other stops it
+ */
+export const OPTIONAL_MILESTONES: readonly MilestoneId[] = ['enchanting']
+
 export interface MilestoneEvent {
   id: MilestoneId
   title: string
@@ -434,6 +440,13 @@ export class Runner {
         const n = (failures.get(m.id) ?? 0) + 1
         failures.set(m.id, n)
         this.log(`milestone ${m.id} failed (${n}): ${(err as Error).message}`)
+        if (n >= maxFailures && OPTIONAL_MILESTONES.includes(m.id)) {
+          // the dragon doesn't need it: the game goes on without
+          this.log(`milestone ${m.id} left out after ${n} failures: on to the next`)
+          skip.add(m.id)
+          failures.delete(m.id)
+          continue
+        }
         if (n >= maxFailures) return this.stop(m.id, 'failed', err)
       }
       try {

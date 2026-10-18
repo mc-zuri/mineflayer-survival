@@ -390,3 +390,22 @@ test('with the iron the work up next, the night is not waited out (its last logs
   await runner.mineTheNight([])
   assert.ok(!lines.some(l => /waited out/.test(l)), lines.join('\n'))
 })
+
+test('the enchanting milestone failing five times is left out and play goes on to the nether (the dragon needs none of it)', async () => {
+  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, cooked_beef: 8 })
+  bot.give('iron_pickaxe', 1)
+  for (const n of ['iron_sword', 'iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots', 'shield', 'bucket', 'diamond_pickaxe', 'diamond_sword']) bot.give(n, 1)
+  bot.survival.memory.setBase({ x: 0, y: 40, z: 0 })
+  let tries = 0
+  const lines: string[] = []
+  const runner = new Runner(bot, {
+    stopAt: 'nether',
+    log: line => lines.push(line),
+    handlers: { enchanting: async () => { tries++; throw new TaskError('NOT_FOUND', 'no more sugar_cane found') } }
+  })
+  const result = await runner.play()
+  assert.equal(tries, 5)
+  assert.equal(result.reason, 'until')
+  assert.equal(result.stoppedAt, 'nether')
+  assert.ok(lines.some(l => /milestone enchanting left out after 5 failures/.test(l)), lines.join(' | '))
+})
