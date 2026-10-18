@@ -130,7 +130,8 @@ async function findBlocks (bot: Bot, names: string[], ctx: StepContext, alternat
   const all = [...names, ...alternatives]
   // the food that grows is looked for no further out than the animals: none there, the plan goes for another food
   const maxRadius = all.some(n => SIGHTED_BLOCKS.includes(n)) ? HUNT_EXPLORE_RADIUS : undefined
-  if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude, maxRadius }, ctx.signal)) {
+  ctx.state.explore ??= { leg: 0 }
+  if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude, maxRadius, progress: ctx.state.explore }, ctx.signal)) {
     if (near(names)) return names
     if (near(alternatives)) return alternatives
   }
@@ -343,7 +344,8 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
         passed.clear()
         // not far out: none in HUNT_EXPLORE_RADIUS of home is a land without them (a snowy taiga's rabbits only), and
         // the plan goes for another food then; the food that grows is noted on the way for it
-        const found = await exploreSurface(bot, { found: () => nearest([step.mob, ...subs], 32) != null, center: ctx.home ?? undefined, maxRadius: HUNT_EXPLORE_RADIUS, memory: ctx.memory, remember: SIGHTED_BLOCKS }, signal)
+        ctx.state.explore ??= { leg: 0 }
+        const found = await exploreSurface(bot, { found: () => nearest([step.mob, ...subs], 32) != null, center: ctx.home ?? undefined, maxRadius: HUNT_EXPLORE_RADIUS, memory: ctx.memory, remember: SIGHTED_BLOCKS, progress: ctx.state.explore }, signal)
         if (!found) throw new SkillError('NOT_FOUND', `no ${step.mob} found exploring`)
         continue
       }

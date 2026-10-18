@@ -284,3 +284,17 @@ test('runCraft: a crafted chestplate the armor reflex put on while the step was 
   const out = await runCraft(step, { bot, signal: new AbortController().signal, state: { start: 0 }, log: () => {} } as any)
   assert.deepEqual(out, { gained: 1 })
 })
+
+test('exploreSurface picks up at the leg its progress kept: a step preempted and run again goes on, not round again', async () => {
+  const { exploreSurface, spiralWaypoints } = await import('../../src/executor/explore')
+  // under the open sky (nothing above), and no pathfinder: any leg walked would throw
+  const bot: any = { entity: { position: new Vec3(0, 64, 0), yaw: 0 }, blockAt: () => null }
+  const legs = spiralWaypoints({ x: 0, z: 0 }, 16, 96).length
+  const progress = { leg: legs }
+  assert.equal(await exploreSurface(bot, { found: () => false, center: new Vec3(0, 64, 0), maxRadius: 96, progress }), false)
+  assert.equal(progress.leg, legs)
+  // from the start every leg is tried (each fails here, with no pathfinder) and counted walked
+  const fresh = { leg: 0 }
+  assert.equal(await exploreSurface(bot, { found: () => false, center: new Vec3(0, 64, 0), maxRadius: 96, progress: fresh }), false)
+  assert.equal(fresh.leg, legs)
+})

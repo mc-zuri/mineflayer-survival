@@ -171,6 +171,12 @@ export interface ExploreArgs {
   /** blocks to note in the memory along the way */
   remember?: string[]
   memory?: WorldMemory
+  /**
+   * the legs walked so far, kept by the caller across the attempts a reflex's preemption makes: a step preempted
+   * every few ticks (swimming, a fight) started its spiral over each time, 1400 times on seed 5, and never left the
+   * first leg
+   */
+  progress?: { leg: number }
 }
 
 /** notes the blocks of the given names within `radius` in the memory */
@@ -433,8 +439,11 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
   await ensureSurface(bot, signal)
   if (args.found()) return true
   const center = args.center ?? bot.entity.position.clone()
-  for (const wp of spiralWaypoints(center, args.step ?? 16, args.maxRadius ?? 192)) {
+  const waypoints = spiralWaypoints(center, args.step ?? 16, args.maxRadius ?? 192)
+  for (let i = args.progress?.leg ?? 0; i < waypoints.length; i++) {
+    const wp = waypoints[i]
     throwIfAborted(signal)
+    if (args.progress != null) args.progress.leg = i
     trace('explore: surface leg to', wp.x, wp.z)
     try {
       await onTheSurface(bot, async () => await navigate(bot, { goal: new goals.GoalNearXZ(wp.x, wp.z, 4) }, signal))
@@ -442,6 +451,7 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
       if (isAbort(err)) throw err
       trace('explore: leg failed', (err as Error).message)
     }
+    if (args.progress != null) args.progress.leg = i + 1
     if (args.memory != null && args.remember != null) rememberAround(bot, args.memory, args.remember)
     if (args.found()) return true
   }
@@ -656,6 +666,8 @@ export interface ExploreForBlocksArgs {
   exclude?: (pos: Vec3) => boolean
   /** how far out the surface spiral goes (default exploreSurface's) */
   maxRadius?: number
+  /** the surface spiral's legs walked so far (ExploreArgs.progress) */
+  progress?: { leg: number }
 }
 
 /** the nearest block of the names in the loaded chunks, within `radius` */
@@ -675,7 +687,7 @@ export async function exploreForBlocks (bot: Bot, args: ExploreForBlocksArgs, si
   const found = (): boolean => findNear(bot, args.names, radius, args.exclude) != null
   if (found()) return true
   const level = oreLevel(args.names)
-  if (level == null) return await exploreSurface(bot, { found, center: args.center, memory: args.memory, remember: args.names, maxRadius: args.maxRadius }, signal)
+  if (level == null) return await exploreSurface(bot, { found, center: args.center, memory: args.memory, remember: args.names, maxRadius: args.maxRadius, progress: args.progress }, signal)
   const feet = feetOf(bot)
   // the bot may stand in a hole above or below the level: get to within a few blocks of it
   if (feet.y > level + 2) await descendTo(bot, level, { found }, signal)
