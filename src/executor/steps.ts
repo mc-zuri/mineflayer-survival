@@ -15,8 +15,10 @@ import { retrieveItems } from '../skills/chest'
 import { fillBucket, isSource } from '../skills/bucket'
 import { hunt, nearestOfType } from '../skills/hunt'
 import type { Entity } from '../skills/combatUtil'
-import { navigateNear } from '../skills/navigate'
+import { navigate, navigateNear } from '../skills/navigate'
+import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { countItems, trace } from '../skills/util'
+import { findPlacementNear } from '../skills/placement'
 import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, onTheSurface, openSky, oreLevel, unstick } from './explore'
 import { toolKindFor, wornOutTools } from './durability'
 
@@ -205,8 +207,39 @@ export async function withRoom<T> (bot: Bot, signal: AbortSignal, fn: () => Prom
       }
     }
     if (!(await ensureSurface(bot, signal))) await unstick(bot, signal)
+    try {
+      return await fn()
+    } catch (again) {
+      if (!isSkillError(again, 'CANNOT_PLACE')) throw again
+    }
+    // still none up here (on a tree's leaves, on a pillar, on a one-wide ridge): somewhere a few blocks off with room
+    await toRoom(bot, signal)
     return await fn()
   }
+}
+
+/**
+ * Walks to a place within ROOM_SEARCH blocks with a free cell next to it to put a block in (findPlacementNear): the
+ * eight ways out, nearest first. The craft of a wooden pickaxe on seed 5 found no room where the bot came down from a
+ * tree, five times over, and the wood milestone failed.
+ */
+export async function toRoom (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  const lookup = (p: Vec3): any => bot.blockAt(p)
+  const here = bot.entity.position.floored()
+  for (const r of [3, 6, 10]) {
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
+      throwIfAborted(signal)
+      const spot = here.offset(dx * r, 0, dz * r)
+      try {
+        await navigate(bot, { goal: new goals.GoalNearXZ(spot.x, spot.z, 1), maxTicks: 400 }, signal)
+      } catch (err) {
+        if (isAbort(err)) throw err
+        continue
+      }
+      if (findPlacementNear(lookup, bot.entity.position) != null) return true
+    }
+  }
+  return false
 }
 
 export const runCraft: StepRunner<CraftStep> = async (step, ctx) => {

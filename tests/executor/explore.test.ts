@@ -237,3 +237,26 @@ test('runMine: a worn tool hands the step back for a new one, unless the step is
   await assert.rejects(runMine(step, ctx(true)))
   assert.ok(targets.length > 0, 'the log was never gone for')
 })
+
+test('withRoom: no room for a station up here either (on a tree\'s leaves): walked to a place with room, and tried there', async () => {
+  const { withRoom } = await import('../../src/executor/steps')
+  const { SkillError } = await import('../../src/skills/errors')
+  // open sky; ground with room everywhere but where the bot stands
+  const bot: any = new (await import('node:events')).EventEmitter()
+  bot.entity = { position: new Vec3(0.5, 80, 0.5), yaw: 0 }
+  bot.blockAt = (p: Vec3) => p.y < 64 ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  const trips: string[] = []
+  bot.pathfinder = {
+    isPathing: false,
+    // the trip down to the ground a few blocks off
+    goto: async (goal: any) => { trips.push(`${goal.x},${goal.z}`); bot.entity.position = new Vec3(goal.x + 0.5, 64, goal.z + 0.5) },
+    cancel: async () => {}
+  }
+  let calls = 0
+  const out = await withRoom(bot, new AbortController().signal, async () => {
+    if (bot.entity.position.y > 70) { calls++; throw new SkillError('CANNOT_PLACE', 'no room next to the bot for a crafting table') }
+    return 'crafted'
+  })
+  assert.equal(out, 'crafted')
+  assert.ok(calls >= 2 && trips.length >= 1, `${calls} calls, trips ${trips.join(' ')}`)
+})
