@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { boxEntry, cellsOnLine, planCrystals, spikeBlocks } from '../../src/end/crystals'
+import { boxEntry, cellsOnLine, pillarColumn, planCrystals, spikeBlocks } from '../../src/end/crystals'
 import { getSpikesForLevel, spikeColumns } from '../../src/end/spikes'
 import { parseSeed } from '../../src/worldgen/random'
 
@@ -72,4 +72,25 @@ test('the shooting spot keeps off the ground to avoid (a breath cloud where the 
   const moved = planCrystals(spikes, { from: { x: -15, z: -5 }, destroyed: [0, 1, 2, 3, 4, 5, 6, 7, 9], avoid })[0].shootFrom
   assert.ok(moved != null)
   assert.ok(!avoid(moved.x, moved.z), `spot ${moved.x}, ${moved.z} in the cloud`)
+})
+
+test('the pillar column is outside the obsidian, and outside the cage of a caged spike, whichever way the shot lies', () => {
+  for (const seed of [0, parseSeed('endfight'), 12345]) {
+    const spikes = getSpikesForLevel(seed)
+    for (const spike of spikes) {
+      const obsidian = new Set(spikeColumns(spike).map(c => `${c.x},${c.z}`))
+      for (let k = 0; k < 32; k++) {
+        const a = k * Math.PI / 16
+        const c = pillarColumn(spike, Math.cos(a), Math.sin(a))
+        assert.ok(!obsidian.has(`${c.x},${c.z}`), `spike ${spike.index} at ${a.toFixed(2)}: ${c.x}, ${c.z} in the obsidian`)
+        if (spike.guarded) assert.ok(Math.max(Math.abs(c.x - spike.centerX), Math.abs(c.z - spike.centerZ)) >= 3, `spike ${spike.index} at ${a.toFixed(2)}: ${c.x}, ${c.z} in the cage`)
+        // next to it: within reach of the bars
+        assert.ok(Math.hypot(c.x + 0.5 - (spike.centerX + 0.5), c.z + 0.5 - (spike.centerZ + 0.5)) < spike.radius + 3.5)
+      }
+    }
+    for (const t of planCrystals(spikes)) {
+      if (t.pillar == null || !t.spike.guarded) continue
+      assert.ok(Math.max(Math.abs(t.pillar.column.x - t.spike.centerX), Math.abs(t.pillar.column.z - t.spike.centerZ)) >= 3)
+    }
+  }
 })

@@ -165,13 +165,29 @@ export function planCrystals (spikes: EndSpike[], opts: CrystalPlanOptions = {})
     const toward = found != null ? { x: found.spot.x - spike.centerX - 0.5, z: found.spot.z - spike.centerZ - 0.5 } : { x: -spike.centerX, z: -spike.centerZ }
     const len = Math.hypot(toward.x, toward.z)
     const l = len > 0 ? len : 1
-    const off = spike.radius + 1.5
-    const column = { x: Math.floor(spike.centerX + 0.5 + toward.x / l * off), z: Math.floor(spike.centerZ + 0.5 + toward.z / l * off) }
+    const column = pillarColumn(spike, toward.x / l, toward.z / l)
     const topY = spike.height + 1
     const breakBars = spike.guarded ? (found != null && found.bars.length > 0 ? found.bars : facingBars(spike, column, topY)) : []
     targets.push({ spike, crystal, aim: crystal.center, method: 'pillar', shootFrom: found?.spot ?? null, pillar: { column, topY, breakBars } })
   }
   return route(targets, opts.from ?? { x: 0, z: 0 })
+}
+
+/**
+ * The first cell out along the direction that is clear of the spike: outside its obsidian, and for a caged one
+ * outside the 5×5 of bars too (a diagonal from the middle crosses the cage's corner, where a pillar would tower into
+ * the bars).
+ */
+export function pillarColumn (spike: EndSpike, dx: number, dz: number): { x: number, z: number } {
+  const obsidian = new Set(spikeColumns(spike).map(c => `${c.x},${c.z}`))
+  for (let off = spike.radius + 1.5; off < spike.radius + 8; off += 0.25) {
+    const x = Math.floor(spike.centerX + 0.5 + dx * off)
+    const z = Math.floor(spike.centerZ + 0.5 + dz * off)
+    if (obsidian.has(`${x},${z}`)) continue
+    if (spike.guarded && Math.abs(x - spike.centerX) <= 2 && Math.abs(z - spike.centerZ) <= 2) continue
+    return { x, z }
+  }
+  return { x: Math.floor(spike.centerX + 0.5 + dx * (spike.radius + 8)), z: Math.floor(spike.centerZ + 0.5 + dz * (spike.radius + 8)) }
 }
 
 /** the cheapest spot with a clear line (cage bars allowed for a caged spike: they get broken) */
