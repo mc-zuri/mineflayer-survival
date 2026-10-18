@@ -555,6 +555,7 @@ export async function sleepThroughNight (bot: Bot, opts: SleepThroughNightOption
   let fought = 0
   let last: unknown = null
   let moved = false
+  let ownBed = false
   const fightOff = async (monster: Bot['entities'][string]): Promise<void> => {
     await fight(bot, monster, { signal, maxTicks: 600 }).catch((e) => { if (isAbort(e)) throw e })
     fought++
@@ -571,7 +572,7 @@ export async function sleepThroughNight (bot: Bot, opts: SleepThroughNightOption
     // on the ground first: the bed goes beside the feet (a crit jump of the fight before left them in the air)
     await waitUntil(bot, () => bot.entity.onGround, 40, signal)
     try {
-      await sleep(bot, { pickUpBed: true, bedDistance: opts.bedDistance }, signal)
+      await sleep(bot, { pickUpBed: true, bedDistance: opts.bedDistance, nearby: !ownBed }, signal)
       return { slept: true, fought }
     } catch (err) {
       trace('sleepThroughNight: try', attempt, (err as Error).message)
@@ -585,6 +586,11 @@ export async function sleepThroughNight (bot: Bot, opts: SleepThroughNightOption
           if (room == null) throw err
           await navigate(bot, { goal: new goals.GoalBlock(room.x, room.y, room.z) }, signal)
         }
+        continue
+      }
+      // a bed standing nearby that won't do (one it can't get to, one it can't click): its own from the bag, once
+      if (!ownBed && !/monsters|not sleeping/i.test((err as Error).message) && bot.inventory.items().some(i => i.name.endsWith('_bed'))) {
+        ownBed = true
         continue
       }
       if (!isSkillError(err, 'REFUSED')) throw err

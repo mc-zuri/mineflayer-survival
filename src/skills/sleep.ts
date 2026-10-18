@@ -13,6 +13,8 @@ export interface SleepArgs {
   /** the bed to use (default: the nearest within `bedDistance`, else one from the inventory) */
   bed?: Vec3
   bedDistance?: number
+  /** look for a bed standing nearby at all (default true; false: the one from the inventory) */
+  nearby?: boolean
   /** break the bed the bot placed and take it back after waking (default false) */
   pickUpBed?: boolean
   /** ticks to wait asleep for the morning (default 1000: the night skips once every player has slept 100 ticks) */
@@ -28,6 +30,28 @@ export interface SleepResult {
 
 const isBedName = (name: string): boolean => name.endsWith('_bed')
 
+/**
+ * A block state's property by name, from minecraft-data's states (the last one varies fastest; a bool's values are
+ * true then false, as BooleanProperty's).
+ */
+export function stateProperty (bot: Pick<Bot, 'registry'>, stateId: number, name: string): string | undefined {
+  const def: any = (bot.registry as any).blocksByStateId[stateId]
+  if (def?.states == null) return undefined
+  let offset = stateId - def.minStateId
+  for (let i = def.states.length - 1; i >= 0; i--) {
+    const state = def.states[i]
+    const index = offset % state.num_values
+    offset = Math.floor(offset / state.num_values)
+    if (state.name === name) return state.type === 'bool' ? String(index === 0) : state.values?.[index] ?? String(index)
+  }
+  return undefined
+}
+
+/** BedBlock.OCCUPIED: someone (a villager) is in it */
+export function bedOccupied (bot: Pick<Bot, 'registry'>, block: { stateId?: number }): boolean {
+  return block.stateId != null && stateProperty(bot, block.stateId, 'occupied') === 'true'
+}
+
 /** whether a bed works now: at night (the time of day 12541 to 23458) or in a thunderstorm, as bot.sleep checks it */
 export function canSleepNow (timeOfDay: number, thundering: boolean): boolean {
   return thundering || (timeOfDay >= 12541 && timeOfDay <= 23458)
@@ -39,7 +63,10 @@ async function getBed (bot: Bot, args: SleepArgs, signal?: AbortSignal): Promise
     if (block == null || !bot.isABed(block)) throw new SkillError('NOT_FOUND', `no bed at ${args.bed.toString()}`)
     return { bed: block, placed: false }
   }
-  const found = bot.findBlock({ matching: (block: any) => isBedName(block.name), maxDistance: args.bedDistance ?? 32 })
+  // a bed standing nearby, not one taken (a villager's: BedBlock.OCCUPIED, "This bed is occupied")
+  const found = args.nearby === false
+    ? null
+    : bot.findBlock({ matching: (block: any) => isBedName(block.name) && !bedOccupied(bot, block), useExtraInfo: true, maxDistance: args.bedDistance ?? 32 })
   if (found != null) return { bed: found, placed: false }
 
   const item = findInventoryItem(bot, item => isBedName(item.name))
