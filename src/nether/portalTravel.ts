@@ -114,6 +114,7 @@ export async function enterPortal (bot: Bot, args: EnterPortalArgs = {}, signal?
   bot.on('respawn', onRespawn)
   bot.on('forcedMove', onForcedMove)
   try {
+    let into = floor
     if (!inPortal(bot)) {
       // to a cell right beside the portal's bottom with the pathfinder, then the last step in by hand (the pathfinder
       // doesn't end moves in portal blocks)
@@ -132,17 +133,32 @@ export async function enterPortal (bot: Bot, args: EnterPortalArgs = {}, signal?
         }
       }
       if (beside == null && !inPortal(bot) && !changed) throw new SkillError('NO_PATH', `no way to the portal at ${floor.toString()}`)
-      const into = beside == null ? floor : (portalFloor(bot, beside, 2).sort((a, b) => a.distanceTo(beside) - b.distanceTo(beside))[0] ?? floor)
+      into = beside == null ? floor : (portalFloor(bot, beside, 2).sort((a, b) => a.distanceTo(beside) - b.distanceTo(beside))[0] ?? floor)
       await walkTo(bot, into.offset(0.5, 0, 0.5), { within: 0.25, maxTicks: 60, until: () => inPortal(bot) || changed }, signal)
       if (!inPortal(bot) && !changed) throw new SkillError('NO_PATH', `couldn't step into the portal at ${floor.toString()} from ${bot.entity.position.toString()}`)
     }
     bot.clearControlStates()
     const maxTicks = args.maxTicks ?? 400
     // still in the portal: PortalProcessor counts the ticks inside it, and leaving resets them
+    // (a player who came in on the portal's cooldown keeps it going while it stays, Entity.setAsInsidePortal:
+    // isOnPortalCooldown, so after twice the wait the bot steps out and back in)
+    let inside = 0
+    let out = 0
     const went = await waitUntil(bot, () => {
       if (changed) return true
-      if (!inPortal(bot)) void bot.lookAt(floor.offset(0.5, 0.5, 0.5), true).then(() => bot.setControlState('forward', true))
-      else bot.setControlState('forward', false)
+      if (out > 0) {
+        out--
+        bot.setControlState('back', out > 10)
+        bot.setControlState('forward', false)
+        if (out === 0) inside = 0
+        return false
+      }
+      if (!inPortal(bot)) {
+        void bot.lookAt(into.offset(0.5, 0.5, 0.5), true).then(() => bot.setControlState('forward', true))
+      } else {
+        bot.setControlState('forward', false)
+        if (++inside > 2 * PORTAL_TRANSITION_TICKS) out = 30
+      }
       return false
     }, maxTicks, signal)
     bot.clearControlStates()
