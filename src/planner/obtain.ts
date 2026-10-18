@@ -1,5 +1,5 @@
 import { Inventory, type ItemCount } from '../core/inventory'
-import { burnTicks, FOODS, parseTool, SMELT_TICKS, TOOL_MATERIAL_RANK, TOOL_MATERIALS, toolKindForMaterial } from '../core/items'
+import { burnTicks, foodInfo, parseTool, SMELT_TICKS, TOOL_MATERIAL_RANK, TOOL_MATERIALS, toolKindForMaterial } from '../core/items'
 import type { Dimension, Pos, WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import type { RegistryLike } from '../core/registry'
@@ -29,16 +29,16 @@ export interface ObtainRequest {
 }
 
 /** what one of an item counts for in a request: 1, or its nutrition for a nutrition request (0 for harmful food) */
-export function unitValue (req: Pick<ObtainRequest, 'unit'>, item: string): number {
+export function unitValue (req: Pick<ObtainRequest, 'unit'>, item: string, registry: RegistryLike): number {
   if (req.unit !== 'nutrition') return 1
-  const food = FOODS[item]
+  const food = foodInfo(registry, item)
   return food == null || food.harmful === true ? 0 : food.nutrition
 }
 
 /** how much of a request the inventory holds, in the request's unit, over its (resolved) alternatives */
 export function heldFor (inv: Inventory, alts: readonly string[], req: Pick<ObtainRequest, 'unit'>): number {
   if (req.unit !== 'nutrition') return inv.countAny(alts)
-  return alts.reduce((n, a) => n + inv.count(a) * unitValue(req, a), 0)
+  return alts.reduce((n, a) => n + inv.count(a) * unitValue(req, a, inv.registry), 0)
 }
 
 export interface ObtainOptions {
@@ -288,7 +288,7 @@ export class Resolver {
     if (have >= count) return s
     let best: State | null = null
     for (const item of this.orderAlternatives(s, alts)) {
-      const value = unitValue(req, item)
+      const value = unitValue(req, item, this.registry)
       if (value <= 0) continue
       const n = Math.ceil((count - have) / value - 1e-9)
       const lim = best == null ? limit : Math.min(limit, best.cost)

@@ -58,9 +58,9 @@ test('food: hunt and cook until there are 40 food points', () => {
 test('food counts its points from any food: the raw meat held is cooked first, berries, melons or crops when near', () => {
   const kit = { crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1 }
   const points = (inv: Inventory): number => heldFor(inv, FOOD_GOAL, { unit: 'nutrition' })
-  assert.equal(unitValue({ unit: 'nutrition' }, 'cooked_beef'), 8)
-  assert.equal(unitValue({ unit: 'nutrition' }, 'chicken'), 0) // raw chicken poisons
-  assert.equal(unitValue({}, 'cooked_beef'), 1)
+  assert.equal(unitValue({ unit: 'nutrition' }, 'cooked_beef', registry), 8)
+  assert.equal(unitValue({ unit: 'nutrition' }, 'chicken', registry), 0) // raw chicken poisons
+  assert.equal(unitValue({}, 'cooked_beef', registry), 1)
   assert.equal(RAW_TO_COOKED.rabbit, 'cooked_rabbit')
   assert.equal(RAW_TO_COOKED.potato, 'baked_potato')
   // the 9 rabbits of a snowy taiga (seed 4) are 45 points once cooked: no hunt for cows

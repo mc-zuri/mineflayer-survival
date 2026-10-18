@@ -134,7 +134,7 @@ export function spareKitGoals (carried: Inventory, stored: Readonly<Record<strin
     if (alts.some(a => (stored[a] ?? 0) > 0)) continue
     goals.push({ item: alts, count: carried.countAny(alts) + 1 })
   }
-  const storedPoints = Object.entries(stored).reduce((n, [name, c]) => n + c * unitValue({ unit: 'nutrition' }, name), 0)
+  const storedPoints = Object.entries(stored).reduce((n, [name, c]) => n + c * unitValue({ unit: 'nutrition' }, name, carried.registry), 0)
   if (storedPoints < SPARE_FOOD_POINTS) {
     goals.push({ item: FOOD_GOAL, count: heldFor(carried, FOOD_GOAL, { unit: 'nutrition' }) + SPARE_FOOD_POINTS - storedPoints, unit: 'nutrition' })
   }

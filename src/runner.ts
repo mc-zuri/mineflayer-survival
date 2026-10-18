@@ -436,11 +436,11 @@ export class Runner {
       if (g.unit === 'nutrition') {
         // the points the chests are short of (the goal is what was carried and those)
         let points = Math.min(SPARE_FOOD_POINTS, g.count - heldFor(carried, FOOD_GOAL, g))
-        for (const name of [...FOOD_GOAL].sort((a, b) => unitValue(g, b) - unitValue(g, a))) {
-          const n = Math.min(inv.count(name), Math.ceil(Math.max(0, points) / unitValue(g, name)))
+        for (const name of [...FOOD_GOAL].sort((a, b) => unitValue(g, b, this.bot.registry as any) - unitValue(g, a, this.bot.registry as any))) {
+          const n = Math.min(inv.count(name), Math.ceil(Math.max(0, points) / unitValue(g, name, this.bot.registry as any)))
           if (n <= 0) continue
           items.push({ name, count: n })
-          points -= n * unitValue(g, name)
+          points -= n * unitValue(g, name, this.bot.registry as any)
         }
       } else {
         const name = (g.item as readonly string[]).find(a => inv.count(a) > 1) ?? (g.item as readonly string[]).find(a => inv.count(a) > 0)
