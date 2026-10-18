@@ -15,6 +15,7 @@ import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './co
 import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { comeUp, dayPhase, nightAction, nightGoals } from './planner/schedule'
+import { onSurface } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
 import { buildBase, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
@@ -618,6 +619,32 @@ export class Runner {
           if (ctrl.signal.aborted) break
           this.log(`night: no ${String(goal.item)}: ${(err as Error).message}`)
         }
+      }
+      // the night's goals got: the iron or diamonds milestone goes on down here where its plan needs nothing from up
+      // there (the smelting and the crafting), and then the rest of the night is waited out in the lit mine, not
+      // spent going up for the day's work: on seed 4 the bot climbed into a ravine at night for animals, sheltered
+      // 5000 ticks there, and a zombie killed it
+      const reached = this.reached.map(r => r.id)
+      const next = MILESTONES.find(m => (m.id === 'iron' || m.id === 'diamonds') && !reached.includes(m.id) && !m.done(progressState(bot, this.memory)))
+      if (!ctrl.signal.aborted && next != null) {
+        const work = next.goals(progressState(bot, this.memory))
+        if (this.executor.plan(work, undefined, { undergroundOnly: true }).ok) {
+          this.log(`night: ${next.id} goes on down here`)
+          try {
+            await this.executor.obtain(work, ctrl.signal, { undergroundOnly: true })
+          } catch (err) {
+            if (signal?.aborted === true || TaskError.is(err, 'DIED') || bot.health <= 0) throw err
+            if (!ctrl.signal.aborted) this.log(`night: ${next.id} stopped: ${(err as Error).message}`)
+          }
+        }
+      }
+      if (!ctrl.signal.aborted && typeof bot.blockAt === 'function' && !onSurface(p => bot.blockAt(p) as any, bot.entity.position.floored())) {
+        this.log(`night (time ${bot.time.timeOfDay}): the rest of it waited out down the mine`)
+        await new Promise<void>(resolve => {
+          if (ctrl.signal.aborted) return resolve()
+          ctrl.signal.addEventListener('abort', () => resolve(), { once: true })
+        })
+        if (signal?.aborted === true) throw signal.reason
       }
     } finally {
       bot.off('physicsTick', watch)

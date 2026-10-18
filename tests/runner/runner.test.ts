@@ -360,3 +360,21 @@ test('a night down the mine with no wood carried cuts a few logs first, for its 
   assert.equal(mined[0], 'oak_log')
   assert.ok(progressState(bot, bot.survival.memory).inventory.count('oak_log') >= DUSK_LOGS)
 })
+
+test('the night\'s goals got, the rest of the night is waited out down the mine until the day', async () => {
+  const bot = fakeBot({ stone_pickaxe: 1, cooked_beef: 8, oak_log: 4 })
+  bot.time = { timeOfDay: 14000, day: 1 }
+  bot.food = 20
+  bot.blockAt = () => ({ name: 'stone', boundingBox: 'block' })
+  const lines: string[] = []
+  const runner = new Runner(bot, { log: l => lines.push(l), executor: { log: () => {} } })
+  let done = false
+  const night = runner.mineTheNight([]).then(() => { done = true })
+  for (let i = 0; i < 20; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  assert.equal(done, false)
+  assert.ok(lines.some(l => /the rest of it waited out down the mine/.test(l)), lines.join('\n'))
+  bot.time = { timeOfDay: 100, day: 2 }
+  bot.emit('physicsTick')
+  await night
+  assert.equal(bot.survival.nightWork, false)
+})
