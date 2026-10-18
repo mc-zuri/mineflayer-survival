@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { boxEntry, cellsOnLine, planCrystals, spikeBlocks } from '../../src/end/crystals'
-import { getSpikesForLevel } from '../../src/end/spikes'
+import { getSpikesForLevel, spikeColumns } from '../../src/end/spikes'
+import { parseSeed } from '../../src/worldgen/random'
 
 test('every crystal gets a plan: shoot the open ones, pillar to the caged ones and open the cage', () => {
   const spikes = getSpikesForLevel(0)
@@ -46,4 +47,18 @@ test('the route starts at the nearest and skips destroyed crystals; no bow means
 
 test('a line through blocks lists the cells between its ends', () => {
   assert.deepEqual(cellsOnLine({ x: 0.5, y: 0.5, z: 0.5 }, { x: 3.5, y: 0.5, z: 0.5 }), [{ x: 1, y: 0, z: 0 }, { x: 2, y: 0, z: 0 }])
+})
+
+test('no shooting spot on a spike\'s top, where the ground a getter reads is the obsidian (seed endfight, spike 7 from beside spike 6)', () => {
+  const spikes = getSpikesForLevel(parseSeed('endfight'))
+  const columns = new Map<string, number>()
+  for (const s of spikes) for (const c of spikeColumns(s)) columns.set(`${c.x},${c.z}`, s.height)
+  // the world's ground: the island at 65, a spike's top where there is one
+  const groundY = (x: number, z: number): number => columns.get(`${Math.floor(x)},${Math.floor(z)}`) ?? 65
+  const plan = planCrystals(spikes, { groundY, from: { x: -27.5, z: -0.5 }, destroyed: [0, 1, 2, 3, 4, 5, 6, 8, 9] })
+  assert.equal(plan.length, 1)
+  const spot = plan[0].shootFrom
+  assert.ok(spot != null)
+  assert.ok(!columns.has(`${Math.floor(spot.x)},${Math.floor(spot.z)}`), `spot ${spot.x}, ${spot.z} is on a spike`)
+  assert.equal(spot.y - spot.pillar, 65)
 })
