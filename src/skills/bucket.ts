@@ -3,9 +3,10 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { SkillError, isAbort, throwIfAborted } from './errors'
-import { navigateToReach } from './navigate'
+import { goals } from '@nxg-org/mineflayer-pathfinder'
+import { navigate, navigateToReach } from './navigate'
 import { isInteractive, isSolid } from './placement'
-import { CARDINALS, FACES, blockAtOrThrow, blockReach, canSee, countItems, eyePosition, findInventoryItem, settleInventory, waitUntil, withinReach, type Block } from './util'
+import { CARDINALS, FACES, blockAtOrThrow, blockReach, canSee, countItems, eyeHeight, eyePosition, findInventoryItem, settleInventory, waitUntil, withinReach, type Block } from './util'
 
 export type Fluid = 'water' | 'lava'
 
@@ -29,26 +30,67 @@ export interface BucketResult {
   item: string
 }
 
-/** a source's surface (FlowingFluid.getHeight: 8/9 of the block), where a look at it hits it */
-function surfacePoints (pos: Vec3): Vec3[] {
+/**
+ * Points on a source's shape (FlowingFluid.getShape: a box 8/9 of the block high), where a look at it hits it: the
+ * surface first, then its sides and its bottom (BucketItem.use's ray, ClipContext.Fluid.SOURCE_ONLY, stops at any face
+ * of the shape, so a source overhead is taken from below).
+ */
+export function surfacePoints (pos: Vec3): Vec3[] {
   const top = 8 / 9 - 0.02
-  return [[0.5, 0.5], [0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]].map(([x, z]) => pos.offset(x, top, z))
+  const points = [[0.5, 0.5], [0.2, 0.2], [0.8, 0.2], [0.2, 0.8], [0.8, 0.8]].map(([x, z]) => pos.offset(x, top, z))
+  for (const [x, z] of [[0.02, 0.5], [0.98, 0.5], [0.5, 0.02], [0.5, 0.98]]) points.push(pos.offset(x, 0.45, z))
+  for (const [x, z] of [[0.5, 0.5], [0.2, 0.2], [0.8, 0.8]]) points.push(pos.offset(x, 0.02, z))
+  return points
 }
 
 /**
- * Goes where the bot sees one of `points` (a look at it hitting what the use aims for) within reach, closer step by
- * step when it doesn't, and returns that point.
+ * Goes where the bot sees what `aim` aims at (a point a look at hits, from the given eyes) within reach: closer step
+ * by step when it doesn't, then to a spot near `pos` it sees it from (the nearest spot in reach can be behind a
+ * block), and returns that point.
  */
-async function approachToSee (bot: Bot, pos: Vec3, aim: () => Vec3 | null, signal?: AbortSignal): Promise<Vec3> {
+async function approachToSee (bot: Bot, pos: Vec3, aim: (eye: Vec3) => Vec3 | null, signal?: AbortSignal): Promise<Vec3> {
   const reach = blockReach(bot)
-  for (const range of [4, 3, 2]) {
-    const point = withinReach(bot, pos) ? aim() : null
-    if (point != null && point.distanceTo(eyePosition(bot)) <= reach) return point
+  const inView = (): Vec3 | null => {
+    const eye = eyePosition(bot)
+    const point = withinReach(bot, pos) ? aim(eye) : null
+    return point != null && point.distanceTo(eye) <= reach ? point : null
+  }
+  for (const range of [4, 3]) {
+    const point = inView()
+    if (point != null) return point
     await navigateToReach(bot, pos, signal, { reach: range })
   }
-  const point = aim()
-  if (point == null || point.distanceTo(eyePosition(bot)) > reach) throw new SkillError('NO_PATH', `no spot found to see ${pos.toString()} from`)
-  return point
+  let point = inView()
+  if (point != null) return point
+  const spots = viewSpots(bot, pos, eyeHeight(bot), eye => { const p = aim(eye); return p != null && p.distanceTo(eye) <= reach - 0.25 })
+  for (const spot of spots.slice(0, 4)) {
+    try {
+      await navigate(bot, { goal: new goals.GoalBlock(spot.x, spot.y, spot.z) }, signal)
+    } catch (err) {
+      if (isAbort(err)) throw err
+      continue
+    }
+    point = inView()
+    if (point != null) return point
+  }
+  throw new SkillError('NO_PATH', `no spot found to see ${pos.toString()} from`)
+}
+
+/** cells near `pos` the bot can stand in (solid below, two cells free of blocks and lava) whose eyes pass `sees`, nearest the bot first */
+function viewSpots (bot: Bot, pos: Vec3, height: number, sees: (eye: Vec3) => boolean, radius = 4): Vec3[] {
+  const out: Array<{ cell: Vec3, d: number }> = []
+  const free = (p: Vec3): boolean => { const b = bot.blockAt(p); return b != null && !isSolid(b) && b.name !== 'lava' }
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      for (let dy = -radius - 1; dy <= radius - 1; dy++) {
+        const cell = pos.offset(dx, dy, dz)
+        if (!free(cell) || !free(cell.offset(0, 1, 0)) || !isSolid(bot.blockAt(cell.offset(0, -1, 0)))) continue
+        if (!sees(cell.offset(0.5, height, 0.5))) continue
+        out.push({ cell, d: cell.offset(0.5, 0, 0.5).distanceTo(bot.entity.position) })
+      }
+    }
+  }
+  return out.sort((a, b) => a.d - b.d).map(c => c.cell)
 }
 
 export async function fillBucket (bot: Bot, args: FillBucketArgs, signal?: AbortSignal): Promise<BucketResult> {
@@ -66,7 +108,7 @@ export async function fillBucket (bot: Bot, args: FillBucketArgs, signal?: Abort
   }
   const pos = source.position
   // BucketItem.use: the server picks the source the player looks at (a raycast that stops at source fluids)
-  const point = await approachToSee(bot, pos, () => surfacePoints(pos).find(point => canSee(bot, point)) ?? null, signal)
+  const point = await approachToSee(bot, pos, eye => surfacePoints(pos).find(point => canSee(bot, point, undefined, eye)) ?? null, signal)
 
   const filled = `${fluid}_bucket`
   const before = countItems(bot, filled)
@@ -90,8 +132,7 @@ export interface EmptyBucketArgs {
  * way. BucketItem.use raycasts without fluids and pours on the clicked face's side (into the block itself when it
  * holds water, as a slab can, so those aren't used).
  */
-function pourPoint (bot: Bot, pos: Vec3): Vec3 | null {
-  const eye = eyePosition(bot)
+function pourPoint (bot: Bot, pos: Vec3, eye: Vec3 = eyePosition(bot)): Vec3 | null {
   for (const face of FACES) {
     const block = bot.blockAt(pos.minus(face))
     if (block == null || !isSolid(block) || isInteractive(block.name) || 'waterlogged' in (block.getProperties?.() ?? {})) continue
@@ -102,7 +143,7 @@ function pourPoint (bot: Bot, pos: Vec3): Vec3 | null {
       const point = face.x !== 0 ? centre.offset(0, a, b) : face.y !== 0 ? centre.offset(a, 0, b) : centre.offset(a, b, 0)
       // the eyes on the face's outer side, nothing between them and it
       if (eye.minus(point).dot(face) <= 0) continue
-      if (canSee(bot, point, block.position)) return point
+      if (canSee(bot, point, block.position, eye)) return point
     }
   }
   return null
@@ -118,7 +159,7 @@ export async function emptyBucket (bot: Bot, args: EmptyBucketArgs, signal?: Abo
   if (isSource(target, fluid)) return { pos, item: 'bucket' }
   if (isSolid(target)) throw new SkillError('CANNOT_PLACE', `${target.name} is at ${pos.toString()}`)
 
-  const point = await approachToSee(bot, pos, () => pourPoint(bot, pos), signal)
+  const point = await approachToSee(bot, pos, eye => pourPoint(bot, pos, eye), signal)
     .catch(err => { throw new SkillError('CANNOT_PLACE', `no face in view to pour against at ${pos.toString()}`, undefined, { cause: err }) })
 
   await settleInventory(bot, signal)

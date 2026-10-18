@@ -209,8 +209,7 @@ export function withinReach (bot: Bot, pos: Vec3, reach = blockReach(bot)): bool
  * Whether the bot's eyes see `point`: no block's collision box in the way (the block at `through`, the one the point
  * is on, excepted). A use the server raycasts for (a bucket's) hits what's first along the look.
  */
-export function canSee (bot: Bot, point: Vec3, through?: Vec3): boolean {
-  const eye = eyePosition(bot)
+export function canSee (bot: Bot, point: Vec3, through?: Vec3, eye: Vec3 = eyePosition(bot)): boolean {
   const delta = point.minus(eye)
   const dist = delta.norm()
   if (dist < 1e-6) return true
