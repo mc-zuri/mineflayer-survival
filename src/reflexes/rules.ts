@@ -6,6 +6,7 @@ import { creeperSwelling, fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
 import { bestMeleeWeapon } from '../skills/weapons'
 import type { Entity } from '../skills/combatUtil'
+import { GHAST_FIREBALL, deflectFireball, fireballIncoming } from '../nether/safety'
 import type { Reflex, ReflexContext } from './types'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
@@ -34,6 +35,19 @@ export const totemReflex: Reflex = {
     if (!config.totem.always && bot.health > config.totem.health) return null
     if (!bot.inventory.items().some(i => i.name === 'totem_of_undying')) return null
     return { name: 'totem', priority: config.totem.priority, run: async () => await equipTotem(bot) }
+  }
+}
+
+/** A ghast's fireball coming at the bot: punched back (AbstractHurtingProjectile.hurt turns it along the look). */
+export const fireballReflex: Reflex = {
+  name: 'fireball',
+  priority: 92,
+  check (ctx) {
+    const { bot, config } = ctx
+    if (!config.fireball.enabled) return null
+    const fireball = Object.values(bot.entities).find(e => e.name === GHAST_FIREBALL && fireballIncoming(bot, e, config.fireball.range))
+    if (fireball == null) return null
+    return { name: 'fireball', priority: config.fireball.priority, detail: 'deflect fireball', run: async (signal) => await deflectFireball(bot, fireball, { signal }) }
   }
 }
 
@@ -189,4 +203,4 @@ export const armorReflex: Reflex = {
   }
 }
 
-export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, hazardReflex, drowningReflex, creeperReflex, hostilesReflex, eatReflex, armorReflex]
+export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fireballReflex, hazardReflex, drowningReflex, creeperReflex, hostilesReflex, eatReflex, armorReflex]

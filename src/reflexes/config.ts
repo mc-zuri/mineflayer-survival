@@ -76,6 +76,12 @@ export interface ReflexConfig {
     enabled: boolean
     priority: number
   }
+  fireball: {
+    enabled: boolean
+    /** hit back a ghast's fireball coming at the bot within this distance (default 12) */
+    range: number
+    priority: number
+  }
   totem: {
     enabled: boolean
     /** keep a totem in the off hand whatever the health (default true); else only at or below `health` */
@@ -107,6 +113,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
   hazard: { enabled: true, searchRadius: 6, waterRadius: 6, maxTicks: 200, priority: 90 },
   drowning: { enabled: true, air: 6, recoverTo: 18, searchRadius: 8, maxTicks: 300, priority: 85 },
   armor: { enabled: true, priority: 20 },
+  fireball: { enabled: true, range: 12, priority: 92 },
   totem: { enabled: true, always: true, health: 10, priority: 95 },
   retryCooldownTicks: 20
 }
