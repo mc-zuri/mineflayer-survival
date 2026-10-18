@@ -274,3 +274,11 @@ test('the reflexes that fire are logged, a run of the same one counted', async (
   await runner.play()
   assert.deepEqual(lines.filter(l => l.startsWith('reflex')), ['reflex drowning', 'reflex drowning 4 times more', 'reflex eat'])
 })
+
+test('the death messages are told from the other system lines about the bot', async () => {
+  const { isDeathMessage } = await import('../../src/runner')
+  assert.equal(isDeathMessage('miner fell from a high place'), true)
+  assert.equal(isDeathMessage('miner was slain by Zombie'), true)
+  assert.equal(isDeathMessage('miner has made the advancement [Stone Age]'), false)
+  assert.equal(isDeathMessage('miner joined the game'), false)
+})

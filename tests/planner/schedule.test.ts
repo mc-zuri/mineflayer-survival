@@ -51,11 +51,14 @@ test('the night\'s goals: torches first (coal means torches), then the iron, the
   assert.deepEqual(nightGoals(inv({ stone_pickaxe: 1, torch: 20, iron_ingot: 40 }), ['wood', 'stone', 'food']), [])
 })
 
-test('the mine is left when the day is back or the food runs low', () => {
+test('the mine is left when the day is back, or when hungry with little left to eat', () => {
   assert.equal(comeUp('night', 30), false)
   assert.equal(comeUp('dusk', 30), false)
   assert.equal(comeUp('day', 30), true)
-  assert.equal(comeUp('night', 4), true)
+  // a full bar mines on without food; a hungry bot with food eats it down there
+  assert.equal(comeUp('night', 4, 20), false)
+  assert.equal(comeUp('night', 30, 5), false)
+  assert.equal(comeUp('night', 4, 5), true)
 })
 
 test('a night\'s plan has only what a mine has: torches from coal ore and the sticks held, no logs or animals', () => {

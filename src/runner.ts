@@ -140,6 +140,11 @@ export function deathSpotWorthIt (death: { x: number, y: number, z: number, dime
   return true
 }
 
+/** a system message about the player that isn't an advancement or a join: a death message (DeathMessageType's) */
+export function isDeathMessage (message: string): boolean {
+  return !/ has (made|completed|reached) the (advancement|challenge|goal)| joined the game| left the game/.test(message)
+}
+
 /** reflexes firing again within this many ticks of the last are counted, not logged each */
 export const REFLEX_LOG_TICKS = 200
 
@@ -301,6 +306,13 @@ export class Runner {
       last = { name, tick, repeats: 0 }
     }
     this.bot.on('reflex' as any, onReflex)
+    // the deaths, where and why: the server's death message (the system chat line that starts with the bot's name)
+    const onDeath = (): void => { const p = this.bot.entity?.position; this.log(`died at ${p != null ? `${Math.floor(p.x)} ${Math.floor(p.y)} ${Math.floor(p.z)}` : '?'}`) }
+    const onMessage = (message: string): void => {
+      if (typeof message === 'string' && message.startsWith(`${this.bot.username} `) && isDeathMessage(message)) this.log(`server: ${message}`)
+    }
+    this.bot.on('death', onDeath)
+    this.bot.on('messagestr' as any, onMessage)
     try {
       const result = await this.loop(controller.signal)
       if (overBudget && result.reason === 'aborted') result.reason = 'budget'
@@ -308,6 +320,8 @@ export class Runner {
     } finally {
       this.bot.off('physicsTick', onTick)
       this.bot.off('reflex' as any, onReflex)
+      this.bot.off('death', onDeath)
+      this.bot.off('messagestr' as any, onMessage)
       outer?.removeEventListener('abort', onOuter)
     }
   }
@@ -499,7 +513,7 @@ export class Runner {
     if (signal?.aborted === true) onOuter()
     signal?.addEventListener('abort', onOuter, { once: true })
     const watch = (): void => {
-      if (ctrl.signal.aborted || !comeUp(dayPhase(bot.time.timeOfDay), ownedInventory(bot).foodPoints())) return
+      if (ctrl.signal.aborted || !comeUp(dayPhase(bot.time.timeOfDay), ownedInventory(bot).foodPoints(), bot.food ?? 20)) return
       ctrl.abort(new TaskError('ABORTED', 'the night is over'))
     }
     bot.on('physicsTick', watch)

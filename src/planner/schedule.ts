@@ -88,10 +88,14 @@ export function nightGoals (inv: Inventory, reached: readonly MilestoneId[]): Ob
   return goals
 }
 
+/** the hunger bar (the player's food level, 0 to 20) at which a bot with no food to eat leaves the mine */
+export const HUNGRY = 6
+
 /**
- * Whether the night's mining stops for the surface: the day is back, or the food is under a quarter of FOOD_POINTS
- * with nothing much left to eat (the restock is a surface trip)
+ * Whether the night's mining stops for the surface: the day is back, or the bot is hungry (HUNGRY) with less than a
+ * quarter of FOOD_POINTS to eat (the restock is a surface trip). With a full bar it mines on without food: the bar
+ * lasts a night's digging (FoodData's exhaustion: 0.005 a block broken)
  */
-export function comeUp (phase: DayPhase, foodPoints: number): boolean {
-  return phase === 'day' || foodPoints < FOOD_POINTS / 4
+export function comeUp (phase: DayPhase, foodPoints: number, hunger = 20): boolean {
+  return phase === 'day' || (hunger <= HUNGRY && foodPoints < FOOD_POINTS / 4)
 }
