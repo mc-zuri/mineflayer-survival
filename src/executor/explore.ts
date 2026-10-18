@@ -2,6 +2,7 @@
 // the surface (trees, animals, water, sand), and for ores a staircase down to the ore's best level and a tunnel
 // along it. Every block opened is checked for lava (and water) around it first, so the bot stays out of both.
 import type { Bot } from 'mineflayer'
+import { TORCH_SPACING } from '../planner/schedule'
 import { Vec3 } from 'vec3'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { WorldMemory } from '../core/memory'
@@ -497,6 +498,26 @@ function feetOf (bot: Bot): Vec3 {
   return new Vec3(Math.floor(p.x), Math.floor(p.y + 1e-6), Math.floor(p.z))
 }
 
+/**
+ * A torch on the floor of the cell a dug route just left, when one is carried: the staircase and tunnels lit every
+ * TORCH_SPACING blocks, so nothing spawns along the way back (any block light stops monster spawning since 1.18,
+ * Monster.isDarkEnoughToSpawn) and the way is seen
+ */
+export async function lightBehind (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise<boolean> {
+  if (countItems(bot, 'torch') === 0) return false
+  const here = bot.blockAt(cell)
+  const floor = bot.blockAt(cell.offset(0, -1, 0))
+  if (here == null || !AIR_BLOCKS.has(here.name) || floor == null || floor.boundingBox !== 'block') return false
+  try {
+    await placeBlock(bot, { pos: cell, item: 'torch', against: cell.offset(0, -1, 0) }, signal)
+    return true
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('explore: no torch at', cell.toString(), (err as Error).message)
+    return false
+  }
+}
+
 export interface DigRouteArgs {
   /** stop early once this holds (checked every step) */
   found?: () => boolean
@@ -513,6 +534,7 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
   const lookup = lookupOf(bot)
   const maxSteps = args.maxSteps ?? 400
   let moves = 0
+  let dug = 0
   for (let i = 0; i < maxSteps; i++) {
     throwIfAborted(signal)
     if (args.found?.() === true) return true
@@ -533,6 +555,7 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
         trace('explore: staircase step failed', (err as Error).message)
         continue
       }
+      if (++dug % TORCH_SPACING === 0) await lightBehind(bot, feet, signal)
       dir = d
       stepped = true
       break
@@ -593,6 +616,7 @@ export async function tunnel (bot: Bot, args: DigRouteArgs & { length?: number, 
   const lookup = lookupOf(bot)
   const length = args.length ?? 24
   const legs = args.legs ?? 8
+  let dug = 0
   for (let leg = 0; leg < legs; leg++) {
     let blocked = 0
     for (let i = 0; i < length; i++) {
@@ -612,6 +636,7 @@ export async function tunnel (bot: Bot, args: DigRouteArgs & { length?: number, 
         blocked++
         break
       }
+      if (++dug % TORCH_SPACING === 0) await lightBehind(bot, feet, signal)
     }
     if (args.found?.() === true) return true
     // turn right (clockwise from above): -z → +x → +z → -x
