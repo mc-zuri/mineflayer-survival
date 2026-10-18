@@ -67,6 +67,8 @@ export interface PlayOptions {
   handlers?: Partial<Record<MilestoneId, MilestoneHandler>>
   /** the memory and progress are saved here after every milestone and step, and loaded from it at the start */
   saveFile?: string
+  /** where to save instead of a file (a browser's localStorage, which has no fs), over saveFile */
+  saveStore?: SaveStore
   /** sleep at night when a bed is at hand (default true) */
   sleep?: boolean
   /** from dusk with a pickaxe and no bed, mine through the night (the schedule's nightAction; default true) */
@@ -90,6 +92,29 @@ export interface PlayResult {
   stoppedAt: MilestoneId | null
   reason: 'until' | 'finished' | 'unwired' | 'failed' | 'aborted' | 'budget'
   error?: unknown
+}
+
+/** where play keeps its save (SaveFile's JSON): a file (saveFile), or any other storage */
+export interface SaveStore {
+  /** the JSON saved last, null when there's none yet */
+  read: () => string | null
+  write: (json: string) => void
+  /** where it is, for the log */
+  name: string
+}
+
+/** a save file, written whole to a .tmp file and renamed over the old one */
+export function fileSaveStore (file: string): SaveStore {
+  return {
+    name: file,
+    read: () => fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null,
+    write: (json) => {
+      fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true })
+      const tmp = `${file}.tmp`
+      fs.writeFileSync(tmp, json)
+      fs.renameSync(tmp, file)
+    }
+  }
 }
 
 interface SaveFile {
@@ -205,9 +230,11 @@ export class Runner {
   private nightMinedDay = -1
   private inNightWork = false
   private restockRetryAt = 0
+  private readonly store: SaveStore | null
 
   constructor (readonly bot: Bot, readonly options: PlayOptions = {}) {
     this.log = options.log ?? (line => console.log(tickLine(this.tick, line)))
+    this.store = options.saveStore ?? (options.saveFile != null ? fileSaveStore(options.saveFile) : null)
     this.executor = new Executor(bot, {
       log: this.log,
       home: () => this.home(),
@@ -240,24 +267,20 @@ export class Runner {
   }
 
   load (): void {
-    const file = this.options.saveFile
-    if (file == null || !fs.existsSync(file)) return
-    const data: SaveFile = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const json = this.store?.read() ?? null
+    if (json == null) return
+    const data: SaveFile = JSON.parse(json)
     if (data.version !== 1) throw new Error(`unknown save file version ${String(data.version)}`)
     this.memory.restore(data.memory)
     this.reached.push(...data.reached)
     this.ticksBefore = data.ticks
-    this.log(`resumed from ${file}: ${data.reached.length > 0 ? data.reached.map(r => r.id).join(', ') : 'no milestones yet'}`)
+    this.log(`resumed from ${this.store?.name ?? ''}: ${data.reached.length > 0 ? data.reached.map(r => r.id).join(', ') : 'no milestones yet'}`)
   }
 
   save (): void {
-    const file = this.options.saveFile
-    if (file == null) return
+    if (this.store == null) return
     const data: SaveFile = { version: 1, memory: this.memory.toJSON(), reached: this.reached, ticks: this.tick }
-    fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true })
-    const tmp = `${file}.tmp`
-    fs.writeFileSync(tmp, JSON.stringify(data))
-    fs.renameSync(tmp, file)
+    this.store.write(JSON.stringify(data))
   }
 
   private handlerFor (id: MilestoneId): MilestoneHandler | null {

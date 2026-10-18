@@ -22,8 +22,8 @@ export * as worldgen from './worldgen'
 export * as executor from './executor'
 export { Executor } from './executor/executor'
 export type { ExecutorOptions, ObtainOutcome } from './executor/executor'
-export { Runner, play, progressState, UNWIRED } from './runner'
-export type { PlayOptions, PlayResult, MilestoneEvent, MilestoneHandler, MilestoneContext } from './runner'
+export { Runner, play, progressState, fileSaveStore, UNWIRED } from './runner'
+export type { PlayOptions, PlayResult, MilestoneEvent, MilestoneHandler, MilestoneContext, SaveStore } from './runner'
 
 export interface SurvivalOptions {
   /** load the pathfinder if the bot doesn't have it yet (default true) */

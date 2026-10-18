@@ -98,6 +98,30 @@ test('until and skip; a milestone failing five times stops play; the save file r
   assert.deepEqual(result2.reached.map(r => r.id), ['wood', 'stone'])
 })
 
+test('a save store (a browser\'s localStorage, no fs) saves and resumes the run as a save file does', async () => {
+  let saved: string | null = null
+  const store = { name: 'localStorage', read: () => saved, write: (json: string) => { saved = json } }
+  const bot = fakeBot()
+  const runner = new Runner(bot, {
+    until: 'wood',
+    saveStore: store,
+    log: () => {},
+    handlers: { wood: async () => { bot.give('wooden_pickaxe', 1); bot.give('crafting_table', 1) } }
+  })
+  bot.survival.memory.rememberBlock('iron_ore', { x: 3, y: 12, z: 4 })
+  await runner.play()
+  assert.notEqual(saved, null)
+  assert.deepEqual(JSON.parse(saved as unknown as string).reached.map((r: any) => r.id), ['wood'])
+
+  const lines: string[] = []
+  const bot2 = fakeBot({ wooden_pickaxe: 1, crafting_table: 1 })
+  const runner2 = new Runner(bot2, { until: 'wood', saveStore: store, log: line => lines.push(line) })
+  const result2 = await runner2.play()
+  assert.deepEqual(result2.reached.map(r => r.id), ['wood'])
+  assert.equal(bot2.survival.memory.findBlocks('iron_ore').length, 1)
+  assert.ok(lines.some(l => l.startsWith('resumed from localStorage')), lines.join('\n'))
+})
+
 test('progressState: worn armor and the base\'s stations count', () => {
   const bot = fakeBot({ iron_pickaxe: 1 })
   bot.survival.memory.setBase({ x: 0, y: 40, z: 0 })
