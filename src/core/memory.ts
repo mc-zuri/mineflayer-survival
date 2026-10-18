@@ -40,6 +40,8 @@ export interface Poi extends Located {
 
 export interface Death extends Located {
   seen: number
+  /** died under a roof (a cave, a mine): no sky over the spot */
+  underground?: boolean
 }
 
 export interface WorldMemoryJSON {
@@ -209,8 +211,8 @@ export class WorldMemory {
     return opts.count != null ? out.slice(0, opts.count) : out
   }
 
-  setDeath (pos: Pos, dimension: Dimension = 'overworld'): void {
-    this.death = { ...at(pos, dimension), seen: this.now }
+  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean): void {
+    this.death = { ...at(pos, dimension), seen: this.now, ...(underground != null ? { underground } : {}) }
   }
 
   toJSON (): WorldMemoryJSON {

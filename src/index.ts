@@ -5,6 +5,7 @@ import { WorldMemory, normalizeDimension } from './core/memory'
 import { ReflexEngine, type ReflexEngineOptions } from './reflexes'
 import { play, type MilestoneHandler, type PlayOptions, type PlayResult } from './runner'
 import { keepHeadAboveWater } from './skills/breath'
+import { openSky } from './executor/explore'
 import type { MilestoneId } from './planner/progression'
 
 export * from './core'
@@ -63,7 +64,12 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     bot.on('physicsTick', () => { memory.now = tasks.tick })
     bot.on('death', () => {
       // the running and queued tasks can't go on; the death spot is where the items are
-      if (bot.entity != null) memory.setDeath(bot.entity.position, normalizeDimension(bot.game?.dimension))
+      if (bot.entity != null) {
+        // (in the overworld: the nether's roof is over everything)
+        const dimension = normalizeDimension(bot.game?.dimension)
+        const lookup = (p: any): any => bot.blockAt(p)
+        memory.setDeath(bot.entity.position, dimension, dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined)
+      }
       tasks.cancelAll('DIED', 'the bot died')
     })
     bot.once('end', () => {

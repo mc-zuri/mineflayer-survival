@@ -114,9 +114,12 @@ export function progressState (bot: Bot, memory: WorldMemory): ProgressState {
   return { inventory: new Inventory(bot.registry as any, items), equipment, memory, stations, enchanted, advancements: [...((bot as any).survival?.advancements ?? [])] }
 }
 
-/** whether a death spot is worth going back to: in this dimension, not in lava or the void, the items not gone yet */
-export function deathSpotWorthIt (death: { x: number, y: number, z: number, dimension: string, seen: number } | null, now: { tick: number, dimension: string, position: Vec3, minY: number, blockAt: (pos: Vec3) => { name: string } | null }, maxTicks: number): boolean {
+/** whether a death spot is worth going back to: in this dimension, not underground, in lava or the void, the items not gone yet */
+export function deathSpotWorthIt (death: { x: number, y: number, z: number, dimension: string, seen: number, underground?: boolean } | null, now: { tick: number, dimension: string, position: Vec3, minY: number, blockAt: (pos: Vec3) => { name: string } | null }, maxTicks: number): boolean {
   if (death == null || death.dimension !== now.dimension) return false
+  // a death in a cave or down a mine is left: the mobs that killed the bot in the dark are still there (and a trip
+  // down after the items on seed 4 ended in a fall and another death)
+  if (death.underground === true) return false
   if (death.y < now.minY + 1) return false
   const age = now.tick - death.seen
   if (age < 0 || age > maxTicks) return false

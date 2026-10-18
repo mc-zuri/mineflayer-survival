@@ -120,6 +120,9 @@ test('the death spot is worth going back to only while the items last and away f
   assert.equal(deathSpotWorthIt({ ...death, y: -70 }, now, 6000), false)
   assert.equal(deathSpotWorthIt({ ...death, dimension: 'the_nether' }, now, 6000), false)
   assert.equal(deathSpotWorthIt(null, now, 6000), false)
+  // a death under a roof (a cave, a mine) is left for the mobs there
+  assert.equal(deathSpotWorthIt({ ...death, underground: true }, now, 6000), false)
+  assert.equal(deathSpotWorthIt({ ...death, underground: false }, now, 6000), true)
 })
 
 test('maxTicks: play stops when its tick budget runs out, the work in hand aborted', async () => {
