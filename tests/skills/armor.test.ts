@@ -69,3 +69,17 @@ test('withArmorHeld: no upgrades offered while the armor is off on purpose (the 
   await withArmorHeld(bot, async () => { assert.deepStrictEqual(armorUpgrades(bot), {}) })
   assert.strictEqual(armorUpgrades(bot).torso?.name, 'diamond_chestplate')
 })
+
+test('armorUpgrades: a spare of the worn piece goes on for its durability only when it has a quarter of its most more left (no swap at each hit)', () => {
+  // the trip's spare golden boots and the worn ones a hit apart: each hit wears the worn ones a point
+  const worn = item('golden_boots')
+  worn.durabilityUsed = 1
+  const bot = fakeBot({ items: [item('golden_boots')], armor: { feet: worn } })
+  assert.strictEqual(armorUpgrades(bot).feet, undefined)
+  // most of the way to breaking: the fresh pair goes on (91 most, 23 a quarter)
+  worn.durabilityUsed = 30
+  assert.strictEqual(armorUpgrades(bot).feet?.durabilityUsed, 0)
+  // a better piece needs no margin
+  const bot2 = fakeBot({ items: [item('iron_boots')], armor: { feet: item('golden_boots') } })
+  assert.strictEqual(armorUpgrades(bot2).feet?.name, 'iron_boots')
+})

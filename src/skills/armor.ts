@@ -82,6 +82,18 @@ export function armorScore (item: Item, worn: Partial<Record<ArmorSlot, Item | n
   return saved * 1000 + Math.min(remainingDurability(item), 999) * 0.001 + enchantLevel(item, 'mending') * 0.5 + enchantLevel(item, 'unbreaking') * 0.1
 }
 
+/**
+ * Whether `spare` is worth putting on for `current` (same protection) for its durability alone: a quarter of its
+ * most more left. Every hit wears each worn piece a point (Inventory.hurtArmor), so with two of a piece (the trip's
+ * spare golden boots) the worn one was always the more worn after a hit: the armor reflex swapped them at each of a
+ * magma cube swarm's hits, preempting the fight back each time, and a 26.3 bot died to 18 hits with a diamond sword in
+ * hand in a basalt delta.
+ */
+function freshEnough (spare: Item, current: Item): boolean {
+  const max = (spare as any).maxDurability ?? 0
+  return remainingDurability(spare) - remainingDurability(current) >= Math.max(1, max / 4)
+}
+
 export function wornArmor (bot: Bot): Record<ArmorSlot, Item | null> {
   const worn: any = {}
   for (const slot of ARMOR_SLOTS) worn[slot] = bot.inventory.slots[bot.getEquipmentDestSlot(slot)] ?? null
@@ -147,7 +159,12 @@ export function armorUpgrades (bot: Bot): Partial<Record<ArmorSlot, Item>> {
   const better: Partial<Record<ArmorSlot, Item>> = {}
   for (const slot of ARMOR_SLOTS) {
     const item = upgrades[slot]
-    if (item != null && item !== worn[slot]) better[slot] = item
+    const current = worn[slot]
+    if (item == null || item === current) continue
+    // (as good but for durability: only for one much fresher)
+    const guard = (i: Item): number => armorScore(i, worn) - Math.min(remainingDurability(i), 999) * 0.001
+    if (current != null && Math.abs(guard(item) - guard(current)) < 1e-9 && !freshEnough(item, current)) continue
+    better[slot] = item
   }
   return better
 }
