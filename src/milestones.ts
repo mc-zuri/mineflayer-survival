@@ -85,17 +85,34 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
   // gone off), the pen built or the one remembered; the herd left loose and gathered when there's none
   let pen: PenPlan | null = null
   // the biggest pen the ground near home takes (a hillside home had no ground for 9 across, 26.3 seed 2)
-  for (const size of PEN_SIZES) {
-    try {
-      const r = await executor.task('the herd pen', async (s) => await herdPen(bot, { home: at, memory: executor.memory, obtain: async (reqs, sig) => await executor.obtain(reqs, sig ?? signal), mob: 'cow', size }, s), signal)
-      pen = r.pen
-      at = pen.center.clone()
-      log(`herd: the pen at ${pen.center.toString()} (${pen.size} across)${r.built ? ' built' : ''}, ${r.inside} cows in`)
-      break
-    } catch (err) {
-      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-      log(`herd: no pen of ${size}: ${(err as Error).message}`)
-      if (!/no ground/.test((err as Error).message)) break
+  // (the fences and the gate are got here, out of the pen's task: an obtain inside it queued its 'make room' task
+  // behind the pen's own and both waited on each other for 300000 ticks, 26.3)
+  sizes: for (const size of PEN_SIZES) {
+    for (let round = 0; round < 2; round++) {
+      let needs: Array<{ item: string, count: number }> | null = null
+      try {
+        const r = await executor.task('the herd pen', async (s) => await herdPen(bot, {
+          home: at,
+          memory: executor.memory,
+          obtain: async (reqs) => { needs = reqs; throw new TaskError('MISSING_ITEMS', `the pen takes ${reqs.map(q => `${q.count} ${q.item}`).join(', ')}`) },
+          mob: 'cow',
+          size
+        }, s), signal)
+        pen = r.pen
+        at = pen.center.clone()
+        log(`herd: the pen at ${pen.center.toString()} (${pen.size} across)${r.built ? ' built' : ''}, ${r.inside} cows in`)
+        break sizes
+      } catch (err) {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        if (needs != null && round === 0) {
+          const want: Array<{ item: string, count: number }> = needs
+          await executor.obtain(want, signal).catch(e => { if (signal.aborted || TaskError.is(e, 'DIED')) throw e; log(`herd: no fences: ${(e as Error).message}`) })
+          continue
+        }
+        log(`herd: no pen of ${size}: ${(err as Error).message}`)
+        if (!/no ground/.test((err as Error).message)) break sizes
+        break
+      }
     }
   }
   const near = (e: any): boolean => pen != null ? inPen(pen, e.position) : e.position.distanceTo(at) <= 96

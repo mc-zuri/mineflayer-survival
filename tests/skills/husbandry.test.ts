@@ -190,3 +190,41 @@ test('leatherFromHerd tries smaller pens when the ground near home takes no pen 
   await leatherFromHerd(bot, executor, 46, new AbortController().signal, () => {})
   assert.equal(pens.length, PEN_SIZES.length)
 })
+
+test('leatherFromHerd gets the pen\'s fences outside the pen\'s task (an obtain inside it waited on its own make-room task)', async () => {
+  const penModule = require('../../src/skills/pen')
+  const { leatherFromHerd } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wheat', 20)] })
+  bot.game.dimension = 'overworld'
+  const pen = { center: new Vec3(10, 64, 10), size: 7, side: 'west', gate: new Vec3(7, 64, 10), inside: new Vec3(8, 64, 10), outside: new Vec3(6, 64, 10), fences: [] }
+  let calls = 0
+  const real = penModule.herdPen
+  penModule.herdPen = async (_bot: unknown, args: any) => {
+    calls++
+    if (calls === 1) await args.obtain([{ item: '#wooden_fences', count: 23 }, { item: '#fence_gates', count: 1 }])
+    return { pen, inside: 0, built: true }
+  }
+  let tick = 0
+  const log: string[] = []
+  let inTask = false
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { get tick () { return tick } },
+    obtain: async (reqs: any[]) => { log.push(`${inTask ? 'in' : 'out'} obtain ${reqs.map(r => r.item).join(',')}`) },
+    task: async (name: string, fn: any) => {
+      if (name === 'the herd pen') { inTask = true; try { return await fn(new AbortController().signal) } finally { inTask = false } }
+      if (name === 'wait for the calves') tick += 1e6
+      return { fed: 0 }
+    }
+  }
+  try {
+    await leatherFromHerd(bot, executor, 46, new AbortController().signal, () => {})
+  } finally {
+    penModule.herdPen = real
+  }
+  assert.equal(calls, 2)
+  assert.deepEqual(log.filter(l => /fences/.test(l)), ['out obtain #wooden_fences,#fence_gates'])
+})
