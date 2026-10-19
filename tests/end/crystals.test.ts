@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { boxEntry, cellsOnLine, pillarColumn, planCrystals, spikeBlocks } from '../../src/end/crystals'
-import { getSpikesForLevel, spikeColumns } from '../../src/end/spikes'
+import { cageBars, getSpikesForLevel, spikeColumns } from '../../src/end/spikes'
 import { parseSeed } from '../../src/worldgen/random'
 
 test('every crystal gets a plan: shoot the open ones, pillar to the caged ones and open the cage', () => {
@@ -92,5 +92,22 @@ test('the pillar column is outside the obsidian, and outside the cage of a caged
       if (t.pillar == null || !t.spike.guarded) continue
       assert.ok(Math.max(Math.abs(t.pillar.column.x - t.spike.centerX), Math.abs(t.pillar.column.z - t.spike.centerZ)) >= 3)
     }
+  }
+})
+
+test('no shooting spot on a caged spike\'s cage either, where the ground a getter reads is the bars\' top (seed 2: spike 9 from on top of spike 0)', () => {
+  const spikes = getSpikesForLevel(parseSeed('2'))
+  const tops = new Map<string, number>()
+  for (const s of spikes) {
+    for (const c of spikeColumns(s)) tops.set(`${c.x},${c.z}`, s.height)
+    if (s.guarded) for (const b of cageBars(s)) tops.set(`${b.x},${b.z}`, Math.max(tops.get(`${b.x},${b.z}`) ?? 0, b.y + 1))
+  }
+  const groundY = (x: number, z: number): number => tops.get(`${Math.floor(x)},${Math.floor(z)}`) ?? 63
+  const plan = planCrystals(spikes, { groundY, from: { x: 30, z: 0 } })
+  assert.equal(plan.length, 10)
+  for (const t of plan) {
+    const spot = t.shootFrom
+    if (spot == null) continue
+    assert.ok(!tops.has(`${Math.floor(spot.x)},${Math.floor(spot.z)}`), `spike ${t.spike.index} shot from ${spot.x}, ${spot.y}, ${spot.z}, on a spike or its cage`)
   }
 })

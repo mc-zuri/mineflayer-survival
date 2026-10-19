@@ -144,8 +144,10 @@ export function planCrystals (spikes: EndSpike[], opts: CrystalPlanOptions = {})
   const maxPillar = opts.maxPillar ?? 24
   const bow = opts.bow ?? true
   const blocks = spikeBlocks(spikes, opts.brokenBars ?? [])
-  // a spike's top is no place to shoot from: the ground there is the obsidian's top, 20 to 40 blocks up
-  const spikeCells = new Set(spikes.flatMap(s => spikeColumns(s).map(c => `${c.x},${c.z}`)))
+  // a spike's top is no place to shoot from: the ground there is the obsidian's top, 20 to 40 blocks up; nor a caged
+  // one's cage, whose bars stand round the obsidian (the 5 × 5 round its middle): seed 2's spike 9 was to be shot from
+  // on top of spike 0's cage, and the 26.3 bots walked into the cage after it, by the crystal's fire, and died there
+  const spikeCells = new Set(spikes.flatMap(s => [...spikeColumns(s), ...(s.guarded ? cageBars(s) : [])].map(c => `${c.x},${c.z}`)))
   const avoid = opts.avoid
   const offLimits = (x: number, z: number): boolean => spikeCells.has(`${Math.floor(x)},${Math.floor(z)}`) || (avoid?.(x, z) ?? false)
   const blocked = (p: Pos): boolean => blocks.has(keyOf(p.x, p.y, p.z)) || (opts.solidAt?.(p.x, p.y, p.z) ?? false)
