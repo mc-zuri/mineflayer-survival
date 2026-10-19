@@ -103,9 +103,15 @@ export function isOnFire (bot: Bot): boolean {
 
 /** The head is under water (the block at the eyes is water or a bubble column). */
 export function headInWater (bot: Bot): boolean {
-  const name = nameAt(bot, eyePosition(bot).floored())
-  return name === 'water' || name === 'bubble_column'
+  const block = bot.blockAt(eyePosition(bot).floored()) as any
+  const name = block?.name
+  // the water plants are water too (a river's seagrass or kelp at the eyes: no drowning reflex, and a 26.3 bot drowned
+  // under it twice), and anything waterlogged
+  return name === 'water' || name === 'bubble_column' || UNDERWATER_PLANTS.has(name) || block?.getProperties?.()?.waterlogged === true
 }
+
+/** the blocks that are always in water */
+const UNDERWATER_PLANTS = new Set(['seagrass', 'tall_seagrass', 'kelp', 'kelp_plant'])
 
 function passable (bot: Bot, pos: Vec3, waterOk: boolean): boolean {
   const b = bot.blockAt(pos)

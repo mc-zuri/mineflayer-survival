@@ -98,3 +98,11 @@ test('inHazard: a fire in a cell the bot\'s box reaches into, its middle out of 
   assert.strictEqual(boxCells(by).length, 4)
   assert.deepStrictEqual(boxCells(off).map(c => c.toArray()), [[0, 64, 0], [0, 65, 0]])
 })
+
+test('headInWater: seagrass or kelp at the eyes is under water too', () => {
+  const river = (p: Vec3): string => p.y < 60 ? 'stone' : p.y === 61 ? 'seagrass' : p.y < 64 ? 'water' : 'air'
+  // the eyes at 61.62: in the seagrass's cell
+  assert.strictEqual(headInWater(fakeBot({ position: new Vec3(0.5, 60, 0.5), world: river })), true)
+  const kelp = (p: Vec3): string => p.y < 60 ? 'stone' : p.y < 64 ? 'kelp_plant' : 'air'
+  assert.strictEqual(headInWater(fakeBot({ position: new Vec3(0.5, 60, 0.5), world: kelp })), true)
+})
