@@ -807,7 +807,8 @@ async function makeKitSpares (bot: Bot, executor: Executor, signal: AbortSignal,
     const plan = executor.plan(want)
     if (!plan.ok || plan.cost > KIT_SPARE_TICKS) continue
     try {
-      await executor.obtain(want, signal)
+      // within twice the estimate at most, as the kit's chest and bed
+      await withTickBudget(bot, KIT_SPARE_TICKS * 2, signal, async (s) => await executor.obtain(want, s))
       log(`trip kit spares: ${want.map(w => w.item).join(', ')}`)
     } catch (err) {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
