@@ -163,3 +163,15 @@ test('roomToDigNear: the bot walled in by its chest in a 1-wide tunnel digs the 
   assert.strictEqual(room.dig.length, 2)
   assert.ok(room.dig.every((c: any) => lookup(c).name === 'stone'))
 })
+
+test('unknownChestNear: the chest the kit\'s stash put down before a fight cut it off is found again; a remembered one is not it', async () => {
+  const { unknownChestNear } = await import('../../src/skills/tripKit')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (p: any) => p.x === 2 && p.y === 64 && p.z === 1 ? 'chest' : p.y < 64 ? 'stone' : 'air' })
+  const memory = new WorldMemory()
+  assert.deepStrictEqual(unknownChestNear(bot, memory), new Vec3(2, 64, 1))
+  memory.rememberChest({ x: 2, y: 64, z: 1 }, { cobblestone: 64 }, 'overworld')
+  assert.strictEqual(unknownChestNear(bot, memory), null)
+})

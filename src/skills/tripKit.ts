@@ -92,6 +92,23 @@ export function roomToDigNear (lookup: (p: Vec3) => any, from: Vec3, near: Vec3,
   return null
 }
 
+/** a chest within 4 of the bot the memory holds nothing of (one just put down, not a stronghold's nor the base's) */
+export function unknownChestNear (bot: Bot, memory: WorldMemory): Vec3 | null {
+  const feet = bot.entity.position.floored()
+  for (let r = 1; r <= 4; r++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dz = -r; dz <= r; dz++) {
+          if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue
+          const p = feet.offset(dx, dy, dz)
+          if (bot.blockAt(p)?.name === 'chest' && memory.chestAt(p, 'overworld') == null) return p
+        }
+      }
+    }
+  }
+  return null
+}
+
 export function nearPortal (lookup: (p: Vec3) => any, pos: Vec3): boolean {
   for (let dx = -2; dx <= 2; dx++) for (let dy = -1; dy <= 3; dy++) for (let dz = -2; dz <= 2; dz++) if (PORTAL_BLOCKS.has(lookup(pos.offset(dx, dy, dz))?.name)) return true
   return false
@@ -175,9 +192,13 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
   const lookup = (p: Vec3): any => bot.blockAt(p)
   // a kit's chest there already (the one a respawn emptied): filled again, no chest nor bed made
   const reuse = opts.chest != null && bot.blockAt(opts.chest)?.name === 'chest'
+  // or the one this put down before it was cut off (a fight's reflex: the task runs again, and the chest is down)
+  const placed = !reuse && !bot.inventory.items().some(i => i.name === 'chest') ? unknownChestNear(bot, memory) : null
   let pos: Vec3
   if (reuse) {
     pos = opts.chest as Vec3
+  } else if (placed != null) {
+    pos = placed
   } else {
     if (!bot.inventory.items().some(i => i.name === 'chest')) throw new SkillError('MISSING_ITEMS', 'no chest for a trip kit')
     const at = findPlacement(lookup, bot.entity.position, { radius: 3, avoid: p => nearPortal(lookup, p) })
