@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
 import { breathZone, SCAN_TURN_SLACK, yawFacing, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
-import { ARROW_FLIGHT_TICKS, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, escapeSpot, dragonPartId, fightDragon, foodToEat, hurtContext, hurtingContact, retreatSpot, safeToEat, takeoffStepBack, walkClear } from '../../src/end/skills/fightDragon'
+import { ARROW_FLIGHT_TICKS, ARROW_RESERVE, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, escapeSpot, dragonPartId, fightDragon, foodToEat, hurtContext, hurtingContact, retreatSpot, safeToEat, takeoffStepBack, walkClear } from '../../src/end/skills/fightDragon'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
 
@@ -309,4 +309,22 @@ test('escapeSpot: out from under the head to the nearest ground clear of its zon
   assert.equal(touchedZone(to, zones, 0, CONTACT_MARGIN), null)
   assert.ok(to.x > -10, 'not through the wall')
   assert.ok(Math.hypot(to.x - me.x, to.z - me.z) <= 6.5)
+})
+
+test('fightDragon keeps ARROW_RESERVE arrows for the crystals left: no shot at the flying dragon with that few', async () => {
+  const blocks = endIsland([], 30)
+  const get = world(blocks)
+  const dragon = entity({ name: 'ender_dragon', position: new Vec3(20.5, 75, 0.5), meta: { phase: DRAGON_PHASES.indexOf('holding_pattern'), health: 150 } })
+  dragon.yaw = 0
+  const crystal = entity({ name: 'end_crystal', position: new Vec3(42.5, 80, 0.5) })
+  const bot = fakeBot({ position: new Vec3(0.5, 62, 10.5), entities: [dragon, crystal], items: [item('bow'), item('arrow', ARROW_RESERVE)] })
+  bot.game.dimension = 'the_end'
+  bot.game.minY = 0
+  bot.blockAt = (pos: Vec3) => { const b = get(pos.floored()); return b == null ? null : { ...b, position: pos.floored() } }
+  bot.waitForTicks = async () => { bot.emit('physicsTick') }
+  let drawn = 0
+  bot.activateItem = () => { drawn++ }
+  bot.deactivateItem = () => {}
+  await assert.rejects(fightDragon(bot, { destroyCrystals: false, maxTicks: 20 }), /alive after 20 ticks/)
+  assert.equal(drawn, 0)
 })

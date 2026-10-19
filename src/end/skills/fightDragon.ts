@@ -314,6 +314,13 @@ export interface FightDragonResult {
 const ARROW_NAMES = ['arrow', 'spectral_arrow', 'tipped_arrow']
 /** a health drop in flight this soon after a shot counts as the arrow's (aimAtDragon's flights are 60 ticks at most) */
 export const ARROW_FLIGHT_TICKS = 60
+/** arrows kept for the crystals while any is left, not shot at the flying dragon */
+export const ARROW_RESERVE = 16
+/**
+ * the longest flight an arrow at the flying dragon is shot for: over the 26.3 and 1.21.11 runs 10 to 19 ticks of flight
+ * hit 60%, 20 to 29 43%, 30 to 39 23%, 40 and over 15%
+ */
+export const MAX_DRAGON_SHOT_TICKS = 30
 
 /** the dragon's health went down while it flew, within ARROW_FLIGHT_TICKS of a shot: the arrow hit */
 export function arrowHit (before: number, after: number, phase: DragonPhase | null, ticksSinceShot: number): boolean {
@@ -397,8 +404,11 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   let stepBackUntil = -1
   const retreatHealth = opts.retreatHealth ?? RETREAT_HEALTH
   const returnHealth = opts.returnHealth ?? RETURN_HEALTH
-  const hasArrows = (): boolean => bot.inventory.items().some(i => ARROW_NAMES.includes(i.name))
-  const bow = (): boolean => opts.bow !== false && bot.inventory.items().some(i => i.name === 'bow') && hasArrows()
+  // with crystals left, ARROW_RESERVE kept for them (a 26.3 bot shot its last at the flying dragon and the caged crystal
+  // left could never be shot; the dragon healed by it)
+  const arrowCount = (): number => bot.inventory.items().filter(i => ARROW_NAMES.includes(i.name)).reduce((n, i) => n + i.count, 0)
+  const crystalsLeft = (): boolean => Object.values(bot.entities).some(e => e.name === 'end_crystal')
+  const bow = (): boolean => opts.bow !== false && bot.inventory.items().some(i => i.name === 'bow') && arrowCount() > (crystalsLeft() ? ARROW_RESERVE : 0)
   const hold = async (name: string): Promise<boolean> => {
     if (bot.heldItem?.name === name) return true
     const item = bot.inventory.items().find(i => i.name === name)
@@ -704,7 +714,7 @@ export function aimAtDragon (bot: Bot, dragon: Entity, leadTicks: number): AimSo
   const world = { clip: arrowWorld(bot).clip }
   const common = { speed: bowArrowSpeed(20), targetVelocity: velocity, leadTicks, world }
   const solution = solveAim(start, point, { ...common, highArc: false })
-  if (solution == null || solution.ticks > 60) return null
+  if (solution == null || solution.ticks > MAX_DRAGON_SHOT_TICKS) return null
   const offset = solution.aimPoint.minus(point)
   const box = { min: dragon.position.offset(-2.5, 0, -2.5).plus(offset), max: dragon.position.offset(2.5, 3, 2.5).plus(offset) }
   return arrowHits(start, solution.yaw, solution.pitch, box, common).hit != null ? solution : null
