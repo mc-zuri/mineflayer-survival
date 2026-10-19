@@ -9,6 +9,7 @@ import { navigate, walkTo } from './navigate'
 import { trace } from './util'
 import { normalizeDimension } from '../core/memory'
 import { nearDeath } from '../nether/deaths'
+import { runSliced, runToEnd, type SliceOptions } from '../core/slice'
 
 export interface GridCellView {
   /** the cell holds nothing to collide with (air, plants, a portal), and no lava or fire */
@@ -89,6 +90,20 @@ export function deadlySides (view: GridCellView, c: Vec3): number {
  * to walk (start left out), or null.
  */
 export function gridPath (view: GridCellView, start: Vec3, isGoal: (c: Vec3) => boolean, heuristic: (c: Vec3) => number, maxNodes = 20000): Vec3[] | null {
+  return runToEnd(gridSearch(view, start, isGoal, heuristic, maxNodes))
+}
+
+/**
+ * gridPath with the event loop let through every SLICE_MS of searching (runSliced): its 20000 cells of a nether walk
+ * held the process 1.5 to 4.6 s at a time (the bot's block lookups), and on a loaded machine past the server's
+ * keep-alive. `opts.between` runs after each pause (an abort's check).
+ */
+export async function gridPathSliced (view: GridCellView, start: Vec3, isGoal: (c: Vec3) => boolean, heuristic: (c: Vec3) => number, maxNodes = 20000, opts: SliceOptions = {}): Promise<Vec3[] | null> {
+  return await runSliced(gridSearch(view, start, isGoal, heuristic, maxNodes), opts)
+}
+
+/** gridPath's search, yielding after each cell it looks at (where a slice may end) */
+function * gridSearch (view: GridCellView, start: Vec3, isGoal: (c: Vec3) => boolean, heuristic: (c: Vec3) => number, maxNodes: number): Generator<void, Vec3[] | null> {
   const open = new MinHeap<{ c: Vec3, g: number, f: number }>(n => n.f)
   open.push({ c: start, g: 0, f: heuristic(start) })
   const came = new Map<string, Vec3 | null>([[key(start), null]])
@@ -98,6 +113,7 @@ export function gridPath (view: GridCellView, start: Vec3, isGoal: (c: Vec3) => 
   while (open.size > 0 && seen++ < maxNodes) {
     const { c, g } = open.pop()
     if (g > (best.get(key(c)) ?? Infinity)) continue
+    yield
     if (isGoal(c)) {
       const path: Vec3[] = []
       let at: Vec3 | null = c
@@ -192,7 +208,7 @@ export async function gridWalk (bot: Bot, args: GridWalkArgs, signal?: AbortSign
   const range = args.range ?? 1
   const start = bot.entity.position.floored()
   const dist = (c: Vec3): number => args.horizontal === true ? Math.hypot(c.x - t.x, c.z - t.z) : c.distanceTo(t)
-  const path = gridPath(view, start, c => dist(c) <= range, dist, args.maxNodes)
+  const path = await gridPathSliced(view, start, c => dist(c) <= range, dist, args.maxNodes, { between: () => throwIfAborted(signal) })
   if (path == null) throw new SkillError('NO_PATH', `no grid path from ${start.toString()} to ${t.toString()}`)
   trace('gridWalk:', path.length, 'cells to', t.toString())
   let prev = start
