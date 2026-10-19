@@ -2,7 +2,8 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
-import { SkillError, abortError, isSkillError, throwIfAborted } from './errors'
+import { SkillError, abortError, isAbort, isSkillError, throwIfAborted } from './errors'
+import { keepRoom } from './bag'
 import { eyeHeight, trace, waitUntil } from './util'
 import type { ReportKind } from '../diagnostics/report'
 
@@ -77,9 +78,12 @@ export const DIG_STUCK_FACTOR = 5
 /**
  * goto, checked. A bot pressed into a corner beside its path (the executor steers at the next node, not back onto the
  * line, so a bot off its block's middle catches on the corner of a wall it passes) is stuck: it steps back to the
- * middle of its block and goes again, `unstick` times.
+ * middle of its block and goes again, `unstick` times. Room is made in the bag before the trip when it's short (the
+ * bag's keeper, skills/bag.ts): the pathfinder's digs on the way drop their blocks where the bot walks, and it can't
+ * refuse them (Player.aiStep's touch picks them up).
  */
 export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSignal): Promise<NavigateResult> {
+  await keepRoom(bot, signal).catch(err => { if (isAbort(err)) throw err })
   const tries = 1 + Math.max(0, args.unstick ?? 2)
   let ticks = 0
   for (let i = 1; ; i++) {

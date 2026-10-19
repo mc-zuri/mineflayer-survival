@@ -7,6 +7,7 @@ import type { TaskError } from '../core/errors'
 import { harvestToolFor } from './equipBest'
 import { navigate } from './navigate'
 import { nearbyDrops, pickupDrops } from './pickupDrops'
+import { keepRoom, unwantedDrop } from './bag'
 import {
   blockIds, countsDelta, emptySlots, eyeHeight, trace, inventoryCounts, inventoryItems, settleInventory, sumPositive, vecKey, waitTicks, waitUntil, withinReach,
   type Block, type ItemCounts
@@ -45,11 +46,15 @@ export interface CollectBlockArgs {
    * it drops (default false: NO_TOOL)
    */
   anyTool?: boolean
-  /** drops not picked up (the route's stone the stock has enough of) */
+  /**
+   * Drops not picked up (the route's stone the stock has enough of; default: what the bag's keeper says no to, but
+   * the drops of the blocks asked for by name: skills/bag.ts unwantedDrop)
+   */
   unwanted?: (name: string) => boolean
   /**
    * Makes room in the bag when it's short (the executor's: the junk and the route's stone thrown behind, the rest in a
-   * depot): before each block, and before the pickup of a block's drops with no slot free
+   * depot): before each block, and before the pickup of a block's drops with no slot free (default: the bag's
+   * keeper's, skills/bag.ts keepRoom)
    */
   room?: () => Promise<void>
 }
@@ -173,12 +178,16 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     const names = [...new Set(types.flatMap(dropsOf))]
     return names.length > 0 ? names : undefined
   }
+  // the bag kept from filling as the blocks come in (the keeper's room and its no to the route's stone), the drops of
+  // the blocks asked for by name always wanted
+  const room = async (): Promise<void> => { if (args.room != null) await args.room(); else await keepRoom(bot, signal) }
+  const unwanted = args.unwanted ?? ((name: string): boolean => !dropNames.has(name) && unwantedDrop(bot, name))
   const gainedDrops = (): number => dropNames.size === 0 ? 0 : sumPositive(countsDelta(before, inventoryCounts(bot)), name => dropNames.has(name))
   const enough = (): boolean => positions.length >= count || gainedDrops() >= count
 
   while (!enough()) {
     throwIfAborted(signal, result())
-    await args.room?.()
+    await room()
     const block = nextTarget()
     if (block == null) break
     const pos = block.position
@@ -248,8 +257,8 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       const centre = pos.offset(0.5, 0.5, 0.5)
       if ((bot.registry.blocks[block.type]?.drops?.length ?? 0) > 0) await waitUntil(bot, () => nearbyDrops(bot, centre, 3).length > 0, 10, signal)
       // the walk here filled the bag (the route's cells' drops): room for the block's own first
-      if (emptySlots(bot) === 0) await args.room?.()
-      const picked = await pickupDrops(bot, { near: centre, radius: 6, names: pickupNames([block.type]), unwanted: args.unwanted }, signal)
+      if (emptySlots(bot) === 0) await room()
+      const picked = await pickupDrops(bot, { near: centre, radius: 6, names: pickupNames([block.type]), unwanted }, signal)
       trace('collectBlock: picked up', picked.items)
     }
   }
@@ -257,7 +266,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
   if (pickup) {
     for (const pos of positions) {
       const names = pickupNames(minedTypes)
-      if (nearbyDrops(bot, pos.offset(0.5, 0.5, 0.5), 8, names, args.unwanted).length > 0) await pickupDrops(bot, { near: pos.offset(0.5, 0.5, 0.5), radius: 8, names, unwanted: args.unwanted }, signal)
+      if (nearbyDrops(bot, pos.offset(0.5, 0.5, 0.5), 8, names, unwanted).length > 0) await pickupDrops(bot, { near: pos.offset(0.5, 0.5, 0.5), radius: 8, names, unwanted }, signal)
     }
   }
 
@@ -269,7 +278,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
   }
   // (minecraft-data's drops: empty for the blocks that drop nothing without silk touch, as glass)
   // (and some of it wanted: the route's stone the stock has enough of is left lying)
-  const dropsSomething = minedTypes.some(type => (bot.registry.blocks[type]?.drops?.length ?? 0) > 0 && !dropsOf(type).every(name => args.unwanted?.(name) === true))
+  const dropsSomething = minedTypes.some(type => (bot.registry.blocks[type]?.drops?.length ?? 0) > 0 && !dropsOf(type).every(name => unwanted(name)))
   if (pickup && res.count === 0 && dropsSomething && toolless < positions.length) {
     throw new SkillError('VERIFY_FAILED', `broke ${positions.length} blocks but no item came into the inventory`, res)
   }

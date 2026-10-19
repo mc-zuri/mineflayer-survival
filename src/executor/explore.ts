@@ -11,6 +11,7 @@ import { findBlocks } from '../core/findBlocks'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { navigate } from '../skills/navigate'
+import { keepRoom } from '../skills/bag'
 import { headInWater, surface } from '../skills/escape'
 import { placeBlock } from '../skills/placeBlock'
 import { AIR_BLOCKS, CARDINALS, countItems, trace } from '../skills/util'
@@ -437,6 +438,7 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
     throwIfAborted(signal)
     const feet = feetOf(bot)
     if (onSurface(lookup, feet, inOverworld(bot))) return true
+    await routeRoom(bot, args, signal)
     const turns = [dir, new Vec3(-dir.z, 0, dir.x), new Vec3(dir.z, 0, -dir.x), dir.scaled(-1)]
     let stepped = false
     for (const d of turns) {
@@ -693,11 +695,18 @@ export interface DigRouteArgs {
   found?: () => boolean
   /**
    * Makes room in the bag when it's short, every step (the executor's: the route's stone over the stock thrown behind,
-   * the rest put in a depot): the route's cells' drops come in as the bot walks into them
+   * the rest put in a depot): the route's cells' drops come in as the bot walks into them (default: the bag's keeper's,
+   * skills/bag.ts keepRoom)
    */
   room?: () => Promise<void>
   /** most steps (default 160) */
   maxSteps?: number
+}
+
+/** room in the bag before a step of a dug route: the route's own room maker, else the bag's keeper's */
+async function routeRoom (bot: Bot, args: DigRouteArgs, signal?: AbortSignal): Promise<void> {
+  if (args.room != null) await args.room()
+  else await keepRoom(bot, signal)
 }
 
 /**
@@ -715,7 +724,7 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
     if (args.found?.() === true) return true
     const feet = feetOf(bot)
     if (feet.y <= y) return true
-    await args.room?.()
+    await routeRoom(bot, args, signal)
     const turns = [dir, new Vec3(-dir.z, 0, dir.x), new Vec3(dir.z, 0, -dir.x), dir.scaled(-1)]
     let stepped = false
     for (const d of turns) {
@@ -798,7 +807,7 @@ export async function tunnel (bot: Bot, args: DigRouteArgs & { length?: number, 
     for (let i = 0; i < length; i++) {
       throwIfAborted(signal)
       if (args.found?.() === true) return true
-      await args.room?.()
+      await routeRoom(bot, args, signal)
       const feet = feetOf(bot)
       const step = tunnelStep(feet, dir)
       const why = unsafeStep(lookup, step)

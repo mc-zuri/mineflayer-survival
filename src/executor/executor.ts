@@ -21,6 +21,7 @@ import { placeBlock } from '../skills/placeBlock'
 import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
 import { tossAway } from '../skills/pickupDrops'
+import { holdBag, type BagKeeper } from '../skills/bag'
 import { countItems, emptySlots, trace } from '../skills/util'
 import { wornOutTools } from './durability'
 import { defaultKeep, JUNK, junkToToss, ROUTE_STONE, splitInventory, type KeepRule, type ScaffoldKeep } from './keep'
@@ -175,6 +176,12 @@ export class Executor {
   private makingRoom = false
   /** what the requests being obtained need (neededItems): kept by the room made during a step */
   private needed: Record<string, number> = {}
+  /**
+   * The bag's keeper every task holds the bag with (skills/bag.ts): room made on the way at the skills' safe points,
+   * in a milestone's own tasks (the obsidian from the lava, the walks and staircases to it, the nether's and the
+   * stronghold's trips) as in a step's
+   */
+  readonly bagKeeper: BagKeeper
 
   constructor (readonly bot: Bot, opts: ExecutorOptions = {}) {
     this.memory = opts.memory ?? bot.survival.memory
@@ -195,6 +202,11 @@ export class Executor {
     this.logFn = opts.log ?? (line => trace('executor:', line))
     this.home = opts.home ?? (() => null)
     this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos))
+    this.bagKeeper = {
+      minFree: this.options.minFreeSlots,
+      room: async (s) => await this.makeRoomDuringStep(s),
+      unwanted: name => this.unwantedDrop(name)
+    }
     // a village passed by is noted, with its farms' crops and hay, for the food plans
     let nextVillageCheck = 0
     bot.on('physicsTick', () => {
@@ -388,14 +400,25 @@ export class Executor {
   /**
    * Runs `fn` as a foreground task (so the reflexes preempt it; it runs again from the start after, so it should be
    * safe to repeat), cancelled when `signal` fires. Never call it from inside a task: the queue runs one at a time.
+   * The task holds the bag (bagKeeper) unless `info.room` is false (a store into the base's chests: no depot put
+   * down on the way there).
    */
-  async task<T> (name: string, fn: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, info?: { step?: PlanStep, desc?: string, args?: unknown }): Promise<T> {
+  async task<T> (name: string, fn: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, info?: { step?: PlanStep, desc?: string, args?: unknown, room?: boolean }): Promise<T> {
     throwIfOwnerAborted(signal)
     // in the nether, every task's paths with the nether's settings (no lava edges or magma, ledges dear, the deaths
     // kept away from): a mine step for warped stems after a death walked the bot into the lava (26.3)
-    const run = async (s: AbortSignal): Promise<T> => normalizeDimension(this.bot.game?.dimension) === 'the_nether'
+    const inDimension = async (s: AbortSignal): Promise<T> => normalizeDimension(this.bot.game?.dimension) === 'the_nether'
       ? await withNetherSafety(this.bot, async () => await fn(s))
       : await fn(s)
+    const run = async (s: AbortSignal): Promise<T> => {
+      if (info?.room === false) return await inDimension(s)
+      const release = holdBag(this.bot, this.bagKeeper, s)
+      try {
+        return await inDimension(s)
+      } finally {
+        release()
+      }
+    }
     const handle = this.tasks.enqueue<T>({ name, onPreempt: 'resume' }, async (ctx) => await run(ctx.signal))
     const onAbort = (): void => handle.cancel(`${name} was stopped`)
     signal?.addEventListener('abort', onAbort, { once: true })
@@ -503,7 +526,7 @@ export class Executor {
   async makeRoom (needed: Record<string, number> = {}, signal?: AbortSignal, force = false, inTask?: AbortSignal): Promise<void> {
     if (this.makingRoom) return
     this.makingRoom = true
-    const run: RoomRunner = inTask != null ? async (_name, fn) => await fn(inTask) : async (name, fn) => await this.task(name, fn, signal)
+    const run: RoomRunner = inTask != null ? async (_name, fn) => await fn(inTask) : async (name, fn) => await this.task(name, fn, signal, { room: false })
     try {
       if (await this.tossJunk(needed, false, run)) return
       const base = this.base
@@ -568,7 +591,7 @@ export class Executor {
    * planner fetches from it, the stock counts it: DEPOT_POI); the junk and the stone the stock has enough of are
    * thrown, not stored. What was stored.
    */
-  async stashNearby (needed: Record<string, number> = {}, signal?: AbortSignal, run: RoomRunner = async (name, fn) => await this.task(name, fn, signal)): Promise<Record<string, number>> {
+  async stashNearby (needed: Record<string, number> = {}, signal?: AbortSignal, run: RoomRunner = async (name, fn) => await this.task(name, fn, signal, { room: false })): Promise<Record<string, number>> {
     const moved: Record<string, number> = {}
     const { store } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed })
     const worth = store.filter(it => !JUNK.has(it.name) && !this.isSurplus(it.name))
@@ -660,7 +683,7 @@ export class Executor {
     }
     const store = async (pos: { x: number, y: number, z: number }, filter: string[], count?: number): Promise<boolean> => {
       try {
-        const res = await this.task(`store ${filter.join(', ')}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter, count }, s), signal)
+        const res = await this.task(`store ${filter.join(', ')}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter, count }, s), signal, { room: false })
         record(pos, res.moved)
         return true
       } catch (err) {
@@ -698,7 +721,7 @@ export class Executor {
         if (left <= 0) break
         throwIfOwnerAborted(signal)
         try {
-          const res = await this.task(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter: [it.name], count: left }, s), signal)
+          const res = await this.task(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter: [it.name], count: left }, s), signal, { room: false })
           const n = res.moved[it.name] ?? 0
           this.rememberStored(pos, it.name, n, dimension)
           moved[it.name] = (moved[it.name] ?? 0) + n

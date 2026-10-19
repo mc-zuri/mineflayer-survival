@@ -7,6 +7,7 @@ import { walkTo } from './navigate'
 import { placeBlock } from './placeBlock'
 import { CARDINALS, countItems, settleInventory, trace, waitTicks, waitUntil } from './util'
 import { dig } from '../core/actions'
+import { keepRoom } from './bag'
 
 export interface TunnelArgs {
   target: Vec3
@@ -72,6 +73,8 @@ export async function tunnelTo (bot: Bot, args: TunnelArgs, signal?: AbortSignal
     throwIfAborted(signal)
     const feet = bot.entity.position.floored()
     if (feet.distanceTo(target) <= range || args.until?.() === true) break
+    // room in the bag before each step (the bag's keeper): the steps' stone comes in as the bot walks into it
+    await keepRoom(bot, signal)
     const down = feet.y > target.y
     const dx = target.x - feet.x
     const dz = target.z - feet.z

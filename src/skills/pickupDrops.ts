@@ -6,6 +6,7 @@ import { SkillError, isAbort, throwIfAborted } from './errors'
 import type { TaskError } from '../core/errors'
 import { navigate, walkTo } from './navigate'
 import { countItems, countsDelta, emptySlots, inventoryCounts, settleInventory, trace, waitUntil, type ItemCounts } from './util'
+import { keepRoom, unwantedDrop } from './bag'
 
 type Entity = Bot['entities'][string]
 
@@ -18,7 +19,10 @@ export interface PickupDropsArgs {
   names?: string[]
   /** ticks to wait at an item for it to be picked up (default 30: the 10 tick pickup delay of a block's drop and more) */
   waitTicks?: number
-  /** items not gone for (the route's stone over what the bag carries of it) */
+  /**
+   * Items not gone for (the route's stone over what the bag carries of it; default: what the bag's keeper says no to,
+   * but the items of `names`: skills/bag.ts unwantedDrop)
+   */
   unwanted?: (name: string) => boolean
 }
 
@@ -258,6 +262,16 @@ export function markUnreachableDrop (bot: Bot, drop: Entity): void {
   given.set(drop.id, { pos: drop.position.clone(), tick: tickCount(bot) })
 }
 
+/** the bag's keeper's room for a full bag (keepRoom); whether it was asked */
+async function keepRoomFor (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  try {
+    return await keepRoom(bot, signal)
+  } catch (err) {
+    if (isAbort(err)) throw err
+    return true
+  }
+}
+
 export async function pickupDrops (bot: Bot, args: PickupDropsArgs = {}, signal?: AbortSignal): Promise<PickupDropsResult> {
   const near = args.near ?? bot.entity.position.clone()
   const radius = args.radius ?? 8
@@ -266,15 +280,25 @@ export async function pickupDrops (bot: Bot, args: PickupDropsArgs = {}, signal?
   const skipped = new Set<number>()
   let picked = 0
   const result = (): PickupDropsResult => ({ picked, items: countsDelta(before, inventoryCounts(bot)) })
+  const unwanted = args.unwanted ?? ((name: string): boolean => args.names?.includes(name) !== true && unwantedDrop(bot, name))
+  // the bag's keeper asked for room once for a full bag (again only after it made some)
+  let roomAsked = false
 
   for (;;) {
     throwIfAborted(signal, result())
-    const drop = nearbyDrops(bot, near, radius, args.names, args.unwanted).find(entity => !skipped.has(entity.id) && !isUnreachableDrop(bot, entity))
+    const drop = nearbyDrops(bot, near, radius, args.names, unwanted).find(entity => !skipped.has(entity.id) && !isUnreachableDrop(bot, entity))
     if (drop == null) break
     if (emptySlots(bot) === 0) {
       // (a stack that isn't full can still take it, so try, but don't treat a refusal as the item being gone)
       const name = droppedName(drop)
       if (name == null || !bot.inventory.items().some(item => item.name === name && item.count < item.stackSize)) {
+        // room made first, by the bag's keeper (the route's stone thrown into a pit, the rest in a depot): obsidian
+        // mined by a 26.3 deep lake failed its pickup 'the inventory is full' block after block, the bag full of the
+        // walk's cobblestone
+        if (!roomAsked && await keepRoomFor(bot, signal)) {
+          roomAsked = emptySlots(bot) === 0
+          continue
+        }
         throw new SkillError('NO_SPACE', 'the inventory is full', result())
       }
     }
