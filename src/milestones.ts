@@ -613,10 +613,19 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   const want: Array<{ item: string | string[], count: number, optional?: boolean }> = []
   if (countItems(bot, ['diamond_sword', 'iron_sword', 'netherite_sword']) === 0) want.push({ item: 'iron_sword', count: 1, optional: true })
   if (!/(iron|diamond|netherite)_chestplate/.test(worn('torso') ?? '') && countItems(bot, ['iron_chestplate', 'diamond_chestplate', 'netherite_chestplate']) === 0) want.push({ item: 'iron_chestplate', count: 1, optional: true })
+  if (countItems(bot, 'shield') === 0 && bot.inventory.slots[45]?.name !== 'shield') want.push({ item: 'shield', count: 1, optional: true })
   if (want.length > 0) {
     await executor.obtain(want as any, signal).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`nether kit: ${(err as Error).message}`)
+    })
+  }
+  // a sword at the least, stone if no iron came (a bot gone in with its hands empty died to the magma cubes by the
+  // portal three times in a row, 26.3)
+  if (countItems(bot, SWORDS) === 0) {
+    await executor.obtain([{ item: 'stone_sword', count: 1 }], signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`nether kit: no sword: ${(err as Error).message}`)
     })
   }
   // the golden boots made now, put on once in (kept on there: goldArmorRequired is the nether's)
@@ -629,6 +638,7 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
 }
 
 const GOLD_PIECES = ['golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots']
+const SWORDS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'golden_sword', 'wooden_sword']
 
 /** the golden piece put on in the nether, when one is held or can be made (the piglins leave such a player alone) */
 export async function goldOnInTheNether (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
