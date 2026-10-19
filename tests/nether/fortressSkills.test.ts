@@ -33,3 +33,23 @@ test('campSpots: floor cells 3 or more from the spawner that see it, not through
   }
   assert.equal(seesFrom(bot, new Vec3(6.5, 65.62, 0.5), new Vec3(0.5, 64.5, 0.5), new Vec3(0, 64, 0)), false)
 })
+
+test('nextCampSpot: the first untried spot that sees a blaze, else the first untried, else none', async () => {
+  const { nextCampSpot } = await import('../../src/nether/fortressSkills')
+  // a wall at x = 4 from y 64 up: a blaze behind it at x 8 is seen only from spots past it
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: p => p.y < 64 ? 'stone' : (p.x === 4 && p.y < 70 ? 'stone' : 'air') })
+  bot.world = {
+    raycast: (from: Vec3, dir: Vec3, range: number) => {
+      for (let t = 0; t <= range; t += 0.05) {
+        const p = from.plus(dir.scaled(t))
+        if (bot.blockAt(p).boundingBox === 'block') return { position: p.floored(), intersect: p }
+      }
+      return null
+    }
+  }
+  const spots = [new Vec3(0, 64, 0), new Vec3(1, 64, 2), new Vec3(6, 64, 0)]
+  const blaze = [new Vec3(8.5, 65, 0.5)]
+  assert.deepEqual(nextCampSpot(bot, spots, blaze, new Set()), new Vec3(6, 64, 0))
+  assert.deepEqual(nextCampSpot(bot, spots, blaze, new Set(['(6, 64, 0)'])), new Vec3(0, 64, 0))
+  assert.equal(nextCampSpot(bot, spots, blaze, new Set(spots.map(s => s.toString()))), null)
+})

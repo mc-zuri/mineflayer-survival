@@ -153,6 +153,18 @@ export function campSpots (bot: Bot, spawner: Vec3, standOff = 5): Vec3[] {
   return out.sort((a, b) => a.d - b.d).map(c => c.cell)
 }
 
+/** ticks the blaze fight waits with blazes about and none in sight before it moves to another camp spot */
+export const BLIND_TICKS = 200
+
+/**
+ * The camp spot to move to when no blaze is in sight: the first of `spots` not tried whose eyes see one of the
+ * blazes (`targets`, their middles), else the first not tried; null when all are tried
+ */
+export function nextCampSpot (bot: Bot, spots: readonly Vec3[], targets: readonly Vec3[], tried: ReadonlySet<string>): Vec3 | null {
+  const left = spots.filter(s => !tried.has(s.toString()))
+  return left.find(s => targets.some(t => seesFrom(bot, s.offset(0.5, 1.62, 0.5), t))) ?? left[0] ?? null
+}
+
 export interface FindSpawnerArgs {
   fortress?: FortressSighting
   /** the world's seed: the fortress's start piece (its candidate chunk) is the first place to look */
@@ -299,6 +311,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     const onDead = (e: Entity): void => { dead.add(e.id) }
     bot.on('entityDead', onDead)
     const noShot = new Map<number, number>()
+    let lastSight = ticks
+    const triedSpots = new Set<string>()
     try {
       while (countItems(bot, 'blaze_rod') < count) {
         throwIfAborted(signal)
@@ -318,10 +332,24 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         // one the bot sees (its middle, from the eyes): through a wall neither the bow nor the sword reaches it
         const blaze = blazes.find(b => seesFrom(bot, eyePosition(bot), b.position.offset(0, 0.9, 0)) && ((noShot.get(b.id) ?? -1e9) < ticks - 60 || b.position.distanceTo(bot.entity.position) <= shootFrom))
         if (blaze == null) {
+          // blazes about the spawner none of which the bot sees for a while (the bot on the room's roof, 3 over the
+          // spawner, sat 24000 ticks five times with 8 blazes under it on 26.3): on to a camp spot that sees one
+          if (blazes.length > 0 && ticks - lastSight > BLIND_TICKS) {
+            const spot = nextCampSpot(bot, spots, blazes.map(b => b.position.offset(0, 0.9, 0)), triedSpots)
+            lastSight = ticks
+            if (spot != null) {
+              triedSpots.add(spot.toString())
+              trace('collectBlazeRods: no blaze in sight: on to', spot.toString())
+              await moveNear(bot, spot, 0, signal).catch(err => { if (isAbort(err)) throw err; trace('collectBlazeRods: no way to', spot.toString(), (err as Error).message) })
+              continue
+            }
+            triedSpots.clear()
+          }
           await camp()
           await waitTicks(bot, 5, signal)
           continue
         }
+        lastSight = ticks
         const d = blaze.position.distanceTo(bot.entity.position)
         const canShoot = countItems(bot, 'bow') > 0 && countItems(bot, ['arrow', 'spectral_arrow', 'tipped_arrow']) > 0
         trace('collectBlazeRods: health', bot.health, 'blazes', blazes.length, 'target at', d.toFixed(1), canShoot && d > Math.min(shootFrom, 3.5) ? 'shoot' : 'fight', 'tick', ticks)
