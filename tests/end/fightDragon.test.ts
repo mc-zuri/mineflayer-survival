@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
 import { breathZone, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
-import { EAT_CLEAR_PERCHED, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, safeToEat } from '../../src/end/skills/fightDragon'
+import { EAT_CLEAR_PERCHED, RETREAT_DISTANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, retreatSpot, safeToEat } from '../../src/end/skills/fightDragon'
 import { fakeBot, item } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
 
@@ -144,19 +144,40 @@ test('safeToEat: eating (32 ticks standing still) only out of a perched dragon\'
   assert.equal(safeToEat('leaving', 10), false)
 })
 
-test('foodToEat: hurt, hungry or short of the 18 that heals; a full bar and no golden apple is nothing to eat', () => {
+test('foodToEat: hurt, retreating, hungry or short of the 18 that heals; a full bar and no golden apple is nothing to eat', () => {
   const bot = fakeBot({ health: 20, food: 20, items: [item('cooked_beef', 8)] })
-  assert.equal(foodToEat(bot, 12), null)
+  assert.equal(foodToEat(bot, false, 12), null)
   bot.health = 11
   // hurt, but the bar is full: beef can't be eaten
-  assert.equal(foodToEat(bot, 12), null)
+  assert.equal(foodToEat(bot, false, 12), null)
   bot.food = 15
-  assert.equal(foodToEat(bot, 12), 'cooked_beef')
+  assert.equal(foodToEat(bot, false, 12), 'cooked_beef')
   bot.health = 20
   bot.food = 13
-  assert.equal(foodToEat(bot, 12), 'cooked_beef')
+  assert.equal(foodToEat(bot, false, 12), 'cooked_beef')
   bot.food = 19
-  assert.equal(foodToEat(bot, 12), null)
+  assert.equal(foodToEat(bot, false, 12), null)
+  bot.health = 9
+  assert.equal(foodToEat(bot, true, 12), 'cooked_beef')
+  assert.equal(canHeal(bot), true)
+  const starving = fakeBot({ health: 9, food: 10, items: [] })
+  assert.equal(canHeal(starving), false)
+})
+
+test('retreatSpot: RETREAT_DISTANCE from the perched dragon on the bot\'s side, turned when that is off the island', () => {
+  const blocks = endIsland([], 40)
+  const get = world(blocks)
+  const perch = exitPortal(62).perch
+  const spot = retreatSpot(get, perch, new Vec3(8.5, 62, 0.5), null, [])
+  assert.ok(spot != null)
+  assert.ok(Math.abs(Math.hypot(spot.x - perch.x, spot.z - perch.z) - RETREAT_DISTANCE) < 1)
+  assert.ok(spot.x > 20)
+  // a small island: 26 out is the void that way and round about; nothing within reach of the margin
+  const small = world(endIsland([], 20))
+  assert.equal(retreatSpot(small, perch, new Vec3(8.5, 62, 0.5), null, []), null)
+  // a cloud on the bot's side: turned
+  const turned = retreatSpot(get, perch, new Vec3(8.5, 62, 0.5), null, [{ center: { x: 26.5, z: 0.5 }, y: 62, radius: 6, why: 'cloud' }])
+  assert.ok(turned != null && Math.hypot(turned.x - 26.5, turned.z - 0.5) > 8)
 })
 
 test('fightDragon holds the eat reflex off for the fight and lets it go after', async () => {

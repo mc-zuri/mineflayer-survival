@@ -62,6 +62,10 @@ export function chooseMeleeSpot (get: BlockGetter, view: DragonView, portalY: nu
   return best == null ? null : { spot: best.spot, target: best.target, crit: best.crit }
 }
 
+/** at or below this health the bot leaves the perched dragon to eat out of its reach (the emergency apple is at 8) */
+export const RETREAT_HEALTH = 10
+/** and comes back to it at this health */
+export const RETURN_HEALTH = 16
 /**
  * how far (horizontally) a perched or landing dragon is left to eat: out of DragonSittingScanningPhase's 20 (a player
  * in it is turned to and roared at, then breathed on)
@@ -70,6 +74,8 @@ export const EAT_CLEAR_PERCHED = 22
 /** a flying dragon circling the spikes this far off leaves time to eat; one strafing or charging this far */
 export const EAT_CLEAR_CIRCLING = 24
 export const EAT_CLEAR_FLYING = 48
+/** where a retreat from the perch goes: this far from the dragon */
+export const RETREAT_DISTANCE = 26
 
 /**
  * Whether 32 ticks of eating (standing still, no hits back) are safe now, from what the dragon does and how far off it
@@ -85,15 +91,41 @@ export function safeToEat (activity: DragonActivity | null, distance: number): b
   }
 }
 
+/** health comes back: food to eat, or the food bar at 18 or over (FoodData.tick's natural regeneration) */
+export function canHeal (bot: Bot): boolean {
+  return bot.food >= 18 || bestFoodInInventory(bot) != null
+}
+
 /**
- * What to eat now in the fight, if anything: hurt (under eatBelow), hungry (under 14), or hurt with the food bar under
- * 18 (no regeneration under it); the best food for it (a golden apple when low: chooseFood's reserved foods), none when
- * nothing can be eaten (a full food bar and no golden apple)
+ * What to eat now in the fight, if anything: hurt (under eatBelow, or retreating for it), hungry (under 14), or hurt
+ * with the food bar under 18 (no regeneration under it); the best food for it (a golden apple when low: chooseFood's
+ * reserved foods), none when nothing can be eaten (a full food bar and no golden apple)
  */
-export function foodToEat (bot: Bot, eatBelow: number): string | null {
-  const want = bot.health < eatBelow || bot.food < 14 || (bot.health < 20 && bot.food < 18)
+export function foodToEat (bot: Bot, retreating: boolean, eatBelow: number): string | null {
+  const want = retreating || bot.health < eatBelow || bot.food < 14 || (bot.health < 20 && bot.food < 18)
   if (!want) return null
   return bestFoodInInventory(bot)?.name ?? null
+}
+
+/**
+ * A spot to retreat to from the perched dragon: RETREAT_DISTANCE from it on the bot's side, or turned by 30° steps
+ * either way when that's off the island, near the void or in a danger; ground within 8 of the bot's height
+ */
+export function retreatSpot (get: BlockGetter, dragon: Pos, from: Vec3, guard: VoidGuard | null, dangers: Danger[], distance = RETREAT_DISTANCE): Vec3 | null {
+  const base = Math.atan2(from.z - dragon.z, from.x - dragon.x)
+  for (const k of [0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5, 6]) {
+    const a = base + k * Math.PI / 6
+    const x = Math.floor(dragon.x + Math.cos(a) * distance) + 0.5
+    const z = Math.floor(dragon.z + Math.sin(a) * distance) + 0.5
+    const y = groundY(get, x, z, from.y + 8, from.y - 8)
+    if (y == null) continue
+    const p = new Vec3(x, y, z)
+    if (!isOpenAt(get, p.floored()) || !isOpenAt(get, p.floored().offset(0, 1, 0))) continue
+    if (guard?.risky(p) === true) continue
+    if (inDanger(p, dangers, 2) != null) continue
+    return p
+  }
+  return null
 }
 
 /**
@@ -138,6 +170,10 @@ export interface FightDragonOptions extends SkillOptions {
   maxTicks?: number
   /** eat below this health when the dragon is away (default 12) */
   eatBelowHealth?: number
+  /** at or below this health, off out of the dragon's reach to eat (default RETREAT_HEALTH) */
+  retreatHealth?: number
+  /** back to the fight from there at this health (default RETURN_HEALTH) */
+  returnHealth?: number
   /** keep this far from the void (default 4) */
   voidMargin?: number
   /** stay within this distance of the podium while it flies (default 24) */
@@ -220,6 +256,9 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   let water: Vec3 | null = null
   let wasRisky = false
   let wasOverVoid = false
+  let retreating = false
+  const retreatHealth = opts.retreatHealth ?? RETREAT_HEALTH
+  const returnHealth = opts.returnHealth ?? RETURN_HEALTH
   const hasArrows = (): boolean => bot.inventory.items().some(i => ARROW_NAMES.includes(i.name))
   const bow = (): boolean => opts.bow !== false && bot.inventory.items().some(i => i.name === 'bow') && hasArrows()
   const hold = async (name: string): Promise<boolean> => {
@@ -330,13 +369,32 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       if (guard.overVoid && !wasOverVoid) log(`over the void at ${me.floored().toString()}`)
       wasOverVoid = guard.overVoid
 
-      // 3. eat when it's safe: out of its reach while it sits, far while it flies (the eat reflex is held off meanwhile)
+      // low on health: off out of its reach to eat, back when healed (an eat reflex at 7.7 health under the perched
+      // dragon's head kept a 26.3 bot there 32 ticks with no hits back, and it died)
       const dragonDistance = dragon == null ? Infinity : Math.hypot(dragon.position.x - me.x, dragon.position.z - me.z)
-      const meal = foodToEat(bot, eatBelow)
+      const healing = canHeal(bot)
+      if (!retreating && bot.health <= retreatHealth && healing) {
+        retreating = true
+        log(`health ${bot.health.toFixed(1)}: off out of its reach to eat`)
+      } else if (retreating && (bot.health >= returnHealth || !healing)) {
+        retreating = false
+        log(`health ${bot.health.toFixed(1)}: back to the fight`)
+      }
+      // 3. eat when it's safe: out of its reach while it sits, far while it flies (the eat reflex is held off meanwhile)
+      const meal = foodToEat(bot, retreating, eatBelow)
       if (meal != null && safeToEat(window.activity, dragonDistance)) {
         stopDraw()
         bot.clearControlStates()
         await eatAwayFromDragon(bot, meal, portalY, signal, log)
+        continue
+      }
+      if (retreating && dragon != null && (window.activity === 'perched' || window.activity === 'landing')) {
+        stopDraw()
+        bot.setControlState('jump', false)
+        const to = retreatSpot(get, dragon.position, me, guard, dangers)
+        if (to != null) steerToward(bot, to, { sprint: true })
+        else bot.clearControlStates()
+        await waitTicks(bot, 1, signal)
         continue
       }
 
