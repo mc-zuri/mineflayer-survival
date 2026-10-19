@@ -177,8 +177,10 @@ test('tunnelTo never digs a portal frame\'s obsidian or the bot\'s chest', async
   const actions = require('../../src/core/actions')
   const { tunnelTo } = await import('../../src/skills/tunnel')
   const { fakeBot } = await import('../reflexes/fakeBot')
-  // obsidian all round the bot's feet level and over it: no step can be dug
-  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (p: any) => p.y < 63 ? 'stone' : (p.x === 0 && p.z === 0 && (p.y === 64 || p.y === 65)) ? 'air' : 'obsidian' })
+  // obsidian and chests all round the bot's feet level and over it: no step can be dug
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (p: any) => p.y < 63 ? 'stone' : (p.x === 0 && p.z === 0 && (p.y === 64 || p.y === 65)) ? 'air' : (p.x === 1 ? 'obsidian' : 'chest') })
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => { const b = realAt(p); return b == null ? b : { ...b, diggable: true } }) as any
   const dug: string[] = []
   const real = actions.dig
   actions.dig = async (_b: unknown, block: any) => { dug.push(block.name) }
