@@ -280,3 +280,8 @@ test('the enchanting milestone makes room in the bag, what the shelves take kept
   // and before the gear's, for the armor taken off
   assert.equal(calls[calls.indexOf('enchant the gear') - 1], 'room force 256', calls.join(', '))
 })
+
+test('ENCHANTING_KEEP keeps the table, its makings and the anvil from a forced room', async () => {
+  const { ENCHANTING_KEEP } = await import('../../src/milestones')
+  for (const name of ['enchanting_table', 'anvil', 'diamond', 'obsidian', 'lapis_lazuli', 'leather', 'sugar_cane']) assert.ok((ENCHANTING_KEEP[name] ?? 0) > 0, name)
+})

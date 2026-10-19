@@ -52,9 +52,10 @@ export const HERD = 'herd'
 /**
  * What the enchanting's room in the bag keeps (a forced makeRoom throws the rest it must): the herd's wheat, the
  * shelves' canes, paper, leather, books and wood, the table's lapis and the anvil's iron (the 40 iron thrown for room
- * to kill the herd's cows left the anvil with 'no plan', 26.3)
+ * to kill the herd's cows left the anvil with 'no plan', 26.3), the table itself and its makings (thrown, and the
+ * gear's enchanting failed at 'can't craft 1 enchanting_table')
  */
-export const ENCHANTING_KEEP: Record<string, number> = { wheat: 64, wheat_seeds: 64, sugar_cane: 256, paper: 256, leather: 64, book: 64, bookshelf: 64, oak_log: 64, oak_planks: 64, lapis_lazuli: 64, iron_ingot: 31, iron_block: 3 }
+export const ENCHANTING_KEEP: Record<string, number> = { wheat: 64, wheat_seeds: 64, sugar_cane: 256, paper: 256, leather: 64, book: 64, bookshelf: 64, oak_log: 64, oak_planks: 64, lapis_lazuli: 64, iron_ingot: 31, iron_block: 3, enchanting_table: 1, anvil: 1, diamond: 3, obsidian: 4 }
 
 /** the herd pen's sizes tried, biggest first (cells across, the ring included) */
 export const PEN_SIZES = [9, 7, 5]
