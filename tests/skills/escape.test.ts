@@ -64,3 +64,14 @@ test('escapeHazard in a lava sea with no ground within 6 swims for the ground 12
   assert.ok(looks.length > 0)
   assert.ok(Math.abs(looks[0] + Math.PI / 2) < 0.3, String(looks[0]))
 })
+
+test('powder snow is a hazard: the cells the bot is in are dug, the head first', async () => {
+  const { powderSnowToDig } = await import('../../src/skills/escape')
+  const snow = (p: Vec3): string => p.y >= 64 && p.y <= 66 && p.x === 0 && p.z === 0 ? 'powder_snow' : p.y < 64 ? 'stone' : 'air'
+  const bot = fakeBot({ position: new Vec3(0.5, 64.2, 0.5), world: snow })
+  assert.strictEqual(inHazard(bot), true)
+  assert.deepStrictEqual(powderSnowToDig(bot), new Vec3(0, 65, 0))
+  const free = fakeBot({ position: new Vec3(3.5, 64, 0.5), world: snow })
+  assert.strictEqual(inHazard(free), false)
+  assert.strictEqual(powderSnowToDig(free), null)
+})

@@ -14,10 +14,24 @@ function nameAt (bot: Bot, pos: Vec3): string | undefined {
   return bot.blockAt(pos)?.name
 }
 
-/** In lava or fire: the blocks at its feet or head, or mineflayer's lava flag. */
+/** blocks that freeze a body in them (PowderSnowBlock: the freeze ticks climb, then the damage) */
+const FREEZING = new Set(['powder_snow'])
+
+/** In lava, fire or powder snow: the blocks at its feet or head, or mineflayer's lava flag. */
 export function inHazard (bot: Bot): boolean {
   const feet = bot.entity.position.floored()
-  return (bot.entity as any).isInLava === true || BURNING.has(nameAt(bot, feet) ?? '') || BURNING.has(nameAt(bot, feet.offset(0, 1, 0)) ?? '')
+  const bad = (n: string | undefined): boolean => BURNING.has(n ?? '') || FREEZING.has(n ?? '')
+  return (bot.entity as any).isInLava === true || bad(nameAt(bot, feet)) || bad(nameAt(bot, feet.offset(0, 1, 0)))
+}
+
+/**
+ * The powder snow the bot is in, head first then feet (dug out, the bot drops or steps free: a 26.3 bot sunk in it
+ * on a snowy slope failed to pillar out, the block refused there, and froze to death)
+ */
+export function powderSnowToDig (bot: Bot): Vec3 | null {
+  const feet = bot.entity.position.floored()
+  for (const p of [feet.offset(0, 1, 0), feet]) if (FREEZING.has(nameAt(bot, p) ?? '')) return p
+  return null
 }
 
 /** Entity.isOnFire as the server tells it: the shared flags' bit 0 (DATA_SHARED_FLAGS_ID). */
@@ -96,6 +110,14 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
         if (water == null) return { ticks: t }
         if ((bot.entity as any).isInWater === true) return { ticks: t }
         steerToward(bot, water.offset(0.5, 0, 0.5), { sprint: true })
+        await waitTicks(bot, 1, opts.signal)
+        continue
+      }
+      const snow = powderSnowToDig(bot)
+      if (snow != null) {
+        bot.clearControlStates()
+        const block = bot.blockAt(snow)
+        if (block != null) await bot.dig(block as any, true).catch(() => {})
         await waitTicks(bot, 1, opts.signal)
         continue
       }
