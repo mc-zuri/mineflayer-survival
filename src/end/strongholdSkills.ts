@@ -316,7 +316,10 @@ export async function locateStronghold (bot: Bot, args: LocateStrongholdArgs = {
  */
 export async function overland (bot: Bot, args: TravelArgs, signal?: AbortSignal): Promise<void> {
   await ensureSurface(bot, signal)
-  await onTheSurface(bot, async () => await travel(bot, args, signal))
+  // to a height (exactY): over the surface to above it, then down to it with the pathfinder's own costs (the surface's
+  // keep it from digging down: a kit chest 13 blocks under the ground was never reached)
+  await onTheSurface(bot, async () => await travel(bot, { ...args, exactY: false, range: Math.max(args.range ?? 3, 3) }, signal))
+  if (args.exactY === true) await travel(bot, args, signal)
 }
 
 /**

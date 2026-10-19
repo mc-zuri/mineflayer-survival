@@ -145,7 +145,9 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
           try {
             await gridWalk(bot, { target: end, range: p.last ? range : Math.max(range, 6), horizontal: args.exactY !== true }, signal)
             if (p.last && args.exactY !== true) return result()
-            moved = true
+            // the last hop to a height (exactY): the grid's walk is level, so the height is the pathfinder's (a kit
+            // chest at y 50 under the bot at y 63 had the grid walk 0 cells over and over, the trip never ending)
+            moved = !p.last || Math.abs(target.y - bot.entity.position.y) <= range
           } catch (err) {
             if (isAbort(err)) throw err
             trace('travel: grid walk', turn.toFixed(2), scale, 'failed:', (err as Error).message)

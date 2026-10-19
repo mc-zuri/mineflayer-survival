@@ -76,3 +76,27 @@ test('inDeepWater and swimToward: out at sea the bot swims at the surface toward
   assert.ok(bot.entity.position.x >= 10.5 && bot.entity.position.x < 12, `${bot.entity.position.x}`)
   assert.deepStrictEqual(bot.controls, {})
 })
+
+test('travel to a height under the bot (exactY): the level grid walk leaves the height to the pathfinder, not looping on 0 cells', async () => {
+  const gridModule = require('../../src/skills/gridWalk')
+  const navModule = require('../../src/skills/navigate')
+  const { travel } = await import('../../src/skills/travel')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ position: new Vec3(0.5, 63, 0.5) })
+  ;(bot as any).pathfinder = { pathfinderSettings: {}, defaultMoveSettings: {}, setOptions: () => {}, setMoveOptions: () => {} }
+  ;(bot as any).world = { getColumnAt: () => ({}) }
+  let grids = 0
+  let navs = 0
+  const realGrid = gridModule.gridWalk
+  const realNav = navModule.navigate
+  gridModule.gridWalk = async () => { grids++; if (grids > 20) throw new Error('looping'); return { cells: 0 } }
+  navModule.navigate = async () => { navs++; bot.entity.position = new Vec3(0.5, 50, 0.5) }
+  try {
+    await travel(bot, { target: new Vec3(0, 50, 0), range: 2, exactY: true })
+  } finally {
+    gridModule.gridWalk = realGrid
+    navModule.navigate = realNav
+  }
+  assert.equal(navs, 1)
+  assert.ok(grids <= 2)
+})
