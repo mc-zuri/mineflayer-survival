@@ -49,6 +49,13 @@ export function netherNeeds (inv: { count: (name: string) => number }): { rods: 
 /** the point of interest where the bot's herd was let out */
 export const HERD = 'herd'
 
+/**
+ * What the enchanting's room in the bag keeps (a forced makeRoom throws the rest it must): the herd's wheat, the
+ * shelves' canes, paper, leather, books and wood, the table's lapis and the anvil's iron (the 40 iron thrown for room
+ * to kill the herd's cows left the anvil with 'no plan', 26.3)
+ */
+export const ENCHANTING_KEEP: Record<string, number> = { wheat: 64, wheat_seeds: 64, sugar_cane: 256, paper: 256, leather: 64, book: 64, bookshelf: 64, oak_log: 64, oak_planks: 64, lapis_lazuli: 64, iron_ingot: 31, iron_block: 3 }
+
 /** the herd pen's sizes tried, biggest first (cells across, the ring included) */
 export const PEN_SIZES = [9, 7, 5]
 
@@ -139,7 +146,7 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
     if (chore === 'kill') {
       // room for the leather and the beef first (a full bag left the drops on the ground: 'hunt killed the cow drops
       // {}' over and over, the leather short of the shelves, 26.3)
-      if ((bot.inventory.emptySlotCount?.() ?? 9) < 2) await executor.makeRoom?.({ leather: 64, wheat: 64, sugar_cane: 256, paper: 256, book: 64, lapis_lazuli: 64 }, signal, true)
+      if ((bot.inventory.emptySlotCount?.() ?? 9) < 2) await executor.makeRoom?.(ENCHANTING_KEEP, signal, true)
       await executor.obtain([{ item: 'leather', count: state.leather + 1 }], signal).catch(err => {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
         log(`herd: no leather: ${(err as Error).message}`)
@@ -352,7 +359,7 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   const cap = Math.min(shelvesForLeather({ count: (n: string) => countItems(bot, n) }, cows, around), shelvesForPaper({ count: (n: string) => countItems(bot, n) }, around))
   // room for the shelves' crafts, what they take kept (the stage's bag full of cobblestone, coal and raw meat failed
   // the paper's craft five times, 'the inventory is full', and the milestone was left out, 26.3)
-  await executor.makeRoom?.({ sugar_cane: 256, paper: 256, leather: 64, book: 64, bookshelf: 64, oak_log: 64, oak_planks: 64, lapis_lazuli: 64 }, signal, true)
+  await executor.makeRoom?.(ENCHANTING_KEEP, signal, true)
   for (let attempt = 0; attempt < 2; attempt++) {
     const held = countItems(bot, 'bookshelf')
     const want = shelvesWithin(n => {
@@ -383,7 +390,7 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   }
   // room in the bag to take the armor off for the table (a full bag kept it on: 'no unenchanted diamond_chestplate')
   // (forced: the junk alone left the bag full, and the armor stayed on unenchanted again, 26.3)
-  await executor.makeRoom?.({ lapis_lazuli: 64, book: 64, leather: 64, paper: 64, iron_ingot: 64 }, signal, true)
+  await executor.makeRoom?.(ENCHANTING_KEEP, signal, true)
   await executor.task('enchant the gear', async (s) => await enchantGear(bot, { executor, signal: s, bookshelves: shelves }), signal)
   await enchantBooksAndApply(bot, executor, signal, log)
 }
