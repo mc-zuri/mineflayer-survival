@@ -18,6 +18,8 @@ export interface TunnelArgs {
   fillers?: string[]
   /** checked before each step: true stops the dig there (something found on the way) */
   until?: () => boolean
+  /** a step with no floor that can't be given one may drop this far onto safe ground (default 4) */
+  maxDrop?: number
 }
 
 export interface TunnelResult {
@@ -34,6 +36,22 @@ export function stepCells (feet: Vec3, dir: Vec3, down: boolean): { clear: Vec3[
 }
 
 const LIQUID = new Set(['lava', 'water', 'bubble_column'])
+const HARMFUL_GROUND = new Set(['lava', 'magma_block', 'fire', 'soul_fire', 'campfire', 'soul_campfire', 'cactus', 'powder_snow', 'pointed_dripstone'])
+
+/**
+ * Where a step into `stand` with no floor under it lands: the cell over the first solid block within `maxDrop` below
+ * it, the cells on the way free of liquids and the ground not harmful; null when it isn't safe
+ */
+export function dropLanding (lookup: (p: Vec3) => { name: string, boundingBox: string } | null, stand: Vec3, maxDrop: number): Vec3 | null {
+  for (let d = 1; d <= maxDrop + 1; d++) {
+    const cell = stand.offset(0, -d, 0)
+    const b = lookup(cell)
+    if (b == null) return null
+    if (LIQUID.has(b.name) || HARMFUL_GROUND.has(b.name)) return null
+    if (b.boundingBox === 'block') return d - 1 <= maxDrop ? cell.offset(0, 1, 0) : null
+  }
+  return null
+}
 
 /**
  * Digs toward the target: down a staircase while above it (a step forward and down each time, along the axis that's
@@ -85,16 +103,25 @@ export async function tunnelTo (bot: Bot, args: TunnelArgs, signal?: AbortSignal
         if (bot.blockAt(c)?.boundingBox === 'block') { trace('tunnelTo: still there after digging', bot.blockAt(c)?.name, c.toString()); ok = false; break }
       }
       if (!ok) continue
-      // a floor to step onto
+      // a floor to step onto: a block put there, else a short drop onto ground with no liquid (an open room under
+      // the stair: a stronghold's portal room under a 26.3 bot, 'nothing solid to place against', no way down)
+      let landing = stand
       if (bot.blockAt(floor)?.boundingBox !== 'block') {
         const filler = fillers.find(f => countItems(bot, f) > 0)
-        if (filler == null) { trace('tunnelTo: no floor and no filler'); continue }
-        try { await placeBlock(bot, { pos: floor, item: filler }, signal) } catch (err) { trace('tunnelTo: floor not placed:', (err as Error).message); continue }
+        let placed = false
+        if (filler != null) {
+          try { await placeBlock(bot, { pos: floor, item: filler }, signal); placed = true } catch (err) { trace('tunnelTo: floor not placed:', (err as Error).message) }
+        }
+        if (!placed) {
+          const drop = dropLanding(p => bot.blockAt(p) as any, stand, args.maxDrop ?? 4)
+          if (drop == null) { trace('tunnelTo: no floor and no safe drop under', stand.toString()); continue }
+          landing = drop
+        }
       }
       await walkTo(bot, stand.offset(0.5, 0, 0.5), { within: 0.25, maxTicks: 30 }, signal)
       // the step down is a fall into the hole: a few ticks after the bot is over it
-      await waitUntil(bot, () => bot.entity.onGround && bot.entity.position.y < stand.y + 0.5, 15, signal)
-      if (bot.entity.position.floored().equals(stand) || bot.entity.position.distanceTo(stand.offset(0.5, 0, 0.5)) < 0.8) { stepped = true; break }
+      await waitUntil(bot, () => bot.entity.onGround && bot.entity.position.y < landing.y + 0.5, 15 + 5 * (stand.y - landing.y), signal)
+      if (bot.entity.position.floored().equals(landing) || bot.entity.position.distanceTo(landing.offset(0.5, 0, 0.5)) < 0.8) { stepped = true; break }
       trace('tunnelTo: the step to', stand.toString(), 'ended at', bot.entity.position.toString())
     }
     if (!stepped) throw new SkillError('NO_PATH', `no safe step toward ${target.toString()} from ${feet.toString()}`, { steps, dug, position: bot.entity.position.clone() })

@@ -154,3 +154,11 @@ test('gridPath: a ledge with a deadly fall either side is walked only with no ed
   assert.ok(careful != null)
   assert.ok(careful.every(c => c.z !== 0 || c.x <= 0 || c.x >= 10), `the path walks the ledge: ${careful.map(c => c.toString()).join(' ')}`)
 })
+
+test('dropLanding: a short drop onto ground is a step; a long one, or onto lava or through water, isn\'t', async () => {
+  const { dropLanding } = await import('../../src/skills/tunnel')
+  const room = (floorY: number, floor = 'stone') => (p: Vec3) => ({ name: p.y === floorY ? floor : p.y < floorY ? 'stone' : 'air', boundingBox: p.y <= floorY && floor !== 'lava' ? 'block' : 'empty' })
+  assert.deepStrictEqual(dropLanding(room(60), new Vec3(0, 64, 0), 4), new Vec3(0, 61, 0))
+  assert.strictEqual(dropLanding(room(55), new Vec3(0, 64, 0), 4), null)
+  assert.strictEqual(dropLanding(room(60, 'lava'), new Vec3(0, 64, 0), 4), null)
+})
