@@ -1,7 +1,7 @@
 // The trip kit: what it takes from the bag, and the runner's way back to it after a death.
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { tripKitItems } from '../../src/skills/tripKit'
+import { kitSpares, tripKitItems } from '../../src/skills/tripKit'
 
 test('tripKitItems: the weapons but the best, half the arrows, food and blocks (64 at most), the armor carried', () => {
   const kit = tripKitItems([
@@ -14,6 +14,26 @@ test('tripKitItems: the weapons but the best, half the arrows, food and blocks (
   assert.deepStrictEqual(by, { iron_sword: 1, arrow: 64, cooked_beef: 24, cobblestone: 64, iron_helmet: 1, golden_apple: 1 })
   // nothing spare: nothing taken
   assert.deepStrictEqual(tripKitItems([{ name: 'diamond_sword', count: 1 }, { name: 'arrow', count: 20 }]), [])
+  // a shield carried goes in (the one held is in the off hand, not the bag)
+  assert.deepStrictEqual(tripKitItems([{ name: 'shield', count: 1 }, { name: 'iron_chestplate', count: 1 }]), [{ name: 'iron_chestplate', count: 1 }, { name: 'shield', count: 1 }])
+})
+
+test('kitSpares: an iron chestplate and leggings from 15 iron when no armor is carried spare, then a shield from an ingot left', () => {
+  const worn = [{ name: 'diamond_chestplate', count: 1 }, { name: 'diamond_leggings', count: 1 }, { name: 'shield', count: 1 }]
+  // the nether stage's 16 iron: both
+  assert.deepStrictEqual(kitSpares([...worn, { name: 'iron_ingot', count: 16 }], [{ name: 'iron_ingot', count: 16 }]), [
+    [{ item: 'iron_chestplate', count: 1 }, { item: 'iron_leggings', count: 1 }],
+    [{ item: 'shield', count: 2 }]
+  ])
+  // 15: the armor alone; 14: the shield alone
+  assert.deepStrictEqual(kitSpares([...worn, { name: 'iron_ingot', count: 15 }], [{ name: 'iron_ingot', count: 15 }]).map(g => g.map(r => r.item)), [['iron_chestplate', 'iron_leggings']])
+  assert.deepStrictEqual(kitSpares([...worn, { name: 'iron_ingot', count: 14 }], [{ name: 'iron_ingot', count: 14 }]).map(g => g.map(r => r.item)), [['shield']])
+  // spares carried already: none made; no iron: none
+  const carried = [{ name: 'iron_helmet', count: 1 }, { name: 'shield', count: 1 }, { name: 'iron_ingot', count: 30 }]
+  assert.deepStrictEqual(kitSpares([...worn, ...carried], carried), [])
+  assert.deepStrictEqual(kitSpares(worn, []), [])
+  // an iron chestplate worn: the spare is one more than owned
+  assert.deepStrictEqual(kitSpares([{ name: 'iron_chestplate', count: 1 }, { name: 'iron_ingot', count: 15 }], [{ name: 'iron_ingot', count: 15 }])[0], [{ item: 'iron_chestplate', count: 2 }, { item: 'iron_leggings', count: 1 }])
 })
 
 test('after a death the runner goes to a trip kit that still holds something, and takes it', async () => {

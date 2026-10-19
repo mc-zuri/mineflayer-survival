@@ -26,14 +26,14 @@ import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from
 import { makeWaterHole, plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
 import { herdPen, inPen, leadIntoPen, type PenPlan } from './skills/pen'
-import { TRIP_KIT, stashTripKit } from './skills/tripKit'
+import { TRIP_KIT, kitSpares, stashTripKit } from './skills/tripKit'
 import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
 import { findFarmSite, knownFarms, plantFarm, rememberFarm, SEED_OF } from './skills/farm'
-import type { Executor } from './executor/executor'
+import { ownedInventory, type Executor } from './executor/executor'
 import { Vec3 } from 'vec3'
 
 const inNether = (bot: Bot): boolean => normalizeDimension(bot.game?.dimension) === 'the_nether'
@@ -796,6 +796,26 @@ export function portalRoomNear (bot: Bot): boolean {
 /** ticks a chest and a bed for the trip kit may cost (the plan's estimate) */
 export const TRIP_KIT_TICKS = 3000
 
+/** ticks the trip kit's spare armor and shield may cost (the plan's estimate: made from what's held, not mined for) */
+export const KIT_SPARE_TICKS = 1000
+
+/** the trip kit's spare armor and shield made from the iron held (kitSpares), when that's cheap */
+async function makeKitSpares (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  const owned = ownedInventory(bot).entries()
+  const carried = bot.inventory.items().map(i => ({ name: i.name, count: i.count }))
+  for (const want of kitSpares(owned, carried)) {
+    const plan = executor.plan(want)
+    if (!plan.ok || plan.cost > KIT_SPARE_TICKS) continue
+    try {
+      await executor.obtain(want, signal)
+      log(`trip kit spares: ${want.map(w => w.item).join(', ')}`)
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`trip kit spares: ${want.map(w => w.item).join(', ')}: ${(err as Error).message}`)
+    }
+  }
+}
+
 /**
  * The trip kit left by the bot (skills/tripKit) unless one with something in it is known: a chest got (and a bed when
  * cheap), the spares put in, the respawn point set by it
@@ -808,6 +828,7 @@ export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortS
   const chest = known != null ? new Vec3(known.x, known.y, known.z) : null
   if (chest != null && chest.distanceTo(bot.entity.position) <= 32 && bot.blockAt(chest)?.name === 'chest') {
     try {
+      await makeKitSpares(bot, executor, signal, log)
       const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s, { chest }), signal)
       log(`trip kit again at ${kit.chest.toString()}: ${Object.entries(kit.stored).map(([n, c]) => `${c} ${n}`).join(', ')}`)
     } catch (err) {
@@ -829,6 +850,7 @@ export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortS
         log(`trip kit: no ${want[0].item === 'chest' ? 'chest' : 'bed'}: ${(err as Error).message}`)
       })
     }
+    await makeKitSpares(bot, executor, signal, log)
     const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s), signal)
     log(`trip kit at ${kit.chest.toString()}: ${Object.entries(kit.stored).map(([n, c]) => `${c} ${n}`).join(', ')}${kit.bed != null ? ', the respawn point by it' : ''}`)
   } catch (err) {

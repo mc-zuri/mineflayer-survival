@@ -1,5 +1,6 @@
 // A spare kit left on a trip, before its deadliest part (the End, from the stronghold's portal room): a chest put down
-// with a spare weapon, part of the arrows, food and blocks and any armor beyond what's worn, and a bed by it that sets
+// with a spare weapon, part of the arrows, food and blocks, any armor beyond what's worn and a spare shield (made for
+// it from the iron held when there are none: kitSpares), and a bed by it that sets
 // the respawn point (BedBlock.useWithoutItem: ServerPlayer.setRespawnPosition, by day too), so a death in the End is
 // a respawn by the kit and a walk back through the portal, whose frames stay filled, not the game lost.
 import type { Bot } from 'mineflayer'
@@ -34,7 +35,7 @@ export function nearPortal (lookup: (p: Vec3) => any, pos: Vec3): boolean {
 /**
  * What a trip kit takes from the bag (items: names and counts carried, the bag's only): the weapons but the best one,
  * a bow when there are two, half the arrows (from 32 up) and of each food (from 8 up), half the blocks up to 64, and
- * the armor carried, not worn
+ * the armor and shields carried, not worn or held
  */
 export function tripKitItems (items: readonly ItemCount[]): ItemCount[] {
   const count = (name: string): number => items.filter(i => i.name === name).reduce((n, i) => n + i.count, 0)
@@ -52,7 +53,31 @@ export function tripKitItems (items: readonly ItemCount[]): ItemCount[] {
     if (n > 0) { add(b, n); blocks += n }
   }
   for (const i of items) if (ARMOR.test(i.name) && !out.some(o => o.name === i.name)) add(i.name, count(i.name))
+  // a shield carried (the one held is in the off hand, not the bag)
+  add('shield', count('shield'))
   if (count('golden_apple') >= 2) add('golden_apple', 1)
+  return out
+}
+
+/** the iron a spare chestplate and leggings take (8 and 7) */
+export const SPARE_ARMOR_IRON = 15
+
+/**
+ * The spare gear to make for a trip kit from what the bot holds, as obtain requests in groups (`owned`: every item the
+ * bot has, worn and held too; `carried`: the bag's): an iron chestplate and leggings, when no armor piece is carried
+ * spare and the iron for both is (a respawn by the kit had none to put on, and a 26.3 bot went back into the nether
+ * bare and died there three more times); then a shield, when none is carried spare and an ingot is left (the
+ * blazes' fireballs, the creepers' blasts and the skeletons' arrows on the way back)
+ */
+export function kitSpares (owned: readonly ItemCount[], carried: readonly ItemCount[]): Array<Array<{ item: string, count: number }>> {
+  const has = (list: readonly ItemCount[], name: string): number => list.filter(i => i.name === name).reduce((n, i) => n + i.count, 0)
+  let iron = has(owned, 'iron_ingot')
+  const out: Array<Array<{ item: string, count: number }>> = []
+  if (!carried.some(i => ARMOR.test(i.name)) && iron >= SPARE_ARMOR_IRON) {
+    out.push([{ item: 'iron_chestplate', count: has(owned, 'iron_chestplate') + 1 }, { item: 'iron_leggings', count: has(owned, 'iron_leggings') + 1 }])
+    iron -= SPARE_ARMOR_IRON
+  }
+  if (has(carried, 'shield') === 0 && iron >= 1) out.push([{ item: 'shield', count: has(owned, 'shield') + 1 }])
   return out
 }
 
