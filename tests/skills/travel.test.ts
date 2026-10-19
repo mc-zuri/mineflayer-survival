@@ -172,3 +172,20 @@ test('GoalNearXZBand: near on x and z with the feet within the band of the heigh
   assert.strictEqual(goal.distHeuristic({ x: 100, y: 110, z: 0 }), 26)
   assert.strictEqual(goal.distHeuristic({ x: 97, y: 70, z: 4 }), 5)
 })
+
+test('tunnelTo never digs a portal frame\'s obsidian or the bot\'s chest', async () => {
+  const actions = require('../../src/core/actions')
+  const { tunnelTo } = await import('../../src/skills/tunnel')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // obsidian all round the bot's feet level and over it: no step can be dug
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (p: any) => p.y < 63 ? 'stone' : (p.x === 0 && p.z === 0 && (p.y === 64 || p.y === 65)) ? 'air' : 'obsidian' })
+  const dug: string[] = []
+  const real = actions.dig
+  actions.dig = async (_b: unknown, block: any) => { dug.push(block.name) }
+  try {
+    await assert.rejects(tunnelTo(bot, { target: new Vec3(10, 64, 0), maxSteps: 3 }), /no safe step/)
+  } finally {
+    actions.dig = real
+  }
+  assert.deepEqual(dug, [])
+})

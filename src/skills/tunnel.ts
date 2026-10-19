@@ -36,6 +36,8 @@ export function stepCells (feet: Vec3, dir: Vec3, down: boolean): { clear: Vec3[
 }
 
 const LIQUID = new Set(['lava', 'water', 'bubble_column'])
+/** blocks a tunnel never digs: a portal's, the bot's chests and beds, its stations */
+const KEPT_BLOCKS = /^(obsidian|crying_obsidian|nether_portal|end_portal|end_portal_frame|chest|trapped_chest|barrel|.*_bed|enchanting_table|anvil|furnace|crafting_table)$/
 const HARMFUL_GROUND = new Set(['lava', 'magma_block', 'fire', 'soul_fire', 'campfire', 'soul_campfire', 'cactus', 'powder_snow', 'pointed_dripstone'])
 
 /**
@@ -88,6 +90,9 @@ export async function tunnelTo (bot: Bot, args: TunnelArgs, signal?: AbortSignal
         if (b == null) { ok = false; break }
         if (b.boundingBox !== 'block') continue
         if (!b.diggable) { trace('tunnelTo: undiggable', b.name); ok = false; break }
+        // a portal's frame, a chest or a bed is gone round, never dug (a stair beside a cave's nether portal dug into
+        // its frame, and the portal was out for good: 'no site to cast' five times after, 26.3)
+        if (KEPT_BLOCKS.test(b.name)) { trace('tunnelTo: kept', b.name, c.toString()); ok = false; break }
         bot.pathingUtil?.refresh?.()
         const tool = (bot as any).pathingUtil?.bestHarvestingTool?.(b)
         if (tool != null && bot.heldItem?.slot !== tool.slot) { await settleInventory(bot, signal); await bot.equip(tool, 'hand') }
