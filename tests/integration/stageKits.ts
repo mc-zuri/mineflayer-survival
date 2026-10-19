@@ -61,6 +61,19 @@ export const STAGES: Record<string, Stage> = {
       ['pumpkin', 1], ['shears', 1], ['white_bed', 1]
     ]
   },
+  // the nether's pearls alone: the nether's kit with its rods got, so the portal and then the pearls (bartered,
+  // hunted in the nether, then the overworld's nights)
+  pearls: {
+    from: 'nether',
+    until: 'eyes',
+    kit: [
+      ...ENCHANTED_GEAR,
+      ['arrow', 128], ['cobblestone', 128], ['cooked_beef', 48], ['bread', 16], ['golden_apple', 2],
+      ['water_bucket', 1], ['bucket', 2], ['flint_and_steel', 1], ['gold_ingot', 32], ['golden_boots', 1],
+      ['torch', 32], ['oak_log', 64], ['crafting_table', 1], ['iron_ingot', 16], ['coal', 16], ['iron_pickaxe', 1],
+      ['blaze_rod', 8], ['white_bed', 1]
+    ]
+  },
   // the epoch before: farming and enchanting. The diamond gear plain, the eyes made already (the nether's done), and
   // what a farm and a table are made from (a bag a few stacks lighter than a run's, which has the base's chests to
   // keep the rest in: the stage has none, and the levels' mining filled it): cows from eggs bred with wheat for the books' leather, canes by water for
