@@ -206,9 +206,12 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
       if (down != null) {
         opts.log?.(`down the pillar at ${down.column.x} ${down.column.z} to ${down.base} first`)
         const t = down
-        await underDragonWatch(bot, ground, async (s) => await digDown(bot, t.base, { signal: s }), { signal, guard, eatBelowHealth: opts.eatBelowHealth, log: opts.log }).catch(err => {
+        await underDragonWatch(bot, ground, async (s) => await digDown(bot, t.base, { signal: s }), { signal, guard, eatBelowHealth: opts.eatBelowHealth, log: opts.log }).catch(async err => {
           if (!TaskError.is(err) || ['ABORTED', 'PREEMPTED', 'DIED'].includes(err.code)) throw err
           opts.log?.(`down the pillar: ${err.code} ${err.message}`)
+          // a dig that fails at once fails again: counted (pillarToLeave lets go after MAX_DOWN_TRIES), and a moment let by
+          down.downTries = (down.downTries ?? 0) + 1
+          await waitTicks(bot, 10, signal)
         })
         if (Math.floor(bot.entity.position.y + 1e-6) <= down.base || !onColumn(bot.entity.position, down.column)) pillar.current = null
         continue
@@ -261,8 +264,11 @@ export function pillarUnderCloud (target: CrystalTarget, avoid: (x: number, z: n
 
 /** a pillar the bot went up for a caged crystal: its column and the feet height at its foot */
 export interface PillarState {
-  current: { column: { x: number, z: number }, base: number } | null
+  current: { column: { x: number, z: number }, base: number, downTries?: number } | null
 }
+
+/** failed tries at coming down a pillar before it is left be (the next job's walk takes the bot off it its own way) */
+export const MAX_DOWN_TRIES = 2
 
 function onColumn (pos: Pos, column: { x: number, z: number }): boolean {
   return Math.floor(pos.x) === column.x && Math.floor(pos.z) === column.z
@@ -272,9 +278,9 @@ function onColumn (pos: Pos, column: { x: number, z: number }): boolean {
  * The pillar to come down before the next job: the bot is up the one it went up (on its column, over its foot) and the
  * next job isn't on up the same column
  */
-export function pillarToLeave (pillar: PillarState, pos: Pos, next: CrystalTarget): { column: { x: number, z: number }, base: number } | null {
+export function pillarToLeave (pillar: PillarState, pos: Pos, next: CrystalTarget): NonNullable<PillarState['current']> | null {
   const p = pillar.current
-  if (p == null || !onColumn(pos, p.column) || Math.floor(pos.y + 1e-6) <= p.base) return null
+  if (p == null || !onColumn(pos, p.column) || Math.floor(pos.y + 1e-6) <= p.base || (p.downTries ?? 0) >= MAX_DOWN_TRIES) return null
   if (next.method === 'pillar' && next.pillar != null && next.pillar.column.x === p.column.x && next.pillar.column.z === p.column.z) return null
   return p
 }

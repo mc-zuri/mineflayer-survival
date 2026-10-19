@@ -84,4 +84,6 @@ test('pillarToLeave: up a pillar cut short and off to another job, it is come do
   assert.strictEqual(pillarToLeave(pillar, { x: 39.5, y: 63, z: 0.4 }, other), null)
   assert.strictEqual(pillarToLeave(pillar, { x: 30.5, y: 63, z: 0.4 }, other), null)
   assert.strictEqual(pillarToLeave({ current: null }, { x: 39.5, y: 84, z: 0.4 }, other), null)
+  // a way down that failed twice is not tried again (the loop came back to it in the same tick, forever)
+  assert.strictEqual(pillarToLeave({ current: { column, base: 63, downTries: 2 } }, { x: 39.5, y: 84, z: 0.4 }, other), null)
 })
