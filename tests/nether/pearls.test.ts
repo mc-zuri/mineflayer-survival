@@ -57,3 +57,18 @@ test('provokeEnderman: a stare at its eyes from where the bot stands until it\'s
   ;(bot as any).world = { raycast: () => null }
   assert.equal(eyesInSight(bot, man), true)
 })
+
+test('huntEndermen passes over an enderman it finds no way to (unless it comes), and says so', async () => {
+  const { huntEndermen, huntable } = await import('../../src/nether/pearls')
+  const bot = fakeBot({ position: new Vec3(0.5, 98, 0.5) })
+  const below = entity({ name: 'enderman', position: new Vec3(2.5, 67, 3.5) })
+  bot.entities[below.id] = below
+  // (the fake bot has no pathfinder: every walk to it fails)
+  const passOver = new Set<number>()
+  await assert.rejects(huntEndermen(bot, { pearls: 1, range: 48, provoke: false, passOver }), /no enderman within 48 blocks the bot can get to/)
+  assert.ok(passOver.has(below.id))
+  assert.equal(huntable(bot, below, passOver), false)
+  // angry, it comes: hunted again
+  below.metadata[bot.registry.entitiesByName.enderman.metadataKeys.indexOf('creepy')] = true
+  assert.equal(huntable(bot, below, passOver), true)
+})

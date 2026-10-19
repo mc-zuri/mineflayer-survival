@@ -164,6 +164,13 @@ export interface HuntEndermenArgs {
   maxTicks?: number
   /** anger one in sight by a stare and fight it where the bot stands, before walking up to it (default true) */
   provoke?: boolean
+  /** endermen the bot found no way to, left alone unless angry (filled in by the hunt; pass one to keep it between hunts) */
+  passOver?: Set<number>
+}
+
+/** an enderman to hunt: alive, and not one passed over (no way to it) unless it's angry and coming */
+export function huntable (bot: Bot, e: Entity, passOver?: ReadonlySet<number>): boolean {
+  return e.name === 'enderman' && isAlive(bot, e) && (passOver?.has(e.id) !== true || isAngryEnderman(bot, e))
 }
 
 /**
@@ -178,6 +185,7 @@ export async function huntEndermen (bot: Bot, args: HuntEndermenArgs = {}, signa
   const range = args.range ?? 48
   const maxTicks = args.maxTicks ?? 12000
   const start = countItems(bot, 'ender_pearl')
+  const passOver = args.passOver ?? new Set<number>()
   let kills = 0
   let ticks = 0
   const onTick = (): void => { ticks++ }
@@ -187,9 +195,10 @@ export async function huntEndermen (bot: Bot, args: HuntEndermenArgs = {}, signa
       throwIfAborted(signal)
       if (ticks > maxTicks) throw new SkillError('TIMEOUT', `${countItems(bot, 'ender_pearl') - start} of ${wanted} pearls after ${ticks} ticks`)
       const enderman = Object.values(bot.entities)
-        .filter(e => e.name === 'enderman' && isAlive(bot, e) && e.position.distanceTo(bot.entity.position) <= range)
+        .filter(e => huntable(bot, e, passOver) && e.position.distanceTo(bot.entity.position) <= range)
         .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
       if (enderman == null) {
+        if (passOver.size > 0 && kills === 0) throw new SkillError('NOT_FOUND', `no enderman within ${range} blocks the bot can get to`)
         if (kills === 0 && ticks > 200) throw new SkillError('NOT_FOUND', `no enderman within ${range} blocks`)
         await waitTicks(bot, 20, signal)
         continue
@@ -213,6 +222,9 @@ export async function huntEndermen (bot: Bot, args: HuntEndermenArgs = {}, signa
         } catch (err) {
           if (isAbort(err)) throw err
           trace('huntEndermen:', (err as Error).message)
+          // no way to it (31 under a 26.3 bot on a warped forest's cliff: a search timed out every 6 s for 6000
+          // ticks, run n2-b): passed over unless it comes
+          if (!isAngryEnderman(bot, enderman) && enderman.position.distanceTo(bot.entity.position) > 4) { passOver.add(enderman.id); continue }
         } finally {
           bot.off('physicsTick', onLook)
         }

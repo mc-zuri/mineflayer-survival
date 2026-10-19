@@ -6,7 +6,7 @@
 import type { Bot } from 'mineflayer'
 import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
-import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, isAdultPiglin, returnOverworld, wearGold, wearingGold, withNetherSafety } from './nether/skills'
+import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, huntable, isAdultPiglin, returnOverworld, wearGold, wearingGold, withNetherSafety } from './nether/skills'
 import { travel } from './skills/travel'
 import { dayPhase } from './planner/schedule'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
@@ -897,6 +897,8 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
   const triedSpots: Array<{ x: number, z: number }> = []
   let forestSpot: { x: number, z: number, distance: number } | null = null
   let lastEnderman = executor.tasks.tick
+  // the endermen there was no way to (huntEndermen's), left alone unless they come
+  const passOver = new Set<number>()
   const goLeg = async (to: Vec3, why: string): Promise<boolean> => {
     legsWalked++
     log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for ${why}`)
@@ -904,7 +906,7 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
       await executor.task('a leg for pearls', async (s) => await withNetherSafety(bot, async () => await travel(bot, {
         target: to,
         range: 8,
-        onHop: () => Object.values(bot.entities).some(e => (e.name === 'enderman' || (isAdultPiglin(bot, e) && count('gold_ingot') > 0)) && e.position.distanceTo(bot.entity.position) <= 48)
+        onHop: () => Object.values(bot.entities).some(e => (huntable(bot, e, passOver) || (isAdultPiglin(bot, e) && count('gold_ingot') > 0)) && e.position.distanceTo(bot.entity.position) <= 48)
       }, s)), signal)
       return true
     } catch (err) {
@@ -917,7 +919,7 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
   for (let round = 0; round < PEARL_NETHER_ROUNDS && legsWalked < legs && elapsed() < PEARL_NETHER_TICKS && count('ender_pearl') < want; round++) {
     if (signal.aborted) throw signal.reason
     const piglin = Object.values(bot.entities).some(e => isAdultPiglin(bot, e) && e.position.distanceTo(bot.entity.position) <= 48)
-    const enderman = Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 48)
+    const enderman = Object.values(bot.entities).some(e => huntable(bot, e, passOver) && e.position.distanceTo(bot.entity.position) <= 48)
     if (enderman) lastEnderman = executor.tasks.tick
     try {
       if (piglin && count('gold_ingot') > 0) {
@@ -927,7 +929,7 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
         continue
       }
       if (enderman) {
-        await executor.task('endermen for pearls', async (s) => await huntEndermen(bot, { pearls: want - count('ender_pearl'), range: 48, maxTicks: 6000 }, s), signal)
+        await executor.task('endermen for pearls', async (s) => await huntEndermen(bot, { pearls: want - count('ender_pearl'), range: 48, maxTicks: 6000, passOver }, s), signal)
         continue
       }
     } catch (err) {

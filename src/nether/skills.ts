@@ -9,5 +9,5 @@ export { netherMoveSettings, withNetherSafety, wearGold, wearingGold, requireGol
 export type { NetherSafetyOptions, BridgeArgs } from './safety'
 export { findFortress, findBlazeSpawner, collectBlazeRods, fortressInView, scanFortressBlocks, fortressSpawnersInView, campSpots, seesFrom, levelSeed } from './fortressSkills'
 export type { FindFortressArgs, FindFortressResult, FindSpawnerArgs, BlazeRodsArgs, BlazeRodsResult } from './fortressSkills'
-export { barterForPearls, huntEndermen, obtainPearls, ingotsForPearls, isAdultPiglin, isAdmiring, looksAtEnderman } from './pearls'
+export { barterForPearls, huntEndermen, huntable, obtainPearls, ingotsForPearls, isAdultPiglin, isAdmiring, looksAtEnderman } from './pearls'
 export type { BarterArgs, BarterResult, HuntEndermenArgs, ObtainPearlsArgs } from './pearls'
