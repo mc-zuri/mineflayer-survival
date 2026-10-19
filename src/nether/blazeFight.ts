@@ -351,6 +351,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   let blocking = false
   let outside = 0
   let sealAgain = 0
+  let shutUntil = 0
   const tracked = new Set<number>()
   const dead = new Set<number>()
   const tried = new Set<number>()
@@ -370,6 +371,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   const sword = (): any => bestMeleeWeapon(bot, 'blaze')
   const bow = (): any => bot.inventory.items().find(i => i.name === 'bow') ?? null
   const hasArrows = (): boolean => countItems(bot, ARROWS) > 0
+  const hasShield = (): boolean => countItems(bot, 'shield') > 0
   const hold = async (item: any): Promise<void> => {
     if (item != null && bot.heldItem?.type !== item.type) await bot.equip(item, 'hand')
   }
@@ -458,7 +460,18 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         if (!await sealAndHeal(bot, nook, healTo, signal)) sealAgain = tick + 40
         continue
       }
-      if (nook.front.some(p => bot.blockAt(p)?.boundingBox === 'block') && bot.health > sealAt) {
+
+      // no shield (broken: 6 of its 336 a blocked fireball): the front shut against what's about to come, open again
+      // once it's quiet
+      // (shut for a volley's length at least: behind the shut front no blaze is seen to be about to shoot)
+      if (!hasShield() && (danger.length > 0 || fireball != null)) {
+        stopDraw()
+        if (nook.front.some(p => bot.blockAt(p)?.boundingBox !== 'block')) await fillNook(bot, nook.front, signal)
+        shutUntil = tick + BLAZE_CHARGE_TICKS + 18 + FIREBALL_FLIGHT_TICKS
+        await waitTicks(bot, 1, signal)
+        continue
+      }
+      if (nook.front.some(p => bot.blockAt(p)?.boundingBox === 'block') && bot.health > sealAt && tick >= shutUntil && danger.length === 0 && fireball == null) {
         unblock()
         await openNook(bot, nook, signal)
         continue

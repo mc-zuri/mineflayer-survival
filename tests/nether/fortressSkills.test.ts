@@ -200,3 +200,21 @@ test('collectBlazeRods fights from a nook by the spawner when the bag has the bl
     gridModule.moveNear = realMove
   }
 })
+
+test('spareShield makes shields up to two while there are an iron ingot and wood, and none without', async () => {
+  const { spareShield } = await import('../../src/nether/fortressSkills')
+  const craftModule = require('../../src/skills/craft')
+  const { item } = await import('../reflexes/fakeBot')
+  const real = craftModule.craft
+  const made: string[] = []
+  try {
+    const bot = fakeBot({ items: [item('oak_log', 4), item('iron_ingot', 3)], offhand: item('shield') })
+    craftModule.craft = async (_b: unknown, a: any) => { made.push(a.item); bot.inventory.slots[30] = item('shield') }
+    assert.equal(await spareShield(bot), 1)
+    assert.deepStrictEqual(made, ['shield'])
+    const poor = fakeBot({ items: [item('oak_log', 4)] })
+    assert.equal(await spareShield(poor), 0)
+  } finally {
+    craftModule.craft = real
+  }
+})

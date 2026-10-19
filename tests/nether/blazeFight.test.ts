@@ -287,3 +287,55 @@ test('meleeAimPoint: a blaze hovering in the nook\'s front under its roof\'s edg
   open.world = { raycast: () => null }
   assert.ok(Math.abs(meleeAimPoint(open, blaze).y - (65.8 + 0.9)) < 1e-9)
 })
+
+test('fightFromNook without a shield shuts the front when a blaze in sight is about to shoot, and keeps it shut for a volley', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, nookAround, BLAZE_CHARGE_TICKS } = await import('../../src/nether/blazeFight')
+  const placeModule = require('../../src/skills/placeBlock')
+  const stand = new Vec3(0, 64, 10)
+  const solid = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => solid.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 65, 2.5), meta: { health: 20, flags: 0 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), items: [item('diamond_sword'), item('cobblestone', 32)], entities: [blaze], world: name })
+  bot.world = {
+    raycast: (from: Vec3, dir: Vec3, range: number) => {
+      for (let t = 0; t <= range; t += 0.02) {
+        const p = from.plus(dir.scaled(t))
+        if (name(p) !== 'air') return { position: p.floored(), intersect: p }
+      }
+      return null
+    }
+  }
+  bot.equip = async (it: any) => { bot.heldItem = it }
+  bot.activateItem = () => {}
+  bot.deactivateItem = () => {}
+  bot.lookAt = async () => {}
+  bot.game.dimension = 'the_nether'
+  const placed: string[] = []
+  const dug: string[] = []
+  const realPlace = placeModule.placeBlock
+  placeModule.placeBlock = async (_b: unknown, a: any) => { solid.add(a.pos.toString()); placed.push(a.pos.toString()) }
+  bot.dig = async (b: any) => { solid.delete(b.position.toString()); dug.push(b.position.toString()) }
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const ac = new AbortController()
+  const done = fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 2000 }, ac.signal).catch(err => err)
+  const tick = async (n: number): Promise<void> => { for (let i = 0; i < n; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) } }
+  try {
+    await tick(5)
+    blaze.metadata[16] = 1
+    await tick(BLAZE_CHARGE_TICKS)
+    assert.deepStrictEqual(placed, ['(0, 64, 9)', '(0, 65, 9)'])
+    // the flag off: still shut a while
+    blaze.metadata[16] = 0
+    await tick(20)
+    assert.deepStrictEqual(dug, [])
+    await tick(120)
+    assert.deepStrictEqual(dug, ['(0, 65, 9)', '(0, 64, 9)'])
+  } finally {
+    ac.abort()
+    await tick(3)
+    await done
+    placeModule.placeBlock = realPlace
+  }
+})

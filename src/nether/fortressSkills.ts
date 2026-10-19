@@ -13,6 +13,7 @@ import { travel } from '../skills/travel'
 import { moveNear } from '../skills/gridWalk'
 import { countItems, trace, waitTicks } from '../skills/util'
 import { eat } from '../skills/eat'
+import { craft } from '../skills/craft'
 import { drinkPotion, findPotion, hasEffect } from '../skills/potion'
 import { fight, lowerShield, raiseShield } from '../skills/fight'
 import { shoot } from '../skills/shoot'
@@ -297,6 +298,26 @@ function keptNook (bot: Bot, spawner: Vec3, lookup: NookLookup): BlazeNook | nul
   return nookAround(lookup, kept.stand, kept.facing)
 }
 
+/** shields the blaze fight carries when it can make them (the one in the off hand and a spare) */
+export const BLAZE_SHIELDS = 2
+
+/** a shield made (CraftingTable: six planks and an iron ingot) while the bag has fewer than BLAZE_SHIELDS and the makings */
+export async function spareShield (bot: Bot, signal?: AbortSignal): Promise<number> {
+  const have = (): number => countItems(bot, 'shield')
+  let made = 0
+  while (have() < BLAZE_SHIELDS && countItems(bot, 'iron_ingot') > 0 && countItems(bot, (i: any) => /_(planks|log|stem)$/.test(i.name)) > 0) {
+    try {
+      await craft(bot, { item: 'shield', pickUpTable: true }, signal)
+      made++
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('collectBlazeRods: no spare shield:', (err as Error).message)
+      break
+    }
+  }
+  return made
+}
+
 /** from further than this from the spawner, the camp is gone to by a trip (travel) first */
 export const CAMP_TRIP = 48
 
@@ -371,6 +392,9 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
       })
     }
+    // a spare shield made first when it can be (a blocked fireball takes 6 of a shield's 336: it broke in a long fight
+    // and the bot in the nook was hit to death); the nook's fight shuts its front against the shots without one
+    await spareShield(bot, signal)
     const lookup = (p: Vec3): any => bot.blockAt(p)
     const kept = keptNook(bot, spawner, lookup)
     // the one built before, else the cheapest three in turn (one the bot finds no way to, the next)
