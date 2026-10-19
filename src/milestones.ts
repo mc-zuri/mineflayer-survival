@@ -129,7 +129,9 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
       }
     }
   }
-  const near = (e: any): boolean => pen != null ? inPen(pen, e.position) : e.position.distanceTo(at) <= 96
+  // the herd: the cows in the pen and those about it still to be led in (counting the pen's alone, a pen built 20
+  // blocks off home counted 0 cows of 8, and the herd was given up on with its wheat gone, 26.3)
+  const near = (e: any): boolean => (pen != null && inPen(pen, e.position)) || e.position.distanceTo(at) <= (pen != null ? 48 : 96)
   let lastLine = ''
   for (;;) {
     if (signal.aborted) throw signal.reason

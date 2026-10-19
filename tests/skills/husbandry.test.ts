@@ -259,3 +259,24 @@ test('leatherFromHerd makes room in a full bag before it kills for leather', asy
   await leatherFromHerd(bot, executor, 46, new AbortController().signal, () => {})
   assert.deepStrictEqual(calls.slice(0, 2), ['room true', 'obtain leather'])
 })
+
+test('leatherFromHerd counts the cows about a pen built off home with those in it (the herd still to be led in)', async () => {
+  const { leatherFromHerd } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wheat', 20)] })
+  bot.game.dimension = 'overworld'
+  for (let i = 1; i <= 8; i++) bot.entities[i] = { id: i, name: 'cow', type: 'animal', position: new Vec3(i, 64, 0), metadata: [] } as any
+  const pen = { center: new Vec3(20, 64, 20), size: 5, side: 'west', gate: new Vec3(18, 64, 20), inside: new Vec3(19, 64, 20), outside: new Vec3(17, 64, 20), fences: [] }
+  let tick = 0
+  const lines: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { get tick () { return tick } },
+    obtain: async () => {},
+    task: async (name: string) => { if (name === 'the herd pen') return { pen, inside: 0, built: true }; if (name === 'wait for the calves') tick += 1e6; return { fed: 0 } }
+  }
+  await leatherFromHerd(bot, executor, 46, new AbortController().signal, l => lines.push(l))
+  assert.ok(lines.some(l => /herd: breed \(8 cows/.test(l)), lines.join(' | '))
+})
