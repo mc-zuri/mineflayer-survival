@@ -37,6 +37,8 @@ export class ReflexEngine {
   private readonly swell = new Map<number, number>()
   private running: Running | null = null
   private readonly cooldownUntil = new Map<string, number>()
+  /** reflexes kept from firing (inhibit), with how many holds each has */
+  private readonly inhibited = new Map<string, number>()
   private readonly onTick = (): void => this.physicsTick()
   /** the tick each entity last hurt the bot at (the damage event's cause) */
   private readonly attackers = new Map<number, number>()
@@ -104,6 +106,7 @@ export class ReflexEngine {
     for (const reflex of this.reflexes) {
       if ((this.cooldownUntil.get(reflex.name) ?? -Infinity) > this.tick) continue
       if (this.running?.task.name === reflex.name) continue
+      if (this.inhibited.has(reflex.name)) continue
       const task = reflex.check(ctx)
       if (task != null && (best == null || task.priority > best.priority)) best = task
     }
@@ -164,6 +167,31 @@ export class ReflexEngine {
         this.bot.emit('reflexFailed' as any, task.name, err)
       }
     )
+  }
+
+  /**
+   * Keeps the named reflexes from firing until the returned release is called (each hold released once; the holds
+   * count): for a skill that sees to their work itself, at the times it knows are safe. The dragon fight eats only out
+   * of the dragon's reach: the eat reflex fired at a 26.3 bot hitting the perched dragon at 7.7 health, and it stood
+   * eating under the head until it died.
+   */
+  inhibit (names: string[]): () => void {
+    for (const n of names) this.inhibited.set(n, (this.inhibited.get(n) ?? 0) + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      for (const n of names) {
+        const k = (this.inhibited.get(n) ?? 1) - 1
+        if (k <= 0) this.inhibited.delete(n)
+        else this.inhibited.set(n, k)
+      }
+    }
+  }
+
+  /** the reflexes held back now (inhibit) */
+  get inhibitedNames (): string[] {
+    return [...this.inhibited.keys()]
   }
 
   /** the urgent task running, if any */

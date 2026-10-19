@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
 import { breathZone, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
-import { chooseMeleeSpot, dragonPartId, fightDragon } from '../../src/end/skills/fightDragon'
-import { fakeBot } from '../reflexes/fakeBot'
+import { EAT_CLEAR_PERCHED, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, safeToEat } from '../../src/end/skills/fightDragon'
+import { fakeBot, item } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
 
 test('dragonPartId: the head is the id after the dragon\'s (EnderDragon.setId)', () => {
@@ -129,4 +129,50 @@ test('endStoneTopLayer: the island\'s top layer round the bot, not under it nor 
     assert.ok(Math.hypot(p.x, p.z) >= 2, p.toString())
   }
   assert.ok(id != null)
+})
+
+test('safeToEat: eating (32 ticks standing still) only out of a perched dragon\'s scan range, far from one circling, further from one strafing or charging', () => {
+  assert.equal(safeToEat(null, 0), true)
+  assert.equal(safeToEat('dying', 3), true)
+  assert.equal(safeToEat('perched', 8), false)
+  assert.equal(safeToEat('perched', EAT_CLEAR_PERCHED), true)
+  assert.equal(safeToEat('landing', 15), false)
+  assert.equal(safeToEat('circling', 20), false)
+  assert.equal(safeToEat('circling', 30), true)
+  assert.equal(safeToEat('strafing', 30), false)
+  assert.equal(safeToEat('charging', 60), true)
+  assert.equal(safeToEat('leaving', 10), false)
+})
+
+test('foodToEat: hurt, hungry or short of the 18 that heals; a full bar and no golden apple is nothing to eat', () => {
+  const bot = fakeBot({ health: 20, food: 20, items: [item('cooked_beef', 8)] })
+  assert.equal(foodToEat(bot, 12), null)
+  bot.health = 11
+  // hurt, but the bar is full: beef can't be eaten
+  assert.equal(foodToEat(bot, 12), null)
+  bot.food = 15
+  assert.equal(foodToEat(bot, 12), 'cooked_beef')
+  bot.health = 20
+  bot.food = 13
+  assert.equal(foodToEat(bot, 12), 'cooked_beef')
+  bot.food = 19
+  assert.equal(foodToEat(bot, 12), null)
+})
+
+test('fightDragon holds the eat reflex off for the fight and lets it go after', async () => {
+  const blocks = endIsland([], 30)
+  for (const p of exitPortal(62).portal) blocks.set(`${p.x},${p.y},${p.z}`, 'end_portal')
+  const get = world(blocks)
+  const bot = fakeBot({ position: new Vec3(10.5, 62, 0.5) })
+  bot.game.dimension = 'the_end'
+  bot.game.minY = 0
+  bot.blockAt = (pos: Vec3) => { const b = get(pos.floored()); return b == null ? null : { ...b, position: pos.floored() } }
+  bot.waitForTicks = async () => { bot.emit('physicsTick') }
+  const held: string[][] = []
+  let released = 0
+  bot.survival = { reflexes: { inhibit: (names: string[]) => { held.push(names); return () => { released++ } } } }
+  const result = await fightDragon(bot, { destroyCrystals: false, maxTicks: 50 })
+  assert.ok(result.killed)
+  assert.deepEqual(held, [['eat']])
+  assert.equal(released, 1)
 })

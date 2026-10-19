@@ -6,14 +6,14 @@ import { solveAim, arrowHits, bowArrowSpeed, type AimSolution } from '../../skil
 import { arrowStart, arrowWorld } from '../../skills/shoot'
 import { motionTrackerOf } from '../../skills/motion'
 import { attackStrengthOf } from '../../skills/weapons'
-import { bestFoodInInventory } from '../../skills/eat'
+import { bestFoodInInventory, eat } from '../../skills/eat'
 import { steerToward } from '../../skills/steer'
 import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataIndex, metadataValue, eyePosition, yawPitchOf, distanceToBox } from '../../skills/combatUtil'
-import { DragonPhaseTracker, dragonZones, meleeSpots, neckTakesFullDamage, partBox, touchedZone, vanillaYaw, CONTACT_MARGIN, JUMP_HEIGHT, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
+import { DragonPhaseTracker, activityOf, dragonZones, phaseName, type DragonActivity, meleeSpots, neckTakesFullDamage, partBox, touchedZone, vanillaYaw, CONTACT_MARGIN, JUMP_HEIGHT, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
 import { exitPortal } from '../spikes'
 import { destroyCrystals } from './destroyCrystals'
 import { blockGetter, groundY, isOpenAt, VoidGuard, findPortalY, exitPortalOpen, worldMinY, type BlockGetter } from './world'
-import { dragonDangers, eatIfHurt, inDanger, safeSpot, type Danger } from './danger'
+import { dragonDangers, inDanger, safeSpot, type Danger } from './danger'
 
 // fightDragon: the Ender Dragon fought until it dies and the exit portal opens. While it sits on the fountain (the
 // phase tracker's melee window) the bot stands outside the breath and hits the head with crits; while it flies the
@@ -60,6 +60,71 @@ export function chooseMeleeSpot (get: BlockGetter, view: DragonView, portalY: nu
   spots.sort((a, b) => a.score - b.score)
   const best = spots[0]
   return best == null ? null : { spot: best.spot, target: best.target, crit: best.crit }
+}
+
+/**
+ * how far (horizontally) a perched or landing dragon is left to eat: out of DragonSittingScanningPhase's 20 (a player
+ * in it is turned to and roared at, then breathed on)
+ */
+export const EAT_CLEAR_PERCHED = 22
+/** a flying dragon circling the spikes this far off leaves time to eat; one strafing or charging this far */
+export const EAT_CLEAR_CIRCLING = 24
+export const EAT_CLEAR_FLYING = 48
+
+/**
+ * Whether 32 ticks of eating (standing still, no hits back) are safe now, from what the dragon does and how far off it
+ * is horizontally: no dragon in sight, or dying; one sitting or landing on the podium out of its scan range; one
+ * circling the spikes 24 off; any other (strafing with fireballs, charging, taking off) 48 off.
+ */
+export function safeToEat (activity: DragonActivity | null, distance: number): boolean {
+  switch (activity) {
+    case null: case 'dying': return true
+    case 'perched': case 'landing': return distance >= EAT_CLEAR_PERCHED
+    case 'circling': return distance >= EAT_CLEAR_CIRCLING
+    default: return distance >= EAT_CLEAR_FLYING
+  }
+}
+
+/**
+ * What to eat now in the fight, if anything: hurt (under eatBelow), hungry (under 14), or hurt with the food bar under
+ * 18 (no regeneration under it); the best food for it (a golden apple when low: chooseFood's reserved foods), none when
+ * nothing can be eaten (a full food bar and no golden apple)
+ */
+export function foodToEat (bot: Bot, eatBelow: number): string | null {
+  const want = bot.health < eatBelow || bot.food < 14 || (bot.health < 20 && bot.food < 18)
+  if (!want) return null
+  return bestFoodInInventory(bot)?.name ?? null
+}
+
+/**
+ * Eats `food`, cut short (PREEMPTED, quietly) when a danger comes over the bot or the dragon comes close enough that
+ * eating isn't safe any more (safeToEat with 8 blocks to spare)
+ */
+export async function eatAwayFromDragon (bot: Bot, food: string, portalY: number, signal?: AbortSignal, log: (line: string) => void = () => {}): Promise<boolean> {
+  const controller = new AbortController()
+  const onParent = (): void => controller.abort(signal?.reason)
+  signal?.addEventListener('abort', onParent)
+  const watch = (): void => {
+    const me = bot.entity.position
+    const dragon = Object.values(bot.entities).find(e => e.name === 'ender_dragon')
+    const phase = dragon != null ? phaseName((dragon.metadata as any)?.[metadataIndex(bot, 'ender_dragon', 'phase', DRAGON_PHASE_METADATA)]) : null
+    const near = dragon != null && !safeToEat(phase != null ? activityOf(phase) : null, Math.hypot(dragon.position.x - me.x, dragon.position.z - me.z) + 8)
+    if (near || inDanger(me, dragonDangers(bot, portalY), 0.5) != null) controller.abort(new TaskError('PREEMPTED', 'the dragon comes'))
+  }
+  bot.on('physicsTick', watch)
+  try {
+    await eat(bot, { signal: controller.signal, food })
+    log(`ate ${food}: health ${bot.health.toFixed(1)}, food ${bot.food}`)
+    return true
+  } catch (err) {
+    throwIfAborted(signal)
+    if (TaskError.is(err, 'DIED')) throw err
+    log(`eating ${food} cut short: ${(err as Error).message}`)
+    return false
+  } finally {
+    bot.off('physicsTick', watch)
+    signal?.removeEventListener('abort', onParent)
+  }
 }
 
 export interface FightDragonOptions extends SkillOptions {
@@ -172,6 +237,8 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
     if (drawing != null) { bot.deactivateItem(); drawing = null }
   }
 
+  // the fight eats when the dragon is away (foodToEat, safeToEat): the eat reflex fired mid-melee
+  const releaseEat = (bot as any).survival?.reflexes?.inhibit?.(['eat']) as (() => void) | undefined
   try {
     for (;;) {
       throwIfAborted(signal)
@@ -263,7 +330,17 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       if (guard.overVoid && !wasOverVoid) log(`over the void at ${me.floored().toString()}`)
       wasOverVoid = guard.overVoid
 
-      // 3. the dragon on the fountain: to a melee spot, and hit the head
+      // 3. eat when it's safe: out of its reach while it sits, far while it flies (the eat reflex is held off meanwhile)
+      const dragonDistance = dragon == null ? Infinity : Math.hypot(dragon.position.x - me.x, dragon.position.z - me.z)
+      const meal = foodToEat(bot, eatBelow)
+      if (meal != null && safeToEat(window.activity, dragonDistance)) {
+        stopDraw()
+        bot.clearControlStates()
+        await eatAwayFromDragon(bot, meal, portalY, signal, log)
+        continue
+      }
+
+      // 4. the dragon on the fountain: to a melee spot, and hit the head
       if (window.open && dragon != null) {
         stopDraw()
         const view = { position: dragon.position, yaw: vanillaYaw(dragon.yaw) }
@@ -328,16 +405,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       }
       bot.setControlState('jump', false)
 
-      // 4. eat while it's away
-      const far = dragon == null || dragon.position.distanceTo(me) > 40
-      if ((bot.health < eatBelow || bot.food < 14) && far && bestFoodInInventory(bot) != null && tracker.phase !== 'charging_player') {
-        stopDraw()
-        bot.clearControlStates()
-        await eatIfHurt(bot, eatBelow, signal)
-        continue
-      }
-
-      // 5. a bow shot while it flies (arrows are wasted on it sitting: AbstractDragonSittingPhase.onHurt)
+      // 6. a bow shot while it flies (arrows are wasted on it sitting: AbstractDragonSittingPhase.onHurt)
       if (dragon != null && bow() && window.activity !== 'perched' && window.activity !== 'landing') {
         const solution = aimAtDragon(bot, dragon, drawing != null ? Math.max(1, 21 - (tick - drawing)) : 22)
         if (drawing == null) {
@@ -362,7 +430,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       }
       stopDraw()
 
-      // 6. wait near the podium, out of the way
+      // 7. wait near the podium, out of the way
       const off = Math.hypot(me.x - home.x, me.z - home.z)
       if (off > homeRadius * 0.6 || off < 6) {
         const to = off < 6 ? me.plus(new Vec3(me.x - home.x, 0, me.z - home.z).normalize().scaled(4)) : home
@@ -373,6 +441,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       await waitTicks(bot, 1, signal)
     }
   } finally {
+    releaseEat?.()
     bot.off('entityGone', onGone)
     if (dragonId != null) motion.untrack({ id: dragonId } as any)
     stopDraw()
