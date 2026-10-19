@@ -70,7 +70,7 @@ export const ITEM_LIFETIME = 6000
  */
 export const THROWN_PICKUP_DELAY = 40
 
-/** how far from where a thrown item was last seen one of the same name counts as it (it rolled, or came back with a new id) */
+/** how far from where a thrown item was last seen one of the same name counts as it, once its entity is gone (a new id) */
 export const THROWN_RADIUS = 2
 
 interface Thrown { name: string, pos: Vec3, tick: number }
@@ -79,9 +79,10 @@ interface Thrown { name: string, pos: Vec3, tick: number }
 const thrownDrops = new WeakMap<Bot, Map<number, Thrown>>()
 
 /**
- * Whether the item entity is one the bot threw away (markThrown) less than ITEM_LIFETIME ago: its entity, or an item of
- * its name within THROWN_RADIUS of where one lay (a chunk sent again gives it another id). The pickups after a block
- * mined went back for the cobblestone just thrown away for room, and the bag was full again.
+ * Whether the item entity is one the bot threw away (markThrown) less than ITEM_LIFETIME ago: its entity, or, once
+ * that's gone from the client's entities (not picked up), an item of its name within THROWN_RADIUS of where it lay (its
+ * chunk saved and loaded again gives it another id). The pickups after a block mined went back for the cobblestone
+ * just thrown away for room, and the bag was full again.
  */
 export function isThrownDrop (bot: Bot, drop: Entity, name: string | null = droppedName(drop)): boolean {
   const thrown = thrownDrops.get(bot)
@@ -94,14 +95,19 @@ export function isThrownDrop (bot: Bot, drop: Entity, name: string | null = drop
     return true
   }
   if (name == null) return false
-  for (const t of thrown.values()) if (t.name === name && t.pos.distanceTo(drop.position) <= THROWN_RADIUS) return true
+  for (const [id, t] of thrown) if (t.name === name && bot.entities[id] == null && t.pos.distanceTo(drop.position) <= THROWN_RADIUS) return true
   return false
 }
 
 /** remembers an item entity the bot threw away (isThrownDrop) */
 export function markThrown (bot: Bot, drop: Entity, name: string): void {
   let thrown = thrownDrops.get(bot)
-  if (thrown == null) thrownDrops.set(bot, thrown = new Map())
+  if (thrown == null) {
+    const map = new Map<number, Thrown>()
+    thrownDrops.set(bot, thrown = map)
+    // one the bot picked up (walking over it) lies there no more
+    bot.on('playerCollect', (collector: Entity, collected: Entity) => { if (collector === bot.entity) map.delete(collected.id) })
+  }
   thrown.set(drop.id, { name, pos: drop.position.clone(), tick: tickCount(bot) })
 }
 
@@ -111,17 +117,44 @@ export function itemEntityIds (bot: Bot): Set<number> {
 }
 
 /**
- * Throws `count` of an item away behind the bot (the way it came, away from where it digs next: Player.drop throws
- * along the look, 0.3 a tick) and remembers the item entities that came of it (markThrown), so no pickup goes back for
- * them. Resolves the count thrown.
+ * The yaw to throw along with no pit to throw into: the way with the most room at head height (a stack thrown at a wall
+ * falls at the bot's feet, and is picked up again once its 40 ticks are up), behind the bot first
  */
-export async function tossAway (bot: Bot, name: string, count: number, signal?: AbortSignal): Promise<number> {
+export function tossYaw (bot: Bot): number {
+  const feet = bot.entity.position.floored()
+  const open = (p: Vec3): boolean => { const b = bot.blockAt(p); return b == null || b.boundingBox === 'empty' }
+  let best = { yaw: bot.entity.yaw + Math.PI, run: -1 }
+  for (const turn of [Math.PI, Math.PI / 2, -Math.PI / 2, 0]) {
+    const yaw = bot.entity.yaw + turn
+    // mineflayer's yaw: 0 looks to -z, pi/2 to -x
+    const dx = Math.round(-Math.sin(yaw))
+    const dz = Math.round(-Math.cos(yaw))
+    let run = 0
+    while (run < 4 && open(feet.offset(dx * (run + 1), 1, dz * (run + 1)))) run++
+    if (run > best.run) best = { yaw, run }
+  }
+  return best.yaw
+}
+
+/**
+ * Throws `count` of an item away and remembers the item entities that came of it (markThrown), so no pickup goes back
+ * for them: into the pit `into` (a cell beside the bot a block under its floor, explore.ts dumpPit), aimed at its far
+ * side (Player.drop throws along the look at 0.3 a tick, give or take 0.1 up or down) where the bot walking by doesn't
+ * touch it; else level, the way with the most room (tossYaw), some 3 blocks off. Resolves the count thrown.
+ */
+export async function tossAway (bot: Bot, name: string, count: number, signal?: AbortSignal, into?: Vec3): Promise<number> {
   const id = bot.registry.itemsByName[name]?.id
   if (id == null || count <= 0) return 0
   const before = itemEntityIds(bot)
   const had = countItems(bot, name)
-  // behind, level: the stack flies some 3 blocks before it lands
-  await bot.look(bot.entity.yaw + Math.PI, 0, true)
+  if (into != null) {
+    const feet = bot.entity.position.floored()
+    const dx = Math.sign(into.x - feet.x)
+    const dz = Math.sign(into.z - feet.z)
+    await bot.lookAt(new Vec3(into.x + 0.5 + dx * 0.35, into.y + 0.1, into.z + 0.5 + dz * 0.35), true)
+  } else {
+    await bot.look(tossYaw(bot), 0, true)
+  }
   await settleInventory(bot, signal)
   await bot.toss(id, null, Math.min(count, had))
   // the item entity comes a tick or two after the click (ServerboundContainerClickPacket, then the entity's spawn and
@@ -130,7 +163,7 @@ export async function tossAway (bot: Bot, name: string, count: number, signal?: 
   await waitUntil(bot, () => ours().length > 0, 10, signal)
   for (const e of ours()) markThrown(bot, e, name)
   const thrown = Math.max(0, had - countItems(bot, name))
-  trace('tossAway:', thrown, name, 'behind', bot.entity.position.toString())
+  trace('tossAway:', thrown, name, into != null ? `into ${into.toString()}` : 'behind', 'from', bot.entity.position.toString())
   return thrown
 }
 

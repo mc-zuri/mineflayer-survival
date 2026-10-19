@@ -173,6 +173,50 @@ export async function digDepotNook (bot: Bot, signal?: AbortSignal): Promise<Vec
   return null
 }
 
+/**
+ * A pit beside the bot's feet to throw what it doesn't want into: the column of the side cell `side` (feet level),
+ * opened from head height down to a block under the floor, `bottom` the cell the items lie in. An item there is out of
+ * the bot's reach as it walks by (Player.aiStep touches what its box, inflated by 0.5 vertically, meets: the item's top
+ * is 0.75 under the floor), and the pit is off the way (a side of the bot's facing first, then behind it, ahead
+ * last). Rock under the bottom, no liquid against the cells, nothing that doesn't break; null when no side will do.
+ */
+export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3): { side: Vec3, bottom: Vec3, open: Vec3[] } | null {
+  const left = new Vec3(-facing.z, 0, facing.x)
+  for (const d of [left, left.scaled(-1), facing.scaled(-1), facing]) {
+    const side = feet.plus(d)
+    const bottom = side.offset(0, -1, 0)
+    const cells = [side.offset(0, 1, 0), side, bottom]
+    if (lookup(bottom.offset(0, -1, 0))?.boundingBox !== 'block') continue
+    if (cells.some(c => { const b = lookup(c); return b == null || UNBREAKABLE.has(b.name) || /(chest|furnace|table|barrel|bed|door|torch|portal)/.test(b.name) || liquidAround(lookup, c) != null })) continue
+    return { side, bottom, open: cells }
+  }
+  return null
+}
+
+/**
+ * Digs a pit beside the bot (dumpPitCells) to throw things into, or finds the one dug before beside it still open;
+ * the cell the items are to land in, or null
+ */
+export async function dumpPit (bot: Bot, signal?: AbortSignal): Promise<Vec3 | null> {
+  const lookup = lookupOf(bot)
+  const feet = feetOf(bot)
+  const cells = dumpPitCells(lookup, feet, facingDir(bot.entity.yaw))
+  if (cells == null) return null
+  if (cells.open.every(c => isOpen(bot, c))) return cells.bottom
+  trace('explore: digging a pit to throw into at', cells.side.toString())
+  // (twice: a dig the pathfinder left going aborts the first)
+  for (let tries = 0; tries < 2; tries++) {
+    try {
+      await open(bot, cells.open, signal)
+      return cells.bottom
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('explore: no pit', (err as Error).message)
+    }
+  }
+  return null
+}
+
 function lookupOf (bot: Bot): Lookup {
   return pos => bot.blockAt(pos) as any
 }

@@ -9,6 +9,7 @@ import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestSer
 import { storeItems } from '../../src/skills/chest'
 import { countItems, emptySlots, waitUntil } from '../../src/skills/util'
 import { DEPOT_POI, Executor } from '../../src/executor/executor'
+import { isThrownDrop } from '../../src/skills/pickupDrops'
 
 const USERNAME = 'bagbot'
 
@@ -118,5 +119,36 @@ describe(`the bag down a mine on a ${DEFAULT_VERSION} server`, { timeout: 20 * 6
     // (and what digging the nook dropped)
     assert.ok(countItems(bot, 'cobblestone') >= 64)
     assert.strictEqual(countItems(bot, 'diamond_pickaxe'), 1)
+  })
+
+  it('mines 4 diamonds through the stone with a bag nearly full of cobblestone: room made on the way, no inventory full, nothing thrown picked up again', async (t) => {
+    await mine(3)
+    // the ores in the rock ahead, off the tunnel's line
+    const ores = [at(7, 0, 1), at(11, 1, -1), at(15, 0, 0), at(19, 0, 1)]
+    for (const o of ores) await setblock(o, 'diamond_ore')
+    // 34 slots: 31 stacks of cobblestone, the 2 free the executor keeps (the room before the step makes none)
+    for (const [item, n] of [['cobblestone', 31 * 64], ['diamond_pickaxe', 1], ['bread', 16], ['torch', 32]] as const) await give(item, n)
+    assert.strictEqual(emptySlots(bot), 2)
+    const lines: string[] = []
+    let recollected = 0
+    const onCollect = (collector: any, collected: any): void => {
+      if (collector === bot.entity && isThrownDrop(bot, collected)) {
+        recollected++
+        t.diagnostic(`picked up again: ${collected.id} at ${collected.position.toString()}, the bot at ${bot.entity.position.toString()}`)
+      }
+    }
+    bot.on('playerCollect', onCollect)
+    const executor = new Executor(bot, { log: line => { lines.push(line); t.diagnostic(line) } })
+    const start = bot.survival.tasks.tick
+    try {
+      await executor.obtain([{ item: 'diamond', count: 4 }])
+    } finally {
+      bot.off('playerCollect', onCollect)
+    }
+    t.diagnostic(`4 diamonds in ${bot.survival.tasks.tick - start} ticks, ${countItems(bot, 'cobblestone')} cobblestone carried, ${emptySlots(bot)} slots free`)
+    assert.ok(countItems(bot, 'diamond') >= 4)
+    assert.ok(!lines.some(l => /inventory full|INVENTORY_FULL|NO_SPACE/.test(l)), lines.filter(l => /full|NO_SPACE/.test(l)).join(' | '))
+    assert.ok(lines.some(l => /throwing away/.test(l)), 'no room made')
+    assert.strictEqual(recollected, 0, 'thrown items picked up again')
   })
 })

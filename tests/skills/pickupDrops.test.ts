@@ -116,10 +116,17 @@ test('tossAway throws behind the bot and remembers what it threw: no pickup goes
     assert.deepStrictEqual(looks, [Math.PI])
     assert.ok(isThrownDrop(bot, bot.entities[70]))
     assert.deepStrictEqual(nearbyDrops(bot, bot.entity.position, 8).map(e => e.id), [71])
-    // with another id (the chunk sent again), an item of its name where it lay is it still; another item isn't
+    // a block's drop by it is not it
     bot.entities[72] = drop(72, 'cobblestone', new Vec3(0.9, 64, 4))
     bot.entities[73] = drop(73, 'andesite', new Vec3(0.9, 64, 4))
+    assert.deepStrictEqual(nearbyDrops(bot, bot.entity.position, 8).map(e => e.id).sort(), [71, 72, 73])
+    // with its entity gone and another id (its chunk loaded again), an item of its name where it lay is it; another
+    // item isn't
+    const thrownOne = bot.entities[70]
+    delete bot.entities[70]
     assert.deepStrictEqual(nearbyDrops(bot, bot.entity.position, 8).map(e => e.id).sort(), [71, 73])
+    bot.entities[70] = thrownOne
+    delete bot.entities[72]
     // the pickups go for the block's drop and the andesite, not what was thrown
     delete bot.entities[71]
     delete bot.entities[73]
@@ -131,4 +138,17 @@ test('tossAway throws behind the bot and remembers what it threw: no pickup goes
   } finally {
     clearInterval(ticker)
   }
+})
+
+test('tossAway with no pit throws the way with room at head height, behind first: a stack thrown at a wall falls at the bot\'s feet', async () => {
+  const { tossYaw } = await import('../../src/skills/pickupDrops')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // a dead end: the tunnel runs ahead of the bot (to -z, yaw 0), rock behind and at the sides
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (pos: Vec3) => (pos.x === 0 && pos.z <= 0 && pos.y >= 64 && pos.y <= 65) ? 'air' : 'stone' })
+  bot.entity.yaw = 0
+  assert.ok(Math.abs(tossYaw(bot) - 0) < 1e-9)
+  // open behind too: behind
+  const open = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  open.entity.yaw = 0
+  assert.ok(Math.abs(tossYaw(open) - Math.PI) < 1e-9)
 })

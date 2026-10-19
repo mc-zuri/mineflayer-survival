@@ -27,7 +27,7 @@ import { defaultKeep, JUNK, junkToToss, ROUTE_STONE, splitInventory, type KeepRu
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { noteVillage } from '../skills/village'
-import { digDepotNook, rememberAround } from './explore'
+import { digDepotNook, dumpPit, rememberAround } from './explore'
 import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
 import { farmCells, grownPlots, knownFarms } from '../skills/farm'
 import { GROW_TICKS } from '../core/crops'
@@ -550,8 +550,11 @@ export class Executor {
     if (toss.length > 0) {
       this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
       await run('make room', async (s) => {
-        // behind the bot, and never gone back for (tossAway)
-        for (const t of toss) await tossAway(this.bot, t.name, t.count, s).catch(err => { if (isAbort(err)) throw err })
+        // into a pit dug beside the bot, out of its reach as it walks by (or behind it), and never gone back for
+        // (tossAway): thrown at a wall, the stack fell at its feet and was picked up again 40 ticks on
+        // (Player.drop's pickup delay)
+        const pit = await dumpPit(this.bot, s)
+        for (const t of toss) await tossAway(this.bot, t.name, t.count, s, pit ?? undefined).catch(err => { if (isAbort(err)) throw err })
       })
     }
     return emptySlots(this.bot) >= this.options.minFreeSlots

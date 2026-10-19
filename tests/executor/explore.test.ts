@@ -372,3 +372,19 @@ test('a dug route breaks its cells with any tool and walks after no drops (its n
   const { ROUTE_DIG } = await import('../../src/executor/explore')
   assert.deepEqual(ROUTE_DIG, { anyTool: true, pickup: false })
 })
+
+test('dumpPitCells: a side of the facing opened from head height to a block under the floor, rock under it; behind and ahead last; none next to lava', async () => {
+  const { dumpPitCells } = await import('../../src/executor/explore')
+  const feet = new Vec3(0, 20, 0)
+  // a one-wide tunnel along x, the bot facing +x
+  const tunnel = { '0,20,0': 'air', '0,21,0': 'air', '1,20,0': 'air', '1,21,0': 'air', '-1,20,0': 'air', '-1,21,0': 'air' }
+  const pit = dumpPitCells(world(tunnel), feet, new Vec3(1, 0, 0))
+  assert.ok(pit != null && pit.side.x === 0 && Math.abs(pit.side.z) === 1, String(pit?.side))
+  assert.deepEqual(pit.bottom.toArray(), [pit.side.x, 19, pit.side.z])
+  assert.deepEqual(pit.open.map(c => c.y), [21, 20, 19])
+  // lava under one side and against the other: behind
+  const wet = dumpPitCells(world({ ...tunnel, [`0,18,${pit.side.z}`]: 'lava', [`0,20,${-2 * pit.side.z}`]: 'lava' }), feet, new Vec3(1, 0, 0))
+  assert.deepEqual(wet?.side.toArray(), [-1, 20, 0])
+  // nothing under the bottom (a cave below): no pit there
+  assert.equal(dumpPitCells(world({ '0,20,0': 'air' }, 'air'), feet, new Vec3(1, 0, 0)), null)
+})
