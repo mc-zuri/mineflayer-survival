@@ -26,6 +26,9 @@ export const SIDE_DIRS: Readonly<Record<Side, Vec3>> = {
 /** blocks put under a fence over a hole, any of them held */
 export const PEN_FILLERS = ['dirt', 'cobblestone', 'cobbled_deepslate', 'stone', 'andesite', 'diorite', 'granite', 'tuff', 'netherrack', 'coarse_dirt']
 
+/** blocks the bot leads an animal before it waits for it to catch up (leadIntoPen) */
+export const LEAD_LEG = 5
+
 /** the smallest pen: a 3 × 3 inside */
 export const MIN_PEN_SIZE = 5
 
@@ -212,7 +215,7 @@ export async function buildPen (bot: Bot, args: BuildPenArgs, signal?: AbortSign
     const item = gateNames.find(n => countItems(bot, n) > 0)
     if (item == null) throw new SkillError('MISSING_ITEMS', 'no fence gate for the pen')
     // the gate's bar lies across the way through it: placed facing out (or in) of the pen
-    await placeBlock(bot, { pos: plan.gate, item, facing: SIDE_DIRS[side] }, signal)
+    await placeWithRetry(bot, plan.gate, item, signal, SIDE_DIRS[side])
     const gate = bot.blockAt(plan.gate)
     if (gate == null || !gateNames.includes(gate.name)) throw new SkillError('VERIFY_FAILED', `no gate at ${plan.gate.toString()}`)
     if ((gate.getProperties() as any).open === true) await useGate(bot, plan.gate, false, signal)
@@ -222,14 +225,27 @@ export async function buildPen (bot: Bot, args: BuildPenArgs, signal?: AbortSign
   return { ...plan, placed }
 }
 
+/** whether a mob (any entity but items, orbs and arrows) has its box in the cell: a block isn't placed there */
+function mobIn (bot: Bot, pos: Vec3): boolean {
+  return Object.values(bot.entities).some((e: any) => {
+    if (e === bot.entity || e.position == null || /^(item|experience_orb|arrow|spectral_arrow)$/.test(e.name ?? '')) return false
+    const hw = (e.width ?? 0.6) / 2
+    return e.position.x + hw > pos.x && e.position.x - hw < pos.x + 1 && e.position.z + hw > pos.z && e.position.z - hw < pos.z + 1 &&
+      e.position.y < pos.y + 1 && e.position.y + (e.height ?? 1.8) > pos.y
+  })
+}
+
 /**
- * placeBlock, out of the cell first (outOfCell), and again from nearer when the server didn't place it (twice more)
+ * placeBlock, out of the cell first (outOfCell) and with no mob in it (the server refuses a block whose collision
+ * shape an entity is in: BlockItem.canPlace, Level.isUnobstructed; a sheep wandered into the ring), and again from
+ * nearer when the server didn't place it (twice more)
  */
-async function placeWithRetry (bot: Bot, pos: Vec3, item: string, signal?: AbortSignal): Promise<{ block: string }> {
+async function placeWithRetry (bot: Bot, pos: Vec3, item: string, signal?: AbortSignal, facing?: Vec3): Promise<{ block: string }> {
   for (let attempt = 0; ; attempt++) {
     await outOfCell(bot, pos, signal)
+    if (mobIn(bot, pos)) await waitUntil(bot, () => !mobIn(bot, pos), 200, signal)
     try {
-      return await placeBlock(bot, { pos, item }, signal)
+      return await placeBlock(bot, { pos, item, facing }, signal)
     } catch (err) {
       if (attempt >= 2 || !isSkillError(err, 'CANNOT_PLACE')) throw err
       trace('buildPen: again at', pos.toString(), 'from', bot.entity.position.toString(), (err as Error).message)
@@ -329,6 +345,16 @@ export async function leadIntoPen (bot: Bot, pen: PenPlan, args: LeadIntoPenArgs
     // till the stray follows (an animal let go of lately waits out its calm down first, TemptGoal.calmDown)
     const stray = strays[0]
     await waitUntil(bot, () => stray.position.distanceTo(bot.entity.position) <= 4, 100, signal)
+    // to the gate in legs of LEAD_LEG blocks, each waited at till the stray is near again (it follows at its own
+    // pace, and one left 10 blocks behind is let go: TemptGoal.canUse)
+    for (let leg = 0; leg < 12 && Math.hypot(bot.entity.position.x - pen.outside.x - 0.5, bot.entity.position.z - pen.outside.z - 0.5) > LEAD_LEG; leg++) {
+      throwIfAborted(signal)
+      const p = bot.entity.position
+      const d = new Vec3(pen.outside.x + 0.5 - p.x, 0, pen.outside.z + 0.5 - p.z)
+      const to = p.plus(d.scaled(LEAD_LEG / d.norm())).floored()
+      await navigate(bot, { goal: new goals.GoalNear(to.x, pen.outside.y, to.z, 2) }, signal).catch(err => trace('leadIntoPen: a leg:', (err as Error).message))
+      if (!(await waitUntil(bot, () => stray.position.distanceTo(bot.entity.position) <= 4, 100, signal))) break
+    }
     // in at a walk, by the gate left open behind, to the far side of the inside (a tempted animal stops 2.5 blocks
     // off the player, TemptGoal.tick: by the gate it would stop in it); then a wait for those that followed to come in
     const before = pathfinder?.defaultMoveSettings
