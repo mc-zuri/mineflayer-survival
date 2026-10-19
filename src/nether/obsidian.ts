@@ -11,6 +11,7 @@ import { aimAtFace } from '../core/actions'
 import { navigateNear } from '../skills/navigate'
 import { countItems, findInventoryItem, trace, waitTicks, waitUntil } from '../skills/util'
 import { isLavaSource } from './portal'
+import { withNetherSafety } from './safety'
 
 /** a block as the obsidian maker reads it: its name, collision and state */
 export type ObsidianLookup = (pos: Vec3) => { name: string, boundingBox: string, properties?: Record<string, any> } | null
@@ -57,6 +58,12 @@ export function pourTarget (get: ObsidianLookup, sources: readonly Vec3[], intoL
  * diamond pickaxe, NOT_FOUND when no source is left to turn.
  */
 export async function obsidianFromLava (bot: Bot, count: number, signal?: AbortSignal): Promise<number> {
+  // the walks and the digs by the lava with the nether's lava rules (no step beside lava, no dig of a block lava
+  // touches): mining the obsidian lid of a deep lake from on top of it dropped a 26.3 bot into the lava under it
+  return await withNetherSafety(bot, async () => await makeObsidian(bot, count, signal))
+}
+
+async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Promise<number> {
   if (countItems(bot, 'water_bucket') === 0) throw new SkillError('MISSING_ITEMS', 'no water bucket to make obsidian with')
   if (countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) throw new SkillError('MISSING_ITEMS', 'no diamond pickaxe to mine obsidian with')
   const get: ObsidianLookup = p => {
