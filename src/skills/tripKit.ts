@@ -144,9 +144,10 @@ export function tripKitItems (items: readonly ItemCount[]): ItemCount[] {
   // all of each weapon but one of the best
   weapons.forEach((w, i) => add(w, count(w) - (i === 0 ? 1 : 0)))
   // a spare pickaxe: the pickaxes but the best (after a death in the nether the bot came back with an axe alone and
-  // stood 20000 ticks where the netherrack in its way couldn't be dug, 26.3)
-  const picks = PICKAXES.filter(p => count(p) > 0)
-  picks.forEach((p, i) => add(p, count(p) - (i === 0 ? 1 : 0)))
+  // stood 20000 ticks where the netherrack in its way couldn't be dug, 26.3), and but the best spare too when there
+  // are three or more: the trip carries a spare of its own (the staircase down to the deep lava broke two, 26.3)
+  const picks = PICKAXES.flatMap(p => new Array<string>(count(p)).fill(p))
+  for (const p of PICKAXES) add(p, picks.slice(picks.length >= 3 ? 2 : 1).filter(q => q === p).length)
   if (count('bow') >= 2) add('bow', count('bow') - 1)
   if (count('arrow') >= 32) add('arrow', Math.floor(count('arrow') / 2))
   for (const f of FOODS) if (count(f) >= 8) add(f, Math.floor(count(f) / 2))
@@ -164,6 +165,8 @@ export function tripKitItems (items: readonly ItemCount[]): ItemCount[] {
 
 /** the iron a spare chestplate and leggings take (8 and 7) */
 export const SPARE_ARMOR_IRON = 15
+/** the iron a spare iron pickaxe takes */
+export const SPARE_PICKAXE_IRON = 3
 /** the gold spare golden boots take */
 export const SPARE_BOOTS_GOLD = 4
 const GOLDEN_ARMOR = /^golden_(helmet|chestplate|leggings|boots)$/
@@ -173,8 +176,9 @@ const GOLDEN_ARMOR = /^golden_(helmet|chestplate|leggings|boots)$/
  * bot has, worn and held too; `carried`: the bag's): an iron chestplate and leggings, when no armor piece is carried
  * spare and the iron for both is (a respawn by the kit had none to put on, and a 26.3 bot went back into the nether
  * bare and died there three more times); then a shield, when none is carried spare and an ingot is left (the
- * blazes' fireballs, the creepers' blasts and the skeletons' arrows on the way back); and golden boots for the
- * piglins, from 4 of the gold held
+ * blazes' fireballs, the creepers' blasts and the skeletons' arrows on the way back); golden boots for the
+ * piglins, from 4 of the gold held; and an iron pickaxe when the bag has one or two, from 3 of the iron left (the kit
+ * takes the worst, the trip goes on with a spare: tripKitItems)
  */
 export function kitSpares (owned: readonly ItemCount[], carried: readonly ItemCount[]): Array<Array<{ item: string, count: number }>> {
   const has = (list: readonly ItemCount[], name: string): number => list.filter(i => i.name === name).reduce((n, i) => n + i.count, 0)
@@ -184,10 +188,17 @@ export function kitSpares (owned: readonly ItemCount[], carried: readonly ItemCo
     out.push([{ item: 'iron_chestplate', count: has(owned, 'iron_chestplate') + 1 }, { item: 'iron_leggings', count: has(owned, 'iron_leggings') + 1 }])
     iron -= SPARE_ARMOR_IRON
   }
-  if (has(carried, 'shield') === 0 && iron >= 1) out.push([{ item: 'shield', count: has(owned, 'shield') + 1 }])
+  if (has(carried, 'shield') === 0 && iron >= 1) {
+    out.push([{ item: 'shield', count: has(owned, 'shield') + 1 }])
+    iron -= 1
+  }
   // golden boots when no golden piece is carried spare and the gold is held: a respawn back into the nether bare had the
   // piglins at it by the portal (PiglinAi.isWearingGold; a 26.3 bot was slain so by the arrival portal)
   if (!carried.some(i => GOLDEN_ARMOR.test(i.name)) && has(owned, 'gold_ingot') >= SPARE_BOOTS_GOLD) out.push([{ item: 'golden_boots', count: has(owned, 'golden_boots') + 1 }])
+  // an iron pickaxe when the bag has fewer than 3 (the kit takes one, the trip carries a spare: tripKitItems) and the
+  // iron for it is left
+  const picks = PICKAXES.reduce((n, p) => n + has(carried, p), 0)
+  if (picks >= 1 && picks < 3 && iron >= SPARE_PICKAXE_IRON) out.push([{ item: 'iron_pickaxe', count: has(owned, 'iron_pickaxe') + 1 }])
   return out
 }
 

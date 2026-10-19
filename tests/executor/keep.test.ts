@@ -170,3 +170,24 @@ test('splitInventory and junkToToss never put away the protected items, whatever
   const toss = junkToToss(bag, 4, { keep: nothing, registry, anything: true })
   assert.deepEqual(toss.map(t => t.name).sort(), ['cobblestone'])
 })
+
+for (const version of VERSIONS) {
+  test(`trip spare: a second pickaxe in the bag, iron or better beside an iron or diamond one, stone or better beside a stone one (${version})`, async () => {
+    const { tripSpareGoals } = await import('../../src/executor/keep')
+    const { Inventory } = await import('../../src/core/inventory')
+    const registry = minecraftData(version)
+    const iron = ['iron_pickaxe', 'diamond_pickaxe', 'netherite_pickaxe']
+    // a diamond one alone: one more of iron or better
+    assert.deepEqual(tripSpareGoals(new Inventory(registry as any, { diamond_pickaxe: 1, iron_ingot: 3 })), [{ item: iron, count: 2 }])
+    // a stone one: stone or better (copper where the version has it)
+    const [stone] = tripSpareGoals(new Inventory(registry as any, { stone_pickaxe: 1 }))
+    assert.equal(stone.count, 2)
+    assert.ok((stone.item as string[]).includes('stone_pickaxe') && (stone.item as string[]).includes('iron_pickaxe'))
+    // a spare carried already, a wooden one, none: nothing
+    assert.deepEqual(tripSpareGoals(new Inventory(registry as any, { diamond_pickaxe: 1, iron_pickaxe: 1 })), [])
+    assert.deepEqual(tripSpareGoals(new Inventory(registry as any, { wooden_pickaxe: 1 })), [])
+    assert.deepEqual(tripSpareGoals(new Inventory(registry as any, { cobblestone: 64 })), [])
+    // a stone spare beside a diamond one is no spare of iron: one more
+    assert.deepEqual(tripSpareGoals(new Inventory(registry as any, { diamond_pickaxe: 1, stone_pickaxe: 1 })), [{ item: iron, count: 2 }])
+  })
+}

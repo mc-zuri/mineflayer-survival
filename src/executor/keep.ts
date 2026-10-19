@@ -315,6 +315,21 @@ export function spareKitGoals (carried: Inventory, stored: Readonly<Record<strin
 }
 
 /**
+ * The spare pickaxe a trip carries in the bag, beside the best one, as a request (none when two are carried): an iron
+ * one or better under a best of iron or better (cheap by then: the stock's iron), a stone one or better under a stone
+ * one; none under a wooden one. A 26.3 whole game's staircase down to the deep lava broke the diamond pickaxe and the
+ * iron one after it, the spare in the base's chest 160 blocks off, and the obsidian failed for want of one.
+ */
+export function tripSpareGoals (carried: Inventory): ObtainRequest[] {
+  const best = carried.bestTool('pickaxe')
+  const tool = best == null ? null : parseTool(best)
+  if (tool == null || tool.kind !== 'pickaxe' || TOOL_MATERIALS[tool.material].tier < TOOL_MATERIALS.stone.tier) return []
+  const alts = toolsAtLeast('pickaxe', TOOL_MATERIALS[tool.material].tier >= TOOL_MATERIALS.iron.tier ? 'iron' : 'stone')
+  const have = carried.countAny(alts)
+  return have >= 2 ? [] : [{ item: alts, count: have + 1 }]
+}
+
+/**
  * The keep rule with the stock policy's working set over it (its marks' keep and the options' keep list): a stack of
  * logs carried, say, where the default stores them; what the policy says nothing of goes by `base`
  */

@@ -22,7 +22,7 @@ import type { Station } from './planner/steps'
 import { buildBase, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
 import { DEPOT_POI, Executor, describeRequest, ownedInventory, type ExecutorOptions, type PlanOptions } from './executor/executor'
-import { SPARE_FOOD_POINTS, spareKitGoals, stockKeepRule } from './executor/keep'
+import { SPARE_FOOD_POINTS, spareKitGoals, stockKeepRule, tripSpareGoals } from './executor/keep'
 import { isAbort } from './skills/errors'
 import { navigate, navigateNear } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
@@ -252,6 +252,9 @@ export const STOCK_RETRY_TICKS = 2400
 
 /** ticks a stock top-up left for later (its plan dearer than its budget: no axe yet, its source far) waits to be looked at again */
 export const STOCK_WAIT_TICKS = 600
+
+/** ticks the spare pickaxe a trip carries may cost (the plan's estimate: made from the iron held or stored, not mined for) */
+export const TRIP_SPARE_TICKS = 1500
 
 /**
  * The milestone to work on: the first not reached in this game and not done now. One reached stays reached when its
@@ -613,6 +616,7 @@ export class Runner {
     try {
       await this.executor.storeAtBase({}, signal)
       await this.stashSpareKit(signal)
+      await this.carrySpare(signal)
     } catch (err) {
       if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
       this.log(`storing failed: ${(err as Error).message}`)
@@ -655,6 +659,25 @@ export class Runner {
       }
     }
     await this.executor.storeExact(items, signal)
+  }
+
+  /**
+   * The spare pickaxe the next trip carries (tripSpareGoals: an iron one beside a diamond one), made when it's cheap
+   * (within TRIP_SPARE_TICKS by the plan: the iron held or stored at the base), so a pickaxe worn out far off has
+   * another in the bag
+   */
+  async carrySpare (signal?: AbortSignal): Promise<void> {
+    const goals = tripSpareGoals(ownedInventory(this.bot))
+    if (goals.length === 0) return
+    const plan = this.executor.plan(goals)
+    if (!plan.ok || plan.cost > TRIP_SPARE_TICKS) return
+    this.log(`a spare pickaxe for the trips: ${describeRequest(goals[0])}`)
+    try {
+      await this.executor.obtain(goals, signal)
+    } catch (err) {
+      if (TaskError.is(err, 'DIED') || isAbort(err) || signal?.aborted === true) throw err
+      this.log(`no spare pickaxe: ${(err as Error).message}`)
+    }
   }
 
   /**

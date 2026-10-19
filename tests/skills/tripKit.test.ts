@@ -40,6 +40,36 @@ test('kitSpares: an iron chestplate and leggings from 15 iron when no armor is c
   assert.deepStrictEqual(kitSpares([{ name: 'iron_chestplate', count: 1 }, { name: 'iron_ingot', count: 15 }], [{ name: 'iron_ingot', count: 15 }])[0], [{ item: 'iron_chestplate', count: 2 }, { item: 'iron_leggings', count: 1 }])
 })
 
+test('tripKitItems: the pickaxes but the best, and but the best spare too with three or more (the trip carries a spare)', () => {
+  // two: the kit takes the spare
+  assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 1 }]), [{ name: 'iron_pickaxe', count: 1 }])
+  // three: the bag keeps the diamond and the best spare, the kit takes the worst
+  assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 1 }, { name: 'stone_pickaxe', count: 1 }]), [{ name: 'stone_pickaxe', count: 1 }])
+  assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 2 }]), [{ name: 'iron_pickaxe', count: 1 }])
+  assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }]), [])
+})
+
+test('kitSpares: an iron pickaxe from 3 iron left when the bag has fewer than 3 pickaxes', () => {
+  const worn = [{ name: 'diamond_chestplate', count: 1 }, { name: 'shield', count: 1 }]
+  const bag = (iron: number, picks: Array<{ name: string, count: number }>): Array<{ name: string, count: number }> => [{ name: 'iron_helmet', count: 1 }, { name: 'shield', count: 1 }, { name: 'iron_ingot', count: iron }, ...picks]
+  const one = bag(3, [{ name: 'diamond_pickaxe', count: 1 }])
+  assert.deepStrictEqual(kitSpares([...worn, ...one], one), [[{ item: 'iron_pickaxe', count: 1 }]])
+  const two = bag(5, [{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 1 }])
+  assert.deepStrictEqual(kitSpares([...worn, ...two], two), [[{ item: 'iron_pickaxe', count: 2 }]])
+  // three carried, too little iron, or no pickaxe at all: none
+  const three = bag(9, [{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 2 }])
+  assert.deepStrictEqual(kitSpares([...worn, ...three], three), [])
+  const poor = bag(2, [{ name: 'diamond_pickaxe', count: 1 }])
+  assert.deepStrictEqual(kitSpares([...worn, ...poor], poor), [])
+  const none = bag(9, [])
+  assert.deepStrictEqual(kitSpares([...worn, ...none], none), [])
+  // after the armor (15) and the shield (1): the iron left
+  const armor = [{ name: 'iron_ingot', count: 18 }, { name: 'diamond_pickaxe', count: 1 }]
+  assert.deepStrictEqual(kitSpares([{ name: 'diamond_chestplate', count: 1 }, ...armor], armor).map(g => g.map(r => r.item)), [['iron_chestplate', 'iron_leggings'], ['shield']])
+  const more = [{ name: 'iron_ingot', count: 19 }, { name: 'diamond_pickaxe', count: 1 }]
+  assert.deepStrictEqual(kitSpares([{ name: 'diamond_chestplate', count: 1 }, ...more], more).map(g => g.map(r => r.item)), [['iron_chestplate', 'iron_leggings'], ['shield'], ['iron_pickaxe']])
+})
+
 test('after a death the runner goes to a trip kit that still holds something, and takes it', async () => {
   const { Runner } = await import('../../src/runner')
   const { EventEmitter } = await import('node:events')
