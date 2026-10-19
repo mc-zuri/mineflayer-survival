@@ -70,3 +70,18 @@ test('shotLineBlocked: a block of the world on the line from the shooting spot s
   const bars: BlockGetter = (p) => { const b = get(p); return b != null && b.name === 'iron_bars' ? { ...b, boundingBox: 'block' } : b }
   assert.strictEqual(shotLineBlocked(bars, spot, box), false)
 })
+
+test('pillarToLeave: up a pillar cut short and off to another job, it is come down first; on up the same column it is not', async () => {
+  const { pillarToLeave } = await import('../../src/end/skills/destroyCrystals')
+  const s = SPIKES[0]
+  const column = { x: 39, z: 0 }
+  const pillar = { current: { column, base: 63 } }
+  const same: any = { spike: s, method: 'pillar', shootFrom: null, pillar: { column, topY: 80, breakBars: [] } }
+  const other: any = { spike: SPIKES[1], method: 'shoot', shootFrom: { x: 22.5, y: 63, z: 16.5 } }
+  assert.deepStrictEqual(pillarToLeave(pillar, { x: 39.5, y: 84, z: 0.4 }, other), { column, base: 63 })
+  assert.strictEqual(pillarToLeave(pillar, { x: 39.5, y: 84, z: 0.4 }, same), null)
+  // down at its foot already, or off its column (knocked off), nothing to come down
+  assert.strictEqual(pillarToLeave(pillar, { x: 39.5, y: 63, z: 0.4 }, other), null)
+  assert.strictEqual(pillarToLeave(pillar, { x: 30.5, y: 63, z: 0.4 }, other), null)
+  assert.strictEqual(pillarToLeave({ current: null }, { x: 39.5, y: 84, z: 0.4 }, other), null)
+})

@@ -137,6 +137,8 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
   const ground = findPortalY(get) ?? 62
   const guard = new VoidGuard(get, 3, worldMinY(bot))
   let spikes = readSpikes(get, [], opts.seed)
+  /** the pillar the bot is building or standing on, and the ground it went up from */
+  const pillar: PillarState = { current: null }
   const onGone = (e: Entity): void => {
     const index = ids.get(e.id)
     if (index == null) return
@@ -198,12 +200,26 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
         continue
       }
       const crystal = left.get(target.spike.index) as Entity
+      // up a pillar of a job cut short (a dodge, a cloud on it) and off to another: down it first, the way it went up
+      // (a 1.21.11 bot left on spike 0's pillar 20 blocks up walked for spike 1's spot, 'stopped short' three times, and fell)
+      const down = pillarToLeave(pillar, bot.entity.position, target)
+      if (down != null) {
+        opts.log?.(`down the pillar at ${down.column.x} ${down.column.z} to ${down.base} first`)
+        const t = down
+        await underDragonWatch(bot, ground, async (s) => await digDown(bot, t.base, { signal: s }), { signal, guard, eatBelowHealth: opts.eatBelowHealth, log: opts.log }).catch(err => {
+          if (!TaskError.is(err) || ['ABORTED', 'PREEMPTED', 'DIED'].includes(err.code)) throw err
+          opts.log?.(`down the pillar: ${err.code} ${err.message}`)
+        })
+        if (Math.floor(bot.entity.position.y + 1e-6) <= down.base || !onColumn(bot.entity.position, down.column)) pillar.current = null
+        continue
+      }
+      if (pillar.current != null && !onColumn(bot.entity.position, pillar.current.column)) pillar.current = null
       opts.log?.(`spike ${target.spike.index} (${target.spike.centerX}, ${target.spike.centerZ}, h ${target.spike.height}${target.spike.guarded ? ', caged' : ''}): ${target.method} from ${JSON.stringify(target.shootFrom != null ? { x: target.shootFrom.x, y: target.shootFrom.y, z: target.shootFrom.z, pillar: target.shootFrom.pillar } : null)}`)
       guard.update(bot.entity.position, bot.entity.onGround)
       await eatIfHurt(bot, opts.eatBelowHealth ?? 12, signal)
       try {
         const t = target
-        const done = await underDragonWatch(bot, ground, async (s) => await destroyOne(bot, t, crystal, brokenBars, opened, { ...opts, signal: s }, (p) => avoid(p.x, p.z)), { signal, guard, eatBelowHealth: opts.eatBelowHealth, log: opts.log })
+        const done = await underDragonWatch(bot, ground, async (s) => await destroyOne(bot, t, crystal, brokenBars, opened, { ...opts, signal: s }, (p) => avoid(p.x, p.z), pillar), { signal, guard, eatBelowHealth: opts.eatBelowHealth, log: opts.log })
         if (!done) opts.log?.(`spike ${target.spike.index}: out of the dragon's way first`)
       } catch (err) {
         if (!TaskError.is(err) || ['ABORTED', 'PREEMPTED', 'DIED'].includes(err.code)) throw err
@@ -243,6 +259,26 @@ export function pillarUnderCloud (target: CrystalTarget, avoid: (x: number, z: n
   return target.method === 'pillar' && target.pillar != null && avoid(target.pillar.column.x + 0.5, target.pillar.column.z + 0.5)
 }
 
+/** a pillar the bot went up for a caged crystal: its column and the feet height at its foot */
+export interface PillarState {
+  current: { column: { x: number, z: number }, base: number } | null
+}
+
+function onColumn (pos: Pos, column: { x: number, z: number }): boolean {
+  return Math.floor(pos.x) === column.x && Math.floor(pos.z) === column.z
+}
+
+/**
+ * The pillar to come down before the next job: the bot is up the one it went up (on its column, over its foot) and the
+ * next job isn't on up the same column
+ */
+export function pillarToLeave (pillar: PillarState, pos: Pos, next: CrystalTarget): { column: { x: number, z: number }, base: number } | null {
+  const p = pillar.current
+  if (p == null || !onColumn(pos, p.column) || Math.floor(pos.y + 1e-6) <= p.base) return null
+  if (next.method === 'pillar' && next.pillar != null && next.pillar.column.x === p.column.x && next.pillar.column.z === p.column.z) return null
+  return p
+}
+
 /** tries at a crystal before it is left (a dodge of the dragon is not one) */
 const MAX_FAILURES = 5
 
@@ -259,12 +295,15 @@ function cachedGround (get: BlockGetter): (x: number, z: number) => number {
   }
 }
 
-async function destroyOne (bot: Bot, target: CrystalTarget, crystal: Entity, brokenBars: Pos[], opened: Map<number, ShootSpot>, opts: DestroyCrystalsOptions, avoid: (p: Vec3) => boolean): Promise<void> {
+async function destroyOne (bot: Bot, target: CrystalTarget, crystal: Entity, brokenBars: Pos[], opened: Map<number, ShootSpot>, opts: DestroyCrystalsOptions, avoid: (p: Vec3) => boolean, pillar: PillarState = { current: null }): Promise<void> {
   const signal = opts.signal
   const get = blockGetter(bot)
   if (target.method === 'pillar' && target.pillar != null) {
     const { column, topY, breakBars } = target.pillar
-    const base = groundY(get, column.x, column.z, topY + 2)
+    // the foot of the pillar: where it went up from, when the bot is up it already
+    const same = pillar.current != null && pillar.current.column.x === column.x && pillar.current.column.z === column.z
+    const base = same ? (pillar.current as { base: number }).base : groundY(get, column.x, column.z, topY + 2)
+    if (base != null) pillar.current = { column, base }
     await pillarUp(bot, column, topY, { signal, avoid })
     for (const bar of breakBars) {
       throwIfAborted(signal)
@@ -285,6 +324,7 @@ async function destroyOne (bot: Bot, target: CrystalTarget, crystal: Entity, bro
     }
     // down the way it came, digging the pillar out under the feet
     if (base != null) await digDown(bot, base, { signal })
+    pillar.current = null
   }
   const spot = target.shootFrom
   if (spot == null) throw new TaskError('NO_PATH', `no spot to shoot spike ${target.spike.index}'s crystal from`)
