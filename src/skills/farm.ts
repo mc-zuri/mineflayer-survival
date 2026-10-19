@@ -8,7 +8,7 @@ import { SkillError, isAbort, throwIfAborted } from './errors'
 import { collectBlock } from './collectBlock'
 import { navigateToReach } from './navigate'
 import { pickupDrops } from './pickupDrops'
-import { countItems, findInventoryItem, settleInventory, waitUntil, type Block } from './util'
+import { countItems, findInventoryItem, settleInventory, trace, waitUntil, type Block } from './util'
 
 /** what each crop is sown from (vanilla's seed items: CropBlock.getBaseSeedId) */
 export const SEED_OF: Readonly<Record<string, string>> = {
@@ -141,6 +141,7 @@ export async function plantFarm (bot: Bot, args: { seed: string, center?: Vec3, 
       sown.push(cell)
     } catch (err) {
       if (isAbort(err) || (err instanceof SkillError && err.code === 'NO_TOOL')) throw err
+      trace('plantFarm: the cell at', cell.toString(), 'failed:', (err as Error).message)
     }
   }
   if (sown.length === 0) throw new SkillError('VERIFY_FAILED', `nothing sown by the water at ${site.water.toString()}`)
