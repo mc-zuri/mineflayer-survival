@@ -42,7 +42,8 @@ export async function placeSpawnBed (bot: Bot, near: Vec3, item: string, signal?
   const lookup = (p: Vec3): any => bot.blockAt(p)
   const avoid = (p: Vec3): boolean => nearPortal(lookup, p)
   const free = findBedPlacementNear(lookup, near, 5, avoid)
-  const spot = free != null ? { ...free, dig: [] as Vec3[] } : bedRoomToDig(lookup, bot.entity.position, avoid)
+  const spot = free != null ? { ...free, dig: [] as Vec3[] } : roomToDigNear(lookup, bot.entity.position, near, avoid)
+  trace('placeSpawnBed: near', near.toString(), 'from', bot.entity.position.floored().toString(), spot == null ? 'no room' : `foot ${spot.foot.toString()} facing ${spot.facing.toString()} dig ${spot.dig.length}`)
   if (spot == null) return null
   if (bot.entity.position.floored().distanceTo(spot.stand) > 0.5) await navigate(bot, { goal: new goals.GoalBlock(spot.stand.x, spot.stand.y, spot.stand.z) }, signal)
   // no room free: dug out (the kit's chest by the stronghold in the 1-wide tunnel the bot came by, 26.3)
@@ -60,6 +61,25 @@ export async function placeSpawnBed (bot: Bot, near: Vec3, item: string, signal?
   await bot.activateBlock(block as any)
   await waitTicks(bot, 10, signal)
   return spot.foot
+}
+
+/**
+ * bedRoomToDig from where the bot stands, else from a cell to stand in within 2 of `near` (feet and head free, solid
+ * under), the nearest first: the bot by its chest in a tunnel may stand where the chest takes the one way out
+ */
+function roomToDigNear (lookup: (p: Vec3) => any, from: Vec3, near: Vec3, avoid: (p: Vec3) => boolean): ReturnType<typeof bedRoomToDig> {
+  const here = bedRoomToDig(lookup, from, avoid)
+  if (here != null) return here
+  const stands: Vec3[] = []
+  for (let dx = -2; dx <= 2; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -2; dz <= 2; dz++) stands.push(near.floored().offset(dx, dy, dz))
+  stands.sort((a, b) => a.distanceTo(near) - b.distanceTo(near))
+  for (const s of stands) {
+    const open = (p: Vec3): boolean => lookup(p)?.boundingBox === 'empty' && !['lava', 'water'].includes(lookup(p)?.name)
+    if (!open(s) || !open(s.offset(0, 1, 0)) || lookup(s.offset(0, -1, 0))?.boundingBox !== 'block') continue
+    const room = bedRoomToDig(lookup, s, avoid)
+    if (room != null) return room
+  }
+  return null
 }
 
 export function nearPortal (lookup: (p: Vec3) => any, pos: Vec3): boolean {
