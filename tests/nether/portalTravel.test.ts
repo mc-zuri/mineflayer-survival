@@ -64,3 +64,31 @@ test('enterNether digs down to a remembered portal under the bot when the walk f
   }
   assert.deepEqual(calls, ['travel', 'tunnel'])
 })
+
+test('enterPortal digs a stair to beside the portal when no path gets there', async () => {
+  const navModule = require('../../src/skills/navigate')
+  const tunnelModule = require('../../src/skills/tunnel')
+  const { enterPortal } = await import('../../src/nether/portalTravel')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // a portal's bottom at (0, 51, 0) and (1, 51, 0) on obsidian, stone round, the bot 8 over it in its own pocket
+  const portal = new Set(['0,51,0', '1,51,0', '0,52,0', '1,52,0', '0,53,0', '1,53,0'])
+  const world = (p: any): string => portal.has(`${p.x},${p.y},${p.z}`) ? 'nether_portal' : (p.y === 50 ? 'obsidian' : (p.y >= 51 && p.y <= 53 && Math.abs(p.z) === 1 && p.x >= 0 && p.x <= 1) ? 'air' : (p.y >= 59 && p.y <= 60 && p.x === 0 && p.z === 0) ? 'air' : 'stone')
+  const bot = fakeBot({ position: new Vec3(0.5, 59, 0.5), world })
+  bot.game.dimension = 'overworld'
+  const id = bot.registry.blocksByName.nether_portal.id
+  bot.findBlocks = () => [...portal].map(k => new Vec3(...k.split(',').map(Number) as [number, number, number]))
+  const realBlockAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => { const b = realBlockAt(p); return b?.name === 'nether_portal' ? { ...b, type: id } : b }) as any
+  const calls: string[] = []
+  const realNav = navModule.navigate
+  const realTunnel = tunnelModule.tunnelTo
+  navModule.navigate = async () => { calls.push('navigate'); throw new Error('NO_PATH: timeout') }
+  tunnelModule.tunnelTo = async (_b: unknown, a: any) => { calls.push(`tunnel ${a.target.toString()}`) }
+  try {
+    await assert.rejects(enterPortal(bot, { portal: new Vec3(0, 51, 0) }), /no way to the portal|couldn't step/)
+  } finally {
+    navModule.navigate = realNav
+    tunnelModule.tunnelTo = realTunnel
+  }
+  assert.ok(calls.some(c => c.startsWith('tunnel')), calls.join(', '))
+})

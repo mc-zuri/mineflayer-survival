@@ -150,6 +150,14 @@ export async function enterPortal (bot: Bot, args: EnterPortalArgs = {}, signal?
           if (isAbort(err)) throw err
         }
       }
+      // no path to a cell beside it (8 over a cave portal the searches timed out, 26.3): a stair dug down to the
+      // nearest, then on as before
+      if (beside == null && !inPortal(bot) && !changed && besides.length > 0) {
+        const c = besides[0]
+        trace('enterPortal: a tunnel to', c.toString())
+        await tunnelTo(bot, { target: c, range: 1 }, signal).catch(err => { if (isAbort(err)) throw err; trace('enterPortal: the tunnel:', (err as Error).message) })
+        if (bot.entity.position.floored().distanceTo(c) <= 1.5) beside = c
+      }
       if (beside == null && !inPortal(bot) && !changed) throw new SkillError('NO_PATH', `no way to the portal at ${floor.toString()}`)
       into = beside == null ? floor : (portalFloor(bot, beside, 2).sort((a, b) => a.distanceTo(beside) - b.distanceTo(beside))[0] ?? floor)
       await walkTo(bot, into.offset(0.5, 0, 0.5), { within: 0.25, maxTicks: 60, until: () => inPortal(bot) || changed }, signal)
