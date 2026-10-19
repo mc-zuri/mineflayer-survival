@@ -148,6 +148,10 @@ export function findBedPlacementNear (lookup: BlockLookup, near: Vec3, radius = 
   const start = near.floored()
   let best: (BedPlacement & { stand: Vec3 }) | null = null
   let bestScore = Infinity
+  // the bed's own cells over a floor that does nothing when clicked: put down against a chest's top (the trip kit's,
+  // just put down under it) the bed opened the chest instead (the server's menu, which the client never closed:
+  // every click after went to it, the eyes stayed in the bag and none went into a frame, 1.21.11)
+  const floor = (pos: Vec3): boolean => { const below = lookup(pos.offset(0, -1, 0)); return isSolid(below) && !isInteractive(below?.name ?? '') }
   const ground = (pos: Vec3): boolean => isFree(lookup(pos)) && isSolid(lookup(pos.offset(0, -1, 0))) && avoid?.(pos) !== true
   for (const dy of [0, -1, 1]) {
     for (let dx = -radius; dx <= radius; dx++) {
@@ -155,11 +159,11 @@ export function findBedPlacementNear (lookup: BlockLookup, near: Vec3, radius = 
         const score = Math.hypot(dx, dz) + Math.abs(dy) * 1.5
         if (score >= bestScore) continue
         const foot = start.offset(dx, dy, dz)
-        if (!ground(foot)) continue
+        if (!ground(foot) || !floor(foot)) continue
         for (const facing of CARDINALS) {
           const head = foot.plus(facing)
           const stand = foot.minus(facing)
-          if (!ground(head) || !ground(stand) || !isFree(lookup(stand.offset(0, 1, 0)))) continue
+          if (!ground(head) || !floor(head) || !ground(stand) || !isFree(lookup(stand.offset(0, 1, 0)))) continue
           best = { foot, head, facing, stand }
           bestScore = score
           break
@@ -190,7 +194,8 @@ export function bedRoomToDig (lookup: BlockLookup, feet: Vec3, avoid?: (pos: Vec
     let ok = true
     for (const cell of [foot, head]) {
       const b = lookup(cell)
-      if (b == null || !isSolid(lookup(cell.offset(0, -1, 0))) || avoid?.(cell) === true) { ok = false; break }
+      const below = lookup(cell.offset(0, -1, 0))
+      if (b == null || !isSolid(below) || isInteractive(below?.name ?? '') || avoid?.(cell) === true) { ok = false; break }
       if (isFree(b)) continue
       if (b.boundingBox !== 'block' || NOT_DUG.has(b.name) || isInteractive(b.name)) { ok = false; break }
       // nothing to flow in once it's dug

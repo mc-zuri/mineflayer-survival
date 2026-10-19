@@ -105,6 +105,8 @@ export async function enterEnd (bot: Bot, opts: EnterEndOptions = {}): Promise<E
   const eyes = bot.inventory.items().filter(i => i.name === 'ender_eye').reduce((n, i) => n + i.count, 0)
   if (eyes < room.missing.length) throw new TaskError('MISSING_ITEMS', `${room.missing.length} eyes needed, ${eyes} in the inventory`)
 
+  // no menu left open (a chest the kit's bed opened, 1.21.11): its clicks would take the eyes' equip
+  if (bot.currentWindow != null) bot.closeWindow(bot.currentWindow)
   let placed = 0
   const left = [...room.missing]
   while (left.length > 0) {

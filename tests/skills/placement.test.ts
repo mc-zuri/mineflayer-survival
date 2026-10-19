@@ -119,6 +119,29 @@ test('findBedPlacementNear: foot, head and a cell behind the foot to face along 
   assert.strictEqual(findBedPlacementNear(flat(closed), near, 5), null)
 })
 
+test('findBedPlacementNear and bedRoomToDig: no bed over a chest (the trip kit chest put down first: the bed opened it)', () => {
+  // the corridor as above, a chest in its floor at x 1: the bed lies clear of it
+  const extra: Record<string, string> = {}
+  for (let x = -6; x <= 12; x++) for (const z of [-1, 1]) for (const y of [-60, -59]) extra[`${x},${y},${z}`] = 'stone'
+  for (const y of [-60, -59]) { extra[`-3,${y},0`] = 'stone'; extra[`9,${y},0`] = 'stone' }
+  extra['1,-61,0'] = 'chest'
+  const world = (pos: Vec3): BlockView => {
+    const b = flat(extra)(pos)
+    return b.name === 'chest' ? { name: 'chest', boundingBox: 'block' } : b
+  }
+  const spot = findBedPlacementNear(world, new Vec3(1, -60, 0), 5)
+  assert.ok(spot != null)
+  for (const p of [spot.foot, spot.head]) assert.notStrictEqual(p.x, 1)
+  // in a tunnel: not dug out over a chest either
+  const tunnel = (pos: Vec3): BlockView => {
+    if (pos.x === 1 && pos.y === -61 && pos.z === 0) return { name: 'chest', boundingBox: 'block' }
+    const name = (pos.x === 0 && pos.z === 0 && (pos.y === -60 || pos.y === -59)) ? 'air' : 'stone'
+    return { name, boundingBox: name === 'air' ? 'empty' : 'block' }
+  }
+  const room = bedRoomToDig(tunnel, new Vec3(0.5, -60, 0.5))
+  assert.ok(room != null && room.facing.x !== 1)
+})
+
 test('bedRoomToDig: in a 1-wide tunnel, the two cells straight out from the bot dug for a bed; never next to lava or through bedrock', () => {
   // stone all round from -64 to -55, a tunnel cell at the bot's feet and head (0, -60, 0), (0, -59, 0)
   const solid = (extra: Record<string, string> = {}) => (pos: Vec3): BlockView => {
@@ -162,4 +185,33 @@ test('cellToStepOff: a bot standing half in the gate\'s cell steps to the middle
   const out = cellToStepOff(walled, new Vec3(-47.5, -60, 0.5), gate)
   assert.ok(out != null && !(out.x === -48 && out.z === 1))
   assert.strictEqual(Math.abs(out.x - gate.x) + Math.abs(out.z - gate.z), 1, 'a cardinal neighbour first')
+})
+
+test('placeBlock against a chest: sneaking, and a menu its use opened anyway is shut (its clicks took the eyes, 1.21.11)', async () => {
+  const { placeBlock } = await import('../../src/skills/placeBlock')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 2.5), items: [item('white_bed', 1)], world: (p: any) => p.x === 0 && p.y === 63 && p.z === 0 ? 'chest' : p.y < 64 ? 'stone' : 'air' })
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = (p: any) => { const b = realAt(p); return b.name === 'chest' ? { ...b, boundingBox: 'block' } : b }
+  bot.equip = async () => {}
+  bot._client = new (require('events').EventEmitter)()
+  let sneaking: boolean | null = null
+  const closed: any[] = []
+  bot.currentWindow = null
+  bot.closeWindow = (w: any) => { closed.push(w); bot.currentWindow = null }
+  bot._placeBlockWithOptions = async () => {
+    sneaking = bot.controls.sneak === true
+    bot.currentWindow = { id: 1, type: 'minecraft:generic_9x3' }
+    throw new Error('No block has been placed : the block is still air')
+  }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(placeBlock(bot, { pos: new Vec3(0, 64, 0), item: 'white_bed', against: new Vec3(0, 63, 0), facing: new Vec3(0, 0, -1) }), /still air/)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.strictEqual(sneaking, true)
+  assert.strictEqual(bot.controls.sneak, false)
+  assert.strictEqual(closed.length, 1)
+  assert.strictEqual(bot.currentWindow, null)
 })

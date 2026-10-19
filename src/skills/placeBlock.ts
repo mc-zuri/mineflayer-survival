@@ -102,6 +102,14 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
   const item = findInventoryItem(bot, args.item)
   if (item == null) throw new SkillError('MISSING_ITEMS', `no ${args.item} in the inventory`)
   await bot.equip(item, 'hand')
+  // against a block that does something when clicked (a chest, a table): sneaking, as a player places on one
+  // (Player.isSecondaryUseActive: the block's own use is passed over), the sneak sent with a tick first
+  const sneak = isInteractive(against.name)
+  if (sneak) {
+    bot.setControlState('sneak', true)
+    await waitTicks(bot, 1, signal)
+  }
+  const windowBefore = bot.currentWindow
   try {
     if (args.facing != null) {
       // the server takes the facing from the player's rotation at the use (ServerboundUseItemOnPacket carries none)
@@ -125,6 +133,11 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
     if (!wanted.includes(bot.blockAt(pos)?.name ?? '')) {
       throw new SkillError('CANNOT_PLACE', `placing ${args.item} at ${pos.toString()} failed: ${(err as Error).message}`, undefined, { cause: err })
     }
+  } finally {
+    if (sneak) bot.setControlState('sneak', false)
+    // a menu the use opened instead (the block's own use): shut, or the server's open menu takes every click after
+    // (the eyes' equip went to a chest's menu, and no eye went into a frame, 1.21.11)
+    if (bot.currentWindow != null && bot.currentWindow !== windowBefore) bot.closeWindow(bot.currentWindow)
   }
   const placed = await waitUntil(bot, () => wanted.includes(bot.blockAt(pos)?.name ?? ''), 10, signal)
   const block = bot.blockAt(pos)?.name ?? 'unknown'
