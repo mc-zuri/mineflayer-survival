@@ -141,13 +141,22 @@ test('enterEnd: an eye that didn\'t go in is tried again with the eye taken in h
   }
   let equips = 0
   bot.equip = async (it: any) => { equips++; bot.heldItem = it }
+  // the server's inventory asked for again before the second try
+  let resyncs = 0
+  bot.supportFeature = () => true
+  bot.inventory.id = 0
+  bot._client = new (require('node:events').EventEmitter)()
+  bot._client.write = (name: string) => { if (name === 'window_click') { resyncs++; bot._client.emit('window_items', { windowId: 0 }) } }
   let clicks = 0
-  bot.activateBlock = async (b: any) => { if (++clicks === 2) frames.get(`${b.position.x},64,${b.position.z}`)!.eye = true }
+  // stopped once every frame has its eye: the walk in after is past what's tested here
+  const stop = new AbortController()
+  bot.activateBlock = async (b: any) => { if (++clicks === 2) { frames.get(`${b.position.x},64,${b.position.z}`)!.eye = true; stop.abort() } }
   bot.lookAt = async () => {}
   bot.waitForTicks = async () => { bot.emit('physicsTick') }
   // the portal never lights in this fake world: the walk in fails after, which is past what's tested here
-  await enterEnd(bot).catch(() => {})
+  await enterEnd(bot, { signal: stop.signal }).catch(() => {})
   assert.strictEqual(clicks, 2)
   assert.strictEqual(equips, 2)
+  assert.strictEqual(resyncs, 1)
   assert.strictEqual([...frames.values()].every(f => f.eye), true)
 })

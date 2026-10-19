@@ -15,7 +15,7 @@ import { steerToward } from './steer'
 import { navigate } from './navigate'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { retrieveItems, storeItems } from './chest'
-import { trace, waitTicks } from './util'
+import { resyncInventory, trace, waitTicks } from './util'
 
 export type ItemCount = { name: string, count: number }
 
@@ -235,6 +235,8 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
       if (isAbort(err)) throw err
       noBed = (err as Error).message
       trace('stashTripKit: the bed:', noBed)
+      // the server's inventory again: a placement the server didn't take leaves the client's hand and slots its own guess
+      await resyncInventory(bot, signal).catch(() => {})
     }
   }
   trace('stashTripKit: at', pos.toString(), JSON.stringify(stored), bed != null ? `bed at ${bed.toString()}` : 'no bed')

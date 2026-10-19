@@ -4,7 +4,7 @@ import { normalizeDimension } from '../../core/memory'
 import { TaskError, type SkillOptions, throwIfAborted, waitTicks, waitUntil, eyePosition } from '../../skills/combatUtil'
 import { analyzePortalRoom, FACING_STEP, findPortalFrames, readPortalFrame, type PortalRoom } from '../portalRoom'
 import { steerToward } from '../../skills/steer'
-import { trace } from '../../skills/util'
+import { resyncInventory, trace } from '../../skills/util'
 import { blockGetter, gotoBlock, gotoNear, groundY, type BlockGetter } from './world'
 
 // enterEnd: the eyes the portal room's frames are missing put in (EnderEyeItem.useOn on each frame's top), then into
@@ -135,7 +135,10 @@ export async function enterEnd (bot: Bot, opts: EnterEndOptions = {}): Promise<E
         const out = FACING_STEP[frame.facing]
         await gotoBlock(bot, frameStandSpot(blockGetter(bot), pos, out, bot.entity.position), { signal })
       }
-      if (bot.heldItem?.name !== 'ender_eye' || attempt > 0) await bot.equip(eye, 'hand')
+      // the server's inventory sent again first (resyncInventory): after a bed's placement failed by the kit, the clicks
+      // that took the eye in hand went by a stale state and the server's hand held something else, 1.21.11
+      if (attempt > 0) await resyncInventory(bot, signal)
+      if (bot.heldItem?.name !== 'ender_eye' || attempt > 0) await bot.equip(bot.inventory.items().find(i => i.name === 'ender_eye') ?? eye, 'hand')
       if (attempt > 0) await waitTicks(bot, 5, signal)
       await bot.lookAt(top, true)
       await bot.activateBlock(block, new Vec3(0, 1, 0), new Vec3(0.5, 13 / 16, 0.5))
