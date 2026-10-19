@@ -647,7 +647,19 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     // a spare kit by the portal and the respawn point by it (a blaze's death in the nether was the stage lost)
     await leaveTripKit(bot, executor, signal, log)
     await netherKit(bot, executor, signal, log)
-    await executor.task('into the nether', async (s) => await enterNether(bot, { build: true }, s), signal)
+    try {
+      await executor.task('into the nether', async (s) => await enterNether(bot, { build: false }, s), signal)
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED') || inNether(bot)) throw err
+      // the portal remembered gone or out of reach: forgotten, and another made the milestone's way (the pools, the
+      // dug site, the obsidian), not the bare cast by the bot that failed five times at once, 'no site to cast' (26.3)
+      log(`nether: the portal: ${(err as Error).message}: another`)
+      for (const poi of executor.memory.getPois('nether_portal', { dimension: 'overworld', near: bot.entity.position })) {
+        if (Math.hypot(poi.x - bot.entity.position.x, poi.z - bot.entity.position.z) < 32) executor.memory.removePoi('nether_portal', poi, 'overworld')
+      }
+      await buildAPortal(bot, executor, signal, log)
+      await executor.task('into the nether', async (s) => await enterNether(bot, { build: false }, s), signal)
+    }
   }
   await goldOnInTheNether(bot, executor, signal, log)
   const needs = netherNeeds({ count })

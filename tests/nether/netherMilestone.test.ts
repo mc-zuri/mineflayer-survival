@@ -280,3 +280,29 @@ test('the nether pearl legs spiral out from where the search began, no point twi
   assert.equal(points.length, PEARL_NETHER_LEGS)
   assert.equal(new Set(points).size, points.length)
 })
+
+test('a way in through the remembered portal that fails makes another the milestone\'s way, then goes in', async () => {
+  const { netherHandler } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('obsidian', 10), item('diamond_sword', 1), item('iron_chestplate', 1)] })
+  bot.game.dimension = 'overworld'
+  const memory = new WorldMemory()
+  memory.addPoi('nether_portal', { x: 3, y: 64, z: 0 }, 'overworld', 'built')
+  const calls: string[] = []
+  let tries = 0
+  const executor: any = {
+    memory,
+    tasks: { tick: 0 },
+    plan: () => ({ ok: false }),
+    obtain: async () => {},
+    task: async (name: string) => {
+      calls.push(name)
+      if (name === 'into the nether' && tries++ === 0) throw new Error("NO_PATH: couldn't step into the portal")
+      if (name === 'into the nether') throw new Error('stop here')
+    }
+  }
+  await assert.rejects(netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }), /stop here/)
+  const first = calls.indexOf('into the nether')
+  assert.deepStrictEqual(calls.slice(first, first + 4), ['into the nether', 'up to the surface', 'build a nether portal', 'into the nether'])
+  assert.equal(memory.getPois('nether_portal', { dimension: 'overworld' }).length, 0)
+})
