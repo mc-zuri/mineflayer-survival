@@ -7,6 +7,7 @@ import assert from 'node:assert'
 import { appendFileSync } from 'node:fs'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
+import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { buildPortal } from '../../src/nether/portalSkills'
@@ -144,6 +145,66 @@ describe(`nether skills on a ${DEFAULT_VERSION} server (seed 4)`, { timeout: 40 
     console.log(`collectBlazeRods: ${rods.rods} rods, ${rods.kills} kills, ${t.ticks} ticks in all, ${t.ms} ms, health ${bot.health}`)
     assert.ok(countItems(bot, 'blaze_rod') >= 2)
     assert.ok(bot.health > 0)
+  })
+
+  it('bridges a gap over lava with the cobblestone it has less the reserve, and never starts one it can\'t finish', async () => {
+    // a netherrack room over a lava floor, a platform at each end and a gap of 5 between them (x -60 to -56), its
+    // walls not to be dug round (canDig off): the way over is a bridge or nothing. The pathfinder keeps
+    // scaffoldReserve (4) blocks out of its plans: on 26.3 nether runs a bridge over the lava sea was planned with
+    // every block the bot had and one more, and halfway over the bot had none and fell in.
+    const [x0, y, z] = [-60, 100, 60]
+    const start = new Vec3(-65.5, y, z + 0.5)
+    const goal = new Vec3(-50, y, z)
+    await run(`effect give ${USERNAME} minecraft:slow_falling 30 0 true`)
+    await nether(`tp ${USERNAME} ${start.x} ${y + 3} ${start.z}`)
+    assert.ok(await waitUntil(bot, () => bot.game.dimension === 'the_nether', 1200))
+    await bot.waitForChunksToLoad()
+    await fill(`${x0 - 11} ${y - 8} ${z - 6} ${x0 + 21} ${y + 9} ${z + 6} netherrack`, 'the_nether')
+    await fill(`${x0 - 10} ${y - 6} ${z - 5} ${x0 + 20} ${y + 8} ${z + 5} air`, 'the_nether')
+    await fill(`${x0 - 10} ${y - 7} ${z - 5} ${x0 + 20} ${y - 7} ${z + 5} lava`, 'the_nether')
+    const platforms = async (): Promise<void> => {
+      await fill(`${x0 - 10} ${y - 1} ${z - 5} ${x0 - 1} ${y - 1} ${z + 5} netherrack`, 'the_nether')
+      await fill(`${x0} ${y - 1} ${z - 5} ${x0 + 4} ${y - 1} ${z + 5} air`, 'the_nether')
+      await fill(`${x0 + 5} ${y - 1} ${z - 5} ${x0 + 20} ${y - 1} ${z + 5} netherrack`, 'the_nether')
+    }
+    await platforms()
+    await nether(`tp ${USERNAME} ${start.x} ${y} ${start.z}`)
+    await run(`effect clear ${USERNAME} minecraft:slow_falling`)
+    const pf = bot.pathfinder as any
+    const before = pf.defaultMoveSettings
+    pf.setMoveOptions({ ...before, canDig: false })
+    let lowest = Infinity
+    const watch = (): void => { if (bot.game.dimension === 'the_nether') lowest = Math.min(lowest, bot.entity.position.y) }
+    bot.on('physicsTick', watch)
+    try {
+      // ten blocks, a budget of six: it crosses, with the reserve left
+      await kit([['cobblestone', 10]])
+      assert.ok(await waitUntil(bot, () => bot.entity.onGround && bot.entity.position.distanceTo(start) < 1, 200))
+      const crossed = measure()
+      await bot.pathfinder.goto(new goals.GoalBlock(goal.x, goal.y, goal.z))
+      const c = crossed()
+      console.log(`bridge of 5 with 10 blocks: ${c.ticks} ticks, ${c.ms} ms, ${countItems(bot, 'cobblestone')} left, at ${bot.entity.position.toString()}`)
+      assert.ok(bot.entity.position.floored().equals(goal), `ended at ${bot.entity.position.toString()}`)
+      assert.strictEqual(countItems(bot, 'cobblestone'), 5)
+
+      // seven, a budget of three: no bridge over it; whatever it does, it stays out of the lava with the reserve left
+      await platforms()
+      lowest = Infinity
+      await nether(`tp ${USERNAME} ${start.x} ${y} ${start.z}`)
+      await kit([['cobblestone', 7]])
+      assert.ok(await waitUntil(bot, () => bot.entity.onGround && bot.entity.position.distanceTo(start) < 1, 200))
+      const tried = measure()
+      await bot.pathfinder.goto(new goals.GoalBlock(goal.x, goal.y, goal.z)).catch((err: Error) => console.log(`goto: ${err.message}`))
+      const t = tried()
+      console.log(`bridge of 5 with 7 blocks: ${t.ticks} ticks, ${t.ms} ms, ${countItems(bot, 'cobblestone')} left, at ${bot.entity.position.toString()}`)
+      assert.ok(!bot.entity.position.floored().equals(goal))
+      assert.ok(countItems(bot, 'cobblestone') >= 4, `${countItems(bot, 'cobblestone')} cobblestone left`)
+      assert.ok(bot.health > 0 && bot.game.dimension === 'the_nether')
+      assert.ok(lowest >= y - 1e-3, `the bot went down to y ${lowest}`)
+    } finally {
+      bot.off('physicsTick', watch)
+      pf.setMoveOptions(before)
+    }
   })
 
   it('barters gold ingots with summoned piglins for ender pearls', async () => {
