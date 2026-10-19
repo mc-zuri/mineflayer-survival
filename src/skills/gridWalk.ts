@@ -156,7 +156,7 @@ class MinHeap<T> {
 }
 
 /** cells' worth charged for each deadly side of a cell the grid walk goes by: in the nether, and elsewhere */
-export const GRID_EDGE_COST = { the_nether: 10, other: 2 }
+export const GRID_EDGE_COST = { the_nether: 3, other: 1 }
 /** cells' worth charged for a cell near where the bot died in the nether (nearDeath) */
 export const GRID_DEATH_COST = 5
 

@@ -74,7 +74,7 @@ test('bridgeOverLava: a bridge with its rails takes 3 blocks a step, one without
   await assert.rejects(bridgeOverLava(mk(), { direction: new Vec3(-1, 0, 0), length: 1, rails: false }), (err: any) => !/out of cobblestone/.test(err.message))
 })
 
-test('netherMoveSettings: magma underfoot is no place to stand, and a ledge over a deadly fall costs 16 a side (edgeHazardCost)', () => {
+test('netherMoveSettings: magma underfoot is no place to stand, and a ledge over a deadly fall costs 6 a side (edgeHazardCost)', () => {
   const bot = fakeBot()
   const reg = bot.registry
   bot.world = {
@@ -84,7 +84,7 @@ test('netherMoveSettings: magma underfoot is no place to stand, and a ledge over
   const step = s.exclusionAreasStep?.[0] as any
   assert.equal(step({ position: new Vec3(3, 64, 0), type: 0 }), FORBID)
   assert.equal(step({ position: new Vec3(0, 64, 0), type: 0 }), 0)
-  assert.equal(s.edgeHazardCost, 16)
+  assert.equal(s.edgeHazardCost, 6)
   assert.equal(netherMoveSettings(bot, { edgeCost: 10 }).edgeHazardCost, 10)
 })
 
@@ -113,7 +113,7 @@ test('withNetherSafety lays the nether settings over once (nested, as it is), an
   await withNetherSafety(bot, async () => {
     assert.equal(hasNetherSafety(bot), true)
     assert.equal(steps(), 1)
-    assert.equal(bot.pathfinder.defaultMoveSettings.edgeHazardCost, 16)
+    assert.equal(bot.pathfinder.defaultMoveSettings.edgeHazardCost, 6)
     await withNetherSafety(bot, async () => { assert.equal(steps(), 1) })
   })
   assert.equal(hasNetherSafety(bot), false)

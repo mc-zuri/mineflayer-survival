@@ -43,8 +43,9 @@ export interface NetherSafetyOptions {
   piglins?: boolean
   /**
    * the pathfinder's edgeHazardCost: ticks on top for each side of a cell the path ends a move in with a deadly fall
-   * beside it (default 16, four times the pathfinder's: the nether's falls end in the lava sea or a delta's lava pockets,
-   * and blazes' and ghasts' fireballs knock the bot about; more widens the search a lot)
+   * beside it (default 6, a half more than the pathfinder's: the nether's falls end in the lava sea or a delta's lava
+   * pockets. 16 widened the searches over the open caverns round a fortress, its bridges all edges, until they timed out
+   * one after another and the bot never got to the spawner, on three 26.3 runs out of five)
    */
   edgeCost?: number
   /** a higher cost near the nether's deaths remembered (rememberNetherDeath) (default true) */
@@ -174,7 +175,7 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
   for (const area of [step, breakArea, place]) (area as any).survivalNether = true
   return {
     infiniteLiquidDropdownDistance: false,
-    edgeHazardCost: opts.edgeCost ?? 16,
+    edgeHazardCost: opts.edgeCost ?? 6,
     exclusionAreasStep: [step as any],
     exclusionAreasBreak: [breakArea as any],
     exclusionAreasPlace: [place as any]
