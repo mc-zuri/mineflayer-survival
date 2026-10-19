@@ -108,7 +108,25 @@ export function goldArmorRequired (bot: Bot): boolean {
 }
 
 /** For each slot, the inventory piece better than the worn one, if any (the last golden piece kept when requireGoldArmor). */
+/** bots whose armor is off on purpose for a while (at the enchanting table, the anvil): no upgrades offered */
+const armorHeld = new WeakSet<object>()
+
+/**
+ * Runs `fn` with the armor reflex held off: a piece taken off for the table or the anvil isn't put back on under it
+ * (the reflex put the chestplate back each time, the enchanting started over 196836 times, 26.3)
+ */
+export async function withArmorHeld<T> (bot: Bot, fn: () => Promise<T>): Promise<T> {
+  const already = armorHeld.has(bot)
+  armorHeld.add(bot)
+  try {
+    return await fn()
+  } finally {
+    if (!already) armorHeld.delete(bot)
+  }
+}
+
 export function armorUpgrades (bot: Bot): Partial<Record<ArmorSlot, Item>> {
+  if (armorHeld.has(bot)) return {}
   const worn = wornArmor(bot)
   const golden = ARMOR_SLOTS.filter(slot => worn[slot]?.name.startsWith('golden_') === true)
   const keep = goldArmorRequired(bot) && golden.length === 1 ? golden[0] : null

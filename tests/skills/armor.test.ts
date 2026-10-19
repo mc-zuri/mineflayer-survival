@@ -57,3 +57,11 @@ test('gold armor: worn, and kept on by armorUpgrades once required', () => {
   assert.deepEqual(Object.keys(armorUpgrades(bot)), ['head'])
   requireGoldArmor(bot, false)
 })
+
+test('withArmorHeld: no upgrades offered while the armor is off on purpose (the table, the anvil), as before after', async () => {
+  const { withArmorHeld } = await import('../../src/skills/armor')
+  const bot = fakeBot({ items: [item('diamond_chestplate')], armor: {} })
+  assert.strictEqual(armorUpgrades(bot).torso?.name, 'diamond_chestplate')
+  await withArmorHeld(bot, async () => { assert.deepStrictEqual(armorUpgrades(bot), {}) })
+  assert.strictEqual(armorUpgrades(bot).torso?.name, 'diamond_chestplate')
+})

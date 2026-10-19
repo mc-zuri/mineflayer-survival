@@ -1,5 +1,6 @@
 // The anvil: an enchanted book (from loot) put on a piece of gear, and gear repaired with its material, through
 // AnvilMenu: the two inputs in, the result and its cost (data slot 0) read, the result taken for the levels.
+import { withArmorHeld } from './armor'
 import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
 import type { Vec3 } from 'vec3'
@@ -164,6 +165,11 @@ export function kindsFor (enchantment: string): ItemKind[] {
  * wanted on that doesn't have it yet (and takes it: AnvilMenu refuses incompatible ones), as the levels allow.
  */
 export async function applyBooks (bot: Bot, opts: { anvil?: Vec3 } = {}, signal?: AbortSignal): Promise<AnvilResult[]> {
+  // (the armor taken off for it stays off till it's back on: the armor reflex held)
+  return await withArmorHeld(bot, async () => await applyBooksHeld(bot, opts, signal))
+}
+
+async function applyBooksHeld (bot: Bot, opts: { anvil?: Vec3 }, signal?: AbortSignal): Promise<AnvilResult[]> {
   const done: AnvilResult[] = []
   const tried = new Set<string>()
   for (;;) {

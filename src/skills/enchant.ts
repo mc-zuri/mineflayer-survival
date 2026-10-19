@@ -1,6 +1,7 @@
 // Enchanting: the table and its 15 bookshelves set up where EnchantingTableBlock counts them, the three offers of the
 // enchanting screen read (EnchantmentMenu's data slots), the offer chosen by its hint and a preference list for the
 // item's kind, and the item enchanted; enchantGear does it for the bot's gear, gaining levels first.
+import { withArmorHeld } from './armor'
 import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
 import { Vec3 } from 'vec3'
@@ -560,6 +561,11 @@ export interface EnchantWaitPartial {
  * back (and worn again if it was worn).
  */
 export async function enchant (bot: Bot, args: EnchantArgs, signal?: AbortSignal): Promise<EnchantResult> {
+  // (a worn piece taken off for it stays off till it's done: the armor reflex held)
+  return await withArmorHeld(bot, async () => await enchantHeld(bot, args, signal))
+}
+
+async function enchantHeld (bot: Bot, args: EnchantArgs, signal?: AbortSignal): Promise<EnchantResult> {
   throwIfAborted(signal)
   const block = findEnchantingTable(bot, { table: args.table, memory: args.memory })
   if (block == null) throw new SkillError('NOT_FOUND', 'no enchanting table nearby')
