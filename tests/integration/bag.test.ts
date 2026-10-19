@@ -318,4 +318,37 @@ describe(`the bag down a mine on a ${DEFAULT_VERSION} server`, { timeout: 20 * 6
     assert.deepStrictEqual(steps.floors.filter(f => bot.blockAt(f)?.boundingBox !== 'block').map(f => f.toString()), [])
     assert.ok(emptySlots(bot) >= 2, `${emptySlots(bot)} slots free`)
   })
+
+  it('puts a stack that keeps coming back into the chest near rather than throw it a third time (a pocket in the obsidian with nowhere to throw)', async (t) => {
+    // (26.3 run full-f: the same stacks thrown every step of a staircase and picked up again)
+    await run(`fill ${xyz(at(-2, -1, -2))} ${xyz(at(2, 3, 2))} obsidian`)
+    await run(`fill ${xyz(at(0, 0, 0))} ${xyz(at(0, 1, 0))} air`)
+    // a chest in the wall, opening into the cell over it (ChestBlock.isChestBlockedAt)
+    const chest = at(1, 0, 0)
+    await setblock(chest, 'chest[facing=west]')
+    await setblock(chest.offset(0, 1, 0), 'air')
+    await run('kill @e[type=item]')
+    await run(`tp ${USERNAME} ${origin.x + 0.5} ${origin.y} ${origin.z + 0.5} -90 0`)
+    assert.ok(await waitUntil(bot, () => bot.entity.position.distanceTo(origin.offset(0.5, 0, 0.5)) < 0.2 && bot.blockAt(at(0, 2, 0))?.name === 'obsidian', 100))
+    // 35 slots: the food and the pickaxe kept, the junk; 1 free
+    for (const [item, n] of [['cooked_beef', 30 * 64], ['diamond_pickaxe', 1], ['bread', 16], ['rotten_flesh', 7], ['string', 5], ['bone', 3]] as const) await give(item, n)
+    assert.strictEqual(emptySlots(bot), 1)
+    const lines: string[] = []
+    const executor = new Executor(bot, { log: line => { lines.push(line); t.diagnostic(line) } })
+    executor.memory.rememberChest(chest, {})
+    // the room made the way a dug route makes it, once a step: what's thrown at the walls falls at the bot's feet and is
+    // picked up again once its 40 ticks are up
+    for (let step = 0; step < 4 && countItems(bot, 'rotten_flesh') > 0; step++) {
+      await executor.task('a step', async (s) => await executor.makeRoomDuringStep(s))
+      await waitTicks(bot, 60)
+    }
+    const throws = lines.filter(l => /throwing away/.test(l))
+    t.diagnostic(`${throws.length} throws, ${emptySlots(bot)} slots free`)
+    assert.ok(lines.some(l => /making room loops: .*7 rotten_flesh/.test(l)), lines.join(' | '))
+    assert.strictEqual(throws.length, 2, throws.join(' | '))
+    const inChest = parseItems(await run(`data get block ${xyz(chest)} Items`))
+    assert.strictEqual(inChest.rotten_flesh, 7, JSON.stringify(inChest))
+    assert.strictEqual(countItems(bot, 'rotten_flesh'), 0)
+    assert.ok(emptySlots(bot) >= 2, `${emptySlots(bot)} slots free`)
+  })
 })

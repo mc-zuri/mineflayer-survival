@@ -285,6 +285,47 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number,
   return out
 }
 
+/** times a part stack of the same count is thrown for room within THROW_LOOP_TICKS before making room loops */
+export const THROW_LOOP_REPEATS = 3
+/** the ticks the throws for room are looked back over for one that came back (ThrowHistory) */
+export const THROW_LOOP_TICKS = 3000
+
+/**
+ * The stacks thrown for room lately, to tell a throw that comes back: a part stack thrown with the same count again
+ * and again is one the bot picked up again (it lay in the reach of the steps after, or the walk went back over it), and
+ * throwing it once more makes no room for long. A whole stack is no sign of it (the route's stone fills one by work
+ * alone). A 26.3 staircase to the deep lava threw '19 dirt, 5 sand, 2 gravel' into a pit its next step reached, every
+ * step for 30 steps; then '29 andesite, 19 dirt' and the diorite it dug, 12 steps more.
+ */
+export class ThrowHistory {
+  private readonly thrown: Array<{ tick: number, key: string }> = []
+
+  constructor (readonly repeats = THROW_LOOP_REPEATS, readonly window = THROW_LOOP_TICKS) {}
+
+  /**
+   * The stacks of `toss` thrown `repeats - 1` times already within the window before `tick` (the throw would be the
+   * `repeats`th), none of a whole stack (`stackSize`, 64 by default)
+   */
+  looping (toss: ReadonlyArray<{ name: string, count: number }>, tick: number, stackSize: (name: string) => number = () => 64): Array<{ name: string, count: number }> {
+    this.forget(tick)
+    return toss.filter(t => t.count < stackSize(t.name) && this.thrown.filter(h => h.key === key(t)).length >= this.repeats - 1)
+  }
+
+  /** a throw made at `tick` */
+  record (toss: ReadonlyArray<{ name: string, count: number }>, tick: number): void {
+    this.forget(tick)
+    for (const t of toss) this.thrown.push({ tick, key: key(t) })
+  }
+
+  private forget (tick: number): void {
+    while (this.thrown.length > 0 && tick - this.thrown[0].tick > this.window) this.thrown.shift()
+  }
+}
+
+function key (t: { name: string, count: number }): string {
+  return `${t.count} ${t.name}`
+}
+
 /** the tool kinds a spare kit holds one of, at the tier of the best one carried */
 export const SPARE_TOOLS: readonly ToolKind[] = ['pickaxe', 'sword', 'axe']
 

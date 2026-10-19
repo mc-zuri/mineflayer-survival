@@ -337,6 +337,72 @@ test('makeRoom throws the route\'s cobblestone over a stack away once the stock 
   }
 })
 
+test('makeRoom: a part stack thrown THROW_LOOP_REPEATS times within THROW_LOOP_TICKS, picked up again each time, goes into a chest instead; with none, INVENTORY_FULL with a report, and no room is made on the way a while', async () => {
+  // (26.3 run full-f: '19 dirt, 5 sand, 2 gravel' thrown into a pit the staircase's next step reached, every step for
+  // 30 steps)
+  const { THROW_LOOP_REPEATS, THROW_LOOP_TICKS } = await import('../../src/executor/keep')
+  const valuables = ['diamond', 'emerald', 'lapis_lazuli', 'redstone', 'quartz', 'coal', 'obsidian', 'ender_pearl', 'blaze_rod', 'book',
+    'raw_iron', 'raw_gold', 'raw_copper', 'iron_ingot', 'gold_ingot', 'copper_ingot', 'crafting_table', 'furnace', 'chest', 'anvil',
+    'bow', 'shield', 'shears', 'compass', 'clock', 'flint_and_steel', 'diamond_pickaxe', 'diamond_sword', 'diamond_axe', 'iron_shovel',
+    'golden_apple', 'ender_eye', 'iron_ore', 'gold_ore']
+  const make = (): { bot: any, ex: Executor, stashed: Array<Set<string>>, reports: string[] } => {
+    // 34 valuables and 2 junk stacks: the bag full
+    const bot = fakeBot({ ...Object.fromEntries(valuables.map(n => [n, 1])), rotten_flesh: 7, string: 5 })
+    bot.tossed = []
+    // what's thrown comes back (a pit in the next step's reach)
+    bot.toss = async (type: number, _meta: unknown, n: number) => { bot.tossed.push(`${n} ${registry.items[type].name}`) }
+    bot.blockAt = () => null
+    bot._client = new EventEmitter()
+    bot.entity.yaw = 0
+    bot.entities = {}
+    bot.look = async () => {}
+    const reports: string[] = []
+    bot.survival.diagnostics = { skillFailed: (name: string, err: Error) => { reports.push(`${name}: ${err.message}`); return null } }
+    const ex = new Executor(bot, { runners: {} })
+    const stashed: Array<Set<string>> = []
+    ;(ex as any).stashNearby = async (_needed: unknown, _signal: unknown, _run: unknown, also: Set<string>) => { stashed.push(new Set(also)); return {} }
+    return { bot, ex, stashed, reports }
+  }
+  const ticking = (bot: any): ReturnType<typeof setInterval> => setInterval(() => bot.emit('physicsTick'), 1)
+  // a chest takes them: stored, not thrown a third time
+  const a = make()
+  let t = ticking(a.bot)
+  try {
+    for (let i = 1; i < THROW_LOOP_REPEATS; i++) await a.ex.makeRoom()
+    assert.deepEqual(a.bot.tossed, ['7 rotten_flesh', '5 string', '7 rotten_flesh', '5 string'])
+    assert.deepEqual(a.stashed.map(s => [...s]), [[], []])
+    ;(a.ex as any).stashNearby = async (_n: unknown, _s: unknown, _r: unknown, also: Set<string>) => {
+      a.stashed.push(new Set(also))
+      for (const name of also) a.bot.take(name, count(a.bot, name))
+      return {}
+    }
+    await a.ex.makeRoom()
+    assert.equal(a.bot.tossed.length, 4, a.bot.tossed.join(', '))
+    assert.deepEqual([...a.stashed[2]].sort(), ['rotten_flesh', 'string'])
+    assert.equal(count(a.bot, 'rotten_flesh'), 0)
+    assert.deepEqual(a.reports, [])
+  } finally {
+    clearInterval(t)
+  }
+  // none takes them: INVENTORY_FULL, a report, and no room made on the way (no throw, no stash) for THROW_LOOP_TICKS
+  const b = make()
+  t = ticking(b.bot)
+  try {
+    for (let i = 1; i < THROW_LOOP_REPEATS; i++) await b.ex.makeRoom()
+    await assert.rejects(b.ex.makeRoom(), (err: any) => TaskError.is(err, 'INVENTORY_FULL') && /making room loops: 7 rotten_flesh, 5 string thrown 3 times/.test(err.message))
+    assert.equal(b.reports.length, 1, b.reports.join(' | '))
+    assert.match(b.reports[0], /^make room: making room loops/)
+    const tosses = b.bot.tossed.length
+    const stashes = b.stashed.length
+    await b.ex.task('a staircase', async (s) => await b.ex.makeRoomDuringStep(s))
+    assert.equal(b.bot.tossed.length, tosses)
+    assert.equal(b.stashed.length, stashes)
+    assert.ok(THROW_LOOP_TICKS > 1000)
+  } finally {
+    clearInterval(t)
+  }
+})
+
 test('makeRoom: what isn\'t kept goes to the base within BASE_STORE_RANGE, farther into a depot chest put down by the bot', async () => {
   const { BASE_STORE_RANGE } = await import('../../src/executor/executor')
   const bag: Record<string, number> = {}

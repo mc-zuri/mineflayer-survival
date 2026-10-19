@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import minecraftData from 'minecraft-data'
-import { defaultKeep, isValuable, junkToToss, splitInventory, tossValue } from '../../src/executor/keep'
+import { defaultKeep, isValuable, junkToToss, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, tossValue } from '../../src/executor/keep'
 import { VERSIONS } from '../versions'
 
 for (const version of VERSIONS) {
@@ -202,3 +202,26 @@ for (const version of VERSIONS) {
     assert.deepEqual(tripSpareGoals(new Inventory(registry as any, { diamond_pickaxe: 1, stone_pickaxe: 1 })), [{ item: iron, count: 2 }])
   })
 }
+
+test('ThrowHistory: a part stack thrown again with the same count is looping at its THROW_LOOP_REPEATS-th throw within THROW_LOOP_TICKS; a whole stack, a new count or an old throw are not', () => {
+  // (26.3 run full-f: '19 dirt, 5 sand, 2 gravel' every step of a staircase, then '29 andesite, 19 dirt' and the diorite dug)
+  const h = new ThrowHistory()
+  assert.equal(h.repeats, THROW_LOOP_REPEATS)
+  assert.equal(h.window, THROW_LOOP_TICKS)
+  const toss = [{ name: 'dirt', count: 19 }, { name: 'sand', count: 5 }, { name: 'cobblestone', count: 64 }]
+  assert.deepEqual(h.looping(toss, 100), [])
+  h.record(toss, 100)
+  assert.deepEqual(h.looping(toss, 200), [])
+  h.record(toss, 200)
+  // the third: the dirt and sand came back, the whole stack of cobblestone is new work
+  assert.deepEqual(h.looping(toss, 300), [{ name: 'dirt', count: 19 }, { name: 'sand', count: 5 }])
+  // with more dug into it, a stack's count is new; the andesite the same
+  assert.deepEqual(h.looping([{ name: 'dirt', count: 22 }], 300), [])
+  // long after, the old throws are forgotten
+  assert.deepEqual(h.looping(toss, 200 + THROW_LOOP_TICKS + 1), [])
+  // eggs stack to 16: a whole stack at 16 is whole at 16
+  const pearls = new ThrowHistory(2)
+  pearls.record([{ name: 'egg', count: 16 }], 0)
+  assert.deepEqual(pearls.looping([{ name: 'egg', count: 16 }], 10, name => name === 'egg' ? 16 : 64), [])
+  assert.deepEqual(pearls.looping([{ name: 'egg', count: 16 }], 10), [{ name: 'egg', count: 16 }])
+})
