@@ -80,7 +80,7 @@ export async function obsidianFromLava (bot: Bot, count: number, signal?: AbortS
     const all = bot.findBlocks({ matching: lavaId, maxDistance: 16, count: 256 })
       .filter(p => isLavaSource(get(p)))
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
-    const target = pourTarget(get, all)
+    const target = pourTarget(get, all, true)
     if (target == null) throw new SkillError('NOT_FOUND', `no lava source left to turn to obsidian (${countItems(bot, 'obsidian')} of ${count})`)
     const { source, spot, side } = target
     trace('obsidianFromLava: water at', spot.toString(), 'for the lava at', source.toString())
@@ -90,16 +90,26 @@ export async function obsidianFromLava (bot: Bot, count: number, signal?: AbortS
     await bot.equip(bucket, 'hand')
     await bot.lookAt(spot.offset(0.5, 0.02, 0.5), true)
     bot.activateItem()
-    await waitUntil(bot, () => bot.blockAt(source)?.name === 'obsidian', 40, signal)
+    // poured beside a source it turns the source; poured into the lake (the nearest source, so the scoop's ray meets
+    // the water first) it turns the sources about it
+    const turned = (): boolean => side ? bot.blockAt(source)?.name === 'obsidian' : bot.findBlocks({ matching: obsidianId, point: spot, maxDistance: 2, count: 1 }).length > 0
+    await waitUntil(bot, turned, 40, signal)
     await waitTicks(bot, 5, signal)
     // the water back up
     const empty = findInventoryItem(bot, 'bucket')
     if (empty != null && bot.blockAt(spot)?.name === 'water') {
+      const lavaBefore = countItems(bot, 'lava_bucket')
       await bot.equip(empty, 'hand')
       await bot.lookAt(spot.offset(0.5, 0.5, 0.5), true)
       bot.activateItem()
-      await waitUntil(bot, () => countItems(bot, 'water_bucket') > 0, 20, signal)
+      await waitUntil(bot, () => countItems(bot, 'water_bucket') > 0 || countItems(bot, 'lava_bucket') > lavaBefore, 20, signal)
+      // lava scooped instead (a source on the ray before the water): poured back where it came from
+      if (countItems(bot, 'lava_bucket') > lavaBefore) {
+        const lavaBucket = findInventoryItem(bot, 'lava_bucket')
+        if (lavaBucket != null) { await bot.equip(lavaBucket, 'hand'); bot.activateItem(); await waitTicks(bot, 5, signal) }
+      }
     }
+    if (countItems(bot, 'water_bucket') === 0) trace('obsidianFromLava: the water was lost')
   }
   return countItems(bot, 'obsidian')
 }
