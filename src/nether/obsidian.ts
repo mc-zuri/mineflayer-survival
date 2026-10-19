@@ -32,6 +32,19 @@ export function pourSpot (getBlock: ObsidianLookup, source: Vec3): Vec3 | null {
 }
 
 /**
+ * The source to turn and where the water goes, of some sources nearest first: the first with ground beside it (the
+ * water poured there, side), else the first open to the air above (the water poured into the lava cell itself)
+ */
+export function pourTarget (get: ObsidianLookup, sources: readonly Vec3[]): { source: Vec3, spot: Vec3, side: boolean } | null {
+  for (const p of sources) {
+    const spot = pourSpot(get, p)
+    if (spot != null) return { source: p, spot, side: true }
+  }
+  const open = sources.find(p => AIR.has(get(p.offset(0, 1, 0))?.name ?? ''))
+  return open == null ? null : { source: open, spot: open, side: false }
+}
+
+/**
  * Obsidian from the lava sources about the bot until `count` are held: for the nearest source with a pour spot, the
  * water poured there and scooped back, then the obsidian made mined. Throws MISSING_ITEMS without a water bucket or a
  * diamond pickaxe, NOT_FOUND when no source is left to turn.
@@ -58,14 +71,17 @@ export async function obsidianFromLava (bot: Bot, count: number, signal?: AbortS
       }
       continue
     }
-    const sources = bot.findBlocks({ matching: lavaId, maxDistance: 16, count: 256 })
-      .filter(p => isLavaSource(get(p)) && pourSpot(get, p) != null)
+    // a source with ground beside it to pour on, else one open to the air above (the bucket's ray goes through the
+    // lava, and the water it pours there flows into the sources about it: a lake's sources are lava on every side,
+    // and none had ground beside it on 26.3 seed 2)
+    const all = bot.findBlocks({ matching: lavaId, maxDistance: 16, count: 256 })
+      .filter(p => isLavaSource(get(p)))
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
-    const source = sources[0]
-    if (source == null) throw new SkillError('NOT_FOUND', `no lava source left to turn to obsidian (${countItems(bot, 'obsidian')} of ${count})`)
-    const spot = pourSpot(get, source) as Vec3
+    const target = pourTarget(get, all)
+    if (target == null) throw new SkillError('NOT_FOUND', `no lava source left to turn to obsidian (${countItems(bot, 'obsidian')} of ${count})`)
+    const { source, spot, side } = target
     trace('obsidianFromLava: water at', spot.toString(), 'for the lava at', source.toString())
-    await navigateNear(bot, spot, 2, signal).catch(err => { if (isAbort(err)) throw err })
+    await navigateNear(bot, spot, side ? 2 : 3, signal).catch(err => { if (isAbort(err)) throw err })
     const bucket = findInventoryItem(bot, 'water_bucket')
     if (bucket == null) throw new SkillError('MISSING_ITEMS', 'the water bucket is gone')
     await bot.equip(bucket, 'hand')
