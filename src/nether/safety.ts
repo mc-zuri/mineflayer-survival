@@ -51,6 +51,11 @@ export interface NetherSafetyOptions {
   /** a higher cost near the nether's deaths remembered (rememberNetherDeath) (default true) */
   avoidDeaths?: boolean
   /**
+   * blocks under the floor a step keeps lava away from (default 0: the floor itself only): a lake's obsidian lid is a
+   * floor with lava under it, and mining it from on top dropped a 26.3 bot into the lava (obsidianFromLava's 3)
+   */
+  lavaBelow?: number
+  /**
    * ticks on top for each cell a path stands in over NETHER_HIGH_Y (default 12): up in the rock under the nether's
    * roof, where the deadly edges are none, a path tunnels along well, and the way back down to anything (a fortress's
    * decks at 48 to 70, the portal) is a drop into the caverns under it
@@ -109,6 +114,7 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
   const gap = opts.lavaGap ?? 1
   const nearCost = opts.nearLavaCost ?? 40
   const highCost = opts.highCost ?? 12
+  const lavaBelow = opts.lavaBelow ?? 0
   // the A* asks about every cell it considers, many times: the answers are kept, and dropped every 100 ticks (lava
   // flows slowly, a bucket's lava or a broken block shows up then)
   const lavaStates = stateRange(bot, 'lava')
@@ -157,6 +163,7 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
     // (a magma block hurts a player standing on it who isn't sneaking, MagmaBlock.stepOn, and lies round the basalt
     // deltas' lava pockets)
     if (isLava(p) || isLava(p.offset(0, 1, 0)) || isLava(p.offset(0, -1, 0)) || lavaBeside(isLava, p, gap) || isMagma(p.offset(0, -1, 0))) cost = FORBID
+    else if (lavaBelow > 0 && Array.from({ length: lavaBelow }, (_, i) => p.offset(0, -2 - i, 0)).some(isLava)) cost = FORBID
     else if (nearCost > 0 && lavaBeside(isLava, p, gap + 1)) cost = nearCost
     if (cost < FORBID && deaths.length > 0 && nearDeath(deaths, p)) cost += NETHER_DEATH_COST
     if (cost < FORBID && p.y > NETHER_HIGH_Y) cost += highCost

@@ -61,7 +61,9 @@ export function pourTarget (get: ObsidianLookup, sources: readonly Vec3[], intoL
 export async function obsidianFromLava (bot: Bot, count: number, signal?: AbortSignal): Promise<number> {
   // the walks and the digs by the lava with the nether's lava rules (no step beside lava, no dig of a block lava
   // touches): mining the obsidian lid of a deep lake from on top of it dropped a 26.3 bot into the lava under it
-  return await withNetherSafety(bot, async () => await makeObsidian(bot, count, signal))
+  // (nor a step onto the lake's lid: a floor with lava under it, the lid's cells mined from the shore, their drops
+  // there left when they lie on the lid)
+  return await withNetherSafety(bot, async () => await makeObsidian(bot, count, signal), { lavaBelow: 3 })
 }
 
 async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Promise<number> {

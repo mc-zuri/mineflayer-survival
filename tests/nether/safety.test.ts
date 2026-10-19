@@ -132,3 +132,19 @@ test('withNetherSafety lays the nether settings over once (nested, as it is), an
     bot.survival.tasks.destroy?.()
   }
 })
+
+test('netherMoveSettings lavaBelow: no step onto a floor with lava under it (a lake\'s obsidian lid), only when asked', () => {
+  const bot = fakeBot()
+  const reg = bot.registry
+  // a lid of obsidian at y 63 over lava at y 62 for x 0 - 3; netherrack elsewhere under y 64
+  bot.world = {
+    getBlockStateId: (p: Vec3) => p.y >= 64 ? reg.blocksByName.air.defaultState
+      : (p.x >= 0 && p.x <= 3 && p.y === 63) ? reg.blocksByName.obsidian.defaultState
+        : (p.x >= 0 && p.x <= 3 && p.y >= 60) ? reg.blocksByName.lava.defaultState : reg.blocksByName.netherrack.defaultState
+  }
+  const plain = netherMoveSettings(bot).exclusionAreasStep?.[0] as any
+  const lid = netherMoveSettings(bot, { lavaBelow: 3 }).exclusionAreasStep?.[0] as any
+  assert.equal(plain({ position: new Vec3(1, 64, 0), type: 0 }), 0)
+  assert.equal(lid({ position: new Vec3(1, 64, 0), type: 0 }), FORBID)
+  assert.equal(lid({ position: new Vec3(-3, 64, 0), type: 0 }), 0)
+})
