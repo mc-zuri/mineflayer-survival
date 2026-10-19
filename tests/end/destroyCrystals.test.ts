@@ -110,3 +110,17 @@ test('readSpikes: a cage with some of its bars broken (a blast, the shot\'s line
   const read = readSpikes(world(blocks))
   assert.strictEqual(read.find(s => s.index === caged.index)?.guarded, true)
 })
+
+test('pillarClimbRisk: no pillar while the dragon strafes or charges the bot, or circles within 32 blocks of it; perched or landing it may', async () => {
+  const { pillarClimbRisk } = await import('../../src/end/skills/destroyCrystals')
+  const column = { x: -32, z: 21 }
+  const far = { x: 40, y: 80, z: 0 }
+  const near = { x: -20, y: 78, z: 20 }
+  assert.match(String(pillarClimbRisk('strafing', far, column)), /strafing/)
+  assert.match(String(pillarClimbRisk('charging', far, column)), /charging/)
+  assert.match(String(pillarClimbRisk('circling', near, column)), /blocks off/)
+  assert.strictEqual(pillarClimbRisk('circling', far, column), null)
+  assert.strictEqual(pillarClimbRisk('perched', { x: 0, y: 66, z: 0 }, column), null)
+  assert.strictEqual(pillarClimbRisk('landing', near, column), null)
+  assert.strictEqual(pillarClimbRisk(null, null, column), null)
+})

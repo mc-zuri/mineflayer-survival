@@ -3,7 +3,8 @@ import { Vec3 } from 'vec3'
 import type { Pos } from '../../core/memory'
 import type { Seed } from '../../worldgen/random'
 import { shoot } from '../../skills/shoot'
-import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, eyePosition, distanceToBox } from '../../skills/combatUtil'
+import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, eyePosition, distanceToBox, metadataIndex } from '../../skills/combatUtil'
+import { activityOf, phaseName, DRAGON_PHASE_METADATA, type DragonActivity } from '../dragon'
 import { attackStrengthOf, bestMeleeWeapon } from '../../skills/weapons'
 import { wornArmor, armorPiece, damageAfterArmor } from '../../skills/armor'
 import { getSpikesForLevel, spikeCenters, type Box, type EndSpike } from '../spikes'
@@ -155,6 +156,8 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
   const pillar: PillarState = { current: null }
   /** waiting up a pillar for a cloud under the bot to go */
   let waitingOver = false
+  /** ticks waited for the dragon to be away before going up a pillar */
+  let pillarWaited = 0
   const onGone = (e: Entity): void => {
     const index = ids.get(e.id)
     if (index == null) return
@@ -244,6 +247,23 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
         continue
       }
       if (pillar.current != null && !onColumn(bot.entity.position, pillar.current.column)) pillar.current = null
+      // a caged crystal's pillar (or a tall one to shoot from) gone up only with the dragon away from it: strafing or
+      // charging the bot, or circling near, its wings throw a bot off a pillar (each crystal shot sends it at the bot,
+      // EnderDragon.onCrystalDestroyed: two runs had it by spike 4's pillar 120 ticks after the bot got up, into the void)
+      const column = target.pillar?.column ?? (target.shootFrom != null && target.shootFrom.pillar >= 3 ? { x: Math.floor(target.shootFrom.x), z: Math.floor(target.shootFrom.z) } : null)
+      if (column != null && !(pillar.current != null && onColumn(bot.entity.position, pillar.current.column)) && pillarWaited < PILLAR_WAIT_TICKS) {
+        const risk = pillarClimbRisk(dragonActivity(bot), Object.values(bot.entities).find(e => e.name === 'ender_dragon')?.position ?? null, column)
+        if (risk != null) {
+          if (pillarWaited === 0) opts.log?.(`spike ${target.spike.index}: the pillar waits, ${risk}`)
+          const before = ticks
+          await evadeDangers(bot, () => dragonDangers(bot, bot.entity.onGround ? bot.entity.position.y : ground, ground), guard, { signal, island: ground, maxTicks: 10 })
+          await waitTicks(bot, 10, signal)
+          pillarWaited += Math.max(10, ticks - before)
+          continue
+        }
+        if (pillarWaited > 0) opts.log?.(`spike ${target.spike.index}: up the pillar after ${pillarWaited} ticks' wait`)
+      }
+      pillarWaited = 0
       opts.log?.(`spike ${target.spike.index} (${target.spike.centerX}, ${target.spike.centerZ}, h ${target.spike.height}${target.spike.guarded ? ', caged' : ''}): ${target.method} from ${JSON.stringify(target.shootFrom != null ? { x: target.shootFrom.x, y: target.shootFrom.y, z: target.shootFrom.z, pillar: target.shootFrom.pillar } : null)}`)
       guard.update(bot.entity.position, bot.entity.onGround)
       await eatIfHurt(bot, opts.eatBelowHealth ?? 12, signal)
@@ -322,6 +342,32 @@ export function cloudUnder (dangers: Danger[], feet: Pos, pillar: { column: { x:
   const z = pillar.column.z + 0.5
   return dangers.find(d => d.why === 'cloud' && d.y != null && d.y >= pillar.base - 1 && d.y <= feet.y - 0.5 &&
     Math.hypot(d.center.x - x, d.center.z - z) < d.radius + 1) ?? null
+}
+
+/** how far (horizontally) a circling dragon is to be from a pillar's column before it is gone up */
+export const PILLAR_CLEAR_DISTANCE = 32
+/** the most a pillar waits for the dragon before it is gone up anyway */
+export const PILLAR_WAIT_TICKS = 1200
+
+/** what the dragon in sight does (its phase metadata), null with none */
+export function dragonActivity (bot: Bot): DragonActivity | null {
+  const dragon = Object.values(bot.entities).find(e => e.name === 'ender_dragon')
+  if (dragon == null) return null
+  const phase = phaseName((dragon.metadata as any)?.[metadataIndex(bot, 'ender_dragon', 'phase', DRAGON_PHASE_METADATA)])
+  return phase != null ? activityOf(phase) : null
+}
+
+/**
+ * Why a pillar's column is no place to go up now, or null: the dragon strafing or charging the bot (DragonStrafePlayerPhase
+ * flies at its target to spit a fireball, as it does after each crystal destroyed), or flying within
+ * PILLAR_CLEAR_DISTANCE of the column; perched, coming down to perch or dying it isn't.
+ */
+export function pillarClimbRisk (activity: DragonActivity | null, dragon: Pos | null, column: { x: number, z: number }): string | null {
+  if (activity == null || dragon == null) return null
+  if (activity === 'strafing' || activity === 'charging') return `the dragon ${activity === 'strafing' ? 'strafing' : 'charging'} the bot`
+  if (activity === 'perched' || activity === 'landing' || activity === 'dying') return null
+  const d = Math.hypot(dragon.x - (column.x + 0.5), dragon.z - (column.z + 0.5))
+  return d < PILLAR_CLEAR_DISTANCE ? `the dragon ${d.toFixed(0)} blocks off` : null
 }
 
 /** tries at a crystal before it is left (a dodge of the dragon is not one) */
