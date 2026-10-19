@@ -69,6 +69,24 @@ export const OPTIONAL_MILESTONES: readonly MilestoneId[] = ['enchanting']
 export const OPTIONAL_MILESTONE_TICKS = 400000
 
 /** milestones that are a trip across the world, not worked from home: the night's mining waits till they're done */
+/** the ticks the re-equipping after a death may take in all */
+export const REEQUIP_TICKS = 24000
+
+/** the basics a bot back from a death makes again when it lacks them, in order */
+export function reequipGoals (inv: { count: (name: string) => number, countAny?: (names: readonly string[]) => number }): ObtainRequest[] {
+  const any = (names: string[]): number => names.reduce((n, name) => n + inv.count(name), 0)
+  const out: ObtainRequest[] = []
+  const picks = ['netherite_pickaxe', 'diamond_pickaxe', 'iron_pickaxe']
+  const swords = ['netherite_sword', 'diamond_sword', 'iron_sword']
+  if (any([...picks, 'stone_pickaxe', 'wooden_pickaxe']) === 0) out.push({ item: 'stone_pickaxe', count: 1 })
+  if (any([...swords, 'stone_sword']) === 0) out.push({ item: 'stone_sword', count: 1 })
+  if (any(picks) === 0) out.push({ item: 'iron_pickaxe', count: 1 })
+  if (any(['bucket', 'water_bucket', 'lava_bucket']) === 0) out.push({ item: 'bucket', count: 1 })
+  if (any(swords) === 0) out.push({ item: 'iron_sword', count: 1 })
+  if (any(['iron_chestplate', 'diamond_chestplate', 'netherite_chestplate']) === 0) out.push({ item: 'iron_chestplate', count: 1 })
+  return out
+}
+
 /** deaths in a row while recovering from one before play just goes on */
 export const RECOVERY_DEATHS = 5
 
@@ -1080,6 +1098,29 @@ export class Runner {
     }
     const kit = await this.rekit(signal)
     diag?.recovery({ kit: kit ?? 'no base' })
+    // what neither a trip kit nor the base gave back: made again from scratch (a 26.3 bot back from a death with dirt
+    // and seeds went on to the nether's portal, every try failing for want of a bucket and a pickaxe)
+    await this.reequip(signal)
+  }
+
+  /**
+   * After a death, the basics the bot lacks made again in order (reequipGoals: a pickaxe and a sword of stone at
+   * least, then iron ones, a bucket, an iron chestplate), each as can be, within REEQUIP_TICKS in all
+   */
+  async reequip (signal?: AbortSignal): Promise<void> {
+    const start = this.bot.survival.tasks.tick
+    for (const goal of reequipGoals(ownedInventory(this.bot))) {
+      if (this.bot.survival.tasks.tick - start > REEQUIP_TICKS) break
+      // (each against the inventory as it is now: an earlier one may have brought it)
+      if (!reequipGoals(ownedInventory(this.bot)).some(g => g.item === goal.item)) continue
+      this.log(`re-equipping: ${goal.item}`)
+      try {
+        await this.executor.obtain([goal], signal)
+      } catch (err) {
+        if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+        this.log(`re-equipping: no ${goal.item}: ${(err as Error).message}`)
+      }
+    }
   }
 
   /**

@@ -188,6 +188,8 @@ test('a death spot the bot died at again going back for its items is left for go
     memory.setDeath(new Vec3(24, 15, 3), 'overworld')
     throw new TaskError('DIED', 'the bot died')
   }
+  // (the re-equipping after it is another test's)
+  ;(runner as any).executor.obtain = async () => {}
   await runner.recoverFromDeath()
   assert.deepEqual(trips, ['to the death spot'])
   assert.ok(logs.some(l => /not back to the death spot at 24 15 3/.test(l)), logs.join('\n'))
@@ -505,4 +507,18 @@ test('rekit gets to a dug-in base the long way (hops, a stair down) when the pat
   }
   assert.deepEqual(calls.slice(0, 2), ['navigate', `overland ${new Vec3(-52, 60, -19).toString()}`])
   assert.ok(calls.includes('retrieve'))
+})
+
+test('after a death the basics lacking are made again in order: stone tools, iron ones, a bucket, a chestplate', async () => {
+  const { reequipGoals } = await import('../../src/runner')
+  const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
+  assert.deepEqual(reequipGoals(inv({ dirt: 3 })).map(g => g.item), ['stone_pickaxe', 'stone_sword', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
+  assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, water_bucket: 1, iron_chestplate: 1 })).map(g => g.item), [])
+  const bot = fakeBot({ dirt: 3 })
+  const runner = new Runner(bot, { log: () => {} })
+  const asked: string[] = []
+  runner.executor.obtain = (async (reqs: any[]) => { asked.push(reqs[0].item); bot.give(reqs[0].item, 1) }) as any
+  await runner.reequip()
+  // the stone ones, then the iron ones (the stone sword's need gone once iron came is still asked in order)
+  assert.deepEqual(asked, ['stone_pickaxe', 'stone_sword', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
 })
