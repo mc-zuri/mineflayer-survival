@@ -441,7 +441,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         await hold(sword())
         if (strength.ticksToFull() <= 0) {
           unblock()
-          await look(close.position.offset(0, 1.2, 0))
+          await look(meleeAimPoint(bot, close))
           strength.attack(close)
         } else if (strength.ticksToFull() > 1) {
           await block(blazeEye(close))
@@ -545,6 +545,25 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   }
   result.ticks = tick
   return result
+}
+
+/**
+ * Where to look to hit an entity close by: the first point up its middle (half its height, then lower, then higher)
+ * the eyes see without a block between (a blaze hovering in the nook's front is under its roof's edge: looked at high,
+ * the crosshair met the roof and no swing went, 200 ticks, the blaze hitting the bot till it died)
+ */
+export function meleeAimPoint (bot: Bot, e: Entity): Vec3 {
+  const eye = eyePosition(bot)
+  const h = e.height ?? 1
+  for (const f of [0.5, 0.25, 0.75, 0.1, 0.9]) {
+    const p = e.position.offset(0, h * f, 0)
+    const d = p.minus(eye)
+    const len = d.norm()
+    if (len < 1e-6) return p
+    const hit: any = (bot.world as any).raycast?.(eye, d.scaled(1 / len), len)
+    if (hit == null || (hit.intersect != null && hit.intersect.distanceTo(eye) >= len - 1e-3)) return p
+  }
+  return e.position.offset(0, h / 2, 0)
 }
 
 /** drops further than this from the nook are left (a walk under the blazes' fire; the spawner's own floor is 10 off) */

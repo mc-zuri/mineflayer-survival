@@ -263,3 +263,27 @@ test('fightFromNook meets a magma cube come into reach with the sword itself, th
   assert.deepStrictEqual(engine.leftAloneNames, [])
   engine.stop()
 })
+
+test('meleeAimPoint: a blaze hovering in the nook\'s front under its roof\'s edge is looked at low, where the eyes see it', async () => {
+  const { fakeBot, entity } = await import('../reflexes/fakeBot')
+  const { meleeAimPoint } = await import('../../src/nether/blazeFight')
+  // the roof over the stand 0 64 10 at y 66; the blaze in the front cell, its feet at 65.8
+  const name = (p: Vec3): string => p.floored().equals(new Vec3(0, 66, 10)) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 65.8, 9.6) })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.3), world: name })
+  bot.world = {
+    raycast: (from: Vec3, dir: Vec3, range: number) => {
+      for (let t = 0; t <= range; t += 0.01) {
+        const p = from.plus(dir.scaled(t))
+        if (name(p) !== 'air') return { position: p.floored(), intersect: p }
+      }
+      return null
+    }
+  }
+  const p = meleeAimPoint(bot, blaze)
+  assert.ok(p.y < 65.8 + 0.9, `aimed at ${p.toString()}`)
+  // the middle, when nothing's in the way
+  const open = fakeBot({ position: new Vec3(0.5, 64, 10.3) })
+  open.world = { raycast: () => null }
+  assert.ok(Math.abs(meleeAimPoint(open, blaze).y - (65.8 + 0.9)) < 1e-9)
+})
