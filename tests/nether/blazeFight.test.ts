@@ -389,3 +389,65 @@ test('fightFromNook gives up a spawner no blaze comes from (NOOK_IDLE_TICKS with
   await done
   assert.match(String((settled as Error)?.message), /no blaze came from the blaze spawner at \(0, 64, 0\) in 50 ticks/)
 })
+
+test('fightFromNook: a rod on the floor is gone for between draws while no blaze can shoot, before the bow; the walk stops for a charge with the shield up where the bot is, then goes on to the rod', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, nookAround } = await import('../../src/nether/blazeFight')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 65, 2.5), meta: { health: 20, flags: 0 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), items: [item('diamond_sword'), item('bow'), item('arrow', 64), item('cooked_beef', 16)], offhand: item('shield'), entities: [blaze], world: name })
+  const rod = { id: 77, name: 'item', position: new Vec3(0.5, 64, 7.5), getDroppedItem: () => item('blaze_rod') }
+  bot.entities[77] = rod
+  bot.world = {
+    raycast: (from: Vec3, dir: Vec3, range: number) => {
+      for (let t = 0; t <= range; t += 0.02) {
+        const p = from.plus(dir.scaled(t))
+        if (name(p) !== 'air') return { position: p.floored(), intersect: p, boundingBox: 'block', name: name(p) }
+      }
+      return null
+    }
+  }
+  const log: string[] = []
+  bot.equip = async (it: any, dest: string) => { if (dest === 'hand') bot.heldItem = it }
+  bot.activateItem = (off = false) => { bot.usingHeldItem = true; log.push(off ? 'shield' : `use ${bot.heldItem?.name as string}`) }
+  bot.deactivateItem = () => { bot.usingHeldItem = false; log.push('release') }
+  bot.look = async () => {}
+  bot.lookAt = async () => {}
+  bot.attack = () => {}
+  const setControl = bot.setControlState
+  bot.setControlState = (k: string, v: boolean) => { if (k === 'forward' && v) log.push('step'); setControl(k, v) }
+  // (ticks as the test gives them)
+  bot.waitForTicks = async (n: number) => await new Promise<void>(resolve => { let k = 0; const f = (): void => { if (++k >= n) { bot.off('physicsTick', f); resolve() } }; bot.on('physicsTick', f) })
+  bot.game.dimension = 'the_nether'
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const ac = new AbortController()
+  const done = fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 2000 }, ac.signal).catch(err => err)
+  const tick = async (n: number): Promise<void> => { for (let i = 0; i < n; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) } }
+  await tick(20)
+  // toward the rod, no draw first (the bow's turn came first: rods were left on the throne for 20000 ticks)
+  assert.ok(log.includes('step'), log.join(' '))
+  assert.ok(!log.includes('use bow'), log.join(' '))
+  // the blaze charges and is about to shoot: the walk stops and the shield goes up where the bot is
+  blaze.metadata[16] = 1
+  log.length = 0
+  await tick(60)
+  assert.ok(log.includes('shield'), log.join(' '))
+  assert.equal(bot.getControlState('forward'), false)
+  // the volley over: on to the rod again, not back to the nook's fight
+  blaze.metadata[16] = 0
+  log.length = 0
+  await tick(FETCH_WAIT)
+  assert.ok(log.includes('step'), log.join(' '))
+  // picked up
+  delete bot.entities[77]
+  bot.inventory.slots[30] = item('blaze_rod')
+  await tick(10)
+  const r = await done
+  assert.ok(!(r instanceof Error), String(r))
+})
+
+/** ticks for a volley's last fireball's flight and the fetch's quiet to go by */
+const FETCH_WAIT = 60

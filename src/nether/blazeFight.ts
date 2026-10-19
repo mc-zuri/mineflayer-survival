@@ -365,7 +365,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   let shutUntil = 0
   const tracked = new Set<number>()
   const dead = new Set<number>()
-  const tried = new Set<number>()
+  const tried = new Map<number, number>()
   const onDead = (e: Entity): void => {
     if (e.name !== 'blaze') return
     dead.add(e.id)
@@ -516,6 +516,21 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         continue
       }
 
+      // the rods on the floor before another shot (between draws), whenever no blaze that sees the bot can shoot for
+      // FETCH_QUIET: the bow's turn came first and the fetch only with every blaze quiet for 75 ticks, which with two or
+      // three about never was, and the nooks at seed 2's spawners at (97, 64, -515) and (925, 64, 123) killed blazes
+      // for 20000 ticks with their rods left on the throne (26.3 runs mag-b and mag-d: 0 rods)
+      const drop = drawn === 0 && bot.health > sealAt + 4 && seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET))
+        ? dropsNear(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES)
+        : undefined
+      if (drop != null) {
+        tried.set(drop.id, (tried.get(drop.id) ?? 0) + 1)
+        unblock()
+        await fetchDrops(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
+        blocking = false
+        continue
+      }
+
       // the bow at the nearest one in sight it has a shot at
       const b0 = bow()
       if (b0 != null && hasArrows()) {
@@ -546,15 +561,6 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         }
       }
       stopDraw()
-
-      // the drops of the kills, while it's quiet: off the floor near the nook, each item tried once
-      const quiet = seeing.every(b => volleys.quietFor(b.id, tick, 60))
-      const drop = quiet ? dropsNear(bot, nook).find(e => !tried.has(e.id)) : undefined
-      if (drop != null) {
-        tried.add(drop.id)
-        await fetchDrops(bot, nook, drop, signal)
-        continue
-      }
 
       // nothing to do: the shield up, toward the nearest blaze, else the spawner
       const watch = seeing.sort(near)[0] ?? blazes.sort(near)[0]
@@ -604,24 +610,77 @@ export function dropsNear (bot: Bot, nook: BlazeNook): Entity[] {
   return nearbyDrops(bot, at, DROP_REACH, ['blaze_rod']).filter(e => e.position.y >= nook.stand.y - 3)
 }
 
-/** an item near the nook picked up (a walk cut off when a blaze that sees the bot is charged), back in after */
-async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, signal?: AbortSignal): Promise<void> {
-  const cut = new AbortController()
-  const onParent = (): void => cut.abort(signal?.reason)
-  signal?.addEventListener('abort', onParent, { once: true })
-  const watch = (): void => {
-    if (Object.values(bot.entities).some(e => e.name === 'blaze' && isAlive(bot, e) && blazeCharged(bot, e) && blazeSeesBot(bot, e))) cut.abort(new Error('a blaze charged'))
+/** ticks with no blaze that sees the bot able to shoot that a fetch of the rods on the floor starts in */
+export const FETCH_QUIET = 20
+/** times a rod on the floor is gone for */
+export const DROP_TRIES = 4
+/** the most ticks a fetch takes, its waits behind the shield too */
+export const FETCH_TICKS = 400
+
+export interface FetchWatch {
+  /** the nook fight's volleys and its tick */
+  volleys: BlazeVolleys
+  now: () => number
+  /** a fetch is given up at this health */
+  sealAt: number
+}
+
+/**
+ * An item near the nook picked up, back in after: the walk to it stopped while a blaze that sees the bot may shoot
+ * (BlazeVolleys, or a small fireball coming), the shield up toward it where the bot stands till the volley's by, then
+ * on to the item, not back to the nook (the walks cut off by each charge went back in, and the rods stayed on the
+ * floor); FETCH_TICKS at most, or till the health is down to `sealAt`
+ */
+export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch: FetchWatch, signal?: AbortSignal): Promise<void> {
+  const start = watch.now()
+  let blocking = false
+  let walks = 0
+  const threat = (): Entity | null => {
+    const blazes = Object.values(bot.entities).filter(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(bot.entity.position) <= 48)
+    watch.volleys.update(blazes.map(b => ({ id: b.id, charged: blazeCharged(bot, b) })), watch.now())
+    const danger = blazes.filter(b => blazeSeesBot(bot, b) && watch.volleys.dangerous(b.id, watch.now()))
+      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
+    return danger ?? Object.values(bot.entities).find(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 24)) ?? null
   }
-  bot.on('physicsTick', watch)
+  trace('fightFromNook: drops at', item.position.toString())
   try {
-    trace('fightFromNook: drops at', item.position.toString())
-    await collectDropsNear(bot, item.position.clone(), { signal: cut.signal, radius: 3, maxTicks: 120 })
-  } catch (err) {
-    if (signal?.aborted === true) throw err
-    if (!isAbort(err)) trace('fightFromNook: drops:', (err as Error).message)
+    while (bot.entities[item.id] === item && watch.now() - start < FETCH_TICKS && bot.health > watch.sealAt) {
+      throwIfAborted(signal)
+      const t = threat()
+      if (t != null) {
+        // the shield up where the bot stands, at it
+        bot.clearControlStates()
+        if (!blocking || (bot as any).usingHeldItem !== true) {
+          const sword = bestMeleeWeapon(bot, 'blaze')
+          if (sword != null && bot.heldItem?.type !== sword.type) await bot.equip(sword, 'hand')
+          blocking = await raiseShield(bot).catch(() => false)
+        }
+        await bot.lookAt(t.name === 'blaze' ? blazeEye(t) : t.position, true)
+        await waitTicks(bot, 1, signal)
+        continue
+      }
+      if (blocking) { lowerShield(bot); blocking = false }
+      const cut = new AbortController()
+      const onParent = (): void => cut.abort(signal?.reason)
+      signal?.addEventListener('abort', onParent, { once: true })
+      const onTick = (): void => { if (threat() != null) cut.abort(new Error('a blaze about to shoot')) }
+      bot.on('physicsTick', onTick)
+      try {
+        await collectDropsNear(bot, item.position.clone(), { signal: cut.signal, radius: 3, maxTicks: 120 })
+      } catch (err) {
+        if (signal?.aborted === true) throw err
+        if (!isAbort(err)) { trace('fightFromNook: drops:', (err as Error).message); break }
+      } finally {
+        bot.off('physicsTick', onTick)
+        signal?.removeEventListener('abort', onParent)
+      }
+      // (a walk that ended with the item still there and nothing about: twice more, then left)
+      if (!cut.signal.aborted && ++walks >= 3) break
+      await waitTicks(bot, 1, signal)
+    }
   } finally {
-    bot.off('physicsTick', watch)
-    signal?.removeEventListener('abort', onParent)
+    if (blocking) lowerShield(bot)
+    bot.clearControlStates()
   }
   await enterNook(bot, nook, signal)
 }
