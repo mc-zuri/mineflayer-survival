@@ -41,6 +41,8 @@ export interface FindPlacementOptions {
   radius?: number
   /** keep the block above free too (a chest won't open under a solid block; default false) */
   freeAbove?: boolean
+  /** cells not to use (a portal's way in) */
+  avoid?: (pos: Vec3) => boolean
 }
 
 /**
@@ -61,6 +63,7 @@ export function findPlacement (lookup: BlockLookup, botPosition: Vec3, opts: Fin
         const below = lookup(pos.offset(0, -1, 0))
         if (!isSolid(below) || isInteractive(below?.name ?? '')) continue
         if (opts.freeAbove === true && !isFree(lookup(pos.offset(0, 1, 0)))) continue
+        if (opts.avoid?.(pos) === true) continue
         // the bot's own column is no place for it (it would stand on the block, or the block on it)
         if (dx === 0 && dz === 0) continue
         candidates.push({ pos, rank: [level, Math.max(Math.abs(dx), Math.abs(dz)), dx * dx + dz * dz, dx, dz] })

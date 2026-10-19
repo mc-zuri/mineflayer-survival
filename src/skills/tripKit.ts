@@ -22,6 +22,15 @@ const BLOCKS = ['cobblestone', 'cobbled_deepslate', 'dirt', 'netherrack', 'end_s
 const WEAPONS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'netherite_axe', 'diamond_axe', 'iron_axe']
 const ARMOR = /_(helmet|chestplate|leggings|boots)$/
 
+/** the blocks of a portal: a chest or bed is kept 2 blocks off them (a bed put down in front of a nether portal in a
+ * cave left the bot standing on it with 'no way to the portal', five times, 26.3) */
+const PORTAL_BLOCKS = new Set(['nether_portal', 'obsidian', 'end_portal', 'end_portal_frame'])
+
+export function nearPortal (lookup: (p: Vec3) => any, pos: Vec3): boolean {
+  for (let dx = -2; dx <= 2; dx++) for (let dy = -1; dy <= 3; dy++) for (let dz = -2; dz <= 2; dz++) if (PORTAL_BLOCKS.has(lookup(pos.offset(dx, dy, dz))?.name)) return true
+  return false
+}
+
 /**
  * What a trip kit takes from the bag (items: names and counts carried, the bag's only): the weapons but the best one,
  * a bow when there are two, half the arrows (from 32 up) and of each food (from 8 up), half the blocks up to 64, and
@@ -68,7 +77,7 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
     pos = opts.chest as Vec3
   } else {
     if (!bot.inventory.items().some(i => i.name === 'chest')) throw new SkillError('MISSING_ITEMS', 'no chest for a trip kit')
-    const at = findPlacement(lookup, bot.entity.position)
+    const at = findPlacement(lookup, bot.entity.position, { radius: 3, avoid: p => nearPortal(lookup, p) })
     if (at == null) throw new SkillError('CANNOT_PLACE', 'no room for a chest')
     pos = at
     await placeBlock(bot, { pos, item: 'chest' }, signal)
@@ -92,7 +101,7 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
   const bedThere = memory.getPois('spawn_bed', { dimension: 'overworld', near: pos }).find(b => new Vec3(b.x, b.y, b.z).distanceTo(pos) <= 4 && isBed(bot.blockAt(new Vec3(b.x, b.y, b.z))?.name ?? ''))
   if (bedThere != null) bed = new Vec3(bedThere.x, bedThere.y, bedThere.z)
   if (held != null && bedThere == null) {
-    const at = findPlacement(lookup, pos)
+    const at = findPlacement(lookup, pos, { radius: 3, avoid: p => nearPortal(lookup, p) })
     if (at != null) {
       try {
         await placeBlock(bot, { pos: at, item: held.name, facing: new Vec3(1, 0, 0) }, signal)

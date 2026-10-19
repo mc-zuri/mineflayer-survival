@@ -65,3 +65,11 @@ test('leaveTripKit fills the kit\'s emptied chest again, making no new chest or 
   await leaveTripKit(bot, executor, new AbortController().signal, () => {})
   assert.deepStrictEqual(calls, ['leave a trip kit'])
 })
+
+test('nearPortal: a cell 2 or fewer blocks from a portal\'s blocks is not for the kit', async () => {
+  const { nearPortal } = await import('../../src/skills/tripKit')
+  const { Vec3 } = await import('vec3')
+  const world = (p: any) => ({ name: p.x === 0 && p.y >= 64 && p.y <= 66 && p.z === 0 ? 'nether_portal' : 'air' })
+  assert.strictEqual(nearPortal(world, new Vec3(1, 64, 1)), true)
+  assert.strictEqual(nearPortal(world, new Vec3(3, 64, 0)), false)
+})
