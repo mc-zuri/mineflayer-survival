@@ -153,3 +153,14 @@ test('the gold and redstone, for the nether and later, are stocked from the diam
   const afterDiamonds = ids(['wood', 'stone', 'food', 'iron', 'diamonds'])
   assert.ok(afterDiamonds.includes('gold') && afterDiamonds.includes('redstone'), afterDiamonds.join(', '))
 })
+
+test('the diamonds are stocked from the diamonds milestone on: the iron milestone\'s end and its nights don\'t chase them', () => {
+  const registry: any = minecraftData('26.3')
+  const ids = (reached: any[]): string[] => new StockPolicy().topUps(new Inventory(registry, {}), {}, reached, ['underground']).map(u => u.mark.id)
+  // the iron milestone ends with its own marks topped up (the runner counts it reached): 24 diamonds at 900 ticks each
+  // were the 1.21.11 iron milestone's last 12000 ticks, wandering after deepslate_diamond_ore at the iron's level
+  const afterIron = ids(['wood', 'stone', 'food', 'iron'])
+  assert.ok(!afterIron.includes('diamond'), afterIron.join(', '))
+  const afterDiamonds = ids(['wood', 'stone', 'food', 'iron', 'diamonds'])
+  assert.ok(afterDiamonds.includes('diamond'), afterDiamonds.join(', '))
+})

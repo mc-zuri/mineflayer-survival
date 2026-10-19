@@ -50,7 +50,9 @@ const STACK = 64
  * - coal: the smelting (an iron run's 33 ores are 5 coal, the food, glass) beside the torches' own stock;
  * - iron: the iron milestone's 33 and after it a spare pickaxe and sword (5), buckets for water and lava (6), shears
  *   (2), flint and steel (1), rails and an anvil (31);
- * - diamonds: a pickaxe and sword (5), the armor (24) and an enchanting table (2), the armor taken as they come;
+ * - diamonds: a pickaxe and sword (5), the armor (24) and an enchanting table (2), the armor taken as they come, from
+ *   the diamonds milestone on (its own strip mine gets the first ones: a top-up of 24 at the iron's end ran the iron
+ *   milestone 12000 ticks over, chasing diamonds at the iron's level);
  * - gold: golden boots for the piglins (4) and ingots to barter for pearls, from the diamonds on (the nether's);
  * - redstone: a compass and a clock (1 each), rails and the odd dispenser, from the diamonds on;
  * - lapis: 3 a level-30 enchantment, for the pickaxe, sword, bow and armor and again later;
@@ -68,7 +70,7 @@ export const STOCK_MARKS: readonly StockMark[] = [
   { id: 'gold', counts: { gold_ingot: 1, raw_gold: 1, gold_block: 9, raw_gold_block: 9, gold_nugget: 1 / 9 }, gather: ['raw_gold', 'gold_ingot'], low: 16, high: 48, from: 'diamonds', where: 'underground', ticksPerUnit: 150 },
   { id: 'redstone', counts: { redstone: 1, redstone_block: 9 }, gather: 'redstone', low: 16, high: 64, from: 'diamonds', where: 'underground', ticksPerUnit: 70 },
   { id: 'lapis', counts: { lapis_lazuli: 1, lapis_block: 9 }, gather: 'lapis_lazuli', low: 27, high: 64, from: 'iron', where: 'underground', ticksPerUnit: 80 },
-  { id: 'diamond', counts: { diamond: 1, diamond_block: 9 }, gather: 'diamond', low: 8, high: 24, from: 'iron', where: 'underground', ticksPerUnit: 900 },
+  { id: 'diamond', counts: { diamond: 1, diamond_block: 9 }, gather: 'diamond', low: 8, high: 24, from: 'diamonds', where: 'underground', ticksPerUnit: 900 },
   { id: 'obsidian', counts: { obsidian: 1 }, gather: 'obsidian', low: 14, high: 24, from: 'diamonds', where: 'underground', ticksPerUnit: 450 },
   { id: 'food', counts: { '#food': 1 }, gather: FOOD_GOAL, unit: 'nutrition', low: 40, high: 80, from: 'food', where: 'surface', ticksPerUnit: 50 },
   { id: 'arrow', counts: { arrow: 1 }, gather: 'arrow', low: 32, high: 64, keep: { arrow: Infinity }, from: 'diamonds', where: 'surface', ticksPerUnit: 150 }
