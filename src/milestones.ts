@@ -4,7 +4,7 @@
 // through, the dragon fought, out by the exit portal). Each skill runs as one foreground task, so the reflexes still
 // preempt it (it starts over after).
 import type { Bot } from 'mineflayer'
-import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET } from './planner/progression'
+import { BOOKSHELVES, EYES_TARGET } from './planner/progression'
 import type { MilestoneHandler } from './runner'
 import { buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
 import type { ExploreOptions } from './nether/fortress'
@@ -134,7 +134,7 @@ export const eyesHandler: MilestoneHandler = async ({ bot, executor, signal, log
   const { room } = await executor.task('to the stronghold', async (s) => await strongholdToPortalRoom(bot, {}, s), signal)
   // the milestone's check: the stronghold remembered, enough eyes left for the frame
   executor.memory.addPoi('stronghold', room.room.center, 'overworld', 'portal room')
-  if (countItems(bot, 'ender_eye') < EYES_FOR_FRAME) log(`only ${countItems(bot, 'ender_eye')} eyes left for the frame`)
+  log(`the portal room at ${room.room.center.x} ${room.room.center.y} ${room.room.center.z}: ${room.room.eyesNeeded} eyes to put in, ${countItems(bot, 'ender_eye')} held`)
 }
 
 export const endHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {

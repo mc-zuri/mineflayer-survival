@@ -187,3 +187,13 @@ test('a crop remembered (maybe not grown: the bot\'s own farm) is no cheaper to 
   const seen = planMilestone(registry, milestone('food'), state(kit, { memory }), { position: { x: 0, y: 64, z: 0 }, findCost: t => t.name === 'carrots' ? 20 : undefined })
   assert.ok(seen.steps.some(st => st.kind === 'mine' && st.item === 'carrot'))
 })
+
+test('the eyes milestone is done in the portal room with the eyes its empty frames take (eyes=N), 12 when no room is read', () => {
+  const s = state({ ender_eye: 10 })
+  s.memory.addPoi('stronghold', { x: 2353, y: -22, z: 1012 }, 'overworld', 'portal room')
+  assert.equal(milestone('eyes').done(s), false)
+  s.memory.addPoi('end_portal', { x: 2353, y: -22, z: 1012 }, 'overworld', 'eyes=9')
+  assert.equal(milestone('eyes').done(s), true)
+  s.memory.addPoi('end_portal', { x: 2353, y: -22, z: 1012 }, 'overworld', 'eyes=11')
+  assert.equal(milestone('eyes').done(s), false)
+})

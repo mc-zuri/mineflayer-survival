@@ -110,6 +110,18 @@ export function eyesAvailable (state: ProgressState): number {
   return inv.count('ender_eye') + Math.min(powder, inv.count('ender_pearl'))
 }
 
+/**
+ * The eyes the portal still takes: the room's empty frames as findPortalRoom read them (the end_portal point's
+ * eyes=N; 1 in 10 frames comes with its eye, EndPortalFrameBlock in StrongholdPieces.PortalRoom), else a frame's 12.
+ * On 26.3 seed 2 the bot stood in the portal room with 10 eyes and the milestone, asking for 12, sent it back to
+ * craft eyes it had nothing for.
+ */
+export function eyesForPortal (memory: WorldMemory): number {
+  const room = memory.getPois('end_portal', { dimension: 'overworld' })[0]
+  const m = /eyes=(\d+)/.exec(room?.note ?? '')
+  return m != null ? Number(m[1]) : EYES_FOR_FRAME
+}
+
 const portalKnown = (state: ProgressState): boolean => state.memory.getPois('nether_portal').length > 0
 
 export const MILESTONES: readonly Milestone[] = [
@@ -203,7 +215,7 @@ export const MILESTONES: readonly Milestone[] = [
   {
     id: 'eyes',
     title: 'craft the eyes and triangulate the stronghold',
-    done: s => s.memory.getPois('stronghold').length > 0 && s.inventory.count('ender_eye') >= EYES_FOR_FRAME,
+    done: s => s.memory.getPois('stronghold').length > 0 && s.inventory.count('ender_eye') >= eyesForPortal(s.memory),
     goals: () => [{ item: 'ender_eye', count: EYES_TARGET }]
   },
   {
