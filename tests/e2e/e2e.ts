@@ -125,6 +125,11 @@ export function watchEventLoop (thresholdMs: number, onBlocked: (lateMs: number)
   return timer
 }
 
+/** play's options for a run: the world's seed passed on too (findFortress's seeded candidates, the epochs' End Cities) */
+export function playOptions (opts: Pick<E2EOptions, 'maxTicks' | 'until' | 'seed'>, saveFile: string): { saveFile: string, maxTicks: number, until?: MilestoneId, seed: string } {
+  return { saveFile, maxTicks: opts.maxTicks, until: opts.until, seed: opts.seed }
+}
+
 export function testPassed (lines: readonly string[]): boolean {
   return lines.some(l => /^Test passed/.test(l))
 }
@@ -222,7 +227,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
         log(`checkpoint ${dir}`)
       }).catch(err => log(`checkpoint ${dir} failed: ${(err as Error).message}`))
     })
-    const result: PlayResult = await b.survival.play({ saveFile, maxTicks: opts.maxTicks, until: opts.until })
+    const result: PlayResult = await b.survival.play(playOptions(opts, saveFile))
     await checkpointing
     const ticks = b.lockstep.ticks - k0
     const wallMs = Date.now() - wall0

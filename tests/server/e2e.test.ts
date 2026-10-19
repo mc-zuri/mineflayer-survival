@@ -86,3 +86,9 @@ test('watchEventLoop: tells of a synchronous hold-up over the threshold', async 
   assert.equal(late.length, 1)
   assert.ok(late[0] >= 100, String(late[0]))
 })
+
+test('playOptions passes the world\'s seed on to play', async () => {
+  const { playOptions, parseArgs } = await import('../e2e/e2e')
+  const opts = parseArgs(['--seed', '7', '--max-ticks', '1000'])
+  assert.deepEqual(playOptions(opts, 'save.json'), { saveFile: 'save.json', maxTicks: 1000, until: undefined, seed: '7' })
+})
