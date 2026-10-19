@@ -118,3 +118,30 @@ test('tripKitItems: the pickaxes but the best go in (a respawn with no pickaxe d
   assert.deepStrictEqual(by, { iron_pickaxe: 1 })
   assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }]), [])
 })
+
+test('a respawn far from the trip kit at night with no armor waits the night out first (waitOutNightFirst), then walks', async () => {
+  const { Runner, waitOutNightFirst, NIGHT_WALK_DISTANCE } = await import('../../src/runner')
+  assert.strictEqual(waitOutNightFirst(18000, NIGHT_WALK_DISTANCE + 1, 0), true)
+  assert.strictEqual(waitOutNightFirst(6000, 2400, 0), false, 'by day it walks')
+  assert.strictEqual(waitOutNightFirst(18000, 20, 0), false, 'the kit by: it goes')
+  assert.strictEqual(waitOutNightFirst(18000, 2400, 15), false, 'with armor on it goes')
+  const { EventEmitter } = await import('node:events')
+  const { TaskRunner } = await import('../../src/core/taskRunner')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { Vec3 } = await import('vec3')
+  const bot: any = new EventEmitter()
+  bot.registry = require('minecraft-data')('1.21.11')
+  bot.inventory = { slots: new Array(46).fill(null), items: () => [] }
+  bot.entity = { position: new Vec3(0, 64, 0) }
+  bot.game = { dimension: 'overworld' }
+  bot.health = 20
+  bot.time = { timeOfDay: 18000 }
+  bot.survival = { memory: new WorldMemory(), tasks: new TaskRunner(bot), handlers: {}, advancements: new Set() }
+  const runner = new Runner(bot, { log: () => {} })
+  bot.survival.memory.addPoi('trip_kit', { x: 2352, y: -22, z: 1016 }, 'overworld', 'spare kit')
+  bot.survival.memory.rememberChest({ x: 2352, y: -22, z: 1016 }, { iron_sword: 1 }, 'overworld')
+  const tasks: string[] = []
+  runner.executor.task = (async (name: string) => { tasks.push(name); return { iron_sword: 1 } }) as any
+  await runner.tripRekit()
+  assert.deepStrictEqual(tasks, ['wait out the night', 'to the trip kit', 'the trip kit'])
+})

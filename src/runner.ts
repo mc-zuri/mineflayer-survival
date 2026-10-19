@@ -30,6 +30,7 @@ import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
 import { MILESTONE_HANDLERS, harvestGrownFarms } from './milestones'
 import { TRIP_KIT, takeTripKit } from './skills/tripKit'
+import { armorPoints, shelter, sleepThroughNight } from './skills/shelter'
 import { overland } from './end/strongholdSkills'
 import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
@@ -171,6 +172,17 @@ export function progressState (bot: Bot, memory: WorldMemory): ProgressState {
   if (base?.table != null) stations.push('crafting_table')
   if ((base?.furnaces.length ?? 0) > 0) stations.push('furnace')
   return { inventory: new Inventory(bot.registry as any, items), equipment, memory, stations, enchanted, advancements: [...((bot as any).survival?.advancements ?? [])] }
+}
+
+/**
+ * A respawn this far from the trip kit or further walks there by day when it has no armor (a 26.3 bot respawned at the
+ * world's spawn at night, bare, walked 600 blocks into skeletons and a creeper and was blown up)
+ */
+export const NIGHT_WALK_DISTANCE = 64
+
+/** whether to wait the night out (a bed by, else a hole dug: shelter) before the walk to the trip kit */
+export function waitOutNightFirst (timeOfDay: number, distance: number, armor: number): boolean {
+  return canSleepNow(timeOfDay, false) && distance > NIGHT_WALK_DISTANCE && armor === 0
 }
 
 /** whether a death spot is worth going back to: in this dimension, not underground, in lava or the void, the items not gone yet */
@@ -1007,6 +1019,20 @@ export class Runner {
     if (Object.values(items).every(n => n <= 0)) return null
     this.log(`to the trip kit at ${poi.x} ${poi.y} ${poi.z}`)
     const at = new Vec3(poi.x, poi.y, poi.z)
+    const bot = this.bot
+    const far = bot.entity.position.distanceTo(at)
+    if (waitOutNightFirst(bot.time?.timeOfDay ?? 0, far, armorPoints(bot))) {
+      this.log(`night, ${far.toFixed(0)} blocks from the trip kit with no armor: the night waited out first`)
+      await this.executor.task('wait out the night', async (s) => {
+        // the respawn's bed if it is by, else a hole dug in the ground
+        const bed = typeof bot.findBlock === 'function' ? bot.findBlock({ matching: (b: any) => isBed(b.name), maxDistance: 16 }) : null
+        if (bed != null) return await sleepThroughNight(bot, { signal: s, bedDistance: 16 })
+        return await shelter(bot, { signal: s })
+      }, signal).catch(err => {
+        if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+        this.log(`the night: ${(err as Error).message}`)
+      })
+    }
     try {
       if (this.bot.entity.position.distanceTo(at) > 4) await this.executor.task('to the trip kit', async (s) => { await overland(this.bot, { target: at, range: 2, exactY: true }, s) }, signal)
       return await this.executor.task('the trip kit', async (s) => await takeTripKit(this.bot, this.memory, s), signal)
