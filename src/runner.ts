@@ -29,6 +29,8 @@ import { pickupDrops } from './skills/pickupDrops'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
 import { MILESTONE_HANDLERS, harvestGrownFarms } from './milestones'
+import { TRIP_KIT, takeTripKit } from './skills/tripKit'
+import { overland } from './end/strongholdSkills'
 import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { Diagnostics, ReportSummary, WatchdogOptions } from './diagnostics'
@@ -959,8 +961,35 @@ export class Runner {
         diag?.recovery({ deathSpot: `failed: ${(err as Error).message}` })
       }
     }
+    // a trip's spare kit (left by the stronghold's portal room before the End) first: the trip goes on from there
+    const trip = await this.tripRekit(signal)
+    if (trip != null) {
+      diag?.recovery({ kit: trip })
+      return
+    }
     const kit = await this.rekit(signal)
     diag?.recovery({ kit: kit ?? 'no base' })
+  }
+
+  /**
+   * The trip kit's chest (skills/tripKit) when it still holds something: gone to over the surface and emptied. Null
+   * when there's none.
+   */
+  async tripRekit (signal?: AbortSignal): Promise<Record<string, number> | null> {
+    const poi = this.memory.getPois(TRIP_KIT, { dimension: 'overworld', near: this.bot.entity.position })[0]
+    if (poi == null || normalizeDimension(this.bot.game?.dimension) !== 'overworld') return null
+    const items = this.memory.chestAt(poi, 'overworld')?.items ?? {}
+    if (Object.values(items).every(n => n <= 0)) return null
+    this.log(`to the trip kit at ${poi.x} ${poi.y} ${poi.z}`)
+    const at = new Vec3(poi.x, poi.y, poi.z)
+    try {
+      if (this.bot.entity.position.distanceTo(at) > 4) await this.executor.task('to the trip kit', async (s) => { await overland(this.bot, { target: at, range: 2, exactY: true }, s) }, signal)
+      return await this.executor.task('the trip kit', async (s) => await takeTripKit(this.bot, this.memory, s), signal)
+    } catch (err) {
+      if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+      this.log(`the trip kit: ${(err as Error).message}`)
+      return null
+    }
   }
 
   /** takes the kit (what the keep rule keeps: tools, armor, food, torches...) out of the base's chests; what it took, null with no base */

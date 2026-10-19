@@ -15,7 +15,7 @@ import { tunnelTo } from './skills/tunnel'
 import { isAbort, isSkillError } from './skills/errors'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
-import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd, readPortalRoom, SCAFFOLD_ITEMS } from './end/skills'
+import { crossToIsland, enterEnd, fightDragon, gotoNear, isInEnd, leaveEnd, readPortalRoom, SCAFFOLD_ITEMS } from './end/skills'
 import { collectBlock } from './skills/collectBlock'
 import { countBookshelves, enchant, enchantGear, findEnchantingTable } from './skills/enchant'
 import { applyBooks } from './skills/anvil'
@@ -23,6 +23,8 @@ import { experience, gainLevels } from './skills/xp'
 import { BREEDING_FOOD, breedAnimals, isAdult, releaseAnimals } from './skills/husbandry'
 import { plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
+import { TRIP_KIT, stashTripKit } from './skills/tripKit'
+import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
@@ -387,6 +389,56 @@ export function portalRoomNear (bot: Bot): boolean {
   return room != null && room.unseen.length === 0
 }
 
+/** ticks a chest and a bed for the trip kit may cost (the plan's estimate) */
+export const TRIP_KIT_TICKS = 3000
+
+/**
+ * The trip kit left by the bot (skills/tripKit) unless one with something in it is known: a chest got (and a bed when
+ * cheap), the spares put in, the respawn point set by it
+ */
+export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  const known = executor.memory.getPois(TRIP_KIT, { dimension: 'overworld', near: bot.entity.position })[0]
+  if (known != null && Object.values(executor.memory.chestAt(known, 'overworld')?.items ?? {}).some(n => n > 0)) return
+  try {
+    const beds = bot.registry.itemsArray.map(i => i.name).filter(n => n.endsWith('_bed'))
+    const hasBed = bot.inventory.items().some(i => i.name.endsWith('_bed'))
+    for (const want of [[{ item: 'chest', count: 1 }], ...(hasBed ? [] : [[{ item: beds, count: 1 }]])]) {
+      const plan = executor.plan(want)
+      if (plan.ok && plan.cost <= TRIP_KIT_TICKS) await executor.obtain(want, signal)
+    }
+    const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s), signal)
+    log(`trip kit at ${kit.chest.toString()}: ${Object.entries(kit.stored).map(([n, c]) => `${c} ${n}`).join(', ')}${kit.bed != null ? ', the respawn point by it' : ''}`)
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`no trip kit: ${(err as Error).message}`)
+  }
+}
+
+/** ticks a death's drops last (ItemEntity's 6000-tick lifespan) */
+export const DROP_LIFESPAN = 6000
+
+/**
+ * Back to a death's drops in the End, when the death was there lately and the spot is on the island's ground (not
+ * the void): walked to and picked up
+ */
+export async function recoverEndDrops (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  const death = executor.memory.death
+  if (death == null || death.dimension !== 'the_end' || executor.memory.now - death.seen > DROP_LIFESPAN || death.y < 10) return
+  const spot = new Vec3(death.x, death.y, death.z)
+  log(`End: back to the drops at ${death.x} ${death.y} ${death.z}`)
+  try {
+    await executor.task('the drops', async (s) => {
+      await crossToIsland(bot, { signal: s })
+      await gotoNear(bot, spot, 2, { signal: s })
+      return await pickupDrops(bot, { near: spot.offset(0.5, 0.5, 0.5), radius: 10 }, s)
+    }, signal)
+    executor.memory.death = null
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`End: the drops: ${(err as Error).message}`)
+  }
+}
+
 /** ticks a pumpkin and shears for the End's carved pumpkin may cost (the plan's estimate) */
 export const PUMPKIN_TICKS = 2000
 
@@ -427,8 +479,12 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
         log(`End: no carved pumpkin: ${(err as Error).message}`)
       })
     }
+    // a spare kit by the portal room and the respawn point by it, before the End (a death there was the game lost)
+    await leaveTripKit(bot, executor, signal, log)
     await executor.task('into the End', async (s) => await enterEnd(bot, { signal: s }), signal)
   }
+  // the drops of a death on the island, while they last and lie on ground
+  if (isInEnd(bot)) await recoverEndDrops(bot, executor, signal, log)
   if (isInEnd(bot) && countItems(bot, 'carved_pumpkin') > 0) await executor.task('wear the pumpkin', async (s) => await wearPumpkin(bot, s), signal)
   // off the arrival platform over the void to the island first (the fight goes for the podium in a straight line)
   await executor.task('over to the island', async (s) => await crossToIsland(bot, { signal: s }), signal)
