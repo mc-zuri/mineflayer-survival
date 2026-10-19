@@ -234,7 +234,7 @@ test('a pool the tunnel stops short of, within 8 blocks, is worked from there', 
   assert.equal(calls[calls.indexOf('to the lava') + 1], 'build a nether portal', calls.join(', '))
 })
 
-test('netherKit: a sword and a chestplate got when missing, and the gold put on, before the nether', async () => {
+test('netherKit: a sword and a chestplate got when missing, and golden boots made, before the nether', async () => {
   const { netherKit } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const bot = fakeBot({ items: [item('stone_pickaxe', 1), item('gold_ingot', 8)] })
@@ -246,9 +246,23 @@ test('netherKit: a sword and a chestplate got when missing, and the gold put on,
     task: async (name: string) => { calls.push(name) }
   }
   await netherKit(bot, executor, new AbortController().signal, () => {})
-  assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate', 'gold on for the piglins'])
+  assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate', 'obtain golden_boots'])
   calls.length = 0
   const armed = fakeBot({ items: [item('diamond_sword', 1), item('diamond_chestplate', 1)] })
   await netherKit(armed, executor, new AbortController().signal, () => {})
   assert.deepStrictEqual(calls, [])
+})
+
+test('goldOnInTheNether: the golden piece put on once in the nether, not in the overworld', async () => {
+  const { goldOnInTheNether } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('golden_boots', 1)] })
+  const calls: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (name: string) => { calls.push(name) } }
+  bot.game.dimension = 'overworld'
+  await goldOnInTheNether(bot, executor, new AbortController().signal, () => {})
+  assert.deepStrictEqual(calls, [])
+  bot.game.dimension = 'the_nether'
+  await goldOnInTheNether(bot, executor, new AbortController().signal, () => {})
+  assert.deepStrictEqual(calls, ['gold on for the piglins'])
 })

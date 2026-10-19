@@ -592,12 +592,24 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
       log(`nether kit: ${(err as Error).message}`)
     })
   }
-  if (!wearingGold(bot) && (countItems(bot, 'gold_ingot') >= 4 || bot.inventory.items().some(i => i.name.startsWith('golden_') && /_(helmet|chestplate|leggings|boots)$/.test(i.name)))) {
-    await executor.task('gold on for the piglins', async (s) => await wearGold(bot, s), signal).catch(err => {
+  // the golden boots made now, put on once in (kept on there: goldArmorRequired is the nether's)
+  if (!wearingGold(bot) && countItems(bot, GOLD_PIECES) === 0 && countItems(bot, 'gold_ingot') >= 4) {
+    await executor.obtain([{ item: 'golden_boots', count: 1 }], signal).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-      log(`nether kit: no gold on: ${(err as Error).message}`)
+      log(`nether kit: no golden boots: ${(err as Error).message}`)
     })
   }
+}
+
+const GOLD_PIECES = ['golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots']
+
+/** the golden piece put on in the nether, when one is held or can be made (the piglins leave such a player alone) */
+export async function goldOnInTheNether (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  if (!inNether(bot) || wearingGold(bot) || (countItems(bot, GOLD_PIECES) === 0 && countItems(bot, 'gold_ingot') < 4)) return
+  await executor.task('gold on for the piglins', async (s) => await wearGold(bot, s), signal).catch(err => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`nether: no gold on: ${(err as Error).message}`)
+  })
 }
 
 /** blocks carried for the nether's bridges and pillars (netherrack mined when fewer than half are held) */
@@ -634,6 +646,7 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     await netherKit(bot, executor, signal, log)
     await executor.task('into the nether', async (s) => await enterNether(bot, { build: true }, s), signal)
   }
+  await goldOnInTheNether(bot, executor, signal, log)
   const needs = netherNeeds({ count })
   // blocks for the nether's bridges before its long walks (the netherrack about: a path bridged over the lava sea
   // at y 81 ran out of blocks half way, 'no item to place', and the bot fell into the lava, three times on 26.3)
