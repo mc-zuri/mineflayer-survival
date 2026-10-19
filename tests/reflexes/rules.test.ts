@@ -289,3 +289,11 @@ test('eat reflex: starving (food 6 or less) the bot eats with a zombie in range 
   assert.strictEqual(check(eatReflex, { food: 0, health: 1, items: [item('bread', 16)], entities: [zombie] }), 'eat')
   assert.strictEqual(check(eatReflex, { food: 7, items: [item('bread', 16)], entities: [zombie] }), null)
 })
+
+test('a slime, a magma cube, a phantom and a hoglin are hostiles too (minecraft-data types them mob and animal)', async () => {
+  const { isHostile } = await import('../../src/reflexes/rules')
+  const bot = fakeBot()
+  for (const name of ['slime', 'magma_cube', 'phantom', 'hoglin', 'zombie']) assert.strictEqual(isHostile(bot, entity({ name, position: at(3) })), true, name)
+  for (const name of ['cow', 'villager']) assert.strictEqual(isHostile(bot, entity({ name, position: at(3) })), false, name)
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'slime', position: at(3) })], items: [item('diamond_sword', 1)] }), 'fight slime')
+})

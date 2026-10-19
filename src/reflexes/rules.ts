@@ -14,9 +14,16 @@ import { isBed } from '../core/items'
 import { breakFall, landingY, shouldBreakFall } from '../skills/fall'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
+/**
+ * Mobs that attack a player on sight that minecraft-data doesn't type 'hostile' (its 'mob' and 'animal': Slime and
+ * MagmaCube are Mob, Phantom FlyingMob, Hoglin Animal): a slime of a slime chunk killed a 26.3 bot in a cave that
+ * never hit back, 17 hits
+ */
+export const HOSTILE_UNTYPED = new Set(['slime', 'magma_cube', 'phantom', 'hoglin'])
+
 export function isHostile (bot: Bot, e: Entity): boolean {
   if (e === bot.entity || e.name == null) return false
-  return (bot.registry.entitiesByName as any)[e.name]?.type === 'hostile'
+  return (bot.registry.entitiesByName as any)[e.name]?.type === 'hostile' || HOSTILE_UNTYPED.has(e.name)
 }
 
 function distance (bot: Bot, e: Entity): number {
