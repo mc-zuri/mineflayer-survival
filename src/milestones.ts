@@ -50,7 +50,7 @@ export const HERD = 'herd'
 
 /** ticks the enchanting milestone may spend growing its herd for the books' leather (lockstep: days of game time) */
 export const HERD_BUDGET_TICKS = 150000
-/** a wait between the herd's chores: levels gained meanwhile (mining, smelting), or the time let pass */
+/** a wait between the herd's chores, by the herd */
 export const HERD_CHORE_TICKS = 3000
 
 /**
@@ -67,7 +67,7 @@ export function herdChore (state: { leather: number, want: number, adults: numbe
 
 /**
  * Leather from the bot's own herd until `want` are held or HERD_BUDGET_TICKS are gone: every pair bred as its cooldown
- * ends, the calves waited for while levels are gained, the wheat farm harvested for their food (not baked), and the
+ * ends, the calves waited for by the herd, the wheat farm harvested for their food (not baked), and the
  * surplus adults killed once they cover what's wanted (two kept to breed on)
  */
 export async function leatherFromHerd (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
@@ -111,13 +111,9 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
         .then(r => log(`herd: ${r.fed} fed (${state.adults} cows, ${state.calves} calves, ${state.leather} leather of ${want})`))
         .catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
     }
-    // the calves grow meanwhile: levels gained (the table's top offer wants 30), or the time let pass
-    try {
-      await executor.task('levels while the calves grow', async (s) => await gainLevels(bot, { level: 30, maxTicks: HERD_CHORE_TICKS }, s), signal)
-    } catch (err) {
-      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-      await executor.task('wait for the calves', async (s) => { await waitTicks(bot, HERD_CHORE_TICKS / 3, s) }, signal)
-    }
+    // the calves grow meanwhile, the bot by the herd (the levels' mining between dug it into a pit under the herd it
+    // never got out of, 140000 ticks on one coal ore, on 26.3: the levels are the enchanting's own after)
+    await executor.task('wait for the calves', async (s) => { await waitTicks(bot, HERD_CHORE_TICKS, s) }, signal)
   }
 }
 
