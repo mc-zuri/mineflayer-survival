@@ -126,9 +126,21 @@ for (const version of VERSIONS) {
     for (const t of tools) items[t] = 1
     const bag = new Inventory(registry, items)
     const owned = new Inventory(registry, { ...items, iron_helmet: 1, iron_chestplate: 1, iron_leggings: 1, iron_boots: 1 })
-    const ups = policy.topUps(owned, {}, ['wood', 'stone'], ['underground'], bag)
+    const ups = policy.topUps(owned, {}, ['wood', 'stone'], ['underground'], { bag })
     assert.deepEqual(ups.map(u => [u.mark.id, u.units]), [['torch', 64], ['coal', 64]])
     // counted with the armor in, the bag would be full
     assert.equal(new StockPolicy({ reserveSlots: 10 }).topUps(owned, {}, ['wood', 'stone'], ['underground']).length, 0)
+  })
+}
+
+for (const version of VERSIONS) {
+  const registry: any = minecraftData(version)
+  test(`${version}: with nowhere to store, a mark gathers up to its working set only; the ores, which have none, to the high mark`, () => {
+    const inv = new Inventory(registry, { cobblestone: 20, coal: 10, stone_pickaxe: 1 })
+    const ups = new StockPolicy().topUps(inv, {}, ['wood', 'stone'], ['underground'], { canStore: false })
+    assert.deepEqual(Object.fromEntries(ups.map(u => [u.mark.id, u.units])), { stone: 44, torch: 64, coal: 22, iron: 64 })
+    // with the base's chests the trip gathers what the slots take
+    const stored = new StockPolicy().topUps(inv, {}, ['wood', 'stone'], ['underground'], { canStore: true })
+    assert.ok((stored.find(u => u.mark.id === 'stone')?.units ?? 0) > 64)
   })
 }

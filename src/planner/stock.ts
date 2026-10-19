@@ -99,6 +99,13 @@ export interface StockLevel {
   stored: number
 }
 
+export interface TopUpOptions {
+  /** the main inventory the free slots are counted in, when the inventory has the worn armor too (default: it) */
+  bag?: Inventory
+  /** whether there's somewhere to store what's over the working set: a base with chests (default true) */
+  canStore?: boolean
+}
+
 /** a top-up to make: the request for the inventory, and the most ticks it may take */
 export interface TopUp {
   mark: StockMark
@@ -202,10 +209,12 @@ export class StockPolicy {
    * The top-ups due at these places (the schedule's: the surface by day, underground by night or down the mine), the
    * lowest first (by level over low). Each gathers to its high mark, as much as fits this trip: the slots free beyond
    * reserveSlots (the junk counted free), shared out among the top-ups due, a slot each to the lowest ones when there are
-   * fewer slots than top-ups (the rest comes on a later trip, the chests holding what's gathered between). `bag` is the
-   * main inventory the slots are counted in, when `inventory` has the worn armor too. Updates the levels first.
+   * fewer slots than top-ups (the rest comes on a later trip, the chests holding what's gathered between). With nowhere
+   * to store (no base with chests yet), a mark with a working set gathers only up to it: more would ride in the bag
+   * until it filled. Updates the levels first.
    */
-  topUps (inventory: Inventory, stored: Readonly<Record<string, number>>, reached: readonly MilestoneId[], places: readonly StockPlace[], bag: Inventory = inventory): TopUp[] {
+  topUps (inventory: Inventory, stored: Readonly<Record<string, number>>, reached: readonly MilestoneId[], places: readonly StockPlace[], opts: TopUpOptions = {}): TopUp[] {
+    const bag = opts.bag ?? inventory
     const levels = this.update(inventory, stored, reached)
     const due = levels
       .filter(l => this.active.has(l.mark.id) && places.includes(l.mark.where))
@@ -221,9 +230,11 @@ export class StockPolicy {
       const slots = share + (extra > 0 ? 1 : 0)
       if (extra > 0) extra--
       const fits = slots * unitsPerSlot(mark, inventory.registry)
-      const units = Math.ceil(Math.min(mark.high - level.have, fits))
-      if (units <= 0) continue
       const alts = (typeof mark.gather === 'string' ? [mark.gather] : mark.gather).flatMap(g => [...tags.resolve(g)])
+      const kept = Math.max(-1, ...alts.map(a => this.keepCount(a, inventory.registry) ?? -1))
+      const cap = opts.canStore === false && kept >= 0 ? kept - level.carried : Infinity
+      const units = Math.ceil(Math.min(mark.high - level.have, fits, cap))
+      if (units <= 0) continue
       const held = heldFor(inventory, alts, { unit: mark.unit })
       const request: ObtainRequest = { item: mark.gather, count: held + units, ...(mark.unit != null ? { unit: mark.unit } : {}) }
       out.push({ mark, level, units, request, budget: Math.ceil(units * mark.ticksPerUnit) })

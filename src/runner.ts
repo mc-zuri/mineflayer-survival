@@ -615,7 +615,9 @@ export class Runner {
     const now = this.bot.survival.tasks.tick
     // the room counted in the 36 slots the items go to (the owned inventory has the worn armor and the off hand too)
     const bag = new Inventory(this.bot.registry as any, this.bot.inventory.items().map(i => ({ name: i.name, count: i.count })))
-    return this.stock.topUps(ownedInventory(this.bot), this.stockStored(), reached, places, bag).filter(u => (this.stockRetryAt.get(u.mark.id) ?? 0) <= now)
+    // with no base's chests to take what's over the working set, a top-up gathers no more than it
+    const canStore = (baseRecord(this.memory)?.chests.length ?? 0) > 0
+    return this.stock.topUps(ownedInventory(this.bot), this.stockStored(), reached, places, { bag, canStore }).filter(u => (this.stockRetryAt.get(u.mark.id) ?? 0) <= now)
   }
 
   /**
@@ -630,7 +632,12 @@ export class Runner {
     for (;;) {
       if (signal.aborted) throw signal.reason
       const up = this.dueTopUps(places, reached).find(u => !tried.has(u.mark.id))
-      if (up == null) return
+      if (up == null) {
+        // marks under way with nothing to gather this trip: no room in the bag (or at their working set, no base)
+        const waiting = tried.size === 0 ? (this.stock?.marks ?? []).filter(m => this.stock?.active.has(m.id) === true && places.includes(m.where) && (this.stockRetryAt.get(m.id) ?? 0) <= this.bot.survival.tasks.tick) : []
+        if (waiting.length > 0) this.log(`stock: no room this trip for ${waiting.map(m => m.id).join(', ')} (${this.bot.inventory.emptySlotCount?.() ?? '?'} slots free)`)
+        return
+      }
       tried.add(up.mark.id)
       const retryLater = (ticks = STOCK_RETRY_TICKS): void => { this.stockRetryAt.set(up.mark.id, this.bot.survival.tasks.tick + ticks) }
       const options: PlanOptions = { exclude: ['loot'], ...(places.includes('surface') ? {} : { undergroundOnly: true }) }
