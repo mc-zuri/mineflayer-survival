@@ -45,7 +45,7 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
     obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs.map(r => `${r.count} ${r.item}`).join(', ')}`) },
     task: async (name: string) => { calls.push(name); return { fortress: { center: { x: 0, y: 64, z: 0 } }, via: 'explore', ticks: 0 } }
   }
-  const bot = fakeBot({ items: [item('water_bucket', 1), item('bucket', 2)] })
+  const bot = fakeBot({ items: [item('water_bucket', 1), item('bucket', 2), item('diamond_pickaxe', 1)] })
   bot.game.dimension = 'overworld'
   bot.findBlocks = () => []
   await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any })
@@ -80,7 +80,7 @@ test('a portal\'s frame from the obsidian in sight first (the caves\' lava met b
   const { Vec3 } = await import('vec3')
   const calls: string[] = []
   const { item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1)] })
+  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1)] })
   bot.game.dimension = 'overworld'
   const obsidian = bot.registry.blocksByName.obsidian.id
   bot.findBlocks = (opts: any) => opts.matching === obsidian ? Array.from({ length: 12 }, (_, i) => new Vec3(i, -52, 3)) : []
@@ -165,4 +165,18 @@ test('pearls in the nether: a warped forest in sight is gone to, and waited in f
   assert.equal(tasks[0], 'a leg for pearls')
   assert.equal(tasks[1], 'wait for endermen')
   forestAt = new Vec3(0, 0, 0)
+})
+
+test('a portal with no diamond pickaxe (a death lost it) gets one before the lakes', async () => {
+  const { buildAPortal } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const calls: string[] = []
+  const bot = fakeBot({ position: new Vec3(0.5, -55, 0.5), items: [item('water_bucket', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.findBlocks = () => []
+  ;(bot as any).findBlock = () => null
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async (want: any[]) => { calls.push(`obtain ${want[0].item}`) }, task: async (name: string) => { calls.push(name) } }
+  await buildAPortal(bot, executor, new AbortController().signal, () => {})
+  assert.equal(calls[0], 'obtain diamond_pickaxe')
 })

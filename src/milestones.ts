@@ -470,6 +470,14 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
     })
   }
   await refillWater(bot, signal)
+  // a diamond pickaxe for the obsidian (a death lost the kit's: 'no diamond pickaxe to mine obsidian with' at every
+  // pool after, 26.3)
+  if (countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) {
+    await executor.obtain([{ item: 'diamond_pickaxe', count: 1 }], signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`a portal frame: a diamond pickaxe: ${(err as Error).message}`)
+    })
+  }
   const tries = (p: { x: number, y: number, z: number }): number => {
     const poi = executor.memory.getPois('lava_tried', { dimension: 'overworld' }).find(t => Math.hypot(t.x - p.x, t.z - p.z) < 16 && Math.abs(t.y - p.y) < 16)
     return poi == null ? 0 : Number(/tries=(\d+)/.exec(poi.note ?? '')?.[1] ?? 1)
@@ -535,7 +543,8 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
         await executor.task('obsidian from the lava', async (s) => await obsidianFromLava(bot, PORTAL_OBSIDIAN, s), signal)
         return await placeFromObsidian()
       } catch (err) {
-        if (signal.aborted || TaskError.is(err, 'DIED') || !isSkillError(err, 'NOT_FOUND')) throw err
+        // (no diamond pickaxe to mine the obsidian with, or no water: the cast takes neither)
+        if (signal.aborted || TaskError.is(err, 'DIED') || !(isSkillError(err, 'NOT_FOUND') || isSkillError(err, 'MISSING_ITEMS'))) throw err
         log(`a portal frame: ${(err as Error).message}: the lava carried up to a cast on the surface`)
       }
       // no shore either: the pool's lava carried up in buckets (more made from the iron) to a cast on flat ground
