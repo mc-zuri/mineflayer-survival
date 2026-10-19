@@ -35,3 +35,40 @@ test('restingY: an item comes to rest on top of a dirt path or slab in its cell,
   assert.strictEqual(touches(new Vec3(-30.53, 66.9375, -0.33), new Vec3(-30.73, 66, -0.31)), false)
   assert.strictEqual(touches(new Vec3(-30.53, 66.9375, -0.33), new Vec3(-30.73, 66.9375, -0.31)), true)
 })
+
+test('pickupDrops: a drop the bot couldn\'t get to is passed over by the pickups after it while it lies there, for UNREACHABLE_DROP_TICKS', async () => {
+  const { pickupDrops, UNREACHABLE_DROP_TICKS } = await import('../../src/skills/pickupDrops')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const registry = require('minecraft-data')('1.21.11')
+  const Item = require('prismarine-item')('1.21.11')
+  const bot = fakeBot({ position: new Vec3(0.7, 64, 0.3), world: (pos: Vec3) => pos.y < 64 ? 'stone' : 'air' })
+  bot.inventory.inventoryStart = 9
+  bot.inventory.inventoryEnd = 45
+  bot._client = { on: () => {}, off: () => {} }
+  bot.time = { age: 1000 }
+  // an item round a corner the bot doesn't get past: each trip ends where it started
+  bot.entities[60] = { id: 60, name: 'item', position: new Vec3(2.4, 64, -0.9), getDroppedItem: () => new Item(registry.itemsByName.cobblestone.id, 1) }
+  let trips = 0
+  bot.pathfinder = { isPathing: false, goto: async () => { trips++ }, cancel: async () => {}, world: {} }
+  bot.waitForTicks = async () => {}
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    // the first pickup goes for it and gives up; the pickups after each block mined (collectBlock) went for it again
+    await pickupDrops(bot, { near: new Vec3(1, 64, 0) })
+    const perTry = trips
+    assert.ok(perTry > 0)
+    await pickupDrops(bot, { near: new Vec3(1, 64, 0) })
+    await pickupDrops(bot, { near: new Vec3(1, 64, 0) })
+    assert.strictEqual(trips, perTry)
+    // once it moved (it fell, the water carried it) it's tried again
+    bot.entities[60].position = new Vec3(2.4, 64, -2)
+    await pickupDrops(bot, { near: new Vec3(1, 64, 0) })
+    assert.strictEqual(trips, 2 * perTry)
+    // and a minute on
+    bot.time.age += UNREACHABLE_DROP_TICKS
+    await pickupDrops(bot, { near: new Vec3(1, 64, 0) })
+    assert.strictEqual(trips, 3 * perTry)
+  } finally {
+    clearInterval(ticker)
+  }
+})

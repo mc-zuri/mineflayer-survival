@@ -103,6 +103,38 @@ export function restingY (blockAt: (pos: Vec3) => { boundingBox: string, shapes?
   return cell.y + Math.min(1, Math.max(...b.shapes.map(s => s[4])))
 }
 
+/** ticks a drop the bot couldn't get to is passed over by the pickups after (unless it moved): a minute */
+export const UNREACHABLE_DROP_TICKS = 1200
+
+/** the drops given up on, by entity id: where each lay and when (the bot's tick count, the lockstep client's or the world's age) */
+const unreachableDrops = new WeakMap<Bot, Map<number, { pos: Vec3, tick: number }>>()
+
+function tickCount (bot: Bot): number {
+  return (bot as any).lockstep?.ticks ?? Number(bot.time?.age ?? 0)
+}
+
+/**
+ * Whether a drop was given up on by an earlier pickup and still lies where it was then (within half a block), less
+ * than UNREACHABLE_DROP_TICKS ago: the pickup after each block mined (collectBlock) asked again for the same item it
+ * couldn't get to, and the bot walked into the same corner every time (5 times in 400 ticks on a play run).
+ */
+export function isUnreachableDrop (bot: Bot, drop: Entity): boolean {
+  const given = unreachableDrops.get(bot)?.get(drop.id)
+  if (given == null) return false
+  if (tickCount(bot) - given.tick >= UNREACHABLE_DROP_TICKS || given.pos.distanceTo(drop.position) > 0.5) {
+    unreachableDrops.get(bot)?.delete(drop.id)
+    return false
+  }
+  return true
+}
+
+/** remembers a drop the bot couldn't get to (isUnreachableDrop) */
+export function markUnreachableDrop (bot: Bot, drop: Entity): void {
+  let given = unreachableDrops.get(bot)
+  if (given == null) unreachableDrops.set(bot, given = new Map())
+  given.set(drop.id, { pos: drop.position.clone(), tick: tickCount(bot) })
+}
+
 export async function pickupDrops (bot: Bot, args: PickupDropsArgs = {}, signal?: AbortSignal): Promise<PickupDropsResult> {
   const near = args.near ?? bot.entity.position.clone()
   const radius = args.radius ?? 8
@@ -114,7 +146,7 @@ export async function pickupDrops (bot: Bot, args: PickupDropsArgs = {}, signal?
 
   for (;;) {
     throwIfAborted(signal, result())
-    const drop = nearbyDrops(bot, near, radius, args.names).find(entity => !skipped.has(entity.id))
+    const drop = nearbyDrops(bot, near, radius, args.names).find(entity => !skipped.has(entity.id) && !isUnreachableDrop(bot, entity))
     if (drop == null) break
     if (emptySlots(bot) === 0) {
       // (a stack that isn't full can still take it, so try, but don't treat a refusal as the item being gone)
@@ -146,6 +178,7 @@ export async function pickupDrops (bot: Bot, args: PickupDropsArgs = {}, signal?
     if (!gone() && !touching()) {
       trace('pickupDrops: no way to', droppedName(drop), 'at', drop.position.toString(), 'bot at', bot.entity.position.toString())
       skipped.add(drop.id)
+      markUnreachableDrop(bot, drop)
       continue
     }
     if (await waitUntil(bot, gone, wait, signal)) picked++
