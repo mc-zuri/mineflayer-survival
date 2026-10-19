@@ -446,7 +446,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       if (window.open && !wasOpen) { perches++; log(`perched (${String(window.phase)}) at tick ${tick}, health ${health}`) }
       wasOpen = window.open
       const dangers = dragonDangers(bot, portalY)
-      if (window.breath != null && (window.phase === 'sitting_flaming' || (window.phase === 'sitting_attacking' && window.phaseTicks > 10))) {
+      if (window.breath != null) {
         dangers.push({ center: window.breath.center, y: portalY, radius: window.breath.radius, why: 'breath' })
       }
       // under its head, neck or wings as they are now (taking off, landing, a sitting dragon turned to the bot): out

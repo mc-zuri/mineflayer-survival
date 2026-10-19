@@ -59,6 +59,8 @@ export const FLAME_WARMUP = 10
 export const SITTING_FLAME_ATTACKS = 4
 /** DragonSittingAttackingPhase: the roar before the flame */
 export const SITTING_ATTACK_TICKS = 40
+/** the ticks before the breath's cloud comes that its place is kept out of (a sprint out of it from in front of the head) */
+export const BREATH_LEAD_TICKS = 30
 /** DragonSittingScanningPhase: a player in range for this long makes it attack; none for SITTING_SCANNING_IDLE_TICKS and it leaves */
 export const SCANNING_ATTACK_TICKS = 25
 export const SCANNING_IDLE_TICKS = 100
@@ -434,7 +436,9 @@ export class DragonPhaseTracker {
         break
       case 'sitting_attacking':
         ticksLeft = Math.max(0, SITTING_ATTACK_TICKS - phaseTicks) + FLAME_DURATION + (SITTING_FLAME_ATTACKS - this.flames - 1) * (SITTING_ATTACK_TICKS + FLAME_DURATION + SCANNING_ATTACK_TICKS)
-        if (view != null) breath = breathZone(view)
+        // the cloud comes FLAME_WARMUP into the flame, after the roar's 40: kept to from BREATH_LEAD_TICKS before it, the
+        // roar's first ticks are melee time
+        if (view != null && phaseTicks >= SITTING_ATTACK_TICKS + FLAME_WARMUP - BREATH_LEAD_TICKS) breath = breathZone(view)
         break
       case 'sitting_flaming':
         ticksLeft = Math.max(0, FLAME_DURATION - phaseTicks) + (SITTING_FLAME_ATTACKS - this.flames) * (SITTING_ATTACK_TICKS + FLAME_DURATION + SCANNING_ATTACK_TICKS)

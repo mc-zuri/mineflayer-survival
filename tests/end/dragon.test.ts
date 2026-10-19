@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import minecraftData from 'minecraft-data'
-import { SCAN_TURN_SLACK, yawFacing, CONTACT_MARGIN, DragonPhaseTracker, FLAME_DURATION, JUMP_HEIGHT, SITTING_DAMAGE_LIMIT, TAKEOFF_HIT_MARGIN, TAKEOFF_WARNING_TICKS, headPosition, activityOf, breathZone, dragonZones, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, touchedZone, vanillaYaw } from '../../src/end/dragon'
+import { SCAN_TURN_SLACK, yawFacing, BREATH_LEAD_TICKS, CONTACT_MARGIN, DragonPhaseTracker, FLAME_DURATION, FLAME_WARMUP, SITTING_ATTACK_TICKS, JUMP_HEIGHT, SITTING_DAMAGE_LIMIT, TAKEOFF_HIT_MARGIN, TAKEOFF_WARNING_TICKS, headPosition, activityOf, breathZone, dragonZones, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, touchedZone, vanillaYaw } from '../../src/end/dragon'
 import { exitPortal } from '../../src/end/spikes'
 
 test('phase ids are the EnderDragonPhase creation order', () => {
@@ -68,7 +68,9 @@ test('the tracker opens the melee window while the dragon sits and closes it on 
   assert.ok(w.ticksLeft > 0)
   assert.equal(w.breath, null)
   t.update({ tick: 230, phase: 7, position: at, yaw: 45 })
-  assert.deepEqual(t.window(231).breath, breathZone({ position: at, yaw: 45 }))
+  // the roar's first ticks are melee time; its place is kept out of from BREATH_LEAD_TICKS before the cloud
+  assert.equal(t.window(231).breath, null)
+  assert.deepEqual(t.window(230 + SITTING_ATTACK_TICKS + FLAME_WARMUP - BREATH_LEAD_TICKS).breath, breathZone({ position: at, yaw: 45 }))
   t.update({ tick: 270, phase: 5, position: at, yaw: 45 })
   assert.equal(t.flames, 1)
   assert.ok(t.window(275).breath != null)
