@@ -104,3 +104,26 @@ test('a portal with no bucket gets one first; with no lava near to try it walks 
   assert.equal(calls.filter(c => c === 'a leg for lava').length, PORTAL_LEGS)
   assert.ok(calls.includes('obtain obsidian'))
 })
+
+test('the blaze rods wanted are fixed before the task: a restart with rods got meanwhile wants no more than the first', async () => {
+  const { netherHandler } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('ender_eye', 0)] })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
+  let rods: any = null
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async () => {},
+    task: async (name: string, fn: (s: AbortSignal) => Promise<unknown>) => {
+      if (name !== 'blaze rods') return { fortress: { center: { x: 0, y: 64, z: 0 } }, via: 'explore', ticks: 0 }
+      // the restart: the rods the first run got are held when it runs again
+      ;(bot.inventory as any).items = () => [{ name: 'blaze_rod', count: 8, type: bot.registry.itemsByName.blaze_rod.id }]
+      rods = await fn(new AbortController().signal)
+      throw new Error('stop here')
+    }
+  }
+  await assert.rejects(netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }), /stop here/)
+  assert.deepEqual(rods, { rods: 8, kills: 0, ticks: 0 })
+})

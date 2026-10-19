@@ -270,6 +270,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
   const onTick = (): void => { ticks++ }
   bot.on('physicsTick', onTick)
   const run = async (): Promise<BlazeRodsResult> => {
+    if (countItems(bot, 'blaze_rod') >= count) return { rods: countItems(bot, 'blaze_rod'), kills, ticks }
     const spawner = args.spawner != null ? v3(args.spawner) : v3(await findBlazeSpawner(bot, { safety: false }, signal))
     const standOff = args.standOff ?? 5
     const spots = campSpots(bot, spawner, standOff)

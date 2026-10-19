@@ -468,7 +468,10 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
       const found = await executor.task('find a fortress', async (s) => await findFortress(bot, { explore: route }, s), signal)
       log(`a fortress at ${found.fortress.center.x} ${found.fortress.center.y} ${found.fortress.center.z} (${found.via}, ${found.ticks} ticks)`)
     }
-    await executor.task('blaze rods', async (s) => await collectBlazeRods(bot, { count: count('blaze_rod') + needs.rods, spawner }, s), signal)
+    // the rods wanted fixed before the task (a restart after a reflex read the rods held again and wanted 8 more: a
+    // 26.3 bot fought at the spawner with 43 rods until a blaze killed it)
+    const rods = count('blaze_rod') + needs.rods
+    await executor.task('blaze rods', async (s) => await collectBlazeRods(bot, { count: rods, spawner }, s), signal)
   }
   const pearls = netherNeeds({ count }).pearls
   if (pearls > 0) {
