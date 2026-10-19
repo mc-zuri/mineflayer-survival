@@ -44,7 +44,7 @@ export const STAGES: Record<string, Stage> = {
       ...ENCHANTED_GEAR,
       ['ender_eye', 16], ['arrow', 128], ['cobblestone', 128], ['cooked_beef', 48], ['bread', 16], ['golden_apple', 2],
       ['water_bucket', 1], ['bucket', 1], ['torch', 32], ['oak_log', 64], ['crafting_table', 1], ['iron_ingot', 16], ['coal', 16],
-      ['flint_and_steel', 1], ['iron_pickaxe', 1], ['carved_pumpkin', 1]
+      ['flint_and_steel', 1], ['iron_pickaxe', 1], ['carved_pumpkin', 1], ['white_bed', 1]
     ]
   },
   // the nether: the enchanted gear, no eyes yet; a portal cast from lava with the buckets (or the obsidian carried),
@@ -58,7 +58,7 @@ export const STAGES: Record<string, Stage> = {
       ['arrow', 128], ['cobblestone', 128], ['cooked_beef', 48], ['bread', 16], ['golden_apple', 2],
       ['water_bucket', 1], ['bucket', 2], ['flint_and_steel', 1], ['gold_ingot', 32], ['golden_boots', 1],
       ['torch', 32], ['oak_log', 64], ['crafting_table', 1], ['iron_ingot', 16], ['coal', 16], ['iron_pickaxe', 1],
-      ['pumpkin', 1], ['shears', 1]
+      ['pumpkin', 1], ['shears', 1], ['white_bed', 1]
     ]
   },
   // the epoch before: farming and enchanting. The diamond gear plain, the eyes made already (the nether's done), and
@@ -73,7 +73,7 @@ export const STAGES: Record<string, Stage> = {
       ['ender_eye', 16], ['arrow', 128], ['cobblestone', 128], ['cooked_beef', 48], ['bread', 16],
       ['water_bucket', 2], ['bucket', 1], ['sugar_cane', 128], ['cow_spawn_egg', 8], ['wheat', 64], ['wheat_seeds', 32],
       ['diamond', 3], ['obsidian', 4], ['lapis_lazuli', 32], ['iron_ingot', 40], ['torch', 32], ['oak_log', 64],
-      ['crafting_table', 1], ['coal', 16], ['flint_and_steel', 1], ['iron_pickaxe', 1], ['pumpkin', 1], ['shears', 1]
+      ['crafting_table', 1], ['coal', 16], ['flint_and_steel', 1], ['iron_pickaxe', 1], ['pumpkin', 1], ['shears', 1], ['white_bed', 1]
     ]
   }
 }
