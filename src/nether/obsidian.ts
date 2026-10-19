@@ -7,6 +7,7 @@ import { Vec3 } from 'vec3'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { placeBlock } from '../skills/placeBlock'
+import { aimAtFace } from '../core/actions'
 import { navigateNear } from '../skills/navigate'
 import { countItems, findInventoryItem, trace, waitTicks, waitUntil } from '../skills/util'
 import { isLavaSource } from './portal'
@@ -103,7 +104,15 @@ export async function obsidianFromLava (bot: Bot, count: number, signal?: AbortS
     const bucket = findInventoryItem(bot, 'water_bucket')
     if (bucket == null) throw new SkillError('MISSING_ITEMS', 'the water bucket is gone')
     await bot.equip(bucket, 'hand')
-    await bot.lookAt(spot.offset(0.5, 0.02, 0.5), true)
+    // the crosshair on the top of the block under the spot (the bucket goes where the look hits: in a cave the rock
+    // round the bot can be in the way), from closer when it isn't in sight
+    const floor = bot.blockAt(spot.offset(0, -1, 0))
+    let aimed = floor != null && await aimAtFace(bot, floor as any, new Vec3(0, 1, 0)) != null
+    if (!aimed && floor != null) {
+      await navigateNear(bot, spot, 1, signal).catch(err => { if (isAbort(err)) throw err })
+      aimed = await aimAtFace(bot, floor as any, new Vec3(0, 1, 0)) != null
+    }
+    if (!aimed) await bot.lookAt(spot.offset(0.5, 0.02, 0.5), true)
     bot.activateItem()
     // poured beside a source it turns the source; poured on the pedestal it turns the sources about it
     const turned = (): boolean => side ? bot.blockAt(source)?.name === 'obsidian' : bot.findBlocks({ matching: obsidianId, point: spot, maxDistance: 2, count: 1 }).length > 0
