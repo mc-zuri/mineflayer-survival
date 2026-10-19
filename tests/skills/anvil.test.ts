@@ -21,3 +21,25 @@ test('repairMaterial: the material each tier repairs with, as the repair tags ha
   }
   for (const block of ANVIL_BLOCKS) assert.ok(registry.blocksByName[block] != null, block)
 })
+
+test('applyBooks: a book of protection goes on the helmet worn, taken off for the anvil and worn again after', async () => {
+  const { applyBooks } = await import('../../src/skills/anvil')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const book = item('enchanted_book', 1)
+  book.enchants = [{ name: 'projectile_protection', lvl: 1 }]
+  const helmet = item('diamond_helmet', 1)
+  const bot = fakeBot({ items: [book], armor: { head: helmet } })
+  bot._client = new (require('node:events').EventEmitter)()
+  bot.findBlock = () => null
+  const calls: string[] = []
+  bot.unequip = async (dest: string) => { calls.push(`unequip ${dest}`); bot.inventory.slots[5] = null; helmet.slot = 20; bot.inventory.slots[20] = helmet }
+  bot.equip = async (it: any, dest: string) => { calls.push(`equip ${it.name} ${dest}`) }
+  // no anvil about: the combine fails, and the helmet goes back on (the world ticks for the inventory's settling)
+  const timer = setInterval(() => bot.emit('physicsTick'), 0)
+  try {
+    await assert.rejects(applyBooks(bot), /no anvil/)
+  } finally {
+    clearInterval(timer)
+  }
+  assert.deepStrictEqual(calls, ['unequip head', 'equip diamond_helmet head'])
+})

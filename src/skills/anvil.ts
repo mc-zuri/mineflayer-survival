@@ -147,6 +147,9 @@ export async function repairItem (bot: Bot, args: { item: string, anvil?: Vec3 }
   return await anvilCombine(bot, { target: damaged, addition, anvil: args.anvil }, signal)
 }
 
+/** where each kind of armor is worn */
+const WORN_SLOTS: Partial<Record<ItemKind, 'head' | 'torso' | 'legs' | 'feet'>> = { helmet: 'head', chestplate: 'torso', leggings: 'legs', boots: 'feet' }
+
 /** the kinds of gear an enchantment is wanted on (ENCHANT_PREFERENCES), most wanted first */
 function kindsFor (enchantment: string): ItemKind[] {
   return (Object.keys(ENCHANT_PREFERENCES) as ItemKind[])
@@ -171,9 +174,20 @@ export async function applyBooks (bot: Bot, opts: { anvil?: Vec3 } = {}, signal?
     if (enchantment == null) continue
     for (const kind of kindsFor(enchantment)) {
       const has = (i: Item): boolean => (i.enchants ?? []).some(e => e.name === enchantment)
-      const best = bestOfKind(inventoryItems(bot).filter(i => itemKind(i.name) === kind && !has(i)))
+      // the armor worn counts: taken off for the anvil and worn again after (the book of protection found only the
+      // bag, and the armor worn took none: 'nothing took a book', 26.3)
+      const dest = WORN_SLOTS[kind]
+      const worn = dest != null ? bot.inventory.slots[bot.getEquipmentDestSlot(dest)] : null
+      const candidates = [...inventoryItems(bot), ...(worn != null && itemKind(worn.name) === kind ? [worn] : [])].filter(i => itemKind(i.name) === kind && !has(i))
+      const best = bestOfKind(candidates)
       if (best == null) continue
+      const takeOff = worn != null && best === worn && dest != null
       try {
+        if (takeOff) {
+          await settleInventory(bot, signal)
+          await bot.unequip(dest)
+          await settleInventory(bot, signal)
+        }
         done.push(await anvilCombine(bot, {
           target: i => i.name === best.name && !has(i),
           addition: i => i.name === 'enchanted_book' && JSON.stringify(i.enchants) === key,
@@ -183,6 +197,11 @@ export async function applyBooks (bot: Bot, opts: { anvil?: Vec3 } = {}, signal?
       } catch (err) {
         if ((err as SkillError).reason === 'MISSING_ITEMS' && (err as any).partial?.needLevels != null) return done
         if ((err as SkillError).reason !== 'VERIFY_FAILED') throw err
+      } finally {
+        if (takeOff) {
+          const piece = inventoryItems(bot).filter(i => i.name === best.name).sort((a, b) => (b.enchants?.length ?? 0) - (a.enchants?.length ?? 0))[0]
+          if (piece != null) await bot.equip(piece, dest).catch(() => {})
+        }
       }
     }
   }
