@@ -59,7 +59,10 @@ const STACK = 64
  * - obsidian: a nether portal (10) and an enchanting table (4);
  * - food: 3 stacks of steak would be some 1500 points, more than a run to the dragon eats: a top-up under the food
  *   milestone's 40 points, to twice that (a hunt runs dear: 80 points took over 4000 ticks);
- * - arrows: the End's crystals and the dragon (the End kit's 64), from the diamonds on.
+ * - arrows: the End's crystals and the dragon (the End kit's 64), from the diamonds on;
+ * - paper and gunpowder: the elytra's rockets after the dragon (a paper and a gunpowder make 3 of flight duration 1),
+ *   the paper from the cane farm's sugar cane, the gunpowder from creepers hunted at night (a top-up's plan for it is
+ *   dear till a creeper is in sight, so it waits for the night's).
  */
 export const STOCK_MARKS: readonly StockMark[] = [
   { id: 'wood', counts: { '#logs_that_burn': 1, '#planks': 1 / 4, stick: 1 / 8 }, gather: '#logs_that_burn', low: 32, high: 64, keep: { '#logs_that_burn': 64 }, where: 'surface', ticksPerUnit: 60 },
@@ -73,7 +76,9 @@ export const STOCK_MARKS: readonly StockMark[] = [
   { id: 'diamond', counts: { diamond: 1, diamond_block: 9 }, gather: 'diamond', low: 8, high: 24, from: 'diamonds', where: 'underground', ticksPerUnit: 900 },
   { id: 'obsidian', counts: { obsidian: 1 }, gather: 'obsidian', low: 14, high: 24, from: 'diamonds', where: 'underground', ticksPerUnit: 450 },
   { id: 'food', counts: { '#food': 1 }, gather: FOOD_GOAL, unit: 'nutrition', low: 40, high: 80, from: 'food', where: 'surface', ticksPerUnit: 50 },
-  { id: 'arrow', counts: { arrow: 1 }, gather: 'arrow', low: 32, high: 64, keep: { arrow: Infinity }, from: 'diamonds', where: 'surface', ticksPerUnit: 150 }
+  { id: 'arrow', counts: { arrow: 1 }, gather: 'arrow', low: 32, high: 64, keep: { arrow: Infinity }, from: 'diamonds', where: 'surface', ticksPerUnit: 150 },
+  { id: 'paper', counts: { paper: 1, sugar_cane: 1 }, gather: 'paper', low: 16, high: 48, keep: { paper: 16 }, from: 'end', where: 'surface', ticksPerUnit: 60 },
+  { id: 'gunpowder', counts: { gunpowder: 1 }, gather: 'gunpowder', low: 8, high: 32, keep: { gunpowder: 16 }, from: 'end', where: 'surface', ticksPerUnit: 600 }
 ]
 
 /** slots a top-up leaves free for the work's own pickups (the milestone's items, the drops on the way) */

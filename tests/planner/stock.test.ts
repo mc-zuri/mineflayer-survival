@@ -164,3 +164,21 @@ test('the diamonds are stocked from the diamonds milestone on: the iron mileston
   const afterDiamonds = ids(['wood', 'stone', 'food', 'iron', 'diamonds'])
   assert.ok(afterDiamonds.includes('diamond'), afterDiamonds.join(', '))
 })
+
+for (const version of VERSIONS) {
+  const registry: any = minecraftData(version)
+  test(`${version}: after the dragon, paper (the sugar cane counted) and gunpowder for the rockets are kept, not before`, () => {
+    const policy = new StockPolicy()
+    const inv = new Inventory(registry, { sugar_cane: 4, gunpowder: 2 })
+    const before = policy.topUps(inv, {}, ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting', 'nether', 'eyes'], ['surface'])
+    assert.ok(!before.some(u => u.mark.id === 'paper' || u.mark.id === 'gunpowder'))
+    const after = policy.topUps(inv, {}, ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting', 'nether', 'eyes', 'end'], ['surface'])
+    const paper = after.find(u => u.mark.id === 'paper')
+    const gunpowder = after.find(u => u.mark.id === 'gunpowder')
+    assert.equal(paper?.request.item, 'paper')
+    assert.equal(paper?.units, 48 - 4)
+    assert.equal(gunpowder?.request.item, 'gunpowder')
+    assert.equal(gunpowder?.units, 32 - 2)
+    assert.equal(gunpowder?.budget, 30 * 600)
+  })
+}
