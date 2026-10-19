@@ -14,7 +14,7 @@ import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
 import { isAbort, isSkillError } from './skills/errors'
 import type { ExploreOptions } from './nether/fortress'
-import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
+import { craftEyes, overland, strongholdToPortalRoom } from './end/strongholdSkills'
 import { crossToIsland, enterEnd, fightDragon, gotoNear, isInEnd, leaveEnd, readPortalRoom, SCAFFOLD_ITEMS } from './end/skills'
 import { collectBlock } from './skills/collectBlock'
 import { countBookshelves, enchant, enchantGear, findEnchantingTable } from './skills/enchant'
@@ -43,6 +43,9 @@ export function netherNeeds (inv: { count: (name: string) => number }): { rods: 
   return { rods: Math.max(0, Math.ceil((wanted - powder) / 2)), pearls: Math.max(0, wanted - inv.count('ender_pearl')) }
 }
 
+/** the point of interest where the bot's herd was let out */
+export const HERD = 'herd'
+
 /** ticks the enchanting milestone may spend growing its herd for the books' leather (lockstep: days of game time) */
 export const HERD_BUDGET_TICKS = 150000
 /** a wait between the herd's chores: levels gained meanwhile (mining, smelting), or the time let pass */
@@ -67,9 +70,19 @@ export function herdChore (state: { leather: number, want: number, adults: numbe
  */
 export async function leatherFromHerd (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
   const start = executor.tasks.tick
-  const near = (e: any): boolean => e.position.distanceTo(bot.entity.position) <= 48
+  const home = executor.memory.getPois(HERD, { dimension: 'overworld', near: bot.entity.position })[0]
+  const at = home != null ? new Vec3(home.x, home.y, home.z) : bot.entity.position.clone()
+  const near = (e: any): boolean => e.position.distanceTo(at) <= 48
   for (;;) {
     if (signal.aborted) throw signal.reason
+    // back to the herd for its chores (the levels' mining between takes the bot off: 120 blocks off and 60 down, the
+    // herd out of sight and not bred, on 26.3)
+    if (bot.entity.position.distanceTo(at) > 16) {
+      await executor.task('back to the herd', async (s) => await overland(bot, { target: at, range: 4 }, s), signal).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`herd: no way back: ${(err as Error).message}`)
+      })
+    }
     const cows = Object.values(bot.entities).filter(e => (e.name === 'cow' || e.name === 'mooshroom') && near(e))
     const state = { leather: countItems(bot, 'leather'), want, adults: cows.filter(e => isAdult(bot, e)).length, calves: cows.filter(e => !isAdult(bot, e)).length, wheat: countItems(bot, 'wheat') }
     const chore = herdChore(state)
@@ -157,7 +170,11 @@ export async function keepFarms (bot: Bot, executor: Executor, signal: AbortSign
     }
   }
   for (const egg of KEPT_ANIMAL_EGGS) {
-    if (countItems(bot, egg) > 0) await tryIt(`let out the ${egg.replace('_spawn_egg', '')}s`, async (s) => `${await releaseAnimals(bot, { egg }, s)} let out`)
+    if (countItems(bot, egg) > 0) {
+      // where the herd lives: its chores are done from there
+      executor.memory.addPoi(HERD, bot.entity.position.floored(), normalizeDimension(bot.game?.dimension), egg.replace('_spawn_egg', ''))
+      await tryIt(`let out the ${egg.replace('_spawn_egg', '')}s`, async (s) => `${await releaseAnimals(bot, { egg }, s)} let out`)
+    }
   }
   for (const mob of ['cow', 'mooshroom', 'sheep', 'pig'] as const) {
     if (!BREEDING_FOOD[mob].some(f => countItems(bot, f) >= 2)) continue
@@ -218,8 +235,9 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   await startFarm(bot, executor, signal, log).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
   await executor.obtain(milestone.goals(state), signal)
   // the herd grown for the 15 shelves' books (45, a leather each) and the anvil's book, when the bot keeps cows
+  const herd = executor.memory.getPois(HERD, { dimension: 'overworld', near: bot.entity.position })[0]
   const kept = Object.values(bot.entities).filter(e => e.name === 'cow' && e.position.distanceTo(bot.entity.position) <= 48).length
-  if (kept >= 2) {
+  if (kept >= 2 || herd != null) {
     const books = 3 * BOOKSHELVES + BOOKS_KEPT
     await leatherFromHerd(bot, executor, Math.max(0, books - countItems(bot, 'book') - 3 * countItems(bot, 'bookshelf')), signal, log)
   }

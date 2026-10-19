@@ -58,6 +58,8 @@ test('keepFarms: eggs held let out, a pair of cows near bred with the wheat held
   const bot = fakeBot({ items: [item('cow_spawn_egg', 4), item('wheat', 16), item('sugar_cane', 64)], entities: [cow(5, 3), cow(6, 4)] })
   await keepFarms(bot, executor, new AbortController().signal, () => {})
   assert.deepStrictEqual(tasks, ['let out the cows', 'breed the cows', 'plant a cane farm'])
+  // where the herd was let out, for its chores after (the levels' mining takes the bot far off)
+  assert.strictEqual(executor.memory.getPois('herd').length, 1)
   // a farm known, no eggs, no food: nothing
   tasks.length = 0
   executor.memory.addPoi('cane_farm', { x: 1, y: 64, z: 1 })
