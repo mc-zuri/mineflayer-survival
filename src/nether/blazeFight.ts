@@ -13,7 +13,7 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
-import { type Entity, entityBox, distanceToBox, eyePosition, isAlive } from '../skills/combatUtil'
+import { type Entity, entityBox, distanceToBox, eyePosition, hasLineOfSight, isAlive } from '../skills/combatUtil'
 import { blazeCharged, lowerShield, raiseShield } from '../skills/fight'
 import { aim, arrowWorld } from '../skills/shoot'
 import { motionTrackerOf } from '../skills/motion'
@@ -29,8 +29,6 @@ import { dig } from '../core/actions'
 
 /** BlazeAttackGoal: ticks charged before the first of the volley's three fireballs */
 export const BLAZE_CHARGE_TICKS = 60
-/** BlazeAttackGoal: a blaze closer than this (distanceToSqr < 4) hits instead of shooting */
-export const BLAZE_MELEE_RANGE = 2
 /** the shield's BlocksAttacks.blockDelaySeconds (0.25 s): raised this many ticks before it blocks */
 export const SHIELD_DELAY_TICKS = 5
 /**
@@ -96,8 +94,7 @@ export class BlazeVolleys {
 
   /** whether nothing it does can reach the bot in the next `ticks`: not charged, or charged too lately to shoot by then */
   quietFor (id: number, tick: number, ticks: number): boolean {
-    if (this.dangerous(id, tick, ticks + SHIELD_LEAD_TICKS)) return false
-    return true
+    return !this.dangerous(id, tick, ticks + SHIELD_LEAD_TICKS)
   }
 }
 
@@ -309,6 +306,9 @@ export interface NookFightResult {
 
 const ARROWS = ['arrow', 'spectral_arrow', 'tipped_arrow']
 
+/** the melee mobs (besides the blazes) the nook's fight meets itself, with the sword once in reach */
+export const NOOK_MELEE = ['magma_cube']
+
 /** the bow's draw to a full-power shot (BowItem.getPowerForTime: full from 20 ticks), a tick to spare */
 const FULL_DRAW = 21
 /** a draw cut short by a blaze about to shoot is loosed from this many ticks on (the power then about 0.7) */
@@ -363,6 +363,10 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   const onTick = (): void => { tick++ }
   bot.on('entityDead', onDead)
   bot.on('physicsTick', onTick)
+  // the magma cubes are the nook's to meet (the sword at one come into reach), not the hostiles reflex's: it went
+  // after them out of the nook, about the basalt delta under the blazes' fire (26.3, seed 2's spawner: 19 times in a
+  // fight of 9898 ticks)
+  const leave = (bot as any).survival?.reflexes?.leaveAlone?.(NOOK_MELEE) as (() => void) | undefined
   const sword = (): any => bestMeleeWeapon(bot, 'blaze')
   const bow = (): any => bot.inventory.items().find(i => i.name === 'bow') ?? null
   const hasArrows = (): boolean => countItems(bot, ARROWS) > 0
@@ -430,7 +434,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // swings (a blaze in the front cell keeps the front from being shut: a 26.3 bot at 9 health tried to shut it
       // for 1200 ticks, the blaze punching it the while, and died)
       const eye = eyePosition(bot)
-      const close = seeing.find(b => distanceToBox(eye, entityBox(b)) <= 2.9)
+      const inReach = (e: Entity): boolean => distanceToBox(eye, entityBox(e)) <= 2.9
+      const close = seeing.find(inReach) ?? Object.values(bot.entities).find(e => NOOK_MELEE.includes(e.name ?? '') && isAlive(bot, e) && inReach(e) && hasLineOfSight(bot, e))
       if (close != null && danger.length === 0) {
         stopDraw()
         await hold(sword())
@@ -531,6 +536,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       await waitTicks(bot, 1, signal)
     }
   } finally {
+    leave?.()
     bot.off('entityDead', onDead)
     bot.off('physicsTick', onTick)
     for (const id of tracked) { const e = bot.entities[id]; if (e != null) tracker.untrack(e) }

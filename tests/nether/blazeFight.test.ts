@@ -229,3 +229,37 @@ test('fightFromNook: low with a blaze in the front, the sword at it (the shield 
   for (let i = 0; i < 3; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
   await done
 })
+
+test('fightFromNook meets a magma cube come into reach with the sword itself, the hostiles reflex leaving the cubes to it till it ends', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, nookAround } = await import('../../src/nether/blazeFight')
+  const { ReflexEngine } = await import('../../src/reflexes/engine')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const cube = entity({ name: 'magma_cube', position: new Vec3(0.5, 64, 8.6), meta: { health: 4 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), items: [item('diamond_sword')], offhand: item('shield'), entities: [cube], world: name })
+  bot.world = { raycast: () => null }
+  const engine = new ReflexEngine(bot, { reflexes: [] })
+  bot.survival = { reflexes: engine }
+  const swings: number[] = []
+  bot.equip = async (it: any, dest: string) => { if (dest === 'hand') bot.heldItem = it }
+  bot.activateItem = () => { bot.usingHeldItem = true }
+  bot.deactivateItem = () => { bot.usingHeldItem = false }
+  bot.lookAt = async () => {}
+  bot.attack = (e: any) => { swings.push(e.id) }
+  bot.game.dimension = 'the_nether'
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const ac = new AbortController()
+  const done = fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 1000 }, ac.signal).catch(err => err)
+  const held: string[][] = []
+  for (let i = 0; i < 30; i++) { bot.emit('physicsTick'); held.push(engine.leftAloneNames); await new Promise(resolve => setImmediate(resolve)) }
+  assert.ok(swings.includes(cube.id), `swings ${swings.join(' ')}`)
+  assert.ok(held.some(h => h.includes('magma_cube')))
+  ac.abort()
+  for (let i = 0; i < 3; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  await done
+  assert.deepStrictEqual(engine.leftAloneNames, [])
+  engine.stop()
+})
