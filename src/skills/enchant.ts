@@ -246,22 +246,25 @@ export function itemKind (name: string): ItemKind {
   return 'other'
 }
 
-/** the enchantments wanted on each kind of item, the most wanted first */
+/**
+ * The enchantments wanted on each kind of item, the most wanted first. Mending last: a treasure enchantment (the table
+ * never offers it), from a fished or traded book through the anvil (applyBooks), on the gear in GEAR_ORDER
+ */
 export const ENCHANT_PREFERENCES: Record<ItemKind, readonly string[]> = {
-  sword: ['sharpness', 'looting', 'sweeping_edge', 'unbreaking', 'fire_aspect', 'smite', 'bane_of_arthropods'],
-  axe: ['efficiency', 'sharpness', 'unbreaking', 'fortune', 'silk_touch'],
-  pickaxe: ['efficiency', 'unbreaking', 'fortune', 'silk_touch'],
-  shovel: ['efficiency', 'unbreaking', 'fortune', 'silk_touch'],
-  hoe: ['efficiency', 'unbreaking', 'fortune'],
-  helmet: ['protection', 'unbreaking', 'respiration', 'aqua_affinity', 'blast_protection', 'projectile_protection', 'fire_protection'],
-  chestplate: ['protection', 'unbreaking', 'blast_protection', 'projectile_protection', 'fire_protection'],
-  leggings: ['protection', 'unbreaking', 'blast_protection', 'projectile_protection', 'fire_protection'],
-  boots: ['feather_falling', 'protection', 'unbreaking', 'depth_strider', 'blast_protection', 'projectile_protection', 'fire_protection'],
-  bow: ['power', 'infinity', 'unbreaking', 'punch', 'flame'],
-  crossbow: ['quick_charge', 'multishot', 'piercing', 'unbreaking'],
-  trident: ['loyalty', 'impaling', 'unbreaking', 'channeling', 'riptide'],
-  mace: ['density', 'breach', 'unbreaking', 'wind_burst'],
-  fishing_rod: ['luck_of_the_sea', 'lure', 'unbreaking'],
+  sword: ['sharpness', 'looting', 'sweeping_edge', 'unbreaking', 'fire_aspect', 'smite', 'bane_of_arthropods', 'mending'],
+  axe: ['efficiency', 'sharpness', 'unbreaking', 'fortune', 'silk_touch', 'mending'],
+  pickaxe: ['efficiency', 'unbreaking', 'fortune', 'silk_touch', 'mending'],
+  shovel: ['efficiency', 'unbreaking', 'fortune', 'silk_touch', 'mending'],
+  hoe: ['efficiency', 'unbreaking', 'fortune', 'mending'],
+  helmet: ['protection', 'unbreaking', 'respiration', 'aqua_affinity', 'blast_protection', 'projectile_protection', 'fire_protection', 'mending'],
+  chestplate: ['protection', 'unbreaking', 'blast_protection', 'projectile_protection', 'fire_protection', 'mending'],
+  leggings: ['protection', 'unbreaking', 'blast_protection', 'projectile_protection', 'fire_protection', 'mending'],
+  boots: ['feather_falling', 'protection', 'unbreaking', 'depth_strider', 'blast_protection', 'projectile_protection', 'fire_protection', 'mending'],
+  bow: ['power', 'infinity', 'unbreaking', 'punch', 'flame', 'mending'],
+  crossbow: ['quick_charge', 'multishot', 'piercing', 'unbreaking', 'mending'],
+  trident: ['loyalty', 'impaling', 'unbreaking', 'channeling', 'riptide', 'mending'],
+  mace: ['density', 'breach', 'unbreaking', 'wind_burst', 'mending'],
+  fishing_rod: ['luck_of_the_sea', 'lure', 'unbreaking', 'mending'],
   book: ['protection', 'sharpness', 'efficiency', 'feather_falling', 'power', 'unbreaking', 'looting', 'fortune'],
   other: ['unbreaking']
 }
