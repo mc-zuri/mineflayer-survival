@@ -8,8 +8,13 @@ import { TaskError, throwIfAborted, type SkillOptions } from '../../skills/comba
 // The End skills' view of the world around the bot: where the ground is, where the void starts, and getting
 // somewhere with the pathfinder (towering up and digging down included).
 
-/** the blocks the pathfinder towers and bridges with (BlockInfo.scaffoldingBlockItems) */
-export const SCAFFOLD_ITEMS = ['cobblestone', 'dirt']
+/**
+ * the blocks the End's pillars and the shelter's towers are built of: any full block a mine leaves the bot with (the
+ * pathfinder's own bridging takes cobblestone and dirt, BlockInfo.scaffoldingBlockItems), the island's end stone too:
+ * with cobblestone and dirt alone a 1.21.11 run stood under a crystal with 12 of them, 'short of 18', and 42 of
+ * deepslate, andesite, diorite and granite in its bag
+ */
+export const SCAFFOLD_ITEMS = ['cobblestone', 'dirt', 'cobbled_deepslate', 'end_stone', 'netherrack', 'andesite', 'diorite', 'granite', 'stone', 'tuff', 'blackstone', 'deepslate', 'stone_bricks']
 
 /** what the End skills read the world through: mineflayer's bot.blockAt, or a test's */
 export type BlockGetter = (pos: Vec3) => { name: string, boundingBox: string } | null

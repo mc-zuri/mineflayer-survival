@@ -9,7 +9,8 @@ import type { MilestoneHandler } from './runner'
 import { buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
-import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd, readPortalRoom } from './end/skills'
+import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd, readPortalRoom, SCAFFOLD_ITEMS } from './end/skills'
+import { collectBlock } from './skills/collectBlock'
 import { countBookshelves, enchant, enchantGear, findEnchantingTable } from './skills/enchant'
 import { applyBooks } from './skills/anvil'
 import { experience } from './skills/xp'
@@ -259,6 +260,9 @@ export function portalRoomNear (bot: Bot): boolean {
   return room != null && room.unseen.length === 0
 }
 
+/** blocks to have for the crystals' pillars (the caged ones are 76 to 103 high, the ground at 64) */
+export const END_BLOCKS = 64
+
 export const endHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {
   if (!isInEnd(bot)) {
     // the End kit: a bow, arrows, blocks to pillar, a water bucket, food
@@ -279,6 +283,15 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
   }
   // off the arrival platform over the void to the island first (the fight goes for the podium in a straight line)
   await executor.task('over to the island', async (s) => await crossToIsland(bot, { signal: s }), signal)
+  // blocks for the crystals' pillars: the island's end stone dug when the bag runs short of them
+  const blocks = countItems(bot, SCAFFOLD_ITEMS)
+  if (blocks < END_BLOCKS) {
+    log(`End: ${blocks} blocks to pillar with: digging end stone`)
+    await executor.task('end stone', async (s) => await collectBlock(bot, { names: ['end_stone'], count: END_BLOCKS - blocks, maxDistance: 32 }, s), signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`End: end stone: ${(err as Error).message}`)
+    })
+  }
   const fight = await executor.task('fight the dragon', async (s) => await fightDragon(bot, { signal: s, log: line => log(`dragon: ${line}`) }), signal)
   log(`dragon ${fight.killed ? 'killed' : 'not killed'} in ${fight.ticks} ticks (${fight.meleeHits} hits, ${fight.arrows} arrows)`)
   if (!fight.killed) return

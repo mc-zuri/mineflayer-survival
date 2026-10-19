@@ -43,3 +43,14 @@ test('isVoidColumn: in the overworld under y 0 a column is not void (the scan st
   assert.ok(!isVoidColumn(get, 0, 0, -60, -64))
   assert.ok(!voidExclusion(get, -64)({ position: new Vec3(0, -60, 0) }))
 })
+
+test('the pillars are built of any full block in the bag: deepslate, andesite, diorite, granite and the island\'s end stone count', async () => {
+  const { SCAFFOLD_ITEMS, towerUp } = await import('../../src/end/skills/world')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  for (const n of ['cobblestone', 'cobbled_deepslate', 'andesite', 'diorite', 'granite', 'end_stone', 'dirt']) assert.ok(SCAFFOLD_ITEMS.includes(n), n)
+  // 12 cobblestone and 42 of the rest: enough for 18 up (the count before the climb)
+  const bot = fakeBot({ position: new (require('vec3').Vec3)(0.5, 64, 0.5), items: [item('cobblestone', 12), item('cobbled_deepslate', 19), item('andesite', 11), item('diorite', 5), item('granite', 7)] })
+  await assert.rejects(towerUp(bot, 82), (err: any) => !/blocks to pillar up/.test(err.message))
+  const poor = fakeBot({ position: new (require('vec3').Vec3)(0.5, 64, 0.5), items: [item('cobblestone', 12)] })
+  await assert.rejects(towerUp(poor, 82), /18 blocks to pillar up, 12 in the inventory/)
+})
