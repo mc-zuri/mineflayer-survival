@@ -88,11 +88,16 @@ export function stageSave (from: MilestoneId): string {
 
 /** gives the stage's kit (and levels) from the console and waits for it to arrive */
 export async function giveKit (server: TestServer, bot: Bot, username: string, stage: Stage): Promise<void> {
+  // the armor and the shield put on (/item replace), the rest given: a big kit's bag has no room for the armor too
+  // (36 slots), and what doesn't fit is dropped at the bot's feet
+  const worn: Record<string, string> = { helmet: 'armor.head', chestplate: 'armor.chest', leggings: 'armor.legs', boots: 'armor.feet' }
   for (const [item, count] of stage.kit) {
-    const out = await server.command(`give ${username} ${item} ${count}`)
-    assert.ok(out.some(l => /^Gave /.test(l)), `give ${item} ${count}: ${out.join(' | ')}`)
+    const kind = /_(helmet|chestplate|leggings|boots)(\[|$)/.exec(item)?.[1]
+    const slot = kind != null ? worn[kind] : /^shield(\[|$)/.test(item) ? 'weapon.offhand' : null
+    const out = await server.command(slot != null ? `item replace entity ${username} ${slot} with ${item} ${count}` : `give ${username} ${item} ${count}`)
+    assert.ok(out.some(l => /^(Gave |Replaced )/.test(l)), `${slot != null ? 'wear' : 'give'} ${item} ${count}: ${out.join(' | ')}`)
   }
   if (stage.levels != null) await server.command(`xp add ${username} ${stage.levels} levels`)
-  const last = stage.kit[stage.kit.length - 1][0].replace(/\[.*$/, '')
+  const last = stage.kit.filter(([item]) => !/_(helmet|chestplate|leggings|boots)(\[|$)|^shield(\[|$)/.test(item)).slice(-1)[0][0].replace(/\[.*$/, '')
   assert.ok(await waitUntil(bot, () => countItems(bot, last) > 0, 200), 'the kit never arrived')
 }
