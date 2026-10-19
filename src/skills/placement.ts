@@ -136,3 +136,35 @@ export function findBedPlacementNear (lookup: BlockLookup, near: Vec3, radius = 
   }
   return best
 }
+
+/** blocks not dug for a bed's room: unbreakable, a portal's, or slow */
+const NOT_DUG = new Set(['bedrock', 'end_portal_frame', 'end_portal', 'nether_portal', 'obsidian', 'crying_obsidian', 'reinforced_deepslate', 'spawner', 'chest', 'barrier'])
+const LIQUIDS = new Set(['water', 'lava'])
+
+/**
+ * Room for a bed dug out beside the bot where none is free (a kit's chest in the 1-wide tunnel the bot came by to the
+ * stronghold): the two cells straight out from the bot's feet, foot then head, with solid ground under them and no
+ * water or lava against them; the way with the fewest blocks to dig first. The bot stands where it is to put it down,
+ * facing along it.
+ */
+export function bedRoomToDig (lookup: BlockLookup, feet: Vec3, avoid?: (pos: Vec3) => boolean): (BedPlacement & { stand: Vec3, dig: Vec3[] }) | null {
+  const at = feet.floored()
+  let best: (BedPlacement & { stand: Vec3, dig: Vec3[] }) | null = null
+  for (const facing of CARDINALS) {
+    const foot = at.plus(facing)
+    const head = foot.plus(facing)
+    const dig: Vec3[] = []
+    let ok = true
+    for (const cell of [foot, head]) {
+      const b = lookup(cell)
+      if (b == null || !isSolid(lookup(cell.offset(0, -1, 0))) || avoid?.(cell) === true) { ok = false; break }
+      if (isFree(b)) continue
+      if (b.boundingBox !== 'block' || NOT_DUG.has(b.name) || isInteractive(b.name)) { ok = false; break }
+      // nothing to flow in once it's dug
+      if ([new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, 1, 0)].some(d => LIQUIDS.has(lookup(cell.plus(d))?.name ?? ''))) { ok = false; break }
+      dig.push(cell)
+    }
+    if (ok && (best == null || dig.length < best.dig.length)) best = { foot, head, facing, stand: at, dig }
+  }
+  return best
+}

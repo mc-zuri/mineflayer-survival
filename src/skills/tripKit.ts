@@ -9,7 +9,8 @@ import type { WorldMemory } from '../core/memory'
 import { isBed } from '../core/items'
 import { SkillError, isAbort, throwIfAborted } from './errors'
 import { placeBlock } from './placeBlock'
-import { findBedPlacementNear, findPlacement } from './placement'
+import { bedRoomToDig, findBedPlacementNear, findPlacement } from './placement'
+import { dig } from '../core/actions'
 import { navigate } from './navigate'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { retrieveItems, storeItems } from './chest'
@@ -39,9 +40,19 @@ const PORTAL_BLOCKS = new Set(['nether_portal', 'obsidian', 'end_portal', 'end_p
  */
 export async function placeSpawnBed (bot: Bot, near: Vec3, item: string, signal?: AbortSignal): Promise<Vec3 | null> {
   const lookup = (p: Vec3): any => bot.blockAt(p)
-  const spot = findBedPlacementNear(lookup, near, 5, p => nearPortal(lookup, p))
+  const avoid = (p: Vec3): boolean => nearPortal(lookup, p)
+  const free = findBedPlacementNear(lookup, near, 5, avoid)
+  const spot = free != null ? { ...free, dig: [] as Vec3[] } : bedRoomToDig(lookup, bot.entity.position, avoid)
   if (spot == null) return null
-  await navigate(bot, { goal: new goals.GoalBlock(spot.stand.x, spot.stand.y, spot.stand.z) }, signal)
+  if (bot.entity.position.floored().distanceTo(spot.stand) > 0.5) await navigate(bot, { goal: new goals.GoalBlock(spot.stand.x, spot.stand.y, spot.stand.z) }, signal)
+  // no room free: dug out (the kit's chest by the stronghold in the 1-wide tunnel the bot came by, 26.3)
+  for (const cell of spot.dig) {
+    const block = bot.blockAt(cell)
+    if (block == null || block.boundingBox !== 'block') continue
+    const tool = (bot as any).pathingUtil?.bestHarvestingTool?.(block)
+    if (tool != null && bot.heldItem?.type !== tool.type) await bot.equip(tool, 'hand')
+    await dig(bot, block as any, { signal })
+  }
   await bot.lookAt(spot.head.offset(0.5, 0, 0.5), true)
   await placeBlock(bot, { pos: spot.foot, item, against: spot.foot.offset(0, -1, 0) }, signal)
   const block = bot.blockAt(spot.foot)

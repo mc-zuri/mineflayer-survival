@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { botCells, findBedPlacement, findBedPlacementNear, findPlacement, type BlockView } from '../../src/skills/placement'
+import { bedRoomToDig, botCells, findBedPlacement, findBedPlacementNear, findPlacement, type BlockView } from '../../src/skills/placement'
 import { placedBlockNames } from '../../src/skills/placeBlock'
 
 // a superflat world: grass at y = -61 and below, air above; `extra` sets blocks by "x,y,z"
@@ -117,4 +117,27 @@ test('findBedPlacementNear: foot, head and a cell behind the foot to face along 
   const closed: Record<string, string> = {}
   for (let x = -6; x <= 6; x++) for (let z = -6; z <= 6; z++) for (const y of [-60, -59]) if (x !== 0 || z !== 0) closed[`${x},${y},${z}`] = 'stone'
   assert.strictEqual(findBedPlacementNear(flat(closed), near, 5), null)
+})
+
+test('bedRoomToDig: in a 1-wide tunnel, the two cells straight out from the bot dug for a bed; never next to lava or through bedrock', () => {
+  // stone all round from -64 to -55, a tunnel cell at the bot's feet and head (0, -60, 0), (0, -59, 0)
+  const solid = (extra: Record<string, string> = {}) => (pos: Vec3): BlockView => {
+    const k = `${pos.x},${pos.y},${pos.z}`
+    const name = extra[k] ?? ((pos.x === 0 && pos.z === 0 && (pos.y === -60 || pos.y === -59)) ? 'air' : 'stone')
+    return { name, boundingBox: ['air', 'lava', 'water'].includes(name) ? 'empty' : 'block' }
+  }
+  const feet = new Vec3(0.5, -60, 0.5)
+  assert.strictEqual(findBedPlacementNear(solid(), feet, 5), null)
+  const room = bedRoomToDig(solid(), feet)
+  assert.ok(room != null)
+  assert.strictEqual(room.dig.length, 2)
+  assert.deepStrictEqual(room.stand, new Vec3(0, -60, 0))
+  assert.deepStrictEqual(room.foot, room.stand.plus(room.facing))
+  assert.deepStrictEqual(room.head, room.foot.plus(room.facing))
+  // lava behind every way but +x, bedrock that way: no room
+  const lava: Record<string, string> = { '0,-60,-3': 'lava', '0,-60,3': 'lava', '-3,-60,0': 'lava', '2,-60,0': 'bedrock' }
+  assert.strictEqual(bedRoomToDig(solid(lava), feet), null)
+  // the cells to avoid (a portal's): not that way
+  const away = bedRoomToDig(solid(), feet, p => p.x > 0)
+  assert.ok(away != null && away.facing.x <= 0)
 })
