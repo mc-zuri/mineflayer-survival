@@ -736,31 +736,40 @@ export async function pearlsByNight (bot: Bot, executor: Executor, want: number,
   const count = (name: string): number => countItems(bot, name)
   const start = executor.tasks.tick
   let leg = 0
-  for (let round = 0; round < PEARL_ROUNDS && count('ender_pearl') < want && executor.tasks.tick - start < PEARL_NIGHTS_TICKS; round++) {
-    if (signal.aborted) throw signal.reason
-    const night = dayPhase(bot.time?.timeOfDay ?? 0) !== 'day'
-    try {
-      if (!night) {
-        await executor.task('levels by day', async (s) => await gainLevels(bot, { level: 30, maxTicks: 3000 }, s), signal)
-          .catch(async () => { await executor.task('wait for the night', async (s) => { await waitTicks(bot, 1000, s) }, signal) })
-        continue
+  // the night's out on the surface is the work: the night reflex's shelter (or bed) held off meanwhile (it took the
+  // bot in each night, and three nights found no enderman, 26.3)
+  const survival = (bot as any).survival ?? {}
+  const before = survival.nightWork
+  survival.nightWork = true
+  try {
+    for (let round = 0; round < PEARL_ROUNDS && count('ender_pearl') < want && executor.tasks.tick - start < PEARL_NIGHTS_TICKS; round++) {
+      if (signal.aborted) throw signal.reason
+      const night = dayPhase(bot.time?.timeOfDay ?? 0) !== 'day'
+      try {
+        if (!night) {
+          await executor.task('levels by day', async (s) => await gainLevels(bot, { level: 30, maxTicks: 3000 }, s), signal)
+            .catch(async () => { await executor.task('wait for the night', async (s) => { await waitTicks(bot, 1000, s) }, signal) })
+          continue
+        }
+        const enderman = Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 64)
+        if (enderman) {
+          await executor.task('endermen for pearls', async (s) => await huntEndermen(bot, { pearls: want - count('ender_pearl'), range: 64, maxTicks: 3000 }, s), signal)
+          continue
+        }
+        const center = executor.memory.base != null ? new Vec3(executor.memory.base.x, executor.memory.base.y, executor.memory.base.z) : bot.entity.position
+        const point = spiralWaypoints(center, 48, 240)[leg++ % 24]
+        await executor.task('a night leg for endermen', async (s) => await overland(bot, {
+          target: new Vec3(point.x, bot.entity.position.y, point.z),
+          range: 8,
+          onHop: () => Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 64)
+        }, s), signal)
+      } catch (err) {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`ender pearls by night: ${(err as Error).message}`)
       }
-      const enderman = Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 64)
-      if (enderman) {
-        await executor.task('endermen for pearls', async (s) => await huntEndermen(bot, { pearls: want - count('ender_pearl'), range: 64, maxTicks: 3000 }, s), signal)
-        continue
-      }
-      const center = executor.memory.base != null ? new Vec3(executor.memory.base.x, executor.memory.base.y, executor.memory.base.z) : bot.entity.position
-      const point = spiralWaypoints(center, 48, 240)[leg++ % 24]
-      await executor.task('a night leg for endermen', async (s) => await overland(bot, {
-        target: new Vec3(point.x, bot.entity.position.y, point.z),
-        range: 8,
-        onHop: () => Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 64)
-      }, s), signal)
-    } catch (err) {
-      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-      log(`ender pearls by night: ${(err as Error).message}`)
     }
+  } finally {
+    survival.nightWork = before
   }
   log(`ender pearls: ${count('ender_pearl')} of ${want} after ${executor.tasks.tick - start} ticks of the overworld's nights`)
   return count('ender_pearl')

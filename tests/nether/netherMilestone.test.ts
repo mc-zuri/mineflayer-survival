@@ -180,3 +180,22 @@ test('a portal with no diamond pickaxe (a death lost it) gets one before the lak
   await buildAPortal(bot, executor, new AbortController().signal, () => {})
   assert.equal(calls[0], 'obtain diamond_pickaxe')
 })
+
+test('the night pearl hunt holds the night reflex off (nightWork) while it hunts, and lets it go after', async () => {
+  const { pearlsByNight } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const bot = fakeBot()
+  bot.game.dimension = 'overworld'
+  bot.time = { timeOfDay: 15000, day: 1 } as any
+  ;(bot as any).survival = { nightWork: false }
+  let tick = 0
+  const seen: boolean[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { get tick () { return tick } },
+    task: async () => { seen.push((bot as any).survival.nightWork); tick += 1e6 }
+  }
+  await pearlsByNight(bot, executor, 4, new AbortController().signal, () => {})
+  assert.ok(seen.length > 0 && seen.every(v => v === true))
+  assert.equal((bot as any).survival.nightWork, false)
+})
