@@ -6,6 +6,7 @@ import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
+import { placeBlock } from '../skills/placeBlock'
 import { navigateNear } from '../skills/navigate'
 import { countItems, findInventoryItem, trace, waitTicks, waitUntil } from '../skills/util'
 import { isLavaSource } from './portal'
@@ -13,6 +14,8 @@ import { isLavaSource } from './portal'
 /** a block as the obsidian maker reads it: its name, collision and state */
 export type ObsidianLookup = (pos: Vec3) => { name: string, boundingBox: string, properties?: Record<string, any> } | null
 
+/** the blocks a pedestal is put into the lava with */
+const PEDESTAL_BLOCKS = ['cobblestone', 'cobbled_deepslate', 'netherrack', 'dirt', 'andesite', 'diorite', 'granite', 'stone']
 const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1)]
 const AIR = new Set(['air', 'cave_air'])
 
@@ -80,7 +83,19 @@ export async function obsidianFromLava (bot: Bot, count: number, signal?: AbortS
     const all = bot.findBlocks({ matching: lavaId, maxDistance: 16, count: 256 })
       .filter(p => isLavaSource(get(p)))
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
-    const target = pourTarget(get, all, true)
+    let target = pourTarget(get, all, false)
+    // a lake with no shore: a block put into the source nearest the bot (the lava replaced), the water poured on it
+    // flows down into the sources about it and turns them, and is scooped back off the block (the water poured into
+    // the lava was lost, and the source stayed lava: 26.3 seed 2)
+    if (target == null) {
+      const open = all.find(p => AIR.has(get(p.offset(0, 1, 0))?.name ?? ''))
+      const filler = PEDESTAL_BLOCKS.find(n => countItems(bot, n) > 0)
+      if (open != null && filler != null) {
+        await navigateNear(bot, open, 3, signal).catch(err => { if (isAbort(err)) throw err })
+        await placeBlock(bot, { pos: open, item: filler, against: open.offset(0, -1, 0) }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the pedestal:', (err as Error).message) })
+        if (bot.blockAt(open)?.boundingBox === 'block') target = { source: open, spot: open.offset(0, 1, 0), side: false }
+      }
+    }
     if (target == null) throw new SkillError('NOT_FOUND', `no lava source left to turn to obsidian (${countItems(bot, 'obsidian')} of ${count})`)
     const { source, spot, side } = target
     trace('obsidianFromLava: water at', spot.toString(), 'for the lava at', source.toString())
@@ -90,8 +105,7 @@ export async function obsidianFromLava (bot: Bot, count: number, signal?: AbortS
     await bot.equip(bucket, 'hand')
     await bot.lookAt(spot.offset(0.5, 0.02, 0.5), true)
     bot.activateItem()
-    // poured beside a source it turns the source; poured into the lake (the nearest source, so the scoop's ray meets
-    // the water first) it turns the sources about it
+    // poured beside a source it turns the source; poured on the pedestal it turns the sources about it
     const turned = (): boolean => side ? bot.blockAt(source)?.name === 'obsidian' : bot.findBlocks({ matching: obsidianId, point: spot, maxDistance: 2, count: 1 }).length > 0
     await waitUntil(bot, turned, 40, signal)
     await waitTicks(bot, 5, signal)
