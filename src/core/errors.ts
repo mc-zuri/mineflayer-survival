@@ -19,6 +19,11 @@ export type TaskErrorCode =
   | 'PREEMPTED'
   /** the bot died while the task ran */
   | 'DIED'
+  /**
+   * stopped by its owner because the held tool is about to break with no spare of its tier (the executor's wear
+   * watch): the tool is replaced and the task run again
+   */
+  | 'TOOL_WORN'
   /** the block, entity or container wasn't found */
   | 'NOT_FOUND'
   /** anything else */

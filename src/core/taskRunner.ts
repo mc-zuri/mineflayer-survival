@@ -45,6 +45,11 @@ export interface TaskHandle<T> {
   readonly result: Promise<T>
   /** aborts the task (or drops it from the queue); the result rejects with ABORTED */
   cancel: (message?: string) => void
+  /**
+   * aborts the running task with `reason` (its signal's reason), not to be resumed: the result rejects with it, and
+   * the task's partial result, once the task has stopped (or its grace ticks are out); a queued one is dropped
+   */
+  stop: (reason: TaskError) => void
 }
 
 export interface TaskRunnerOptions {
@@ -137,7 +142,11 @@ export class TaskRunner {
       name: entry.name,
       priority: entry.priority,
       result,
-      cancel: (message?: string) => this.cancelEntry(entry, new TaskError('ABORTED', message ?? `${entry.name} cancelled`))
+      cancel: (message?: string) => this.cancelEntry(entry, new TaskError('ABORTED', message ?? `${entry.name} cancelled`)),
+      stop: (reason: TaskError) => {
+        if (this.running === entry) this.abortRunning(reason)
+        else this.cancelEntry(entry, reason)
+      }
     }
   }
 

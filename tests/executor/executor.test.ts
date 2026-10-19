@@ -420,3 +420,87 @@ test('the loot step walks to a chest out of the loaded chunks before it opens it
   }
   assert.deepEqual(calls, [`travel ${new Vec3(-56, 60, -16).toString()}`, 'retrieve'])
 })
+
+/**
+ * a bot whose bag holds a worn iron pickaxe (uses left as given) beside what fakeBot's counts give, the best pickaxe
+ * held, the one with the most uses of the best tier (as the dig's tool choice: bestHarvestingTool)
+ */
+function wornPickBot (usesLeft: number, items: Record<string, number>): { bot: any, pick: any } {
+  const bot = fakeBot(items)
+  const pick = { name: 'iron_pickaxe', count: 1, type: registry.itemsByName.iron_pickaxe.id, slot: 36, maxDurability: 250, durabilityUsed: 250 - usesLeft }
+  const items0 = bot.inventory.items
+  bot.inventory.items = () => [...items0(), ...(pick.durabilityUsed < pick.maxDurability ? [pick] : [])]
+  const tier = (i: any): number => ['wooden', 'stone', 'iron', 'diamond', 'netherite'].indexOf(i.name.split('_')[0])
+  const uses = (i: any): number => (i.maxDurability ?? 1e9) - (i.durabilityUsed ?? 0)
+  Object.defineProperty(bot, 'heldItem', { get: () => bot.inventory.items().filter((i: any) => i.name.endsWith('_pickaxe')).sort((a: any, b: any) => tier(b) - tier(a) || uses(b) - uses(a))[0] ?? null })
+  return { bot, pick }
+}
+
+/** a long dig as a milestone task: `blocks` blocks, each a use of the held pickaxe; it goes on from what it dug (its memory) */
+function longDig (bot: any, blocks: number, progress: { dug: number, runs: number, tools: string[] }): (s: AbortSignal) => Promise<number> {
+  return async (s) => {
+    progress.runs++
+    while (progress.dug < blocks) {
+      if (s.aborted) throw (s.reason as TaskError).withPartial({ dug: progress.dug })
+      const held = bot.heldItem
+      if (held == null) throw new TaskError('NO_TOOL', 'no pickaxe')
+      if (held.maxDurability != null) held.durabilityUsed++
+      progress.tools.push(held.name)
+      progress.dug++
+      bot.emit('physicsTick')
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    return progress.dug
+  }
+}
+
+test('a long task whose pickaxe is about to break stops (TOOL_WORN), a new one is made from what is carried, and the task goes on from where it was', async () => {
+  const { bot, pick } = wornPickBot(30, { iron_ingot: 3, stick: 2, crafting_table: 1 })
+  const log: string[] = []
+  const lines: string[] = []
+  const ex = new Executor(bot, { runners: honestRunners(bot, log), log: line => lines.push(line) })
+  const progress = { dug: 0, runs: 0, tools: [] as string[] }
+  const dug = await ex.task('down to the deep lava', longDig(bot, 40, progress))
+  assert.equal(dug, 40)
+  assert.equal(progress.runs, 2)
+  // stopped with 24 uses left: 6 blocks dug with the old one, the rest with the new
+  assert.equal(pick.durabilityUsed, 250 - 24)
+  assert.deepEqual(log, ['craft 1 iron_pickaxe'])
+  assert.equal(progress.tools.filter((_t, i) => i < 6).length, 6)
+  // the worn one, and the new one
+  assert.equal(count(bot, 'iron_pickaxe'), 2)
+  assert.ok(lines.some(l => /down to the deep lava: stopped, the iron_pickaxe has 24 uses left.*"dug":6/.test(l)), lines.join('\n'))
+})
+
+test('a worn tool no replacement can be got for is let be: the task goes on with it, and no task stops for it a while', async () => {
+  // nothing to make a pickaxe of, and the mine steps find nothing
+  const { bot } = wornPickBot(30, {})
+  const lines: string[] = []
+  const ex = new Executor(bot, { runners: { mine: async () => { throw new TaskError('NOT_FOUND', 'none found') } }, maxStepFailures: 1, log: line => lines.push(line) })
+  const progress = { dug: 0, runs: 0, tools: [] as string[] }
+  assert.equal(await ex.task('a tunnel', longDig(bot, 20, progress)), 20)
+  assert.equal(progress.runs, 2)
+  assert.ok(lines.some(l => /no new pickaxe for the iron_pickaxe/.test(l)), lines.join('\n'))
+  // the next task with it: no stop
+  const next = { dug: 0, runs: 0, tools: [] as string[] }
+  assert.equal(await ex.task('another tunnel', longDig(bot, 3, next)), 3)
+  assert.equal(next.runs, 1)
+})
+
+test('a lower tier spare held does when no tool of the worn one\'s tier can be got; a plan\'s step is never stopped by the watch', async () => {
+  const { bot, pick } = wornPickBot(30, { stone_pickaxe: 1 })
+  pick.name = 'diamond_pickaxe'
+  pick.maxDurability = 1561
+  pick.durabilityUsed = 1561 - 30
+  const lines: string[] = []
+  const ex = new Executor(bot, { runners: { mine: async () => { throw new TaskError('NOT_FOUND', 'none found') } }, maxStepFailures: 1, log: line => lines.push(line) })
+  const progress = { dug: 0, runs: 0, tools: [] as string[] }
+  assert.equal(await ex.task('a staircase', longDig(bot, 10, progress)), 10)
+  assert.ok(lines.some(l => /the stone_pickaxe held goes on after it/.test(l)), lines.join('\n'))
+  // a step task wears its tool unwatched (the mine step hands a worn tool back itself)
+  const step = { dug: 0, runs: 0, tools: [] as string[] }
+  const fresh = wornPickBot(30, {})
+  const ex2 = new Executor(fresh.bot, { log: () => {} })
+  assert.equal(await ex2.task('step:mine', longDig(fresh.bot, 10, step), undefined, { step: { kind: 'mine' } as any }), 10)
+  assert.equal(step.runs, 1)
+})

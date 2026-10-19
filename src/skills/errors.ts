@@ -61,9 +61,12 @@ export function isSkillError (err: unknown, reason?: SkillFailure): err is Skill
   return err instanceof SkillError && (reason == null || err.reason === reason)
 }
 
-/** whether the error is an abort (a SkillError, core's TaskError, or the AbortSignal's own reason) */
+/**
+ * whether the error is an abort (a SkillError, core's TaskError, or the AbortSignal's own reason): cancelled, preempted
+ * or stopped for a worn tool
+ */
 export function isAbort (err: unknown): boolean {
-  return TaskError.is(err, 'ABORTED', 'PREEMPTED') || (err as Error)?.name === 'AbortError'
+  return TaskError.is(err, 'ABORTED', 'PREEMPTED', 'TOOL_WORN') || (err as Error)?.name === 'AbortError'
 }
 
 /**

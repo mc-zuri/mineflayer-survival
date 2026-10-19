@@ -155,3 +155,23 @@ test('a task that ignores its abort signal holds the lock only for the grace tic
   runner.destroy()
   await assert.rejects(stuck, (err: unknown) => TaskError.is(err, 'ABORTED'))
 })
+
+test('stop aborts the running task with its reason, not to be resumed: the result rejects with it and the partial result once the task stops', async () => {
+  const { runner, flush } = setup()
+  const handle = runner.enqueue({ name: 'dig' }, async (ctx) => {
+    await new Promise((_resolve, reject) => ctx.signal.addEventListener('abort', () => reject((ctx.signal.reason as TaskError).withPartial({ dug: 7 }))))
+  })
+  await flush()
+  handle.stop(new TaskError('TOOL_WORN', 'the pickaxe is about to break'))
+  await assert.rejects(handle.result, (err: unknown) => TaskError.is(err, 'TOOL_WORN') && (err as TaskError).partial != null && ((err as TaskError).partial as any).dug === 7)
+  assert.equal(runner.current, null)
+  assert.deepEqual(runner.pending, [])
+  // a queued one is dropped
+  const busy = runner.run('busy', async (ctx) => { await ctx.waitTicks(5) })
+  const queued = runner.enqueue('queued', async () => 'ran')
+  await flush()
+  queued.stop(new TaskError('TOOL_WORN', 'worn'))
+  await assert.rejects(queued.result, (err: unknown) => TaskError.is(err, 'TOOL_WORN'))
+  runner.destroy()
+  await assert.rejects(busy)
+})

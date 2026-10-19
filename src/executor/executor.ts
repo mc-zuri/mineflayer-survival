@@ -13,6 +13,7 @@ import type { TaskRunner } from '../core/taskRunner'
 import { itemTags } from '../core/tags'
 import { heldFor, obtainAll, type ObtainOptions, type ObtainPlan, type ObtainRequest, type StrategyKind } from '../planner/obtain'
 import { toolsAtLeast } from '../planner/progression'
+import type { ToolMaterial } from '../core/items'
 import { checkPlan, type PlanStep, type Station } from '../planner/steps'
 import { baseRecord, type BaseRecord } from '../base/pois'
 import { storeItems } from '../skills/chest'
@@ -23,7 +24,7 @@ import { isAbort } from '../skills/errors'
 import { tossAway } from '../skills/pickupDrops'
 import { holdBag, type BagKeeper } from '../skills/bag'
 import { countItems, emptySlots, trace } from '../skills/util'
-import { wornOutTools } from './durability'
+import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { defaultKeep, JUNK, junkToToss, ROUTE_STONE, splitInventory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
@@ -35,6 +36,7 @@ import { GROW_TICKS } from '../core/crops'
 import type { Diagnostics } from '../diagnostics'
 import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
 import { withNetherSafety } from '../nether/safety'
+import { travel } from '../skills/travel'
 
 /** ticks between the looks for a village about the bot */
 export const VILLAGE_CHECK_TICKS = 400
@@ -85,6 +87,25 @@ export interface ExecutorOptions {
   home?: () => Vec3 | null
 }
 
+/** times a task is stopped for a worn tool (TOOL_WORN) and run again before the stop is let through */
+export const MAX_WEAR_STOPS = 3
+
+/** ticks a worn tool whose replacement failed is let be (no task stopped for it) before another try */
+export const WEAR_RETRY_TICKS = 12000
+
+/** ticks a replacement may cost to be got at once (a tier lower, or a spare of it held, before a dearer one) */
+export const WEAR_REPLACE_TICKS = 6000
+
+/** how far from where a task stopped for a worn tool the bot goes back there before it runs the task again */
+export const WEAR_RETURN_RANGE = 8
+
+/** where and for what a task was stopped by the wear watch */
+interface WearStop {
+  tool: WornTool
+  at: Vec3
+  dimension: string
+}
+
 /** how far the base may be for makeRoom to walk there and store (some 500 ticks each way); farther, a depot */
 export const BASE_STORE_RANGE = 96
 
@@ -111,6 +132,17 @@ export interface ObtainOutcome {
   plans: number
   /** steps run */
   steps: number
+}
+
+/** what a task is (for the reports) and how it runs */
+export interface TaskInfo {
+  step?: PlanStep
+  desc?: string
+  args?: unknown
+  /** false: the task doesn't hold the bag (a store into the base's chests) */
+  room?: boolean
+  /** false: no wear watch (the task isn't stopped for a worn tool) */
+  wear?: boolean
 }
 
 /** a step as a log line: "mine 3 cobblestone" */
@@ -177,6 +209,8 @@ export class Executor {
   /** the tool replacement in progress (it obtains with this executor: no replacing within it) */
   private replacing = false
   private makingRoom = false
+  /** worn tools (kind:material) whose replacement failed: the tick until which no task is stopped for them */
+  private readonly wearMuted = new Map<string, number>()
   /** what the requests being obtained need (neededItems): kept by the room made during a step */
   private needed: Record<string, number> = {}
   /**
@@ -404,27 +438,145 @@ export class Executor {
    * Runs `fn` as a foreground task (so the reflexes preempt it; it runs again from the start after, so it should be
    * safe to repeat), cancelled when `signal` fires. Never call it from inside a task: the queue runs one at a time.
    * The task holds the bag (bagKeeper) unless `info.room` is false (a store into the base's chests: no depot put
-   * down on the way there).
+   * down on the way there). Unless it's a plan's step or `info.wear` is false, the held tool is watched as the task
+   * wears it (watchToolWear): about to break with no spare of its tier, the task is stopped (TOOL_WORN), the tool
+   * replaced (replaceWornTool: made from what's carried, looted from the base or a depot, or obtained), the bot taken
+   * back to where it stopped, and the task run again, up to MAX_WEAR_STOPS times.
    */
-  async task<T> (name: string, fn: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, info?: { step?: PlanStep, desc?: string, args?: unknown, room?: boolean }): Promise<T> {
+  async task<T> (name: string, fn: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, info?: TaskInfo): Promise<T> {
+    for (let stops = 0; ; stops++) {
+      const watch: { stop: WearStop | null } = { stop: null }
+      try {
+        return await this.runTask(name, fn, signal, info, watch)
+      } catch (err) {
+        const stop = watch.stop
+        if (stop == null || !TaskError.is(err, 'TOOL_WORN') || signal?.aborted === true) throw err
+        const partial = err.partial
+        this.log(`${name}: stopped, the ${stop.tool.name} has ${stop.tool.uses} uses left and no spare of its tier${partial != null ? ` (got so far: ${JSON.stringify(partial)})` : ''}`)
+        if (stops >= MAX_WEAR_STOPS) {
+          this.muteWorn(stop.tool)
+          throw err
+        }
+        await this.replaceWornTool(stop.tool, signal)
+        await this.backTo(stop, name, signal)
+      }
+    }
+  }
+
+  /** the wear watch's mute: no task is stopped for the tool for WEAR_RETRY_TICKS */
+  private muteWorn (tool: WornTool): void {
+    this.wearMuted.set(`${tool.kind}:${tool.material}`, this.tasks.tick + WEAR_RETRY_TICKS)
+  }
+
+  private wornMuted (tool: WornTool): boolean {
+    return (this.wearMuted.get(`${tool.kind}:${tool.material}`) ?? -1) > this.tasks.tick
+  }
+
+  /**
+   * A new tool for one the wear watch stopped a task for: of its tier or better, else of a tier lower (replacementTiers),
+   * the cheap way first (a plan within WEAR_REPLACE_TICKS: made from what's carried, a spare looted from the base or a
+   * depot), a spare of a lower tier held in good shape doing before a dear plan; else the first plan there is. None got,
+   * the tool is let be for a while (muteWorn) and used till it breaks. Whether there's one now.
+   */
+  async replaceWornTool (tool: WornTool, signal?: AbortSignal): Promise<boolean> {
+    if (this.replacing) return false
+    this.replacing = true
+    try {
+      const tiers = replacementTiers(tool.material)
+      const request = (material: ToolMaterial): ObtainRequest[] => {
+        const alts = toolsAtLeast(tool.kind, material)
+        return [{ item: alts, count: ownedInventory(this.bot).countAny(alts) + 1 }]
+      }
+      // a spare of a lower tier held in good shape: it goes on after the worn one
+      const spareHeld = (material: ToolMaterial): string | null => {
+        const alts = toolsAtLeast(tool.kind, material)
+        return this.bot.inventory.items().find(i => alts.includes(i.name) && usesLeft(i) > this.options.minToolUses * 2)?.name ?? null
+      }
+      const get = async (material: ToolMaterial, why: string): Promise<boolean> => {
+        this.log(`the ${tool.name} has ${tool.uses} uses left: another of ${material} or better (${why})`)
+        try {
+          await this.obtain(request(material), signal)
+          return true
+        } catch (err) {
+          if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true) throw err
+          this.log(`no new ${tool.kind} of ${material}: ${(err as Error).message}`)
+          return false
+        }
+      }
+      const plans = tiers.map(material => ({ material, plan: this.plan(request(material)) }))
+      for (const [i, { material, plan }] of plans.entries()) {
+        const spare = i > 0 ? spareHeld(material) : null
+        if (spare != null) {
+          this.log(`the ${tool.name} has ${tool.uses} uses left: the ${spare} held goes on after it`)
+          this.muteWorn(tool)
+          return true
+        }
+        if (plan.ok && plan.cost <= WEAR_REPLACE_TICKS && await get(material, `a plan of ${Math.round(plan.cost)} ticks`)) return true
+      }
+      for (const { material, plan } of plans) {
+        if (plan.ok && plan.cost > WEAR_REPLACE_TICKS && await get(material, `a dear plan, ${Math.round(plan.cost)} ticks`)) return true
+      }
+      this.log(`no new ${tool.kind} for the ${tool.name}: it's used till it breaks`)
+      this.muteWorn(tool)
+      return false
+    } finally {
+      this.replacing = false
+    }
+  }
+
+  /** back to where a task stopped for a worn tool (the new one got away from there: the base's chest), to go on from there */
+  private async backTo (stop: WearStop, name: string, signal?: AbortSignal): Promise<void> {
+    if (normalizeDimension(this.bot.game?.dimension) !== stop.dimension || this.bot.entity.position.distanceTo(stop.at) <= WEAR_RETURN_RANGE) return
+    this.log(`back to ${stop.at.floored().toString()}, where ${name} stopped`)
+    await this.task(`back to where ${name} stopped`, async (s) => { await travel(this.bot, { target: stop.at, range: 2, exactY: true }, s) }, signal, { wear: false })
+      .catch(err => {
+        if (TaskError.is(err, 'DIED') || signal?.aborted === true) throw err
+        this.log(`not back where ${name} stopped: ${(err as Error).message}`)
+      })
+  }
+
+  /** a task as task() runs it once, `watch.stop` set when the wear watch stopped it */
+  private async runTask<T> (name: string, fn: (signal: AbortSignal) => Promise<T>, signal: AbortSignal | undefined, info: TaskInfo | undefined, watch: { stop: WearStop | null }): Promise<T> {
     throwIfOwnerAborted(signal)
     // in the nether, every task's paths with the nether's settings (no lava edges or magma, ledges dear, the deaths
     // kept away from): a mine step for warped stems after a death walked the bot into the lava (26.3)
     const inDimension = async (s: AbortSignal): Promise<T> => normalizeDimension(this.bot.game?.dimension) === 'the_nether'
       ? await withNetherSafety(this.bot, async () => await fn(s))
       : await fn(s)
+    // the attempt running now (not one a reflex preempted)
+    let active = false
     const run = async (s: AbortSignal): Promise<T> => {
-      if (info?.room === false) return await inDimension(s)
-      const release = holdBag(this.bot, this.bagKeeper, s)
+      active = true
       try {
-        return await inDimension(s)
+        if (info?.room === false) return await inDimension(s)
+        const release = holdBag(this.bot, this.bagKeeper, s)
+        try {
+          return await inDimension(s)
+        } finally {
+          release()
+        }
       } finally {
-        release()
+        active = false
       }
     }
     const handle = this.tasks.enqueue<T>({ name, onPreempt: 'resume' }, async (ctx) => await run(ctx.signal))
     const onAbort = (): void => handle.cancel(`${name} was stopped`)
     signal?.addEventListener('abort', onAbort, { once: true })
+    // the held tool watched as the task wears it (not a plan's step: a mine step hands a worn tool back itself, and the
+    // executor replaces it before the next; nor within a replacement): stopped with TOOL_WORN when it's about to break
+    // with no spare of its tier, and task() replaces it and runs the task again. Long tasks never made one: a 26.3
+    // whole game's staircase down to the deep lava broke the diamond and the iron pickaxe, the spare 160 blocks off
+    const unwatch = info?.step == null && info?.wear !== false && !this.replacing && typeof (this.bot as any).on === 'function'
+      ? watchToolWear(this.bot as any, {
+        minUses: this.options.minToolUses,
+        active: () => active,
+        muted: tool => this.wornMuted(tool),
+        stop: tool => {
+          watch.stop = { tool, at: this.bot.entity.position.clone(), dimension: normalizeDimension(this.bot.game?.dimension) }
+          handle.stop(new TaskError('TOOL_WORN', `the ${tool.name} has ${tool.uses} uses left, no spare of its tier: ${name} stopped for another`))
+        }
+      })
+      : () => {}
     try {
       return await handle.result
     } catch (err) {
@@ -434,6 +586,7 @@ export class Executor {
       }
       throw err
     } finally {
+      unwatch()
       signal?.removeEventListener('abort', onAbort)
     }
   }
