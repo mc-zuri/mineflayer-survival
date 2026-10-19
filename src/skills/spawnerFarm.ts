@@ -447,11 +447,19 @@ export async function useSpawnerFarm (bot: Bot, farm: XpFarm, args: UseFarmArgs 
       const target = Object.values(bot.entities)
         .filter(e => e !== bot.entity && hittable(e) && isAlive(bot, e) && distanceToBox(eye, ridingBox(e)) <= 2.9)
         .sort((a, b) => distanceToBox(eye, ridingBox(a)) - distanceToBox(eye, ridingBox(b)))[0]
-      // a mob hitting the bot that the client sees elsewhere (a baby zombie on a chicken: mineflayer doesn't move a
-      // mob's rider with it, and one came through the slit and hit the bot to death from 'six blocks off', 26.3): hit
-      // back at it, the server knowing where it is
+      // a mob hitting the bot that the client sees elsewhere (a chicken jockey's baby zombie: mineflayer moves no rider
+      // with its mount, and one came through the slit and hit the bot to death from 'six blocks off' while it swung at
+      // the zombies at the slit, 26.3): hit back at it first, the server knowing where it is
       const hitter = attacker != null && ticks - attacker.tick <= 40 ? bot.entities[attacker.id] : null
-      if (target != null) {
+      const seen = (e: Entity): boolean => distanceToBox(eye, ridingBox(e)) <= 2.9
+      if (hitter != null && isAlive(bot, hitter) && (target == null || (hitter !== target && !seen(hitter)))) {
+        if (strength.scale(0.5) >= 1) {
+          trace('spawnerFarm: hitting back at', hitter.name, hitter.id, 'seen at', hitter.position.toString())
+          bot.attack(hitter)
+          hit.add(hitter.id)
+          strength.ticker = 0
+        }
+      } else if (target != null) {
         const weapon = bestMeleeWeapon(bot, target.name)
         if (weapon != null && bot.heldItem?.type !== weapon.type) await bot.equip(weapon, 'hand')
         // at what shows of it through the slit: its body at the slit's middle height
@@ -461,13 +469,6 @@ export async function useSpawnerFarm (bot: Bot, farm: XpFarm, args: UseFarmArgs 
         const { yaw, pitch } = yawPitchOf(new Vec3(at.x, y, at.z).minus(eye))
         await bot.look(yaw, pitch, true)
         if (strength.scale(0.5) >= 1 && strength.attack(target)) hit.add(target.id)
-      } else if (hitter != null && isAlive(bot, hitter)) {
-        if (strength.scale(0.5) >= 1) {
-          trace('spawnerFarm: hitting back at', hitter.name, hitter.id, 'seen at', hitter.position.toString())
-          bot.attack(hitter)
-          hit.add(hitter.id)
-          strength.ticker = 0
-        }
       } else if (bot.food <= FARM_EAT_AT) {
         // fed between the zombies (the swings tire: Player.attack's exhaustion), so the health comes back
         await eat(bot, { signal }).catch(err => { if (isAbort(err)) throw err; trace('spawnerFarm: no meal:', (err as Error).message) })
