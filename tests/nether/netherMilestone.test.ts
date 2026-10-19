@@ -319,3 +319,21 @@ test('the nether pearl legs aim well over the lava sea, not at the bot\'s height
   const ys = lines.map(l => /on to \(-?\d+, (-?\d+),/.exec(l)?.[1]).filter(y => y != null).map(Number)
   assert.ok(ys.length > 0 && ys.every(y => y >= PEARL_LEG_Y), ys.join(','))
 })
+
+test('upFromLowGround: by the lava sea in the nether the bot pillars up 8, not higher up or out of the nether', async () => {
+  const { upFromLowGround } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const calls: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (name: string) => { calls.push(name) } }
+  const low = fakeBot({ position: new Vec3(0.5, 34, 0.5) })
+  low.game.dimension = 'the_nether'
+  await upFromLowGround(low, executor, new AbortController().signal, () => {})
+  const high = fakeBot({ position: new Vec3(0.5, 70, 0.5) })
+  high.game.dimension = 'the_nether'
+  await upFromLowGround(high, executor, new AbortController().signal, () => {})
+  const over = fakeBot({ position: new Vec3(0.5, 34, 0.5) })
+  over.game.dimension = 'overworld'
+  await upFromLowGround(over, executor, new AbortController().signal, () => {})
+  assert.deepEqual(calls, ['up from the low ground'])
+})

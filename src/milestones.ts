@@ -18,6 +18,7 @@ import { isAbort, isSkillError } from './skills/errors'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, overland, strongholdToPortalRoom } from './end/strongholdSkills'
 import { crossToIsland, enterEnd, fightDragon, gotoNear, isInEnd, leaveEnd, readPortalRoom, SCAFFOLD_ITEMS } from './end/skills'
+import { towerUp } from './end/skills/world'
 import { collectBlock } from './skills/collectBlock'
 import { countBookshelves, enchant, enchantGear, findEnchantingTable, offerCostRange } from './skills/enchant'
 import { applyBooks } from './skills/anvil'
@@ -690,7 +691,12 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     log(`ender pearls: ${pearls} to get`)
     await pearlsInTheNether(bot, executor, count('ender_pearl') + pearls, signal, log)
   }
-  await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
+  await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal).catch(async err => {
+    if (signal.aborted || TaskError.is(err, 'DIED') || !inNether(bot)) throw err
+    // low by the lava sea with no way to the portal: up first, then again
+    await upFromLowGround(bot, executor, signal, log)
+    await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
+  })
   // what the nether didn't give: the overworld's endermen by night
   const still = netherNeeds({ count }).pearls
   if (still > 0) {
@@ -789,12 +795,31 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
       target: to,
       range: 8,
       onHop: () => Object.values(bot.entities).some(e => (e.name === 'enderman' || (isAdultPiglin(bot, e) && count('gold_ingot') > 0)) && e.position.distanceTo(bot.entity.position) <= 48)
-    }, s)), signal).catch(err => {
+    }, s)), signal).catch(async err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`ender pearls: the leg: ${(err as Error).message}`)
+      await upFromLowGround(bot, executor, signal, log)
     })
   }
   return count('ender_pearl')
+}
+
+/** the height under which a nether path that finds no way on climbs up first (the lava sea is at 31) */
+export const NETHER_LOW_Y = 45
+
+/**
+ * In the nether by the lava sea with no way on: a pillar 8 up from where the bot stands (the low ground's ways are
+ * all beside lava, which the nether's path settings forbid: every leg failed at once from y 34 and the way back to
+ * the portal too, 26.3)
+ */
+export async function upFromLowGround (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  if (!inNether(bot) || bot.entity.position.y >= NETHER_LOW_Y) return
+  const top = Math.floor(bot.entity.position.y) + 8
+  log(`nether: low by the lava sea at y ${Math.floor(bot.entity.position.y)}: up to ${top}`)
+  await executor.task('up from the low ground', async (s) => await towerUp(bot, top, { signal: s }), signal).catch(err => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`nether: no way up: ${(err as Error).message}`)
+  })
 }
 
 /**
