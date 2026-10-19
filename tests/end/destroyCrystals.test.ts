@@ -124,3 +124,15 @@ test('pillarClimbRisk: no pillar while the dragon strafes or charges the bot, or
   assert.strictEqual(pillarClimbRisk('landing', near, column), null)
   assert.strictEqual(pillarClimbRisk(null, null, column), null)
 })
+
+test('pillarBase: a column climbed again keeps the foot of its first climb, not the top of what was left of the pillar', async () => {
+  const { pillarBase } = await import('../../src/end/skills/destroyCrystals')
+  const pillar: any = { current: null, bases: new Map() }
+  const column = { x: -32, z: 21 }
+  assert.strictEqual(pillarBase(pillar, column, () => 63), 63)
+  pillar.current = null
+  // 12 blocks of the first pillar left: the ground the column shows now is their top
+  assert.strictEqual(pillarBase(pillar, column, () => 75), 63)
+  assert.deepStrictEqual(pillar.current, { column, base: 63 })
+  assert.strictEqual(pillarBase(pillar, { x: 39, z: 0 }, () => 62), 62)
+})

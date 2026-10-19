@@ -153,7 +153,7 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
   const guard = new VoidGuard(get, 3, worldMinY(bot))
   let spikes = readSpikes(get, [], opts.seed)
   /** the pillar the bot is building or standing on, and the ground it went up from */
-  const pillar: PillarState = { current: null }
+  const pillar: PillarState = { current: null, bases: new Map() }
   /** waiting up a pillar for a cloud under the bot to go */
   let waitingOver = false
   /** ticks waited for the dragon to be away before going up a pillar */
@@ -312,10 +312,26 @@ export function pillarUnderCloud (target: CrystalTarget, avoid: (x: number, z: n
 /** a pillar the bot went up for a caged crystal: its column and the feet height at its foot */
 export interface PillarState {
   current: { column: { x: number, z: number }, base: number, downTries?: number } | null
+  /** each column's foot from its first climb (what's left of a pillar is no ground to dig down to) */
+  bases?: Map<string, number>
 }
 
 /** failed tries at coming down a pillar before it is left be (the next job's walk takes the bot off it its own way) */
 export const MAX_DOWN_TRIES = 2
+
+/**
+ * The foot of a pillar on `column`, from its first climb when there was one (`read`, the ground the column shows, the
+ * first time); the pillar made the one being built
+ */
+export function pillarBase (pillar: PillarState, column: { x: number, z: number }, read: () => number | null): number | null {
+  const key = `${column.x},${column.z}`
+  const base = pillar.bases?.get(key) ?? read()
+  if (base != null) {
+    pillar.current = { column, base }
+    pillar.bases?.set(key, base)
+  }
+  return base
+}
 
 function onColumn (pos: Pos, column: { x: number, z: number }): boolean {
   return Math.floor(pos.x) === column.x && Math.floor(pos.z) === column.z
@@ -392,9 +408,9 @@ async function destroyOne (bot: Bot, target: CrystalTarget, crystal: Entity, bro
   if (target.method === 'pillar' && target.pillar != null) {
     const { column, topY, breakBars } = target.pillar
     // the foot of the pillar: where it went up from, when the bot is up it already
-    const same = pillar.current != null && pillar.current.column.x === column.x && pillar.current.column.z === column.z
-    const base = same ? (pillar.current as { base: number }).base : groundY(get, column.x, column.z, topY + 2)
-    if (base != null) pillar.current = { column, base }
+    // the foot of the pillar: where it first went up from (a pillar left part way and climbed again stood on what was
+    // left of it, the foot read 12 blocks up, and the way down stopped there, 26.3)
+    const base = pillarBase(pillar, column, () => groundY(get, column.x, column.z, topY + 2))
     await pillarUp(bot, column, topY, { signal, avoid })
     opts.log?.(`up the pillar at ${bot.entity.position.floored().toString()} (from ${String(base)}): ${breakBars.length} bars to break`)
     for (const bar of breakBars) {
