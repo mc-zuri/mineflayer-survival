@@ -581,6 +581,14 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     }
     // a spare kit by the portal and the respawn point by it (a blaze's death in the nether was the stage lost)
     await leaveTripKit(bot, executor, signal, log)
+    // the bridges' blocks taken in from here: the pathfinder bridges with cobblestone and dirt only, which the nether
+    // hasn't got (its netherrack isn't placed by it yet)
+    if (countItems(bot, ['cobblestone', 'dirt']) < NETHER_BLOCKS) {
+      await executor.obtain([{ item: 'cobblestone', count: countItems(bot, 'cobblestone') + NETHER_BLOCKS - countItems(bot, ['cobblestone', 'dirt']) }], signal).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`nether: no cobblestone: ${(err as Error).message}`)
+      })
+    }
     await executor.task('into the nether', async (s) => await enterNether(bot, { build: true }, s), signal)
   }
   const needs = netherNeeds({ count })

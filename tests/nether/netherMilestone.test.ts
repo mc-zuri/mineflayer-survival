@@ -54,7 +54,8 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
   const from = calls.indexOf('obtain 10 obsidian')
   assert.equal(calls[0], 'down to the deep lava')
   assert.equal(calls.slice(0, from).filter(c => c === 'a leg for lava').length, PORTAL_LEGS)
-  assert.deepStrictEqual(calls.slice(from, from + 4), ['obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
+  // (the bridges' cobblestone got before the way in)
+  assert.deepStrictEqual(calls.slice(from).filter(c => !/cobblestone/.test(c)).slice(0, 4), ['obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
 })
 
 test('pearls in the nether: the endermen in sight hunted, else a leg on to find piglins or endermen, a few legs at most', async () => {
@@ -165,4 +166,23 @@ test('pearls in the nether: a warped forest in sight is gone to, and waited in f
   assert.equal(tasks[0], 'a leg for pearls')
   assert.equal(tasks[1], 'wait for endermen')
   forestAt = new Vec3(0, 0, 0)
+})
+
+test('the nether is gone into with 64 cobblestone or dirt for the pathfinder\'s bridges', async () => {
+  const { netherHandler, NETHER_BLOCKS } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('cobblestone', 20)] })
+  bot.game.dimension = 'overworld'
+  const memory = new WorldMemory()
+  memory.addPoi('nether_portal', { x: 0, y: 64, z: 0 }, 'overworld', 'built')
+  const calls: string[] = []
+  const executor: any = {
+    memory,
+    tasks: { tick: 0 },
+    plan: () => ({ ok: false }),
+    obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs[0].count} ${reqs[0].item}`) },
+    task: async (name: string) => { calls.push(name); if (name === 'into the nether') throw new Error('stop here') }
+  }
+  await assert.rejects(netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }), /stop here/)
+  assert.ok(calls.includes(`obtain ${NETHER_BLOCKS} cobblestone`), calls.join(', '))
 })
