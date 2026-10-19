@@ -696,6 +696,7 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     }
   }
   await goldOnInTheNether(bot, executor, signal, log)
+  await recoverNetherDrops(bot, executor, signal, log)
   const needs = netherNeeds({ count })
   // blocks for the nether's bridges before its long walks (the netherrack about: a path bridged over the lava sea
   // at y 81 ran out of blocks half way, 'no item to place', and the bot fell into the lava, three times on 26.3)
@@ -1056,6 +1057,33 @@ export async function recoverEndDrops (bot: Bot, executor: Executor, signal: Abo
     if (signal.aborted || TaskError.is(err, 'DIED')) throw err
     log(`End: the drops: ${(err as Error).message}`)
   }
+}
+
+/** ticks the way back to a nether death's drops may take */
+export const NETHER_DROPS_TICKS = 8000
+
+/**
+ * Back to a nether death's drops (its diamond gear at a fortress's spawner): the items of an unloaded chunk don't
+ * age (ItemEntity ticks only in loaded chunks), so they lie there till the bot is back; gone to by the nether's path
+ * settings within NETHER_DROPS_TICKS, unless the death was in the lava sea or the spot is lava when seen
+ * (a 26.3 bot came back to the spawner naked three times, its kit's diamonds lying there)
+ */
+export async function recoverNetherDrops (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  const death = executor.memory.death
+  if (death == null || death.dimension !== 'the_nether' || !inNether(bot) || death.y <= 33) return
+  const spot = new Vec3(death.x, death.y, death.z)
+  log(`nether: back to the drops at ${death.x} ${death.y} ${death.z}`)
+  try {
+    await withTickBudget(bot, NETHER_DROPS_TICKS, signal, async (s) => await executor.task('the nether drops', async (ts) => await withNetherSafety(bot, async () => {
+      await travel(bot, { target: spot, range: 3, exactY: true }, ts)
+      if (/lava/.test(bot.blockAt(spot.floored())?.name ?? '')) return
+      await pickupDrops(bot, { near: spot.offset(0.5, 0.5, 0.5), radius: 10 }, ts)
+    }), s))
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`nether: the drops: ${(err as Error).message}`)
+  }
+  executor.memory.death = null
 }
 
 /** ticks a pumpkin and shears for the End's carved pumpkin may cost (the plan's estimate) */

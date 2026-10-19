@@ -337,3 +337,21 @@ test('upFromLowGround: by the lava sea in the nether the bot pillars up 8, not h
   await upFromLowGround(over, executor, new AbortController().signal, () => {})
   assert.deepEqual(calls, ['up from the low ground'])
 })
+
+test('recoverNetherDrops: back to a nether death\'s drops off the lava sea, once', async () => {
+  const { recoverNetherDrops } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot()
+  bot.game.dimension = 'the_nether'
+  const memory = new WorldMemory()
+  const calls: string[] = []
+  const executor: any = { memory, tasks: { tick: 0 }, task: async (name: string) => { calls.push(name) } }
+  memory.setDeath(new Vec3(60, 64, -530), 'the_nether')
+  await recoverNetherDrops(bot, executor, new AbortController().signal, () => {})
+  assert.deepEqual(calls, ['the nether drops'])
+  assert.equal(memory.death, null)
+  memory.setDeath(new Vec3(60, 31, -530), 'the_nether')
+  await recoverNetherDrops(bot, executor, new AbortController().signal, () => {})
+  assert.deepEqual(calls, ['the nether drops'])
+})
