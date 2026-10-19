@@ -5,7 +5,7 @@ import { WorldMemory, normalizeDimension } from './core/memory'
 import { ReflexEngine, type ReflexEngineOptions } from './reflexes'
 import { play, type MilestoneHandler, type PlayOptions, type PlayResult } from './runner'
 import { keepHeadAboveWater } from './skills/breath'
-import { keepOutOfHazardsLeft } from './skills/hazardCells'
+import { keepOffDripstone, keepOutOfHazardsLeft } from './skills/hazardCells'
 import { openSky } from './executor/explore'
 import type { MilestoneId } from './planner/progression'
 import { Diagnostics, type DiagnosticsOptions } from './diagnostics'
@@ -88,6 +88,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     keepHeadAboveWater(bot)
     // no step back into a cell the hazard reflex just took the bot out of (a magma block it was walked back onto)
     keepOutOfHazardsLeft(bot)
+    // no walk or drop onto a stalagmite (impaled, PointedDripstoneBlock.fallOn)
+    keepOffDripstone(bot)
     const tasks = new TaskRunner(bot)
     const memory = new WorldMemory()
     const reflexes = options.reflexes === false ? null : new ReflexEngine(bot, { sink: tasks, ...(options.reflexes === true ? {} : options.reflexes) })

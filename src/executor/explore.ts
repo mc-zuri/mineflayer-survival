@@ -94,11 +94,26 @@ export function tunnelStep (feet: Vec3, dir: Vec3): { open: Vec3[], next: Vec3, 
   return { open: [ahead, ahead.offset(0, 1, 0)], next: ahead, floor: ahead.offset(0, -1, 0) }
 }
 
-/** why a step is unsafe (lava or water next to a cell it opens, nothing to stand on over a drop into lava), or null */
+/**
+ * why a step is unsafe (lava or water next to a cell it opens, nothing to stand on over a drop into lava, pointed
+ * dripstone in a cell it opens, as its floor or under it: a dripstone cave's stalagmites), or null
+ */
 export function unsafeStep (lookup: Lookup, step: { open: Vec3[], floor: Vec3 }): string | null {
   for (const cell of step.open) {
     const liquid = liquidAround(lookup, cell)
     if (liquid != null) return liquid
+  }
+  // a stalagmite stood on or fallen onto impales (PointedDripstoneBlock.fallOn), and a stalactite whose block is
+  // broken falls (a 26.3 staircase to the deep lava came out in a dripstone cave, where the bot was impaled)
+  for (const cell of step.open) {
+    if (lookup(cell)?.name === 'pointed_dripstone') return `pointed dripstone at ${cell.toString()}`
+  }
+  // (the floor, and down a cave under it to its ground)
+  for (let dy = 0; dy >= -3; dy--) {
+    const cell = step.floor.offset(0, dy, 0)
+    const b = lookup(cell)
+    if (b?.name === 'pointed_dripstone') return `pointed dripstone at ${cell.toString()}`
+    if (b == null || b.boundingBox === 'block') break
   }
   // the floor and what's under it: a bot doesn't stand over lava (a block broken under it drops it in)
   for (let dy = 0; dy >= -2; dy--) {
@@ -908,6 +923,7 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
   const maxSteps = args.maxSteps ?? 400
   let moves = 0
   let dug = 0
+  let level = 0
   const pickaxe = pickaxeKeeper(bot)
   for (let i = 0; i < maxSteps; i++) {
     throwIfAborted(signal)
@@ -937,6 +953,12 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
       break
     }
     if (stepped) continue
+    // no safe step down on any side (a dripstone cave's stalagmites under them, a lake): a level step on through the
+    // rock, over the cave's roof, and down again past it
+    if (level < LEVEL_STEPS && await levelStep(bot, lookup, feet, [dir, new Vec3(-dir.z, 0, dir.x), new Vec3(dir.z, 0, -dir.x)], signal)) {
+      level++
+      continue
+    }
     // water or lava on every side (a beach, a lake's floor): somewhere drier a few blocks off, and down from there
     const spot = moves < 3 ? dryStart(lookup, feet) : null
     if (spot == null) throw new SkillError('NO_PATH', `no safe way down from ${feet.toString()}`)
@@ -950,6 +972,32 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
     }
   }
   return feetOf(bot).y <= y
+}
+
+/** level steps a staircase down takes at most where no step down is safe (descendTo) */
+const LEVEL_STEPS = 32
+
+/**
+ * A level step (tunnelStep) along the first of `dirs` it's safe to take (unsafeStep), dug and walked into; whether one
+ * was. A staircase over a dripstone cave (every step down over its stalagmites) went no further, 'no safe way down'.
+ */
+async function levelStep (bot: Bot, lookup: Lookup, feet: Vec3, dirs: Vec3[], signal?: AbortSignal): Promise<boolean> {
+  for (const d of dirs) {
+    const step = tunnelStep(feet, d)
+    const why = unsafeStep(lookup, step)
+    if (why != null) continue
+    try {
+      await open(bot, step.open, signal)
+      if (!(await ensureFloor(bot, step.floor, signal))) continue
+      await walkInto(bot, step.next, signal)
+      trace('explore: no safe step down from', feet.toString(), ': a level step to', step.next.toString())
+      return true
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('explore: level step failed', (err as Error).message)
+    }
+  }
+  return false
 }
 
 /**

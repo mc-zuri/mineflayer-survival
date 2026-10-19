@@ -219,7 +219,8 @@ export function botGridView (bot: Bot): GridCellView {
   return {
     free: p => { const b = blockOf(p); return b != null && b.boundingBox === 'empty' && !HARMFUL.has(b.name) },
     // (and no cell the hazard reflex took the bot out of lately: hazardLeft)
-    floor: p => { const b = blockOf(p); return b != null && b.boundingBox === 'block' && b.name !== 'magma_block' && !hazardLeft(bot, p.offset(0, 1, 0)) },
+    // (nor pointed dripstone: a stalagmite's tip impales, PointedDripstoneBlock.fallOn)
+    floor: p => { const b = blockOf(p); return b != null && b.boundingBox === 'block' && b.name !== 'magma_block' && b.name !== 'pointed_dripstone' && !hazardLeft(bot, p.offset(0, 1, 0)) },
     lava: isLava,
     edgeCost: nether ? GRID_EDGE_COST.the_nether : GRID_EDGE_COST.other,
     cellCost: deaths.length > 0 ? c => nearDeath(deaths, c) ? GRID_DEATH_COST : 0 : undefined

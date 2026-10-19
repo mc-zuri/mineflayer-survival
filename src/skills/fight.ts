@@ -3,6 +3,7 @@ import type { Item } from 'prismarine-item'
 import type { Vec3 } from 'vec3'
 import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { edgeAhead, steerAway, steerToward } from './steer'
+import { onDripstone } from './hazardCells'
 import { type Entity, metadataIndex, metadataValue, distanceToBox, entityBox, entityName, eyePosition, isAlive, TaskError, type SkillOptions, throwIfAborted, waitTicks, yawPitchOf } from './combatUtil'
 
 export interface FightOptions extends SkillOptions {
@@ -225,7 +226,10 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       bot.setControlState('back', distance < 1 && !edgeAhead(bot, bot.entity.yaw + Math.PI, 1.2, opts.maxDrop ?? 3))
       lookAt(bot, center)
       const e = bot.entity as any
-      const canCrit = crits && !isCreeper && e.isInWater !== true && e.isInLava !== true && e.onClimbable !== true
+      // no crit jump off a stalagmite: each landing back on its tip impales (PointedDripstoneBlock.fallOn; a 26.3 bot
+      // jumped at zombies from one 17 times, till it died)
+      const canCrit = crits && !isCreeper && e.isInWater !== true && e.isInLava !== true && e.onClimbable !== true &&
+        !onDripstone(p => bot.blockAt(p), bot.entity.position.floored())
       const airborne = ticks - jumpedAt <= 14 && !bot.entity.onGround
       const falling = !bot.entity.onGround && bot.entity.velocity.y < 0
       const jumpNow = canCrit && bot.entity.onGround && !airborne && strength.ticksToFull() <= 5
