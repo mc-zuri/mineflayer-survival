@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
 import { breathZone, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
-import { ARROW_FLIGHT_TICKS, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, hurtingContact, retreatSpot, safeToEat, takeoffStepBack } from '../../src/end/skills/fightDragon'
+import { ARROW_FLIGHT_TICKS, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, hurtContext, hurtingContact, retreatSpot, safeToEat, takeoffStepBack } from '../../src/end/skills/fightDragon'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
 
@@ -248,4 +248,16 @@ test('arrowHit: a health drop in flight within ARROW_FLIGHT_TICKS of a shot; non
   assert.equal(arrowHit(200, 191, 'sitting_scanning', 5), false)
   assert.equal(arrowHit(191, 192, 'holding_pattern', 5), false)
   assert.equal(arrowHit(200, 191, null, 5), false)
+})
+
+
+test('hurtContext: where the bot was hurt, the dragon\'s place and phase, the part it touched', () => {
+  const dragon = entity({ name: 'ender_dragon', position: new Vec3(0.5, 66, 0.5), meta: { phase: DRAGON_PHASES.indexOf('sitting_scanning'), health: 150 } })
+  dragon.yaw = Math.PI - Math.PI / 2 // vanilla 90: the head along +x
+  const bot = fakeBot({ position: new Vec3(7.5, 63, 0.5), entities: [dragon] })
+  const tracker = new DragonPhaseTracker(exitPortal(62).perch)
+  tracker.update({ tick: 0, phase: DRAGON_PHASES.indexOf('sitting_scanning'), position: dragon.position, yaw: 90 })
+  const line = hurtContext(bot, 62, tracker)
+  assert.match(line, /bot at 7\.5 63\.00 0\.5/)
+  assert.match(line, /dragon at 0\.5 66\.00 0\.5 yaw 90 \(sitting_scanning\), touching its head/)
 })

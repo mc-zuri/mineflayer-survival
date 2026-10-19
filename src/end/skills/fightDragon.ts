@@ -181,6 +181,21 @@ export function takeoffStepBack (window: MeleeWindow, afterHit: boolean): boolea
   return window.activity === 'leaving' || afterHit || (window.takeoffSoon && window.phase === 'sitting_flaming')
 }
 
+/** where the bot and the dragon are when it is hurt, for the log: the bot's feet, the dragon's place, yaw and phase, the part it touches, the clouds over it */
+export function hurtContext (bot: Bot, portalY: number, tracker: DragonPhaseTracker): string {
+  const me = bot.entity.position
+  const parts = [`bot at ${me.x.toFixed(1)} ${me.y.toFixed(2)} ${me.z.toFixed(1)}${bot.entity.onGround ? '' : ' (airborne)'}`]
+  const dragon = Object.values(bot.entities).find(e => e.name === 'ender_dragon')
+  if (dragon != null) {
+    const view = { position: dragon.position, yaw: vanillaYaw(dragon.yaw), ...tracker.flight() }
+    const zone = touchedZone(me, dragonZones(view, tracker.phase != null && isSitting(tracker.phase)))
+    parts.push(`dragon at ${dragon.position.x.toFixed(1)} ${dragon.position.y.toFixed(2)} ${dragon.position.z.toFixed(1)} yaw ${view.yaw.toFixed(0)} (${String(tracker.phase)})${zone != null ? `, touching its ${zone.part}` : ''}`)
+  }
+  const cloud = inDanger(me, dragonDangers(bot, portalY), 0)
+  if (cloud != null) parts.push(`in a ${cloud.why} (${cloud.center.x.toFixed(1)}, ${cloud.center.z.toFixed(1)}, radius ${cloud.radius.toFixed(1)})`)
+  return parts.join(', ')
+}
+
 /** a point `distance` from `from` straight away from `threat` (horizontally) */
 export function awayFrom (from: Vec3, threat: Pos, distance: number): Vec3 {
   const away = new Vec3(from.x - threat.x, 0, from.z - threat.z)
@@ -283,6 +298,13 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   let health = 200
   const onGone = (e: Entity): void => { if (e.id === dragonId) killed = killed || health <= 0 || tracker.phase === 'dying' }
   bot.on('entityGone', onGone)
+  // each hurt logged with where the bot and the dragon were (what hurt it: the head, the breath, a fireball's cloud)
+  let lastHealth = bot.health
+  const onHealth = (): void => {
+    if (bot.health < lastHealth) log(`hurt ${lastHealth.toFixed(1)} -> ${bot.health.toFixed(1)}: ${hurtContext(bot, portalY, tracker)}`)
+    lastHealth = bot.health
+  }
+  bot.on('health', onHealth)
   let tick = 0
   let meleeHits = 0
   let crits = 0
@@ -405,7 +427,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       const contact = dragon != null ? hurtingContact({ position: dragon.position, yaw: vanillaYaw(dragon.yaw), ...tracker.flight() }, me, window.phase) : null
       if (contact != null && dragon != null) {
         stopDraw()
-        if (!wasInContact) log(`under the dragon's ${contact} (${String(window.phase)}): out from under it`)
+        if (!wasInContact) log(`under the dragon's ${contact}: out from under it; ${hurtContext(bot, portalY, tracker)}`)
         wasInContact = true
         steerToward(bot, awayFrom(me, dragon.position, 6), { sprint: true })
         bot.setControlState('jump', false)
@@ -584,6 +606,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   } finally {
     releaseEat?.()
     bot.off('entityGone', onGone)
+    bot.off('health', onHealth)
     if (dragonId != null) motion.untrack({ id: dragonId } as any)
     stopDraw()
     bot.clearControlStates()
