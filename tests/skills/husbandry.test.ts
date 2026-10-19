@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { BREED_COOLDOWN_TICKS, breedingPairs } from '../../src/skills/husbandry'
+import { BREED_COOLDOWN_TICKS, breedingPairs, releaseSpots } from '../../src/skills/husbandry'
 import { caneSpot, caneSpots, waterHoleSite } from '../../src/skills/caneFarm'
 
 test('breedingPairs: adults within 8 blocks of each other, not fed in the cooldown, nearest first', () => {
@@ -65,14 +65,34 @@ test('keepFarms: eggs held let out, a pair of cows near bred with the wheat held
   assert.deepStrictEqual(tasks, [])
 })
 
-test('shelvesForLeather: the shelves the leather at hand makes books for, two cows kept to breed', async () => {
+test('shelvesForLeather: the shelves the leather at hand makes books for, two cows kept to breed and a book for the anvil', async () => {
   const { shelvesForLeather } = await import('../../src/milestones')
   const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
-  // 8 cows let out: 6 to kill, 6 books, 2 shelves (the table's book made already)
-  assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1 }), 8), 2)
+  // 8 cows let out: 6 to kill, 6 books, one kept: a shelf (the table's book made already)
+  assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1 }), 8), 1)
+  assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1 }), 8, 0, 0), 2)
   // the table still to make takes a book first
-  assert.strictEqual(shelvesForLeather(inv({}), 8), 1)
+  assert.strictEqual(shelvesForLeather(inv({}), 9), 1)
   assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1, leather: 10, book: 3, bookshelf: 1 }), 2), 5)
   assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1, leather: 64 }), 0, 4), 15)
   assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1 }), 1), 0)
+})
+
+test('releaseSpots and waterHoleSite on a hillside: ground with room over it about the bot, a hole with cane ground on two sides', () => {
+  // a slope rising one block a column along +x from x 0, grass on top, the bot at x 0 on y 64
+  const top = (x: number): number => 63 + Math.max(0, Math.min(4, x))
+  const hill = (p: Vec3): { name: string, boundingBox: string } => {
+    const t = top(p.x)
+    if (p.y > t) return { name: 'air', boundingBox: 'empty' }
+    return { name: p.y === t ? 'grass_block' : 'dirt', boundingBox: 'block' }
+  }
+  const spots = releaseSpots(hill, new Vec3(0, 64, 0))
+  assert.ok(spots.length >= 8, `${spots.length}`)
+  for (const s of spots) {
+    assert.strictEqual(hill(s).boundingBox, 'block')
+    assert.strictEqual(hill(s.offset(0, 1, 0)).boundingBox, 'empty')
+  }
+  const site = waterHoleSite(hill, new Vec3(0.5, 64, 0.5)) as Vec3
+  assert.ok(site != null)
+  assert.strictEqual(hill(site).name, 'grass_block')
 })

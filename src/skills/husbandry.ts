@@ -121,6 +121,26 @@ export async function breedAnimals (bot: Bot, args: BreedArgs = {}, signal?: Abo
   return { fed: count, pairs: pairs.length }
 }
 
+/**
+ * The ground blocks an egg is used on: within 4 blocks of the bot, 2 up or down, with room for an animal over them
+ * (the cell over and the one above it free), 2 or more blocks off the bot, nearest first. (A fixed ring of spots on
+ * level ground let 3 of 8 cows out on a hillside.)
+ */
+export function releaseSpots (lookup: (pos: Vec3) => { boundingBox: string, name?: string } | null, feet: Vec3, radius = 4): Vec3[] {
+  const out: Vec3[] = []
+  for (let dy = -3; dy <= 1; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        if (Math.max(Math.abs(dx), Math.abs(dz)) < 2) continue
+        const g = feet.offset(dx, dy, dz)
+        const free = (p: Vec3): boolean => { const b = lookup(p); return b != null && b.boundingBox === 'empty' && b.name !== 'water' && b.name !== 'lava' }
+        if (lookup(g)?.boundingBox === 'block' && free(g.offset(0, 1, 0)) && free(g.offset(0, 2, 0))) out.push(g)
+      }
+    }
+  }
+  return out.sort((a, b) => a.distanceTo(feet) - b.distanceTo(feet))
+}
+
 export interface ReleaseArgs {
   /** the spawn egg (default cow_spawn_egg) */
   egg?: string
@@ -136,12 +156,11 @@ export async function releaseAnimals (bot: Bot, args: ReleaseArgs = {}, signal?:
   const egg = args.egg ?? 'cow_spawn_egg'
   const total = Math.min(countItems(bot, egg), args.count ?? Infinity)
   let released = 0
-  const feet = bot.entity.position.floored()
-  const spots = [[2, 0], [-2, 0], [0, 2], [0, -2], [2, 2], [-2, -2], [2, -2], [-2, 2]]
+  const spots = releaseSpots(p => bot.blockAt(p) as any, bot.entity.position.floored())
+  if (spots.length === 0) throw new SkillError('NOT_FOUND', 'no ground about to let the animals out on')
   for (let i = 0; i < total; i++) {
     throwIfAborted(signal)
-    const [dx, dz] = spots[i % spots.length]
-    const ground = bot.blockAt(feet.offset(dx, -1, dz))
+    const ground = bot.blockAt(spots[i % spots.length])
     if (ground == null || ground.boundingBox !== 'block') continue
     const item = findInventoryItem(bot, egg)
     if (item == null) break

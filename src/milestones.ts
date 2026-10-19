@@ -34,16 +34,19 @@ export function netherNeeds (inv: { count: (name: string) => number }): { rods: 
   return { rods: Math.max(0, Math.ceil((wanted - powder) / 2)), pearls: Math.max(0, wanted - inv.count('ender_pearl')) }
 }
 
+/** books kept out of the shelves, to enchant and put on the gear at an anvil */
+export const BOOKS_KEPT = 1
+
 /** adult cows kept to breed when the rest are killed for leather */
 export const BREEDERS_KEPT = 2
 
 /**
- * The shelves the leather at hand makes books for (3 books a shelf, a book a leather; the table's book first): the
- * leather, books and shelves held, and an adult cow's leather each beyond BREEDERS_KEPT, plus the shelves round the
+ * The shelves the leather at hand makes books for (3 books a shelf, a book a leather; the table's book first, and
+ * BOOKS_KEPT for the anvil): the leather, books and shelves held, and an adult cow's leather each beyond BREEDERS_KEPT, plus the shelves round the
  * table already; at most BOOKSHELVES
  */
-export function shelvesForLeather (inv: { count: (name: string) => number }, adultCows: number, around = 0): number {
-  const books = inv.count('book') + inv.count('leather') + Math.max(0, adultCows - BREEDERS_KEPT) - (inv.count('enchanting_table') > 0 || around > 0 ? 0 : 1)
+export function shelvesForLeather (inv: { count: (name: string) => number }, adultCows: number, around = 0, reserve = BOOKS_KEPT): number {
+  const books = inv.count('book') + inv.count('leather') + Math.max(0, adultCows - BREEDERS_KEPT) - (inv.count('enchanting_table') > 0 || around > 0 ? 0 : 1) - reserve
   return Math.min(BOOKSHELVES, around + inv.count('bookshelf') + Math.max(0, Math.floor(books / 3)))
 }
 
@@ -107,6 +110,13 @@ export const BOOKS_TO_ENCHANT = 3
  * gear, and the gear still plain enchanted again: the second round of the enchanting
  */
 export async function enchantBooksAndApply (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  // the book kept out of the shelves (BOOKS_KEPT), made from its leather and paper now
+  if (countItems(bot, 'book') === 0 && countItems(bot, 'lapis_lazuli') > 0 && experience(bot).level >= 1) {
+    await executor.obtain([{ item: 'book', count: BOOKS_KEPT }], signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`enchanting: no book to enchant: ${(err as Error).message}`)
+    })
+  }
   for (let i = 0; i < BOOKS_TO_ENCHANT && countItems(bot, 'book') > 0 && countItems(bot, 'lapis_lazuli') > 0 && experience(bot).level >= 1; i++) {
     try {
       const r = await executor.task('enchant a book', async (s) => await enchant(bot, { item: 'book', memory: executor.memory }, s), signal)

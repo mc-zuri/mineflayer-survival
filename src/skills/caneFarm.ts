@@ -42,25 +42,31 @@ export function caneSpots (lookup: CaneLookup, center: Vec3, radius = 12): Vec3[
   return out.sort((a, b) => a.distanceTo(c) - b.distanceTo(c))
 }
 
+const AIRS = new Set(['air', 'cave_air', 'short_grass', 'tall_grass', 'fern', 'dandelion', 'poppy'])
+
 /**
- * A cell to make a water hole in for a farm: a cane ground block with the same ground on its four sides and air over
- * them, nearest first
+ * A cell to make a water hole in for a farm: a ground block with cane ground on 2 or more of its four sides (air or a
+ * plant over them, the canes' cells) and something under it to hold the water, the most sides first, then the
+ * nearest. (Level grass on all four sides found no site on a hillside's edge of a forest: no farm on 26.3 seed 2.)
  */
-export function waterHoleSite (lookup: CaneLookup, center: Vec3, radius = 8): Vec3 | null {
+export function waterHoleSite (lookup: CaneLookup, center: Vec3, radius = 12): Vec3 | null {
   const c = center.floored()
-  let best: Vec3 | null = null
-  for (let dy = -2; dy <= 1; dy++) {
+  let best: { p: Vec3, sides: number } | null = null
+  for (let dy = -3; dy <= 2; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {
       for (let dz = -radius; dz <= radius; dz++) {
         if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1 && dy >= -1) continue
         const p = c.offset(dx, dy, dz)
-        const ok = [p, ...SIDES.map(s => p.plus(s))].every(q => CANE_GROUND.has(lookup(q)?.name ?? '') && lookup(q.offset(0, 1, 0))?.name === 'air') &&
-          lookup(p.offset(0, -1, 0))?.name !== 'air'
-        if (ok && (best == null || p.distanceTo(c) < best.distanceTo(c))) best = p
+        if (!CANE_GROUND.has(lookup(p)?.name ?? '') || !AIRS.has(lookup(p.offset(0, 1, 0))?.name ?? '')) continue
+        const under = lookup(p.offset(0, -1, 0))?.name
+        if (under == null || AIRS.has(under) || under === 'water' || under === 'lava') continue
+        const sides = SIDES.filter(s => CANE_GROUND.has(lookup(p.plus(s))?.name ?? '') && AIRS.has(lookup(p.plus(s).offset(0, 1, 0))?.name ?? '')).length
+        if (sides < 2) continue
+        if (best == null || sides > best.sides || (sides === best.sides && p.distanceTo(c) < best.p.distanceTo(c))) best = { p, sides }
       }
     }
   }
-  return best
+  return best?.p ?? null
 }
 
 export interface CaneFarmResult {
