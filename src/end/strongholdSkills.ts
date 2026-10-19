@@ -117,6 +117,12 @@ export async function throwEnderEye (bot: Bot, opts: { recover?: boolean } = {},
     const observed = { spawn: spawn != null ? toVec(spawn) : undefined, positions: positions.map(toVec) }
     const direction = inferThrowDirection(observed)
     const ray: EyeRay | null = direction == null ? null : { origin: direction.origin, direction: direction.direction }
+    // what the throw told, remembered before the walk after the eye: a reflex that preempts the walk (the drowning
+    // reflex out at sea) runs the search again from the start, and the ray it had not kept was thrown for again, over
+    // and over, the eyes going one by one (26.3 seed 2)
+    const memory = bot.survival?.memory
+    if (direction?.near != null) memory?.addPoi(STRONGHOLD_SPOT, { x: direction.near.x, y: 0, z: direction.near.z }, 'overworld', 'eye came down')
+    else if (ray != null) rememberRay(memory, ray)
     let recovered = false
     if (opts.recover !== false && positions.length > 0) {
       // the item drops where the eye was (EyeOfEnder.tick: spawnAtLocation at its position) and falls
@@ -323,7 +329,8 @@ async function throwReadable (bot: Bot, signal?: AbortSignal): Promise<ThrowEyeR
   await toThrowingSpot(bot, signal)
   for (let i = 0; i < 3; i++) {
     await waitUntil(bot, () => bot.entity.onGround && bot.entity.velocity.norm() < 0.1, 40, signal)
-    last = await throwEnderEye(bot, {}, signal)
+    // in the water still (no shore near): an eye coming down is in the sea, and isn't swum after
+    last = await throwEnderEye(bot, { recover: !inWater(bot) }, signal)
     if (last.ray != null || last.near != null) return last
     trace('locateStronghold: the eye\'s flight was not read; another')
   }
@@ -408,7 +415,7 @@ export async function reachStronghold (bot: Bot, args: ReachStrongholdArgs = {},
         }
       }
       await toThrowingSpot(bot, signal)
-      const t = await throwEnderEye(bot, {}, signal)
+      const t = await throwEnderEye(bot, { recover: !inWater(bot) }, signal)
       if (t.near != null) {
         bot.survival?.memory.addPoi(STRONGHOLD_SPOT, { x: t.near.x, y: 0, z: t.near.z }, 'overworld', 'eye came down')
         return { spot: t.near, throws: n, ticks }

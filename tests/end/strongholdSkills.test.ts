@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, nextAlongRay, awaitEyeDrop, consistentCrossing, EYE_RAY, EYE_DROP_TICKS } from '../../src/end/strongholdSkills'
+import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, nextAlongRay, awaitEyeDrop, consistentCrossing, throwEnderEye, rememberedRays as raysOf, EYE_RAY, EYE_DROP_TICKS } from '../../src/end/strongholdSkills'
 import { isSkillError } from '../../src/skills/errors'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
@@ -107,4 +107,42 @@ test('consistentCrossing: rays to two strongholds are no estimate; the pair that
   assert.ok(Math.hypot(est.x - east.x, est.z - east.z) < 5, `${est.x} ${est.z}`)
   // two rays that cross well inside the rings' inner edge (300 blocks out) aren't a stronghold either
   assert.strictEqual(consistentCrossing([toward({ x: 0, z: 0 }, { x: 300, z: 0 }), toward({ x: 0, z: 200 }, { x: 300, z: 0 })]), null)
+})
+
+test('throwEnderEye remembers the eye\'s ray as soon as its flight is read, before any walk after the eye (a reflex cutting the walk off loses nothing)', async () => {
+  const { Vec3 } = require('vec3')
+  const { EventEmitter } = require('node:events')
+  const { WorldMemory } = require('../../src/core/memory')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('ender_eye', 3)] })
+  bot.game.dimension = 'overworld'
+  bot._client = new EventEmitter()
+  bot.equip = async () => {}
+  bot.deactivateItem = () => {}
+  bot.survival = { memory: new WorldMemory() }
+  let eye: any = null
+  let t = 0
+  bot.activateItem = () => {
+    eye = { id: 9, name: 'eye_of_ender', position: new Vec3(0.5, 65, 0.5) }
+    bot.entities[9] = eye
+    bot.emit('entitySpawn', eye)
+  }
+  // the world ticks: the eye flies east 12 blocks over 40 ticks, then goes
+  const timer = setInterval(() => {
+    t++
+    if (eye != null && bot.entities[9] != null) {
+      eye.position = eye.position.offset(0.3, 0.05, 0)
+      if (eye.position.x > 12) delete bot.entities[9]
+    }
+    bot.emit('physicsTick')
+  }, 0)
+  try {
+    const res = await throwEnderEye(bot, { recover: false })
+    assert.ok(res.ray != null)
+    const rays = raysOf(bot.survival.memory)
+    assert.strictEqual(rays.length, 1)
+    assert.ok(rays[0].direction.x > 0.99, JSON.stringify(rays[0]))
+    assert.strictEqual(bot.survival.memory.getPois(EYE_RAY).length, 1)
+  } finally {
+    clearInterval(timer)
+  }
 })
