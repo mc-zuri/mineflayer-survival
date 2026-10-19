@@ -208,6 +208,47 @@ export function hurtContext (bot: Bot, portalY: number, tracker: DragonPhaseTrac
   return parts.join(', ')
 }
 
+/**
+ * The nearest spot the bot can walk straight to (16 headings, 1.5 to 6 blocks out, the ground at most a step up or 2
+ * down on the way) where its body is out of the given zones (CONTACT_MARGIN), the dangers and the void's margin
+ */
+export function escapeSpot (get: BlockGetter, from: Vec3, zones: DragonZone[], dangers: Danger[], guard: VoidGuard | null): Vec3 | null {
+  for (const d of [1.5, 2.5, 3.5, 4.5, 6]) {
+    let best: Vec3 | null = null
+    let bestScore = Infinity
+    for (let k = 0; k < 16; k++) {
+      const a = k * Math.PI / 8
+      const p = walkable(get, from, a, d)
+      if (p == null) continue
+      if (touchedZone(p, zones, 0, CONTACT_MARGIN) != null || inDanger(p, dangers, 0.5) != null || guard?.risky(p) === true) continue
+      // level ground first
+      const score = Math.abs(p.y - from.y)
+      if (score < bestScore) { bestScore = score; best = p }
+    }
+    if (best != null) return best
+  }
+  return null
+}
+
+/** where a straight walk from `from` along heading `a` (radians, x = cos, z = sin) for `distance` ends, null if a wall or a drop of more than 2 is on the way */
+function walkable (get: BlockGetter, from: Vec3, a: number, distance: number): Vec3 | null {
+  let y = Math.floor(from.y + 1e-6)
+  const steps = Math.ceil(distance / 0.5)
+  let x = from.x
+  let z = from.z
+  for (let i = 1; i <= steps; i++) {
+    x = from.x + Math.cos(a) * distance * i / steps
+    z = from.z + Math.sin(a) * distance * i / steps
+    // a step up (the ground a block over) to 2 down
+    const g = groundY(get, x, z, y + 2, y - 3)
+    if (g == null) return null
+    const cell = new Vec3(Math.floor(x), g, Math.floor(z))
+    if (!isOpenAt(get, cell) || !isOpenAt(get, cell.offset(0, 1, 0))) return null
+    y = g
+  }
+  return new Vec3(Math.floor(x) + 0.5, y, Math.floor(z) + 0.5)
+}
+
 /** a point `distance` from `from` straight away from `threat` (horizontally) */
 export function awayFrom (from: Vec3, threat: Pos, distance: number): Vec3 {
   const away = new Vec3(from.x - threat.x, 0, from.z - threat.z)
@@ -457,8 +498,11 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         stopDraw()
         if (!wasInContact) log(`under the dragon's ${contact}: out from under it; ${hurtContext(bot, portalY, tracker)}`)
         wasInContact = true
-        steerToward(bot, awayFrom(me, dragon.position, 6), { sprint: true })
-        bot.setControlState('jump', false)
+        const view = { position: dragon.position, yaw: vanillaYaw(dragon.yaw), ...tracker.flight() }
+        const zones = dragonZones(view, window.phase != null && isSitting(window.phase)).filter(z => z.hurts)
+        // the nearest ground out of them the bot can walk to (straight away from the body may be a wall, or a step up
+        // further into them)
+        steerToward(bot, escapeSpot(get, me, zones, dangers, guard) ?? awayFrom(me, dragon.position, 6), { sprint: true })
         await waitTicks(bot, 1, signal)
         continue
       }

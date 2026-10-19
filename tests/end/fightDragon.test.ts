@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
 import { breathZone, SCAN_TURN_SLACK, yawFacing, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
-import { ARROW_FLIGHT_TICKS, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, hurtContext, hurtingContact, retreatSpot, safeToEat, takeoffStepBack, walkClear } from '../../src/end/skills/fightDragon'
+import { ARROW_FLIGHT_TICKS, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, escapeSpot, dragonPartId, fightDragon, foodToEat, hurtContext, hurtingContact, retreatSpot, safeToEat, takeoffStepBack, walkClear } from '../../src/end/skills/fightDragon'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
 
@@ -292,3 +292,21 @@ test('chooseMeleeSpot: from the far side of a bump under the head, a spot the wa
   assert.equal(walkClear(get, from, choice.spot, dragonZones(view)), true)
 })
 
+test('escapeSpot: out from under the head to the nearest ground clear of its zones the bot can walk to, round a wall straight behind it', () => {
+  const blocks = endIsland([], 40)
+  // the 26.3 run's ground: a block over the portal's level round the podium (end stone at 62: feet at 63)
+  for (let x = -14; x <= -4; x++) for (let z = -6; z <= 8; z++) blocks.set(`${x},62,${z}`, 'end_stone')
+  // a wall 2 high straight behind the bot (away from the body)
+  for (let z = 0; z <= 4; z++) for (const y of [63, 64]) blocks.set(`-10,${y},${z}`, 'end_stone')
+  const get = world(blocks)
+  const perch = exitPortal(62).perch
+  const view = { position: new Vec3(perch.x - 0.6, perch.y, perch.z + 0.4), yaw: -98 }
+  const zones = dragonZones(view).filter(z => z.hurts)
+  const me = new Vec3(-8.4, 63, 2.5)
+  assert.ok(touchedZone(me, zones, 0, 0.1) != null, 'the bot starts under the head')
+  const to = escapeSpot(get, me, zones, [], null)
+  assert.ok(to != null)
+  assert.equal(touchedZone(to, zones, 0, CONTACT_MARGIN), null)
+  assert.ok(to.x > -10, 'not through the wall')
+  assert.ok(Math.hypot(to.x - me.x, to.z - me.z) <= 6.5)
+})
