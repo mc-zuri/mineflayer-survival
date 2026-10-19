@@ -255,7 +255,9 @@ async function takePortal (bot: Bot, to: Dimension, args: EnterNetherArgs, signa
     if (poi != null) {
       const at = new Vec3(poi.x, poi.y, poi.z)
       trace('takePortal: walking to the remembered portal at', at.toString())
-      await travel(bot, { target: at, range: 4 }, signal)
+      // to its height too (exactY): a portal built in a cave lies under the ground the walk ends on, and the bot on
+      // the surface 100 blocks over a 26.3 portal at y -43 saw none and built another ('0 lava sources found')
+      await travel(bot, { target: at, range: 4, exactY: true }, signal)
       portal = findPortal(bot, 16)
     }
   }
