@@ -10,11 +10,11 @@ import { normalizeDimension } from '../core/memory'
 import { findBlocks } from '../core/findBlocks'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
-import { navigate } from '../skills/navigate'
+import { navigate, walkTo } from '../skills/navigate'
 import { keepRoom } from '../skills/bag'
 import { headInWater, surface } from '../skills/escape'
 import { placeBlock } from '../skills/placeBlock'
-import { AIR_BLOCKS, CARDINALS, countItems, trace } from '../skills/util'
+import { AIR_BLOCKS, CARDINALS, countItems, trace, waitUntil } from '../skills/util'
 
 export type Lookup = (pos: Vec3) => { name: string, boundingBox: string } | null
 
@@ -745,16 +745,20 @@ async function ensureFloor (bot: Bot, floor: Vec3, signal?: AbortSignal): Promis
   }
 }
 
+/**
+ * Into the open cell of a dug route's next step beside the bot: walked straight at by hand, as a player holds forward
+ * (off the edge into a step down, jumping into a step up), the pathfinder's way only when that doesn't get there. The
+ * pathfinder's way into a staircase's next step, a block forward and a block down, broke the floor under the bot and
+ * walked in level: a block more to dig each step (a 26.3 staircase dug by hand took 220 ticks a step for it, 70
+ * without), and the bot a block lower beside the pit it had thrown into, the stack picked up again.
+ */
 async function walkInto (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise<void> {
-  try {
-    await navigate(bot, { goal: new goals.GoalBlock(cell.x, cell.y, cell.z) }, signal)
-  } catch (err) {
-    if (isAbort(err)) throw err
-    // a step into an open cell next to the bot: by hand (forward, jumping into a step up)
-    const { walkTo } = await import('../skills/navigate')
-    await walkTo(bot, cell.offset(0.5, 0, 0.5), { within: 0.25, maxTicks: 40, until: () => feetOf(bot).equals(cell) }, signal)
-    if (!feetOf(bot).equals(cell)) throw err
-  }
+  const there = (): boolean => feetOf(bot).equals(cell) && bot.entity.onGround
+  await walkTo(bot, cell.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 40, until: there }, signal)
+  // (still dropping into it)
+  await waitUntil(bot, () => bot.entity.onGround, 20, signal)
+  if (there()) return
+  await navigate(bot, { goal: new goals.GoalBlock(cell.x, cell.y, cell.z) }, signal)
 }
 
 /** the bot's feet cell */

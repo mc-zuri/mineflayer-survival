@@ -11,6 +11,7 @@ import { countItems, emptySlots, waitTicks, waitUntil } from '../../src/skills/u
 import { DEPOT_POI, Executor, LAVA_ROOM } from '../../src/executor/executor'
 import { isThrownDrop } from '../../src/skills/pickupDrops'
 import { obsidianFromPools, TABLE_OBSIDIAN } from '../../src/milestones'
+import { descendTo } from '../../src/executor/explore'
 
 const USERNAME = 'bagbot'
 
@@ -227,5 +228,53 @@ describe(`the bag down a mine on a ${DEFAULT_VERSION} server`, { timeout: 20 * 6
     assert.deepStrictEqual(full, [])
     assert.ok(lines.some(l => /throwing away/.test(l)), 'no room made')
     assert.strictEqual(recollected, 0, 'thrown items picked up again')
+  })
+
+  /** a stone mound 40 long along +x and `height` high, the air over it cleared, the bot on top facing +x (a staircase goes along the facing) */
+  async function mound (height: number): Promise<void> {
+    await run(`fill ${xyz(at(-4, 0, -4))} ${xyz(at(36, height - 1, 4))} stone`)
+    await run(`fill ${xyz(at(-4, height, -4))} ${xyz(at(36, height + 4, 4))} air`)
+    await run('kill @e[type=item]')
+    await run(`tp ${USERNAME} ${origin.x + 0.5} ${origin.y + height} ${origin.z + 0.5} -90 0`)
+    assert.ok(await waitUntil(bot, () => bot.entity.position.distanceTo(origin.offset(0.5, height, 0.5)) < 0.5 && bot.blockAt(at(0, height - 1, 0))?.name === 'stone', 200))
+  }
+
+  /** the blocks the bot stood on (a staircase's floors), and the blocks broken near it, while `fn` runs */
+  async function watchSteps<T> (fn: () => Promise<T>): Promise<{ result: T, floors: Vec3[], broken: Vec3[] }> {
+    const floors: Vec3[] = []
+    const broken: Vec3[] = []
+    const onMove = (): void => {
+      const under = bot.entity.position.floored().offset(0, -1, 0)
+      if (bot.entity.onGround && bot.blockAt(under)?.boundingBox === 'block' && !floors.some(f => f.equals(under))) floors.push(under)
+    }
+    const onBlock = (old: any, now: any): void => {
+      if (old?.boundingBox === 'block' && now?.boundingBox === 'empty' && now.position.distanceTo(bot.entity.position) < 6) broken.push(now.position.clone())
+    }
+    bot.on('physicsTick', onMove)
+    bot.on('blockUpdate', onBlock)
+    try {
+      return { result: await fn(), floors, broken }
+    } finally {
+      bot.off('physicsTick', onMove)
+      bot.off('blockUpdate', onBlock)
+    }
+  }
+
+  it('walks a staircase\'s steps straight in: 3 blocks dug a step, none under the bot, every step\'s floor left whole', async (t) => {
+    // (26.3 run full-f: the pathfinder's way into each step broke the floor under the bot and walked in level, a block
+    // more to dig each step: 220 ticks a step by hand, 70 without)
+    const height = 20
+    await mound(height)
+    await run(`clear ${USERNAME}`)
+    await give('diamond_pickaxe', 1)
+    const executor = new Executor(bot, { log: line => t.diagnostic(line) })
+    const start = bot.survival.tasks.tick
+    const { result, floors, broken } = await watchSteps(async () => await executor.task('down the staircase', async (s) => await descendTo(bot, origin.y + 3, {}, s)))
+    const steps = origin.y + height - (origin.y + 3)
+    t.diagnostic(`${steps} steps in ${bot.survival.tasks.tick - start} ticks, ${broken.length} blocks broken`)
+    assert.strictEqual(result, true)
+    assert.ok(broken.length <= 3 * steps, `${broken.length} blocks broken for ${steps} steps`)
+    assert.deepStrictEqual(floors.filter(f => bot.blockAt(f)?.boundingBox !== 'block').map(f => f.toString()), [])
+    assert.ok(floors.length >= steps, `${floors.length} floors stood on`)
   })
 })
