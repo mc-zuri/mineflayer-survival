@@ -9,7 +9,7 @@ import type { MilestoneHandler } from './runner'
 import { buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
-import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd } from './end/skills'
+import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd, readPortalRoom } from './end/skills'
 import { countBookshelves, enchant, enchantGear, findEnchantingTable } from './skills/enchant'
 import { applyBooks } from './skills/anvil'
 import { experience } from './skills/xp'
@@ -253,6 +253,12 @@ export const eyesHandler: MilestoneHandler = async (ctx) => {
   log(`the portal room at ${room.room.center.x} ${room.room.center.y} ${room.room.center.z}: ${room.room.eyesNeeded} eyes to put in, ${countItems(bot, 'ender_eye')} held`)
 }
 
+/** whether the portal room's frames are within enterEnd's reach of the bot */
+export function portalRoomNear (bot: Bot): boolean {
+  const room = readPortalRoom(bot)
+  return room != null && room.unseen.length === 0
+}
+
 export const endHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {
   if (!isInEnd(bot)) {
     // the End kit: a bow, arrows, blocks to pillar, a water bucket, food
@@ -260,6 +266,14 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
       await executor.obtain(milestone.goals(state).map(g => ({ ...g, optional: true })), signal)
     } catch (err) {
       log(`End kit short: ${(err as Error).message}`)
+    }
+    // back to the portal room when the kit's getting (or the stock's top-ups, a death) took the bot off from it:
+    // enterEnd reads the frames within 12 blocks (1.21.11 seed 2: 48 gold mined 26 blocks off, 'no end portal frame
+    // around' five times)
+    if (inNether(bot)) await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
+    if (!portalRoomNear(bot)) {
+      log('back to the portal room')
+      await executor.task('to the portal room', async (s) => await strongholdToPortalRoom(bot, {}, s), signal)
     }
     await executor.task('into the End', async (s) => await enterEnd(bot, { signal: s }), signal)
   }

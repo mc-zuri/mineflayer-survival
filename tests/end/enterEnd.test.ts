@@ -68,3 +68,22 @@ test('portalApproach: into the portal from outside a side\'s middle frame, on th
   assert.deepStrictEqual([...keys].sort(), ['2348,1013', '2351,1010', '2351,1016', '2354,1013'].sort())
   assert.ok(['2348,1013', '2351,1016'].includes(keys[0]), keys[0])
 })
+
+test('portalRoomNear: the room\'s 12 frames in reach; 26 blocks off (mining gold for the stock) it isn\'t, and the End handler goes back first', async () => {
+  const { portalRoomNear } = await import('../../src/milestones')
+  const { expectedFrames } = require('../../src/end/portalRoom')
+  const center = { x: 2351, y: -22, z: 1013 }
+  const frames = new Map<string, any>(expectedFrames(center).map((f: any) => [`${f.pos.x},${f.pos.y},${f.pos.z}`, f]))
+  const mk = (pos: Vec3): any => {
+    const bot = fakeBot({ position: pos })
+    bot.blockAt = (p: Vec3) => {
+      const f = frames.get(`${p.x},${p.y},${p.z}`)
+      return f != null
+        ? { name: 'end_portal_frame', position: p, boundingBox: 'block', getProperties: () => ({ facing: f.facing, eye: false }) }
+        : { name: 'air', position: p, boundingBox: 'empty' }
+    }
+    return bot
+  }
+  assert.strictEqual(portalRoomNear(mk(new Vec3(2351.5, -22, 1016.5))), true)
+  assert.strictEqual(portalRoomNear(mk(new Vec3(2377.5, -27, 1017.5))), false)
+})
