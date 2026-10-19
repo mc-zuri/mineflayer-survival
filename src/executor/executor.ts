@@ -28,7 +28,7 @@ import { defaultKeep, JUNK, junkToToss, ROUTE_STONE, splitInventory, type KeepRu
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { noteVillage } from '../skills/village'
-import { digDepotNook, dumpPit, rememberAround } from './explore'
+import { digDepotNook, dumpPit, lavaThrow, rememberAround } from './explore'
 import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
 import { farmCells, grownPlots, knownFarms } from '../skills/farm'
 import { GROW_TICKS } from '../core/crops'
@@ -90,6 +90,9 @@ export const BASE_STORE_RANGE = 96
 
 /** how far a known chest may be for stashNearby to use it rather than put down a depot */
 export const DEPOT_RANGE = 32
+
+/** slots made beyond the usual when what's thrown away goes into lava (explore.ts lavaThrow) */
+export const LAVA_ROOM = 6
 
 /** the memory's point of interest for a chest the bot put down away from the base (a mine depot): its chests count as stock */
 export const DEPOT_POI = 'mine_depot'
@@ -204,7 +207,7 @@ export class Executor {
     this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos))
     this.bagKeeper = {
       minFree: this.options.minFreeSlots,
-      room: async (s) => await this.makeRoomDuringStep(s),
+      room: async (s, toward) => await this.makeRoomDuringStep(s, toward),
       unwanted: name => this.unwantedDrop(name)
     }
     // a village passed by is noted, with its farms' crops and hay, for the food plans
@@ -521,14 +524,15 @@ export class Executor {
    * here). When `force` and there's no room still, it throws the rest of what storing would take, never a valuable
    * (keep.ts's isValuable), and with nothing left to throw fails INVENTORY_FULL: a forced room had thrown an
    * enchanting table and a diamond away (26.3). `inTask`: the signal of the task it runs in (a step's, room made on the
-   * way: makeRoomDuringStep), whose skills it calls straight, with no walk to the base.
+   * way: makeRoomDuringStep), whose skills it calls straight, with no walk to the base. `toward`: where the bot goes
+   * next (the pit for what's thrown dug behind it, off its way).
    */
-  async makeRoom (needed: Record<string, number> = {}, signal?: AbortSignal, force = false, inTask?: AbortSignal): Promise<void> {
+  async makeRoom (needed: Record<string, number> = {}, signal?: AbortSignal, force = false, inTask?: AbortSignal, toward?: Vec3): Promise<void> {
     if (this.makingRoom) return
     this.makingRoom = true
     const run: RoomRunner = inTask != null ? async (_name, fn) => await fn(inTask) : async (name, fn) => await this.task(name, fn, signal, { room: false })
     try {
-      if (await this.tossJunk(needed, false, run)) return
+      if (await this.tossJunk(needed, false, run, toward)) return
       const base = this.base
       if (inTask == null && base != null && base.chests.length > 0 && (force || this.nearBase(base, BASE_STORE_RANGE))) {
         await this.storeAtBase(needed, signal)
@@ -536,7 +540,7 @@ export class Executor {
       }
       await this.stashNearby(needed, signal, run)
       if (!force || emptySlots(this.bot) >= this.options.minFreeSlots) return
-      await this.tossJunk(needed, true, run)
+      await this.tossJunk(needed, true, run, toward)
       if (emptySlots(this.bot) === 0) {
         throw new TaskError('INVENTORY_FULL', 'no room: nothing to throw away but what is kept or valuable, and no chest near to put it in')
       }
@@ -551,10 +555,10 @@ export class Executor {
    * and the room before the next step is made. The junk and the surplus thrown, the rest in a depot; never a walk to
    * the base, never a failure (the step's own pickups say NO_SPACE)
    */
-  async makeRoomDuringStep (signal: AbortSignal): Promise<void> {
+  async makeRoomDuringStep (signal: AbortSignal, toward?: Vec3): Promise<void> {
     if (emptySlots(this.bot) >= this.options.minFreeSlots) return
     try {
-      await this.makeRoom(this.needed, signal, false, signal)
+      await this.makeRoom(this.needed, signal, false, signal, toward)
     } catch (err) {
       if (isAbort(err) || TaskError.is(err, 'DIED', 'ABORTED') || signal.aborted) throw err
       this.log(`no room made on the way: ${(err as Error).message}`)
@@ -565,19 +569,25 @@ export class Executor {
    * Throws away the junk and the surplus (and with `anything`, what storing would take) for room: whole stacks, the
    * least worth first (junkToToss), behind the bot. Whether there's room now.
    */
-  private async tossJunk (needed: Record<string, number>, anything: boolean, run: RoomRunner): Promise<boolean> {
-    const want = this.options.minFreeSlots + 2 - emptySlots(this.bot)
+  private async tossJunk (needed: Record<string, number>, anything: boolean, run: RoomRunner, toward?: Vec3): Promise<boolean> {
+    const lava = (): { yaw: number, pitch: number } | null => lavaThrow(p => this.bot.blockAt(p) as any, this.bot.entity.position, (this.bot.entity as any).eyeHeight ?? 1.62)
+    // with lava in reach, LAVA_ROOM more slots: what burns is gone for good, and the work about a lava lake (its
+    // obsidian) turns the lava it would be thrown into later
+    const want = this.options.minFreeSlots + 2 + (lava() != null ? LAVA_ROOM : 0) - emptySlots(this.bot)
     if (want <= 0) return true
     const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
     const toss = junkToToss(stacks, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.options.scaffold })
     if (toss.length > 0) {
       this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
       await run('make room', async (s) => {
-        // into a pit dug beside the bot, out of its reach as it walks by (or behind it), and never gone back for
-        // (tossAway): thrown at a wall, the stack fell at its feet and was picked up again 40 ticks on
-        // (Player.drop's pickup delay)
-        const pit = await dumpPit(this.bot, s)
-        for (const t of toss) await tossAway(this.bot, t.name, t.count, s, pit ?? undefined).catch(err => { if (isAbort(err)) throw err })
+        // into lava in reach, where it burns (lavaThrow); else into a pit dug beside the bot, out of its reach as it
+        // walks by (or behind it), and never gone back for (tossAway): thrown at a wall, the stack fell at its feet and
+        // was picked up again 40 ticks on (Player.drop's pickup delay)
+        let pit: Vec3 | null | undefined
+        for (const t of toss) {
+          const into = lava() ?? (pit !== undefined ? pit : (pit = await dumpPit(this.bot, s, toward)))
+          await tossAway(this.bot, t.name, t.count, s, into ?? undefined).catch(err => { if (isAbort(err)) throw err })
+        }
       })
     }
     return emptySlots(this.bot) >= this.options.minFreeSlots

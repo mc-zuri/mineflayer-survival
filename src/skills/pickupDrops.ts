@@ -77,7 +77,7 @@ export const THROWN_PICKUP_DELAY = 40
 /** how far from where a thrown item was last seen one of the same name counts as it, once its entity is gone (a new id) */
 export const THROWN_RADIUS = 2
 
-interface Thrown { name: string, pos: Vec3, tick: number }
+interface Thrown { name: string, pos: Vec3, tick: number, untilGone?: boolean }
 
 /** what the bot threw away and lies on the ground still, by entity id (the bot's tick count when thrown) */
 const thrownDrops = new WeakMap<Bot, Map<number, Thrown>>()
@@ -99,20 +99,24 @@ export function isThrownDrop (bot: Bot, drop: Entity, name: string | null = drop
     return true
   }
   if (name == null) return false
-  for (const [id, t] of thrown) if (t.name === name && bot.entities[id] == null && t.pos.distanceTo(drop.position) <= THROWN_RADIUS) return true
+  for (const [id, t] of thrown) if (t.untilGone !== true && t.name === name && bot.entities[id] == null && t.pos.distanceTo(drop.position) <= THROWN_RADIUS) return true
   return false
 }
 
-/** remembers an item entity the bot threw away (isThrownDrop) */
-export function markThrown (bot: Bot, drop: Entity, name: string): void {
+/**
+ * Remembers an item entity the bot threw away (isThrownDrop); `untilGone`: only while its entity is there (a stack
+ * thrown into lava burns, and the drops of the blocks dug there after are no thrown ones)
+ */
+export function markThrown (bot: Bot, drop: Entity, name: string, untilGone = false): void {
   let thrown = thrownDrops.get(bot)
   if (thrown == null) {
     const map = new Map<number, Thrown>()
     thrownDrops.set(bot, thrown = map)
     // one the bot picked up (walking over it) lies there no more
     bot.on('playerCollect', (collector: Entity, collected: Entity) => { if (collector === bot.entity) map.delete(collected.id) })
+    bot.on('entityGone', (gone: Entity) => { if (map.get(gone.id)?.untilGone === true) map.delete(gone.id) })
   }
-  thrown.set(drop.id, { name, pos: drop.position.clone(), tick: tickCount(bot) })
+  thrown.set(drop.id, { name, pos: drop.position.clone(), tick: tickCount(bot), ...(untilGone ? { untilGone } : {}) })
 }
 
 /** the item entities lying about now, by id (to tell the ones a toss makes) */
@@ -142,16 +146,19 @@ export function tossYaw (bot: Bot): number {
 
 /**
  * Throws `count` of an item away and remembers the item entities that came of it (markThrown), so no pickup goes back
- * for them: into the pit `into` (a cell beside the bot a block under its floor, explore.ts dumpPit), aimed at its far
- * side (Player.drop throws along the look at 0.3 a tick, give or take 0.1 up or down) where the bot walking by doesn't
- * touch it; else level, the way with the most room (tossYaw), some 3 blocks off. Resolves the count thrown.
+ * for them: along a look given (a throw into lava, explore.ts lavaThrow); into the pit `into` (a cell beside the bot a
+ * block under its floor, explore.ts dumpPit), aimed at its far side (Player.drop throws along the look at 0.3 a tick,
+ * give or take 0.1 up or down) where the bot walking by doesn't touch it; else level, the way with the most room
+ * (tossYaw), some 3 blocks off. Resolves the count thrown.
  */
-export async function tossAway (bot: Bot, name: string, count: number, signal?: AbortSignal, into?: Vec3): Promise<number> {
+export async function tossAway (bot: Bot, name: string, count: number, signal?: AbortSignal, into?: Vec3 | { yaw: number, pitch: number }): Promise<number> {
   const id = bot.registry.itemsByName[name]?.id
   if (id == null || count <= 0) return 0
   const before = itemEntityIds(bot)
   const had = countItems(bot, name)
-  if (into != null) {
+  if (into != null && !(into instanceof Vec3)) {
+    await bot.look(into.yaw, into.pitch, true)
+  } else if (into != null) {
     const feet = bot.entity.position.floored()
     const dx = Math.sign(into.x - feet.x)
     const dz = Math.sign(into.z - feet.z)
@@ -165,9 +172,10 @@ export async function tossAway (bot: Bot, name: string, count: number, signal?: 
   // its item's data)
   const ours = (): Entity[] => Object.values(bot.entities).filter(e => !before.has(e.id) && isItemEntity(e) && e.position.distanceTo(bot.entity.position) <= 6 && droppedName(e) === name)
   await waitUntil(bot, () => ours().length > 0, 10, signal)
-  for (const e of ours()) markThrown(bot, e, name)
+  // (into lava: it burns, Entity.lavaHurt)
+  for (const e of ours()) markThrown(bot, e, name, into != null && !(into instanceof Vec3))
   const thrown = Math.max(0, had - countItems(bot, name))
-  trace('tossAway:', thrown, name, into != null ? `into ${into.toString()}` : 'behind', 'from', bot.entity.position.toString())
+  trace('tossAway:', thrown, name, into instanceof Vec3 ? `into ${into.toString()}` : into != null ? 'into the lava' : 'behind', 'from', bot.entity.position.toString())
   return thrown
 }
 
@@ -263,9 +271,9 @@ export function markUnreachableDrop (bot: Bot, drop: Entity): void {
 }
 
 /** the bag's keeper's room for a full bag (keepRoom); whether it was asked */
-async function keepRoomFor (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+async function keepRoomFor (bot: Bot, signal?: AbortSignal, toward?: Vec3): Promise<boolean> {
   try {
-    return await keepRoom(bot, signal)
+    return await keepRoom(bot, signal, toward)
   } catch (err) {
     if (isAbort(err)) throw err
     return true
@@ -295,7 +303,7 @@ export async function pickupDrops (bot: Bot, args: PickupDropsArgs = {}, signal?
         // room made first, by the bag's keeper (the route's stone thrown into a pit, the rest in a depot): obsidian
         // mined by a 26.3 deep lake failed its pickup 'the inventory is full' block after block, the bag full of the
         // walk's cobblestone
-        if (!roomAsked && await keepRoomFor(bot, signal)) {
+        if (!roomAsked && await keepRoomFor(bot, signal, drop.position)) {
           roomAsked = emptySlots(bot) === 0
           continue
         }

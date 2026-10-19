@@ -179,11 +179,13 @@ export async function digDepotNook (bot: Bot, signal?: AbortSignal): Promise<Vec
  * opened from head height down to a block under the floor, `bottom` the cell the items lie in. An item there is out of
  * the bot's reach as it walks by (Player.aiStep touches what its box, inflated by 0.5 vertically, meets: the item's top
  * is 0.75 under the floor), and the pit is off the way (a side of the bot's facing first, then behind it, ahead
- * last). Rock under the bottom, no liquid against the cells, nothing that doesn't break; null when no side will do.
+ * last; with `behindFirst`, behind it, then its sides, never ahead: the way the bot goes next is `facing`, and a pit at
+ * its side was beside the steps down it took after, the stone picked up again). Rock under the bottom, no liquid
+ * against the cells, nothing that doesn't break; null when no side will do.
  */
-export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3): { side: Vec3, bottom: Vec3, open: Vec3[] } | null {
+export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3, behindFirst = false): { side: Vec3, bottom: Vec3, open: Vec3[] } | null {
   const left = new Vec3(-facing.z, 0, facing.x)
-  for (const d of [left, left.scaled(-1), facing.scaled(-1), facing]) {
+  for (const d of behindFirst ? [facing.scaled(-1), left, left.scaled(-1)] : [left, left.scaled(-1), facing.scaled(-1), facing]) {
     const side = feet.plus(d)
     const bottom = side.offset(0, -1, 0)
     const cells = [side.offset(0, 1, 0), side, bottom]
@@ -196,12 +198,15 @@ export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3): { side:
 
 /**
  * Digs a pit beside the bot (dumpPitCells) to throw things into, or finds the one dug before beside it still open;
- * the cell the items are to land in, or null
+ * the cell the items are to land in, or null. `toward`: where the bot goes next (the pit behind it, off its way)
  */
-export async function dumpPit (bot: Bot, signal?: AbortSignal): Promise<Vec3 | null> {
+export async function dumpPit (bot: Bot, signal?: AbortSignal, toward?: Vec3): Promise<Vec3 | null> {
   const lookup = lookupOf(bot)
   const feet = feetOf(bot)
-  const cells = dumpPitCells(lookup, feet, facingDir(bot.entity.yaw))
+  const away = toward != null && Math.hypot(toward.x - bot.entity.position.x, toward.z - bot.entity.position.z) >= 1
+    ? facingDir(Math.atan2(-(toward.x - bot.entity.position.x), -(toward.z - bot.entity.position.z)))
+    : null
+  const cells = (away != null ? dumpPitCells(lookup, feet, away, true) : null) ?? dumpPitCells(lookup, feet, facingDir(bot.entity.yaw))
   if (cells == null) return null
   if (cells.open.every(c => isOpen(bot, c))) return cells.bottom
   trace('explore: digging a pit to throw into at', cells.side.toString())
@@ -213,6 +218,94 @@ export async function dumpPit (bot: Bot, signal?: AbortSignal): Promise<Vec3 | n
     } catch (err) {
       if (isAbort(err)) throw err
       trace('explore: no pit', (err as Error).message)
+    }
+  }
+  return null
+}
+
+/** a thrown stack's flight (Player.drop, ItemEntity.tick): its gravity, its drag in the air, its speed along the look */
+const ITEM_GRAVITY = 0.04
+const ITEM_DRAG = 0.98
+const THROW_SPEED = 0.3
+/** Player.drop's lift and its random part up or down (random.nextFloat() - random.nextFloat()) * 0.1 */
+const THROW_LIFT = 0.1
+const THROW_LIFT_SPREAD = 0.1
+/** an item entity's box: 0.25 a side (EntityType.ITEM) */
+const ITEM_HALF = 0.125
+
+/**
+ * Where a stack thrown along the look `yaw`, `pitch` (mineflayer's: yaw 0 to -z, pitch up) by a player whose eyes are at
+ * `eye` goes, with its random lift `lift` (Player.drop: spawned at the eyes less 0.3, at 0.3 a tick along the look and
+ * 0.1 up; ItemEntity.tick: the gravity, the move stopped by solid blocks, the air's drag): 'lava' once its box is in a
+ * lava block, else where it comes to rest (null: still flying after 60 ticks)
+ */
+export function itemFlight (lookup: Lookup, eye: Vec3, yaw: number, pitch: number, lift = THROW_LIFT): 'lava' | Vec3 | null {
+  const pos = eye.offset(0, -0.3, 0)
+  const v = new Vec3(-Math.sin(yaw) * Math.cos(pitch) * THROW_SPEED, Math.sin(pitch) * THROW_SPEED + lift, -Math.cos(yaw) * Math.cos(pitch) * THROW_SPEED)
+  // the cells the item's box (pos the bottom's middle) is in
+  const cells = (p: Vec3): Vec3[] => {
+    const out: Vec3[] = []
+    for (let x = Math.floor(p.x - ITEM_HALF); x <= Math.floor(p.x + ITEM_HALF); x++) {
+      for (let y = Math.floor(p.y); y <= Math.floor(p.y + 2 * ITEM_HALF); y++) {
+        for (let z = Math.floor(p.z - ITEM_HALF); z <= Math.floor(p.z + ITEM_HALF); z++) out.push(new Vec3(x, y, z))
+      }
+    }
+    return out
+  }
+  const solid = (p: Vec3): boolean => cells(p).some(c => lookup(c)?.boundingBox === 'block')
+  for (let tick = 0; tick < 60; tick++) {
+    v.y -= ITEM_GRAVITY
+    let grounded = false
+    for (const axis of ['x', 'y', 'z'] as const) {
+      const next = pos.clone()
+      next[axis] += v[axis]
+      if (solid(next)) {
+        // (down onto the full block it hit: on its top)
+        if (axis === 'y' && v.y < 0) {
+          grounded = true
+          const top = Math.floor(next.y) + 1
+          if (top <= pos.y && !solid(new Vec3(pos.x, top, pos.z))) pos.y = top
+        }
+        v[axis] = 0
+      } else {
+        pos[axis] = next[axis]
+      }
+    }
+    if (cells(pos).some(c => lookup(c)?.name === 'lava')) return 'lava'
+    if (grounded) return pos
+    v.x *= ITEM_DRAG
+    v.y *= ITEM_DRAG
+    v.z *= ITEM_DRAG
+  }
+  return null
+}
+
+/**
+ * A throw into lava near the bot (lava burns a thrown stack: Entity.lavaHurt, an item's 5 health gone in two ticks),
+ * where nothing thrown can ever be picked up again: the look (yaw, pitch) whose flight ends in lava with Player.drop's
+ * lift at both ends of its spread and between, toward the lava within 6 blocks across and 8 down, the nearest first;
+ * null when none does. A pit beside the bot wasn't out of its reach for good: by a 26.3 lake the bot mining the lake's obsidian came
+ * down beside the pit and picked its stone up again.
+ */
+export function lavaThrow (lookup: Lookup, feet: Vec3, eyeHeight = 1.62): { yaw: number, pitch: number, lava: Vec3 } | null {
+  const eye = feet.offset(0, eyeHeight, 0)
+  const base = feet.floored()
+  const lava: Vec3[] = []
+  for (let dx = -6; dx <= 6; dx++) {
+    for (let dz = -6; dz <= 6; dz++) {
+      for (let dy = -8; dy <= 1; dy++) {
+        const p = base.offset(dx, dy, dz)
+        if ((dx !== 0 || dz !== 0) && lookup(p)?.name === 'lava') lava.push(p)
+      }
+    }
+  }
+  lava.sort((a, b) => a.offset(0.5, 0.5, 0.5).distanceTo(eye) - b.offset(0.5, 0.5, 0.5).distanceTo(eye))
+  for (const p of lava.slice(0, 12)) {
+    const yaw = Math.atan2(-(p.x + 0.5 - eye.x), -(p.z + 0.5 - eye.z))
+    for (let deg = -80; deg <= 30; deg += 5) {
+      const pitch = deg * Math.PI / 180
+      const lands = [-THROW_LIFT_SPREAD, 0, THROW_LIFT_SPREAD].every(spread => itemFlight(lookup, eye, yaw, pitch, THROW_LIFT + spread) === 'lava')
+      if (lands) return { yaw, pitch, lava: p }
     }
   }
   return null

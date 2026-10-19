@@ -6,14 +6,18 @@
 // the 26.3 deep lakes went into a bag the walks there had filled with their stone, and every block's pickup failed
 // 'the inventory is full' while 177 cobblestone, 36 diorite, 32 andesite and 18 granite filled it.
 import type { Bot } from 'mineflayer'
+import type { Vec3 } from 'vec3'
 import { emptySlots } from './util'
 import { throwIfAborted } from './errors'
 
 export interface BagKeeper {
   /** slots kept free: room is made when fewer are */
   minFree: number
-  /** makes room, straight in the running task (with its signal); throws only when stopped */
-  room: (signal: AbortSignal) => Promise<void>
+  /**
+   * Makes room, straight in the running task (with its signal); throws only when stopped. `toward`: where the bot goes
+   * next, when the caller knows (what it throws is put behind it, off its way)
+   */
+  room: (signal: AbortSignal, toward?: Vec3) => Promise<void>
   /** a drop not gone for (the route's stone the stock has enough of, once the bag carries what's kept of it) */
   unwanted: (name: string) => boolean
 }
@@ -60,16 +64,17 @@ export function bagShort (bot: Bot): boolean {
 
 /**
  * Room made when the bag is short of its keeper's free slots, at a skill's safe point (where the bot may turn, throw,
- * dig a pit beside it, put a chest down, and the skill goes on from wherever it then stands). Resolves whether the
- * keeper was asked; throws only the abort of `signal` or of the keeper's task.
+ * dig a pit beside it, put a chest down, and the skill goes on from wherever it then stands), `toward` where the bot
+ * goes next when the skill knows (a trip's goal, the block to break). Resolves whether the keeper was asked; throws
+ * only the abort of `signal` or of the keeper's task.
  */
-export async function keepRoom (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+export async function keepRoom (bot: Bot, signal?: AbortSignal, toward?: Vec3): Promise<boolean> {
   throwIfAborted(signal)
   const hold = liveHold(bot)
   if (hold == null || busy.has(bot) || emptySlots(bot) >= hold.keeper.minFree) return false
   busy.add(bot)
   try {
-    await hold.keeper.room(hold.signal)
+    await hold.keeper.room(hold.signal, toward)
   } finally {
     busy.delete(bot)
   }

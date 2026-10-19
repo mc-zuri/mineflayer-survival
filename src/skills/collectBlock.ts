@@ -180,17 +180,19 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
   }
   // the bag kept from filling as the blocks come in (the keeper's room and its no to the route's stone), the drops of
   // the blocks asked for by name always wanted
-  const room = async (): Promise<void> => { if (args.room != null) await args.room(); else await keepRoom(bot, signal) }
+  const room = async (toward?: Vec3): Promise<void> => { if (args.room != null) await args.room(); else await keepRoom(bot, signal, toward) }
   const unwanted = args.unwanted ?? ((name: string): boolean => !dropNames.has(name) && unwantedDrop(bot, name))
   const gainedDrops = (): number => dropNames.size === 0 ? 0 : sumPositive(countsDelta(before, inventoryCounts(bot)), name => dropNames.has(name))
   const enough = (): boolean => positions.length >= count || gainedDrops() >= count
 
   while (!enough()) {
     throwIfAborted(signal, result())
-    await room()
     const block = nextTarget()
     if (block == null) break
     const pos = block.position
+    // the room made toward the block (the pit for what's thrown dug off the way to it), and the block there still
+    await room(pos)
+    if (!sameBlock(bot, pos, block.type)) continue
 
     const harvestable = harvestToolFor(block, inventoryItems(bot)) !== null
     if (!harvestable && args.anyTool !== true) {
@@ -257,7 +259,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       const centre = pos.offset(0.5, 0.5, 0.5)
       if ((bot.registry.blocks[block.type]?.drops?.length ?? 0) > 0) await waitUntil(bot, () => nearbyDrops(bot, centre, 3).length > 0, 10, signal)
       // the walk here filled the bag (the route's cells' drops): room for the block's own first
-      if (emptySlots(bot) === 0) await room()
+      if (emptySlots(bot) === 0) await room(centre)
       const picked = await pickupDrops(bot, { near: centre, radius: 6, names: pickupNames([block.type]), unwanted }, signal)
       trace('collectBlock: picked up', picked.items)
     }

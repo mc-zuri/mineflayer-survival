@@ -83,7 +83,7 @@ export const DIG_STUCK_FACTOR = 5
  * refuse them (Player.aiStep's touch picks them up).
  */
 export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSignal): Promise<NavigateResult> {
-  await keepRoom(bot, signal).catch(err => { if (isAbort(err)) throw err })
+  await keepRoom(bot, signal, goalPoint(args.goal) ?? undefined).catch(err => { if (isAbort(err)) throw err })
   const tries = 1 + Math.max(0, args.unstick ?? 2)
   let ticks = 0
   for (let i = 1; ; i++) {
@@ -99,6 +99,15 @@ export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSign
       await walkTo(bot, middle, { within: 0.1, maxTicks: 20 }, signal)
     }
   }
+}
+
+/** a point of the goal where it has one (a block's, a near's, an item's), for the way the trip goes */
+export function goalPoint (goal: Goal): Vec3 | null {
+  const g = goal as any
+  for (const p of [g, g.pos, g.item, g.position]) {
+    if (p != null && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z)) return new Vec3(p.x, p.y, p.z)
+  }
+  return null
 }
 
 /** what a failed trip's stuck report said, on the error navigate throws */

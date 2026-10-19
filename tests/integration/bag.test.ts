@@ -7,9 +7,10 @@ import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { storeItems } from '../../src/skills/chest'
-import { countItems, emptySlots, waitUntil } from '../../src/skills/util'
-import { DEPOT_POI, Executor } from '../../src/executor/executor'
+import { countItems, emptySlots, waitTicks, waitUntil } from '../../src/skills/util'
+import { DEPOT_POI, Executor, LAVA_ROOM } from '../../src/executor/executor'
 import { isThrownDrop } from '../../src/skills/pickupDrops'
+import { obsidianFromPools, TABLE_OBSIDIAN } from '../../src/milestones'
 
 const USERNAME = 'bagbot'
 
@@ -148,6 +149,82 @@ describe(`the bag down a mine on a ${DEFAULT_VERSION} server`, { timeout: 20 * 6
     t.diagnostic(`4 diamonds in ${bot.survival.tasks.tick - start} ticks, ${countItems(bot, 'cobblestone')} cobblestone carried, ${emptySlots(bot)} slots free`)
     assert.ok(countItems(bot, 'diamond') >= 4)
     assert.ok(!lines.some(l => /inventory full|INVENTORY_FULL|NO_SPACE/.test(l)), lines.filter(l => /full|NO_SPACE/.test(l)).join(' | '))
+    assert.ok(lines.some(l => /throwing away/.test(l)), 'no room made')
+    assert.strictEqual(recollected, 0, 'thrown items picked up again')
+  })
+
+  it('throws what it doesn\'t want into the lava in reach, where it burns, and makes more room then', async (t) => {
+    await run(`fill ${xyz(at(-4, -4, -7))} ${xyz(at(10, -1, 7))} stone`)
+    await run(`fill ${xyz(at(-4, 0, -7))} ${xyz(at(10, 5, 7))} air`)
+    // a pool of lava a block down, 2 to 4 blocks off the bot's rim
+    await run(`fill ${xyz(at(2, -1, -2))} ${xyz(at(4, -1, 2))} lava`)
+    await run('kill @e[type=item]')
+    await run(`tp ${USERNAME} ${origin.x + 0.5} ${origin.y} ${origin.z + 0.5} 90 0`)
+    assert.ok(await waitUntil(bot, () => bot.blockAt(at(3, -1, 0))?.name === 'lava', 100))
+    for (const [item, n] of [['diamond_pickaxe', 1], ['cobblestone', 33 * 64], ['diorite', 64]] as const) await give(item, n)
+    assert.strictEqual(emptySlots(bot), 1)
+    const lines: string[] = []
+    const executor = new Executor(bot, { log: line => { lines.push(line); t.diagnostic(line) } })
+    await executor.task('make room by the lava', async (s) => await executor.makeRoomDuringStep(s))
+    // the room made and more (LAVA_ROOM), the thrown stacks burnt up
+    assert.ok(emptySlots(bot) >= 2 + 2 + LAVA_ROOM - 1, `${emptySlots(bot)} slots free: ${lines.join(' | ')}`)
+    await waitTicks(bot, 40)
+    const items = Object.values(bot.entities).filter(e => e.name === 'item' && e.position.distanceTo(bot.entity.position) < 16)
+    assert.deepStrictEqual(items.map(e => e.position.toString()), [], 'thrown items left lying')
+    // the rim's floor as it was: no pit dug
+    assert.strictEqual(bot.blockAt(at(0, -1, 1))?.name, 'stone')
+    assert.strictEqual(bot.blockAt(at(0, -1, -1))?.name, 'stone')
+  })
+
+  it('makes the enchanting table\'s obsidian from a deep lava lake through the rock with a bag nearly full of the route\'s stone: room made on the way, no inventory full, nothing thrown picked up again', async (t) => {
+    // (26.3 whole game: obsidianFromLava by the deep lakes failed its pickups 'the inventory is full' over and over,
+    // the bag full of the walk's cobblestone, diorite, andesite and granite)
+    await run(`fill ${xyz(at(-4, -4, -7))} ${xyz(at(24, 5, 7))} stone`)
+    // the bot in a pocket in the rock; the lake in a cave 12 blocks along +x at the bottom of the world, under a rim
+    // open over it (no shore at its level), andesite and diorite in the rock between
+    await run(`fill ${xyz(at(0, 0, 0))} ${xyz(at(0, 1, 0))} air`)
+    await run(`fill ${xyz(at(4, -1, -2))} ${xyz(at(10, 2, 2))} andesite`)
+    await run(`fill ${xyz(at(6, 0, -1))} ${xyz(at(8, 1, 1))} diorite`)
+    await run(`fill ${xyz(at(12, 0, -5))} ${xyz(at(21, 3, 5))} air`)
+    await run(`fill ${xyz(at(15, -2, -2))} ${xyz(at(18, -2, 1))} lava`)
+    await run(`fill ${xyz(at(15, -1, -2))} ${xyz(at(18, -1, 1))} air`)
+    await run('kill @e[type=item]')
+    await run(`tp ${USERNAME} ${origin.x + 0.5} ${origin.y} ${origin.z + 0.5} -90 0`)
+    assert.ok(await waitUntil(bot, () => bot.blockAt(at(15, -2, -2))?.name === 'lava' && bot.blockAt(at(5, 0, 0))?.name === 'andesite', 200))
+    // 34 slots: the tools and 31 stacks of the route's stone, the 2 free the executor keeps
+    for (const [item, n] of [['diamond_pickaxe', 1], ['water_bucket', 1], ['bucket', 1], ['cobblestone', 28 * 64], ['diorite', 64], ['andesite', 64], ['granite', 64]] as const) await give(item, n)
+    assert.strictEqual(emptySlots(bot), 2)
+    const lines: string[] = []
+    const traced: string[] = []
+    let recollected = 0
+    const onCollect = (collector: any, collected: any): void => {
+      if (collector === bot.entity && isThrownDrop(bot, collected)) {
+        recollected++
+        t.diagnostic(`picked up again: ${collected.id} at ${collected.position.toString()}, the bot at ${bot.entity.position.toString()}`)
+      }
+    }
+    // the skills' trace (SURVIVAL_DEBUG): the pickups' NO_SPACE is caught and traced by obsidianFromLava
+    const debug = process.env.SURVIVAL_DEBUG
+    const error = console.error
+    process.env.SURVIVAL_DEBUG = '1'
+    console.error = (...args: unknown[]) => { traced.push(args.map(String).join(' ')) }
+    bot.on('playerCollect', onCollect)
+    const executor = new Executor(bot, { log: line => { lines.push(line); t.diagnostic(line) } })
+    const start = bot.survival.tasks.tick
+    let made = false
+    try {
+      made = await obsidianFromPools(bot, executor, TABLE_OBSIDIAN, new AbortController().signal, line => { lines.push(line); t.diagnostic(line) })
+    } finally {
+      bot.off('playerCollect', onCollect)
+      console.error = error
+      if (debug == null) delete process.env.SURVIVAL_DEBUG
+      else process.env.SURVIVAL_DEBUG = debug
+    }
+    for (const l of traced) if (/obsidianFromLava|pedestal|tossAway|navigate:|collectBlock: broke|pickupDrops/.test(l)) t.diagnostic(l)
+    const full = [...lines, ...traced].filter(l => /inventory (is )?full|INVENTORY_FULL|NO_SPACE/.test(l))
+    t.diagnostic(`${countItems(bot, 'obsidian')} obsidian in ${bot.survival.tasks.tick - start} ticks, ${emptySlots(bot)} slots free; ${traced.filter(l => /tossAway/.test(l)).join(' | ')}`)
+    assert.ok(made && countItems(bot, 'obsidian') >= TABLE_OBSIDIAN, `${countItems(bot, 'obsidian')} obsidian`)
+    assert.deepStrictEqual(full, [])
     assert.ok(lines.some(l => /throwing away/.test(l)), 'no room made')
     assert.strictEqual(recollected, 0, 'thrown items picked up again')
   })

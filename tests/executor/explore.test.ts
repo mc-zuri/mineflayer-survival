@@ -388,3 +388,39 @@ test('dumpPitCells: a side of the facing opened from head height to a block unde
   // nothing under the bottom (a cave below): no pit there
   assert.equal(dumpPitCells(world({ '0,20,0': 'air' }, 'air'), feet, new Vec3(1, 0, 0)), null)
 })
+
+test('itemFlight: a stack thrown level flies some 2 blocks before it lands (Player.drop at 0.3 a tick along the look, 0.1 up; ItemEntity.tick)', async () => {
+  const { itemFlight } = await import('../../src/executor/explore')
+  // open ground: stone under y 64
+  const open = (pos: Vec3) => ({ name: pos.y < 64 ? 'stone' : 'air', boundingBox: pos.y < 64 ? 'block' : 'empty' })
+  const eye = new Vec3(0.5, 64 + 1.62, 0.5)
+  // yaw 0 throws to -z
+  const rest = itemFlight(open, eye, 0, 0)
+  assert.ok(rest instanceof Vec3)
+  assert.equal(rest.y, 64)
+  assert.ok(rest.z < -1 && rest.z > -3.5, `landed at ${rest.toString()}`)
+  assert.ok(Math.abs(rest.x - 0.5) < 1e-9)
+  // a wall a block ahead stops it at the bot's feet
+  const walled = (pos: Vec3) => pos.z === -1 || pos.y < 64 ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  const fell = itemFlight(walled, eye, 0, 0)
+  assert.ok(fell instanceof Vec3 && fell.z > -0.2, `landed at ${String(fell)}`)
+})
+
+test('lavaThrow: a look that lands the stack in the lake\'s lava below the rim whatever Player.drop\'s random lift; none across a wall or with no lava near', async () => {
+  const { lavaThrow, itemFlight } = await import('../../src/executor/explore')
+  // the bot on a rim at y 64 (stone under it), a lake of lava at y 63 from x 2 to 5, open above
+  const lake = (pos: Vec3) => {
+    if (pos.y === 63 && pos.x >= 2 && pos.x <= 5 && pos.z >= -2 && pos.z <= 2) return { name: 'lava', boundingBox: 'empty' }
+    return pos.y < 64 ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  }
+  const feet = new Vec3(0.5, 64, 0.5)
+  const t = lavaThrow(lake, feet)
+  assert.ok(t != null)
+  assert.ok(t.lava.x >= 2 && t.lava.y === 63)
+  for (const lift of [0, 0.1, 0.2]) assert.equal(itemFlight(lake, feet.offset(0, 1.62, 0), t.yaw, t.pitch, lift), 'lava')
+  // a wall two high between the bot and the lake
+  const walled = (pos: Vec3) => pos.x === 1 && pos.y >= 64 && pos.y <= 66 ? { name: 'stone', boundingBox: 'block' } : lake(pos)
+  assert.equal(lavaThrow(walled, feet), null)
+  // no lava
+  assert.equal(lavaThrow(pos => ({ name: pos.y < 64 ? 'stone' : 'air', boundingBox: pos.y < 64 ? 'block' : 'empty' }), feet), null)
+})

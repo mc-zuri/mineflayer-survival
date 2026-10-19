@@ -152,3 +152,37 @@ test('tossAway with no pit throws the way with room at head height, behind first
   open.entity.yaw = 0
   assert.ok(Math.abs(tossYaw(open) - Math.PI) < 1e-9)
 })
+
+test('tossAway into lava throws along the look given, and what it threw counts as thrown only while its entity is there (it burns: the blocks dug there after drop no thrown ones)', async () => {
+  const { tossAway, isThrownDrop } = await import('../../src/skills/pickupDrops')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const registry = require('minecraft-data')('1.21.11')
+  const Item = require('prismarine-item')('1.21.11')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('cobblestone', 64)] })
+  bot.inventory.inventoryStart = 9
+  bot.inventory.inventoryEnd = 45
+  bot._client = { on: () => {}, off: () => {} }
+  bot.time = { age: 1000 }
+  const looks: Array<[number, number]> = []
+  bot.look = async (yaw: number, pitch: number) => { looks.push([yaw, pitch]) }
+  const drop = (id: number, pos: Vec3): any => ({ id, name: 'item', position: pos, getDroppedItem: () => new Item(registry.itemsByName.cobblestone.id, 1) })
+  bot.toss = async (_type: number, _meta: unknown, n: number) => {
+    const stack = bot.inventory.items()[0]
+    stack.count -= n
+    if (stack.count <= 0) bot.inventory.slots[stack.slot] = null
+    setTimeout(() => { bot.entities[80] = drop(80, new Vec3(0.5, 65.3, -0.5)) }, 3)
+  }
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    assert.strictEqual(await tossAway(bot, 'cobblestone', 64, undefined, { yaw: 1, pitch: -0.7 }), 64)
+    assert.deepStrictEqual(looks, [[1, -0.7]])
+    assert.ok(isThrownDrop(bot, bot.entities[80]))
+    // burnt in the lava
+    const burnt = bot.entities[80]
+    delete bot.entities[80]
+    bot.emit('entityGone', burnt)
+    assert.strictEqual(isThrownDrop(bot, drop(81, new Vec3(0.5, 65, -0.5))), false)
+  } finally {
+    clearInterval(ticker)
+  }
+})

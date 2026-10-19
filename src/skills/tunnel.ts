@@ -74,7 +74,7 @@ export async function tunnelTo (bot: Bot, args: TunnelArgs, signal?: AbortSignal
     const feet = bot.entity.position.floored()
     if (feet.distanceTo(target) <= range || args.until?.() === true) break
     // room in the bag before each step (the bag's keeper): the steps' stone comes in as the bot walks into it
-    await keepRoom(bot, signal)
+    await keepRoom(bot, signal, target)
     const down = feet.y > target.y
     const dx = target.x - feet.x
     const dz = target.z - feet.z
