@@ -166,6 +166,15 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
     opts.onDestroyed?.(index)
   }
   bot.on('entityGone', onGone)
+  // up a pillar the hostiles reflex is held off: its fight walks the bot off the top (a 26.3 bot fought from spike 4's
+  // pillar 20 blocks up and fell; the water bucket saved it)
+  const hold: { release: (() => void) | null } = { release: null }
+  const pillarHold = (): void => {
+    const up = upPillar(pillar, bot.entity.position)
+    if (up && hold.release == null) hold.release = (bot as any).survival?.reflexes?.inhibit?.(['hostiles']) ?? null
+    else if (!up && hold.release != null) { hold.release(); hold.release = null }
+  }
+  bot.on('physicsTick', pillarHold)
   let ticks = 0
   const tickCounter = (): void => { ticks++ }
   bot.on('physicsTick', tickCounter)
@@ -289,6 +298,8 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
     }
   } finally {
     bot.off('entityGone', onGone)
+    bot.off('physicsTick', pillarHold)
+    hold.release?.()
     bot.off('physicsTick', tickCounter)
     bot.clearControlStates()
   }
@@ -331,6 +342,12 @@ export function pillarBase (pillar: PillarState, column: { x: number, z: number 
     pillar.bases?.set(key, base)
   }
   return base
+}
+
+/** the bot is up the pillar it built: on its column, more than a block and a half over its foot */
+export function upPillar (pillar: PillarState, pos: Pos): boolean {
+  const p = pillar.current
+  return p != null && onColumn(pos, p.column) && pos.y > p.base + 1.5
 }
 
 function onColumn (pos: Pos, column: { x: number, z: number }): boolean {

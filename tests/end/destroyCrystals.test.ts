@@ -136,3 +136,12 @@ test('pillarBase: a column climbed again keeps the foot of its first climb, not 
   assert.deepStrictEqual(pillar.current, { column, base: 63 })
   assert.strictEqual(pillarBase(pillar, { x: 39, z: 0 }, () => 62), 62)
 })
+
+test('upPillar: the bot is up its pillar (the hostiles reflex held off there) on the column over its foot only', async () => {
+  const { upPillar } = await import('../../src/end/skills/destroyCrystals')
+  const pillar: any = { current: { column: { x: -32, z: 21 }, base: 63 } }
+  assert.strictEqual(upPillar(pillar, { x: -31.5, y: 83, z: 21.5 }), true)
+  assert.strictEqual(upPillar(pillar, { x: -31.5, y: 64, z: 21.5 }), false)
+  assert.strictEqual(upPillar(pillar, { x: -30.5, y: 83, z: 21.5 }), false)
+  assert.strictEqual(upPillar({ current: null }, { x: -31.5, y: 83, z: 21.5 }), false)
+})
