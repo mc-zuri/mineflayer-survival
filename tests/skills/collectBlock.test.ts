@@ -126,6 +126,27 @@ test('collectBlock with avoidLava passes over a block given by position once lav
   assert.deepStrictEqual(targets, ['(1, 64, 0)'])
 })
 
+test('collectBlock with avoidLava and lavaUnder breaks a block given by position with lava only under it (a lake\'s obsidian lid), not one with lava beside it', async () => {
+  const registry = require('minecraft-data')('1.21.11')
+  const blocks = new Map<string, string>([['1,64,0', 'obsidian'], ['1,63,0', 'lava'], ['3,64,0', 'obsidian'], ['3,63,0', 'lava'], ['4,64,0', 'lava']])
+  const lookup = (pos: Vec3): { name: string } => ({ name: blocks.get(`${pos.x},${pos.y},${pos.z}`) ?? (pos.y < 64 ? 'stone' : 'air') })
+  assert.ok(lavaBeside(lookup, new Vec3(1, 64, 0)))
+  assert.ok(!lavaBeside(lookup, new Vec3(1, 64, 0), false))
+  assert.ok(lavaBeside(lookup, new Vec3(3, 64, 0), false))
+  const bot = fakeBot({ position: new Vec3(0.5, 65, 0.5), world: (pos: Vec3) => lookup(pos).name })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; return b }
+  const targets: string[] = []
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: (block: any) => { targets.push(block.position.toString()); throw new Error('the test stops here') } }
+  // the lid with lava beside it passed over, the one with lava under it gone for
+  await assert.rejects(collectBlock(bot, { positions: [new Vec3(3, 64, 0), new Vec3(1, 64, 0)], avoidLava: true, lavaUnder: true }), /the test stops here/)
+  assert.deepStrictEqual(targets, ['(1, 64, 0)'])
+  // without lavaUnder, both passed over
+  targets.length = 0
+  await assert.rejects(collectBlock(bot, { positions: [new Vec3(3, 64, 0), new Vec3(1, 64, 0)], avoidLava: true }), (err: any) => err.code === 'NOT_FOUND')
+  assert.deepStrictEqual(targets, [])
+})
+
 test('collectBlock with anyTool breaks a block by hand that the bag has no harvest tool for (a way out of a mine), and expects no drop', async () => {
   const registry = require('minecraft-data')('1.21.11')
   const blocks = new Map<string, string>([['1,64,0', 'stone']])

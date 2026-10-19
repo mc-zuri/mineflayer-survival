@@ -133,6 +133,23 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
         if (bot.blockAt(open)?.boundingBox === 'block') target = { source: open, spot: open.offset(0, 1, 0), side: false }
       }
     }
+    // a deep lake's lid: the top layer the water turned, more lava under it that no water gets to. Its cells with lava
+    // only under them are mined from the shore (the lava under a broken cell doesn't come up into it: FlowingFluid
+    // spreads down and sideways, and the walks' lava rules keep the bot off the lid), opening the sources under them to
+    // the next pour, which turns that layer over the stone under it. Their drops aren't gone after: they fall into the
+    // lava and burn (ItemEntity.lavaHurt; the layer turned makes up for them), or lie on the lid where no step goes.
+    // A 2-deep lake's sources were all under its lid: 'no lava source left' (26.3)
+    if (target == null) {
+      const lavaOver = (p: Vec3): boolean => [...SIDES, new Vec3(0, 1, 0)].some(d => get(p.plus(d))?.name === 'lava')
+      const lid = findBlocks(bot, { matching: obsidianId, maxDistance: 8, count: 64 })
+        .filter(p => !p.equals(feet) && get(p.offset(0, -1, 0))?.name === 'lava' && !lavaOver(p))
+      if (lid.length > 0) {
+        trace('obsidianFromLava: opening the lid over', lid.length, 'sources')
+        await withoutDigging(bot, async () => await collectBlock(bot, { positions: lid, pickup: false, avoidLava: true, lavaUnder: true }, signal))
+          .catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the lid:', (err as Error).message) })
+        if (lid.some(p => get(p)?.name !== 'obsidian')) continue
+      }
+    }
     if (target == null) throw new SkillError('NOT_FOUND', `no lava source left to turn to obsidian (${countItems(bot, 'obsidian')} of ${count})`)
     const { source, side } = target
     let spot = target.spot

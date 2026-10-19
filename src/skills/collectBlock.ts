@@ -42,6 +42,11 @@ export interface CollectBlockArgs {
    */
   avoidLava?: boolean
   /**
+   * With avoidLava, blocks given by `positions` with lava only under them are broken all the same (default false): a
+   * lake's obsidian lid, the lava under it not coming up into the cell (FlowingFluid spreads down and sideways)
+   */
+  lavaUnder?: boolean
+  /**
    * Break a block with no harvest tool at hand too (by hand: stone in 150 ticks), for a way through rather than what
    * it drops (default false: NO_TOOL)
    */
@@ -61,9 +66,9 @@ export interface CollectBlockArgs {
 
 const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, 1, 0), new Vec3(0, -1, 0)]
 
-/** whether lava touches the block at `pos` (a side, above or below) */
-export function lavaBeside (lookup: (pos: Vec3) => { name: string } | null, pos: Vec3): boolean {
-  return SIDES.some(d => lookup(pos.plus(d))?.name === 'lava')
+/** whether lava touches the block at `pos` (a side, above, or below unless `below` is false) */
+export function lavaBeside (lookup: (pos: Vec3) => { name: string } | null, pos: Vec3, below = true): boolean {
+  return SIDES.some(d => (below || d.y >= 0) && lookup(pos.plus(d))?.name === 'lava')
 }
 
 /** water (or a plant that grows in it) against a face of the block: an ore under a lake or in a flooded cave */
@@ -142,7 +147,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
         tried.add(key)
         const block = bot.blockAt(pos.floored())
         // (lava there now: one of the blocks broken before let it in, FlowingFluid spreading into the cell)
-        if (args.avoidLava === true && lavaBeside(p => bot.blockAt(p), pos.floored())) {
+        if (args.avoidLava === true && lavaBeside(p => bot.blockAt(p), pos.floored(), args.lavaUnder !== true)) {
           trace('collectBlock: passing over', block?.name, pos.toString(), ': lava against it')
           continue
         }

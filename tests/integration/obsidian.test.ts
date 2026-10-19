@@ -61,7 +61,7 @@ describe(`obsidian from a lava lake on a ${DEFAULT_VERSION} server`, { timeout: 
     await run(`clear ${USERNAME}`)
     for (const [item, n] of [['water_bucket', 1], ['bucket', 2], ['diamond_pickaxe', 1], ['cobblestone', 16]] as const) await run(`give ${USERNAME} ${item} ${n}`)
     await run(`tp ${USERNAME} ${o.x + 0.5} ${o.y} ${o.z + 0.5}`)
-    assert.ok(await waitUntil(bot, () => countItems(bot, 'cobblestone') > 0 && bot.blockAt(o.offset(2, -3, 2))?.name === 'lava', 200))
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'cobblestone') > 0 && bot.blockAt(o.offset(2, -3, 2))?.name === 'lava' && bot.entity.position.distanceTo(o.offset(0.5, 0, 0.5)) < 1, 200))
     const got = await obsidianFromLava(bot, 4)
     console.log(`obsidianFromLava (deep): ${got} obsidian, water bucket ${countItems(bot, 'water_bucket')}`)
     assert.ok(got >= 4, `${got} obsidian`)
@@ -78,7 +78,7 @@ describe(`obsidian from a lava lake on a ${DEFAULT_VERSION} server`, { timeout: 
     await run(`clear ${USERNAME}`)
     await run(`give ${USERNAME} diamond_pickaxe 1`)
     await run(`tp ${USERNAME} ${o.x + 3.5} ${o.y} ${o.z + 2.5}`)
-    assert.ok(await waitUntil(bot, () => countItems(bot, 'diamond_pickaxe') > 0 && bot.blockAt(o.offset(4, -1, 0))?.name === 'obsidian', 200))
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'diamond_pickaxe') > 0 && bot.blockAt(o.offset(4, -1, 0))?.name === 'obsidian' && bot.entity.position.distanceTo(o.offset(3.5, 0, 2.5)) < 1, 200))
     const positions = [o.offset(2, -1, 0), o.offset(4, -1, 0)]
     await run(`setblock ${xyz(5, -1, 0)} lava`)
     assert.ok(await waitUntil(bot, () => bot.blockAt(o.offset(5, -1, 0))?.name === 'lava', 20))
