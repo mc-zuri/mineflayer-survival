@@ -27,8 +27,10 @@ describe(`obsidian from a lava lake on a ${DEFAULT_VERSION} server`, { timeout: 
     if (server != null) await server.cleanup()
   })
 
+  let start: Vec3 | null = null
   it('turns a shoreless lake\'s lava to obsidian and mines 10', async () => {
     const o = bot.entity.position.floored()
+    start = o
     const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
     await run(`fill ${xyz(-8, -4, -8)} ${xyz(8, -1, 8)} stone`)
     await run(`fill ${xyz(-8, 0, -8)} ${xyz(8, 6, 8)} air`)
@@ -43,5 +45,24 @@ describe(`obsidian from a lava lake on a ${DEFAULT_VERSION} server`, { timeout: 
     console.log(`obsidianFromLava: ${got} obsidian, water bucket ${countItems(bot, 'water_bucket')}`)
     assert.ok(got >= 10, `${got} obsidian`)
     assert.strictEqual(countItems(bot, 'water_bucket'), 1)
+  })
+
+  it('turns the lava of a deep lake to obsidian, the pedestal put against its wall (its floor more lava)', async () => {
+    // (beside the first test's ground, at its height)
+    const o = (start ?? bot.entity.position.floored()).offset(24, 0, 0)
+    const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
+    await run(`fill ${xyz(-8, -4, -8)} ${xyz(8, -1, 8)} stone`)
+    await run(`fill ${xyz(-8, 0, -8)} ${xyz(8, 6, 8)} air`)
+    // the lake: 4 x 4, 2 deep (y -3 to -2), under a rim of stone at y -1 except over the lake (the flat world's
+    // bedrock at y -64 leaves no deeper)
+    await run(`fill ${xyz(2, -3, 2)} ${xyz(5, -2, 5)} lava`)
+    await run(`fill ${xyz(2, -1, 2)} ${xyz(5, -1, 5)} air`)
+    await run(`clear ${USERNAME}`)
+    for (const [item, n] of [['water_bucket', 1], ['bucket', 2], ['diamond_pickaxe', 1], ['cobblestone', 16]] as const) await run(`give ${USERNAME} ${item} ${n}`)
+    await run(`tp ${USERNAME} ${o.x + 0.5} ${o.y} ${o.z + 0.5}`)
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'cobblestone') > 0 && bot.blockAt(o.offset(2, -3, 2))?.name === 'lava', 200))
+    const got = await obsidianFromLava(bot, 4)
+    console.log(`obsidianFromLava (deep): ${got} obsidian, water bucket ${countItems(bot, 'water_bucket')}`)
+    assert.ok(got >= 4, `${got} obsidian`)
   })
 })

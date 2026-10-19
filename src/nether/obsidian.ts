@@ -103,11 +103,15 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
     // flows down into the sources about it and turns them, and is scooped back off the block (the water poured into
     // the lava was lost, and the source stayed lava: 26.3 seed 2)
     if (target == null) {
-      const open = all.find(p => AIR.has(get(p.offset(0, 1, 0))?.name ?? ''))
+      // a source open above with a block to put the pedestal against: its floor, else a solid side (a deep lake's
+      // floor is more lava: 'nothing solid to place against', 26.3)
+      const solidAt = (p: Vec3): boolean => get(p)?.boundingBox === 'block' && get(p)?.name !== 'lava'
+      const against = (p: Vec3): Vec3 | null => [new Vec3(0, -1, 0), ...SIDES].map(d => p.plus(d)).find(solidAt) ?? null
+      const open = all.find(p => AIR.has(get(p.offset(0, 1, 0))?.name ?? '') && against(p) != null)
       const filler = PEDESTAL_BLOCKS.find(n => countItems(bot, n) > 0)
       if (open != null && filler != null) {
         await navigateNear(bot, open, 3, signal).catch(err => { if (isAbort(err)) throw err })
-        await placeBlock(bot, { pos: open, item: filler, against: open.offset(0, -1, 0), intoFluid: true }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the pedestal:', (err as Error).message) })
+        await placeBlock(bot, { pos: open, item: filler, against: against(open) as Vec3, intoFluid: true }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the pedestal:', (err as Error).message) })
         if (bot.blockAt(open)?.boundingBox === 'block') target = { source: open, spot: open.offset(0, 1, 0), side: false }
       }
     }
