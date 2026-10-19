@@ -49,6 +49,9 @@ export function netherNeeds (inv: { count: (name: string) => number }): { rods: 
 /** the point of interest where the bot's herd was let out */
 export const HERD = 'herd'
 
+/** the herd pen's sizes tried, biggest first (cells across, the ring included) */
+export const PEN_SIZES = [9, 7, 5]
+
 /** ticks the enchanting milestone may spend growing its herd for the books' leather (lockstep: days of game time) */
 export const HERD_BUDGET_TICKS = 150000
 /** a wait between the herd's chores, by the herd */
@@ -81,14 +84,19 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
   // the herd shut in a pen by home (cows wander: a herd of 8 let out was 5 to 8 by home over 150000 ticks, its calves
   // gone off), the pen built or the one remembered; the herd left loose and gathered when there's none
   let pen: PenPlan | null = null
-  try {
-    const r = await executor.task('the herd pen', async (s) => await herdPen(bot, { home: at, memory: executor.memory, obtain: async (reqs, sig) => await executor.obtain(reqs, sig ?? signal), mob: 'cow' }, s), signal)
-    pen = r.pen
-    at = pen.center.clone()
-    log(`herd: the pen at ${pen.center.toString()}${r.built ? ' built' : ''}, ${r.inside} cows in`)
-  } catch (err) {
-    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-    log(`herd: no pen: ${(err as Error).message}`)
+  // the biggest pen the ground near home takes (a hillside home had no ground for 9 across, 26.3 seed 2)
+  for (const size of PEN_SIZES) {
+    try {
+      const r = await executor.task('the herd pen', async (s) => await herdPen(bot, { home: at, memory: executor.memory, obtain: async (reqs, sig) => await executor.obtain(reqs, sig ?? signal), mob: 'cow', size }, s), signal)
+      pen = r.pen
+      at = pen.center.clone()
+      log(`herd: the pen at ${pen.center.toString()} (${pen.size} across)${r.built ? ' built' : ''}, ${r.inside} cows in`)
+      break
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`herd: no pen of ${size}: ${(err as Error).message}`)
+      if (!/no ground/.test((err as Error).message)) break
+    }
   }
   const near = (e: any): boolean => pen != null ? inPen(pen, e.position) : e.position.distanceTo(at) <= 96
   let lastLine = ''

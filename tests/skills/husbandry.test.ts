@@ -167,3 +167,26 @@ test('leatherFromHerd pens the herd first, and leads the cows outside the pen ba
   assert.ok(tasks.includes('the herd into its pen'), tasks.join(', '))
   assert.ok(!tasks.includes('gather the herd'))
 })
+
+test('leatherFromHerd tries smaller pens when the ground near home takes no pen of 9', async () => {
+  const { leatherFromHerd, PEN_SIZES } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wheat', 20)] })
+  bot.game.dimension = 'overworld'
+  let tick = 0
+  const pens: number[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { get tick () { return tick } },
+    obtain: async () => {},
+    task: async (name: string, fn: any) => {
+      if (name === 'the herd pen') { pens.push(pens.length); throw new Error(`NOT_FOUND: no ground for a pen of ${PEN_SIZES[pens.length - 1]}`) }
+      if (name === 'wait for the calves') tick += 1e6
+      return { fed: 0 }
+    }
+  }
+  await leatherFromHerd(bot, executor, 46, new AbortController().signal, () => {})
+  assert.equal(pens.length, PEN_SIZES.length)
+})
