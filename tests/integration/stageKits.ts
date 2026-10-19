@@ -46,6 +46,21 @@ export const STAGES: Record<string, Stage> = {
       ['water_bucket', 1], ['bucket', 1], ['torch', 32], ['oak_log', 64], ['crafting_table', 1], ['iron_ingot', 16], ['coal', 16],
       ['flint_and_steel', 1], ['iron_pickaxe', 1]
     ]
+  },
+  // the epoch before: farming and enchanting. The diamond gear plain, the eyes made already (the nether's done), and
+  // what a farm and a table are made from: cows from eggs bred with wheat for the books' leather, canes by water for
+  // their paper, the table's diamonds and obsidian, lapis, iron for an anvil; then on to the dragon as above
+  enchant: {
+    from: 'enchanting',
+    until: 'end',
+    kit: [
+      ['diamond_sword', 1], ['diamond_pickaxe', 1], ['diamond_axe', 1], ['bow', 1], ['shield', 1],
+      ['diamond_helmet', 1], ['diamond_chestplate', 1], ['diamond_leggings', 1], ['diamond_boots', 1],
+      ['ender_eye', 16], ['arrow', 128], ['cobblestone', 128], ['cooked_beef', 48], ['bread', 16],
+      ['water_bucket', 2], ['bucket', 1], ['sugar_cane', 128], ['cow_spawn_egg', 8], ['wheat', 64], ['wheat_seeds', 32],
+      ['diamond', 3], ['obsidian', 4], ['lapis_lazuli', 32], ['iron_ingot', 40], ['torch', 32], ['oak_log', 64],
+      ['crafting_table', 1], ['coal', 16], ['flint_and_steel', 1], ['iron_pickaxe', 1]
+    ]
   }
 }
 
