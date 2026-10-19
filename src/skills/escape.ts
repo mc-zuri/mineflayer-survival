@@ -163,10 +163,64 @@ export function nearestSpot (bot: Bot, radius: number, test: (pos: Vec3) => bool
   return null
 }
 
+/** ticks the hazard reflex steps toward ground beside a magma block before it puts a block on the magma instead */
+export const HOT_FLOOR_STEP_TICKS = 20
+
+/**
+ * The ground beside the magma block the bot stands on that a step gets it to: of the eight cells round it, one that's
+ * a safe stand (isSafeStand: no magma under) at the feet's level, a jump up (room over the head for it) or a drop of
+ * 1 or 2, the cells on the way free of lava and fire; the nearest the bot's middle. Null when there's none.
+ */
+export function hotFloorStep (bot: Bot): Vec3 | null {
+  const pos = bot.entity.position
+  const feet = pos.floored()
+  const headroom = passable(bot, feet.offset(0, 2, 0), false)
+  let best: { cell: Vec3, d: number } | null = null
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      if (dx === 0 && dz === 0) continue
+      const column = feet.offset(dx, 0, dz)
+      let cell: Vec3 | null = null
+      if (isSafeStand(bot, column.offset(0, 1, 0)) && headroom && passable(bot, column.offset(0, 2, 0), false)) cell = column.offset(0, 1, 0)
+      else if (passable(bot, column, false) && passable(bot, column.offset(0, 1, 0), false)) {
+        for (let dy = 0; dy >= -2 && cell == null; dy--) {
+          const c = column.offset(0, dy, 0)
+          if (!passable(bot, c, false)) break
+          if (isSafeStand(bot, c)) cell = c
+        }
+      }
+      // a diagonal step goes by both its sides' cells: both open at the feet and the head
+      if (cell == null || (dx !== 0 && dz !== 0 && (!passable(bot, feet.offset(dx, 0, 0), false) || !passable(bot, feet.offset(0, 0, dz), false) ||
+        !passable(bot, feet.offset(dx, 1, 0), false) || !passable(bot, feet.offset(0, 1, dz), false)))) continue
+      const d = Math.hypot(cell.x + 0.5 - pos.x, cell.z + 0.5 - pos.z)
+      if (best == null || d < best.d) best = { cell, d }
+    }
+  }
+  return best?.cell ?? null
+}
+
+/**
+ * A block put on the magma block under the feet, by a pillar's jump (towerUp, a block of the bag's scaffolding),
+ * for the bot to stand on: resolves whether it stands a block up off the magma
+ */
+export async function coverHotFloor (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  const feet = bot.entity.position.floored()
+  try {
+    const { towerUp } = await import('../end/skills/world')
+    await towerUp(bot, feet.y + 1, { signal })
+  } catch (err) {
+    if (isAbort(err)) throw err
+    return false
+  }
+  return Math.floor(bot.entity.position.y + 1e-6) > feet.y && !onHotFloor(bot)
+}
+
 export interface EscapeHazardOptions extends SkillOptions {
   searchRadius?: number
   /** how far ground is looked for when none is within searchRadius (default 16) */
   farRadius?: number
+  /** puts a block on the magma under the feet (default coverHotFloor) */
+  cover?: (bot: Bot, signal?: AbortSignal) => Promise<boolean>
   /** run to water this close when burning (0 off) */
   waterRadius?: number
   maxTicks?: number
@@ -177,6 +231,8 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
   const radius = opts.searchRadius ?? 6
   const maxTicks = opts.maxTicks ?? 200
   let target: Vec3 | null = null
+  let hotTicks = 0
+  let covered = false
   try {
     for (let t = 0; t < maxTicks; t++) {
       throwIfAborted(opts.signal)
@@ -209,6 +265,25 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
         if (block != null) await bot.dig(block as any, true).catch(() => {})
         await waitTicks(bot, 1, opts.signal)
         continue
+      }
+      // on a magma block (not in lava or fire): off it by a step onto ground beside it, never through lava; a pocket
+      // with none, or a step that doesn't get the bot off in HOT_FLOOR_STEP_TICKS (magma cubes in the way), gets a
+      // block put on the magma under the feet (a pillar's jump) to stand on. In seed 2's basalt delta a 26.3 bot stood
+      // on a magma block with the lava sea on two sides and a wall two high on the others for 170 ticks, the reflex
+      // steering at a stand it couldn't climb to, the floor hurting it every 12 and the magma cubes about, till it died
+      if (onHotFloor(bot) && !inLava(bot)) {
+        hotTicks++
+        const step = hotFloorStep(bot)
+        if ((step == null || hotTicks > HOT_FLOOR_STEP_TICKS) && !covered) {
+          covered = true
+          bot.clearControlStates()
+          if (await (opts.cover ?? coverHotFloor)(bot, opts.signal)) continue
+        }
+        if (step != null) {
+          steerToward(bot, step.offset(0.5, 0, 0.5), { sprint: false })
+          await waitTicks(bot, 1, opts.signal)
+          continue
+        }
       }
       if (target == null || t % 10 === 0 || !isSafeStand(bot, target)) {
         // the near ground first, then any within farRadius: in the nether's lava sea none was within 6 and the bot

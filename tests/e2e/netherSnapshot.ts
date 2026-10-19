@@ -2,7 +2,8 @@
 // (tests/fixtures/nether-seed2-delta.json.gz, tests/nether/netherSnapshot.ts):
 //   node -r ts-node/register/transpile-only tests/e2e/netherSnapshot.ts <out.json.gz> x0 z0 x1 z1 y0 y1
 // (the fixtures: nether-seed2-delta.json.gz 240 -64 495 127 24 119; nether-seed2-blaze.json.gz, the fortress spawner
-// at 59 64 -534 and its throne: 27 -566 91 -502 50 85)
+// at 59 64 -534 and its throne: 27 -566 91 -502 50 85; nether-seed2-east.json.gz, the basalt delta east of it down to
+// the lava sea, where the pearl legs go from the throne: 58 -585 160 -505 24 90)
 import * as fs from 'node:fs'
 import * as zlib from 'node:zlib'
 import { Vec3 } from 'vec3'
@@ -27,7 +28,7 @@ async function main (): Promise<void> {
           for (let x = cx; x < Math.min(cx + step, x1 + 1); x += 16) for (let z = cz; z < Math.min(cz + step, z1 + 1); z += 16) if ((bot.world as any).getColumnAt(new Vec3(x, 64, z)) == null) return false
           return (bot.world as any).getColumnAt(new Vec3(Math.min(cx + step, x1 + 1) - 1, 64, Math.min(cz + step, z1 + 1) - 1)) != null && bot.game.dimension.includes('nether')
         }
-        for (let i = 0; i < 400 && !loaded(); i++) await bot.waitForTicks(1)
+        for (let i = 0; i < 2000 && !loaded(); i++) await bot.waitForTicks(1)
         if (!loaded()) throw new Error(`chunks at ${cx} ${cz} not loaded`)
         for (let x = cx; x < Math.min(cx + step, x1 + 1); x++) {
           for (let z = cz; z < Math.min(cz + step, z1 + 1); z++) {
