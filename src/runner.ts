@@ -326,6 +326,8 @@ export class Runner {
   readonly executor: Executor
   readonly reached: MilestoneEvent[] = []
   private ticksBefore = 0
+  /** the milestone being worked on (play's stop names it when an abort gets past the loop) */
+  private current: MilestoneId | null = null
   private readonly started = Date.now()
   private readonly log: (line: string) => void
   private sleepCooldownUntil = 0
@@ -490,7 +492,15 @@ export class Runner {
     if (diag != null) diag.clock = clock
     const disarm = diag?.arm(this.options.watchdog)
     try {
-      const result = await this.loop(controller.signal)
+      let result: PlayResult
+      try {
+        result = await this.loop(controller.signal)
+      } catch (err) {
+        // an abort that got past the loop's own catches (a recovery from a death under way when the budget ran out:
+        // pnpm e2e crashed on the TaskError, exit code 2, no FAIL line) is still a stop
+        if (!controller.signal.aborted) throw err
+        result = this.stop(this.current, 'aborted', err)
+      }
       if (overBudget && result.reason === 'aborted') result.reason = 'budget'
       return result
     } finally {
@@ -554,6 +564,7 @@ export class Runner {
       // the epochs once the milestones are done (the dragon dead), when play's options ask for them
       const m = nextToWork(state, reachedIds, skip) ?? (this.options.epochs === true ? nextEpoch(state, reachedIds, skip) : null)
       if (m == null) return this.stop(null, 'finished')
+      this.current = m.id
       if (this.options.stopAt === m.id) return this.stop(m.id, 'until')
       const handler = this.handlerFor(m.id)
       if (handler == null) {

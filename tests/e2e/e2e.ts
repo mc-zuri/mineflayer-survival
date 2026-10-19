@@ -227,7 +227,11 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
         log(`checkpoint ${dir}`)
       }).catch(err => log(`checkpoint ${dir} failed: ${(err as Error).message}`))
     })
-    const result: PlayResult = await b.survival.play(playOptions(opts, saveFile))
+    // (a throw out of play is a FAIL with its reason, not a crash of the runner)
+    const result: PlayResult = await b.survival.play(playOptions(opts, saveFile)).catch((err: unknown): PlayResult => {
+      log(`play threw: ${(err as Error)?.stack ?? String(err)}`)
+      return { reached: [...reached], stoppedAt: null, reason: 'aborted', error: err }
+    })
     await checkpointing
     const ticks = b.lockstep.ticks - k0
     const wallMs = Date.now() - wall0

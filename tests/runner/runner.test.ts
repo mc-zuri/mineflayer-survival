@@ -165,6 +165,26 @@ test('maxTicks: play stops when its tick budget runs out, the work in hand abort
   assert.equal(r.stoppedAt, 'wood')
 })
 
+test('maxTicks: an abort that gets past the loop (a recovery under way when the budget runs out) is a budget stop, not a throw', async () => {
+  const bot = fakeBot()
+  const runner = new Runner(bot, {
+    maxTicks: 50,
+    log: () => {},
+    handlers: { wood: async () => { throw new TaskError('DIED', 'the bot died') } }
+  })
+  // the recovery waits out the budget, then throws the abort
+  ;(runner as any).recoverFromDeath = async (signal?: AbortSignal) => {
+    await new Promise<void>(resolve => signal?.addEventListener('abort', () => resolve()))
+    throw new TaskError('ABORTED', 'aborted')
+  }
+  ;(runner as any).recover = (runner as any).recoverFromDeath
+  const result = runner.play()
+  for (let i = 0; i < 60; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  const r = await result
+  assert.equal(r.reason, 'budget')
+  assert.equal(r.stoppedAt, 'wood')
+})
+
 test('netherNeeds: the rods and pearls still wanted for the eyes', async () => {
   const { netherNeeds } = await import('../../src/milestones')
   const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
