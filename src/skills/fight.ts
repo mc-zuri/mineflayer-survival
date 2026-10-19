@@ -2,7 +2,7 @@ import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
 import type { Vec3 } from 'vec3'
 import { attackStrengthOf, bestMeleeWeapon } from './weapons'
-import { steerAway, steerToward } from './steer'
+import { edgeAhead, steerAway, steerToward } from './steer'
 import { type Entity, metadataIndex, metadataValue, distanceToBox, entityBox, entityName, eyePosition, isAlive, TaskError, type SkillOptions, throwIfAborted, waitTicks, yawPitchOf } from './combatUtil'
 
 export interface FightOptions extends SkillOptions {
@@ -205,16 +205,19 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       }
 
       if (distance > reach) {
-        // close in, sprinting (a sprint hit knocks back further)
-        steerToward(bot, target.position, { sprint: true })
+        // close in, sprinting (a sprint hit knocks back further), but not over a deadly edge: a magma cube in a basalt
+        // delta was chased into a lava pocket, a blaze off a ledge over the lava sea (26.3); it comes to the bot
+        steerToward(bot, target.position, { sprint: true, guard: true })
         lookAt(bot, center)
         await waitTicks(bot, 1, signal)
         continue
       }
 
-      // in reach: hold position (step back if it's on top of us) and time the swing
+      // in reach: hold position (step back if it's on top of us, unless that's over a deadly edge: a blaze hovering
+      // over a 26.3 bot on a ledge walked it backwards off the end, into the lava sea) and time the swing
       bot.setControlState('forward', false)
-      bot.setControlState('back', distance < 1)
+      bot.setControlState('sneak', false)
+      bot.setControlState('back', distance < 1 && !edgeAhead(bot, bot.entity.yaw + Math.PI))
       lookAt(bot, center)
       const e = bot.entity as any
       const canCrit = crits && !isCreeper && e.isInWater !== true && e.isInLava !== true && e.onClimbable !== true

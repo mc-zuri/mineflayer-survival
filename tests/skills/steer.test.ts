@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { fleeHeading, stepCost } from '../../src/skills/steer'
+import { deadlyStep, edgeAhead, fleeHeading, stepCost, steerToward } from '../../src/skills/steer'
 import { fakeBot } from '../reflexes/fakeBot'
 
 test('fleeHeading runs away from the threat, around lava and walls', () => {
@@ -20,4 +20,46 @@ test('fleeHeading runs away from the threat, around lava and walls', () => {
   // walled in: nowhere
   const box = (p: Vec3): string => (Math.abs(p.x) >= 1 || Math.abs(p.z) >= 1) ? 'stone' : p.y < 64 ? 'stone' : 'air'
   assert.strictEqual(fleeHeading(fakeBot({ position: new Vec3(0.5, 64, 0.5), world: box }), new Vec3(-3, 64, 0.5)), null)
+})
+
+test('deadlyStep: lava or fire at the feet, a fall into lava or past 3 blocks; not a wall, a step down, or water under', () => {
+  // stone floor to y 63 west of x 2; east of it: a pocket of lava at y 62 (z < 0) and the void (z >= 0), a wall at x -2
+  const world = (p: Vec3): string => {
+    if (p.x <= -2) return p.y < 66 ? 'stone' : 'air'
+    if (p.x < 2) return p.y < 64 ? 'stone' : 'air'
+    if (p.z < 0) return p.y === 62 ? 'lava' : p.y < 62 ? 'stone' : 'air'
+    if (p.z >= 4) return p.y === 60 ? 'water' : 'air'
+    return 'air'
+  }
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world })
+  assert.strictEqual(deadlyStep(bot, new Vec3(1, 64, 0)), false, 'level ground')
+  assert.strictEqual(deadlyStep(bot, new Vec3(-2, 64, 0)), false, 'a wall')
+  assert.strictEqual(deadlyStep(bot, new Vec3(2, 64, -1)), true, 'a lava pocket under a drop of 1')
+  assert.strictEqual(deadlyStep(bot, new Vec3(2, 64, 1)), true, 'the void')
+  assert.strictEqual(deadlyStep(bot, new Vec3(2, 64, 5)), false, 'water under a drop of 3')
+})
+
+test('steerToward with guard stops at a deadly edge (sneaking: the speed had doesn\'t carry it over), and walks on away from it', () => {
+  // a ledge: ground to x < 1, the lava sea far under it east
+  const world = (p: Vec3): string => p.x < 1 ? (p.y < 64 ? 'stone' : 'air') : (p.y === 31 ? 'lava' : 'air')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world })
+  // east: over the edge
+  assert.strictEqual(edgeAhead(bot, -Math.PI / 2), true)
+  assert.strictEqual(steerToward(bot, new Vec3(5, 64, 0.5), { guard: true }), false)
+  assert.strictEqual(bot.getControlState('forward'), false)
+  assert.strictEqual(bot.getControlState('sprint'), false)
+  assert.strictEqual(bot.getControlState('sneak'), true)
+  // without the guard it walks on (an escape through lava wants that)
+  assert.strictEqual(steerToward(bot, new Vec3(5, 64, 0.5)), true)
+  assert.strictEqual(bot.getControlState('forward'), true)
+  // west, along the ground: on it goes
+  bot.clearControlStates()
+  assert.strictEqual(edgeAhead(bot, Math.PI / 2), false)
+  assert.strictEqual(steerToward(bot, new Vec3(-5, 64, 0.5), { guard: true, sprint: true }), true)
+  assert.strictEqual(bot.getControlState('forward'), true)
+  assert.strictEqual(bot.getControlState('sprint'), true)
+  assert.strictEqual(bot.getControlState('sneak'), false)
+  // two blocks from the edge it isn't one yet (the check reaches 1.2 blocks on)
+  bot.entity.position = new Vec3(-1.5, 64, 0.5)
+  assert.strictEqual(edgeAhead(bot, -Math.PI / 2), false)
 })

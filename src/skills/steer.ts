@@ -43,16 +43,75 @@ export function stepCost (bot: Bot, feet: Vec3): number {
   return Infinity
 }
 
-/** Turns toward the point and walks (sprinting unless told not), jumping over steps and swimming up in water. */
-export function steerToward (bot: Bot, point: Vec3, opts: { sprint?: boolean, lookPitch?: number } = {}): void {
+/**
+ * Whether a step into the column at `feet` is one to die of: lava, fire or another danger block at the feet or the
+ * head, or a fall into one, or of more than 3 blocks with no water under (LivingEntity.causeFallDamage). A wall or a
+ * step up is none (walking into it does no harm).
+ */
+export function deadlyStep (bot: Bot, feet: Vec3): boolean {
+  const f = feet.floored()
+  if (isDangerBlock(blockName(bot, f)) || isDangerBlock(blockName(bot, f.offset(0, 1, 0)))) return true
+  if (isSolid(bot, f)) return false
+  for (let d = 1; d <= 4; d++) {
+    const below = f.offset(0, -d, 0)
+    const name = blockName(bot, below)
+    if (name === 'water') return false
+    if (isDangerBlock(name)) return true
+    if (isSolid(bot, below)) return false
+  }
+  return true
+}
+
+/**
+ * Whether walking on along `yaw` (mineflayer's: the look's direction is -sin, -cos) steps into a deadly column
+ * (deadlyStep) within `reach` blocks of the bot's middle, at its feet's height: the edge of a ledge over the lava sea,
+ * a basalt delta's lava pocket. Checked from the near side of the bot's box on (its half width, 0.3).
+ */
+export function edgeAhead (bot: Bot, yaw: number, reach = 1.2): boolean {
+  const pos = bot.entity.position
+  const dx = -Math.sin(yaw)
+  const dz = -Math.cos(yaw)
+  for (const k of [0.45, 0.8, reach]) {
+    if (k > reach) continue
+    if (deadlyStep(bot, new Vec3(pos.x + dx * k, pos.y + 0.01, pos.z + dz * k))) return true
+  }
+  return false
+}
+
+export interface SteerOptions {
+  sprint?: boolean
+  lookPitch?: number
+  /**
+   * stop short of a deadly edge ahead (edgeAhead), sneaking for the tick so the speed already had doesn't carry the bot
+   * over (Player.maybeBackOffFromEdge): for a fight or a chase that only wants to get near, not for an escape through
+   * lava (default false)
+   */
+  guard?: boolean
+}
+
+/**
+ * Turns toward the point and walks (sprinting unless told not), jumping over steps and swimming up in water; with
+ * `guard`, stops at a deadly edge instead. Returns whether it walked on.
+ */
+export function steerToward (bot: Bot, point: Vec3, opts: SteerOptions = {}): boolean {
   const pos = bot.entity.position
   const yaw = Math.atan2(-(point.x - pos.x), -(point.z - pos.z))
   void bot.look(yaw, opts.lookPitch ?? 0, true)
+  if (opts.guard === true && edgeAhead(bot, yaw)) {
+    bot.setControlState('forward', false)
+    bot.setControlState('back', false)
+    bot.setControlState('sprint', false)
+    bot.setControlState('jump', false)
+    bot.setControlState('sneak', true)
+    return false
+  }
+  if (opts.guard === true) bot.setControlState('sneak', false)
   bot.setControlState('forward', true)
   bot.setControlState('back', false)
   bot.setControlState('sprint', opts.sprint !== false)
   const e = bot.entity as any
   bot.setControlState('jump', (e.isCollidedHorizontally === true && bot.entity.onGround) || e.isInWater === true || e.isInLava === true)
+  return true
 }
 
 /** The heading (mineflayer yaw) that leads furthest from the threat over safe ground, or null if every way is shut. */
