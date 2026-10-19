@@ -3,8 +3,8 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
 import { breathZone, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
-import { EAT_CLEAR_PERCHED, RETREAT_DISTANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, retreatSpot, safeToEat } from '../../src/end/skills/fightDragon'
-import { fakeBot, item } from '../reflexes/fakeBot'
+import { EAT_CLEAR_PERCHED, RETREAT_DISTANCE, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, hurtingContact, retreatSpot, safeToEat, takeoffStepBack } from '../../src/end/skills/fightDragon'
+import { entity, fakeBot, item } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
 
 test('dragonPartId: the head is the id after the dragon\'s (EnderDragon.setId)', () => {
@@ -196,4 +196,47 @@ test('fightDragon holds the eat reflex off for the fight and lets it go after', 
   assert.ok(result.killed)
   assert.deepEqual(held, [['eat']])
   assert.equal(released, 1)
+})
+
+test('takeoffStepBack: during a takeoff, after a hit near the sitting damage\'s limit, and as the 4th flame ends; not otherwise', () => {
+  const base = { open: true, phase: 'sitting_scanning' as const, activity: 'perched' as const, phaseTicks: 0, ticksLeft: 100, breath: null, sittingDamage: 0, takeoffSoon: false }
+  assert.equal(takeoffStepBack(base, false), false)
+  assert.equal(takeoffStepBack(base, true), true)
+  assert.equal(takeoffStepBack({ ...base, takeoffSoon: true }, false), false)
+  assert.equal(takeoffStepBack({ ...base, phase: 'sitting_flaming', takeoffSoon: true }, false), true)
+  assert.equal(takeoffStepBack({ ...base, open: false, phase: 'takeoff', activity: 'leaving' }, false), true)
+})
+
+test('hurtingContact: the zones as the dragon is now, a sitting one\'s wings harmless, a flying one\'s not', () => {
+  const view = { position: new Vec3(0.5, 66, 0.5), yaw: 90 }
+  // on the ground (62) under the head: clear; on a bump (63) under it: the head
+  assert.equal(hurtingContact(view, { x: 7.5, y: 62, z: 0.5 }, 'sitting_scanning'), null)
+  assert.equal(hurtingContact(view, { x: 7.5, y: 63, z: 0.5 }, 'sitting_scanning'), 'head')
+  // by its side a block up: under a wing, which only pushes while it sits and hurts once it doesn't
+  assert.equal(hurtingContact(view, { x: 0.5, y: 63, z: 6.5 }, 'sitting_scanning'), null)
+  assert.equal(hurtingContact(view, { x: 0.5, y: 63, z: 6.5 }, 'takeoff'), 'wing')
+})
+
+test('fightDragon steps back from a dragon taking off, out to TAKEOFF_CLEARANCE from its body', async () => {
+  const blocks = endIsland([], 30)
+  const get = world(blocks)
+  const dragon = entity({ name: 'ender_dragon', position: new Vec3(0.5, 66.2, 0.5), meta: { phase: DRAGON_PHASES.indexOf('takeoff'), health: 150 } })
+  dragon.yaw = 0
+  const bot = fakeBot({ position: new Vec3(7.5, 62, 0.5), entities: [dragon] })
+  bot.game.dimension = 'the_end'
+  bot.game.minY = 0
+  bot.blockAt = (pos: Vec3) => { const b = get(pos.floored()); return b == null ? null : { ...b, position: pos.floored() } }
+  const looks: number[] = []
+  bot.look = async (yaw: number) => { looks.push(yaw) }
+  bot.waitForTicks = async () => { bot.emit('physicsTick') }
+  await assert.rejects(fightDragon(bot, { destroyCrystals: false, maxTicks: 3 }), /alive after 3 ticks/)
+  // away along +x: mineflayer yaw atan2(-dx, -dz) = -π/2, sprinting
+  assert.ok(looks.length > 0)
+  assert.ok(looks.every(y => Math.abs(y + Math.PI / 2) < 1e-6), looks.join(' '))
+  // past the clearance it stands
+  bot.entity.position = new Vec3(0.5 + TAKEOFF_CLEARANCE + 1, 62, 0.5)
+  looks.length = 0
+  await assert.rejects(fightDragon(bot, { destroyCrystals: false, bow: false, maxTicks: 3 }), /alive after 3 ticks/)
+  assert.deepEqual(looks, [])
+  assert.notEqual(bot.controls.forward, true)
 })

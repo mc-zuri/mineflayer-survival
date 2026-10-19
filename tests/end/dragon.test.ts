@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import minecraftData from 'minecraft-data'
-import { CONTACT_MARGIN, DragonPhaseTracker, JUMP_HEIGHT, activityOf, breathZone, dragonZones, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, touchedZone, vanillaYaw } from '../../src/end/dragon'
+import { CONTACT_MARGIN, DragonPhaseTracker, FLAME_DURATION, JUMP_HEIGHT, SITTING_DAMAGE_LIMIT, TAKEOFF_HIT_MARGIN, TAKEOFF_WARNING_TICKS, headPosition, activityOf, breathZone, dragonZones, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, touchedZone, vanillaYaw } from '../../src/end/dragon'
 import { exitPortal } from '../../src/end/spikes'
 
 test('phase ids are the EnderDragonPhase creation order', () => {
@@ -148,4 +148,46 @@ test('without metadata the perch is told by position', () => {
   const t = new DragonPhaseTracker(exitPortal(63).perch)
   t.last = { tick: 0, phase: -1, position: { x: 0.6, y: 67, z: 0.4 }, yaw: 0 }
   assert.equal(t.window(0).open, true)
+})
+
+test('takeoffSoon: the 4th flame\'s last ticks, or the sitting damage a hit short of its limit', () => {
+  const t = new DragonPhaseTracker(exitPortal(63).perch)
+  const at = { x: 0.5, y: 67, z: 0.5 }
+  t.update({ tick: 0, phase: 6, position: at, yaw: 0 })
+  assert.equal(t.window(1).takeoffSoon, false)
+  // four flames (scanning, attacking, flaming over again)
+  let tick = 10
+  for (let f = 0; f < 4; f++) {
+    t.update({ tick: tick++, phase: 7, position: at, yaw: 0 })
+    t.update({ tick: tick, phase: 5, position: at, yaw: 0 })
+    if (f < 3) { tick += FLAME_DURATION; t.update({ tick: tick++, phase: 6, position: at, yaw: 0 }) }
+  }
+  assert.equal(t.flames, 4)
+  assert.equal(t.window(tick + 100).takeoffSoon, false)
+  assert.equal(t.window(tick + FLAME_DURATION - TAKEOFF_WARNING_TICKS).takeoffSoon, true)
+  const d = new DragonPhaseTracker(exitPortal(63).perch)
+  d.update({ tick: 0, phase: 6, position: at, yaw: 0 })
+  d.updateHealth(200)
+  d.updateHealth(200 - (SITTING_DAMAGE_LIMIT - TAKEOFF_HIT_MARGIN))
+  assert.equal(d.window(1).takeoffSoon, false)
+  d.updateHealth(200 - (SITTING_DAMAGE_LIMIT - TAKEOFF_HIT_MARGIN) - 1)
+  assert.equal(d.window(2).takeoffSoon, true)
+})
+
+test('flight: the head\'s y offset and tilt from the y history (EnderDragon.getHeadYOffset, DragonFlightHistory): under the body as it starts to climb', () => {
+  const t = new DragonPhaseTracker(exitPortal(63).perch)
+  // sat at 67 for 10 ticks, then climbing faster and faster
+  for (let i = 0; i <= 10; i++) t.update({ tick: i, phase: 4, position: { x: 0.5, y: 67, z: 0.5 }, yaw: 0 })
+  assert.deepEqual(t.flight(), { headYOffset: 0, tilt: 0 })
+  const ys = [67.1, 67.3, 67.6, 68, 68.5]
+  ys.forEach((y, i) => t.update({ tick: 11 + i, phase: 4, position: { x: 0.5, y, z: 0.5 }, yaw: 0 }))
+  const f = t.flight()
+  // 5 ticks back it was at 67: 1.5 under now; 10 back at 67 too: no tilt yet
+  assert.ok(Math.abs(f.headYOffset + 1.5) < 1e-9)
+  assert.equal(f.tilt, 0)
+  const view = { position: { x: 0.5, y: 68.5, z: 0.5 }, yaw: 0, ...f }
+  assert.ok(Math.abs(headPosition(view, false).y - 67) < 1e-9)
+  // a level flight's head is level with the body; a sitting one's a block under
+  assert.equal(headPosition({ position: view.position, yaw: 0 }, false).y, 68.5)
+  assert.equal(headPosition(view, true).y, 67.5)
 })

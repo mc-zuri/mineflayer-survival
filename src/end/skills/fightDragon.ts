@@ -9,7 +9,7 @@ import { attackStrengthOf } from '../../skills/weapons'
 import { bestFoodInInventory, eat } from '../../skills/eat'
 import { steerToward } from '../../skills/steer'
 import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataIndex, metadataValue, eyePosition, yawPitchOf, distanceToBox } from '../../skills/combatUtil'
-import { DragonPhaseTracker, activityOf, dragonZones, phaseName, type DragonActivity, meleeSpots, neckTakesFullDamage, partBox, touchedZone, vanillaYaw, CONTACT_MARGIN, JUMP_HEIGHT, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
+import { DragonPhaseTracker, activityOf, dragonZones, isSitting, phaseName, type DragonActivity, type DragonPhase, meleeSpots, neckTakesFullDamage, partBox, touchedZone, vanillaYaw, CONTACT_MARGIN, JUMP_HEIGHT, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
 import { exitPortal } from '../spikes'
 import { destroyCrystals } from './destroyCrystals'
 import { blockGetter, groundY, isOpenAt, VoidGuard, findPortalY, exitPortalOpen, worldMinY, type BlockGetter } from './world'
@@ -159,6 +159,35 @@ export async function eatAwayFromDragon (bot: Bot, food: string, portalY: number
   }
 }
 
+/**
+ * The part of the dragon whose hurting zone (dragonZones, for its phase: sitting or not) the body at `feet` touches, if
+ * any: a margin of 0.1 for the turn of a tick
+ */
+export function hurtingContact (view: DragonView, feet: Pos, phase: DragonPhase | null): 'head' | 'neck' | 'wing' | null {
+  const zone = touchedZone(feet, dragonZones(view, phase != null && isSitting(phase)), 0, 0.1)
+  return zone?.hurts === true ? zone.part : null
+}
+
+/** how far from the body a takeoff is waited out (the head turning round 6.5 out with its 1-block zone, the wings' 6) */
+export const TAKEOFF_CLEARANCE = 10
+/** after a hit that may have sent it off: kept back this long (DragonTakeoffPhase leaves within 10 of the podium) */
+export const TAKEOFF_STEP_BACK_TICKS = 30
+
+/**
+ * Back out of the dragon's way for a takeoff: under way (DragonTakeoffPhase), the 4th flame ending (the window's
+ * takeoffSoon in sitting_flaming), or just after a hit that may have passed the sitting damage's limit (`afterHit`)
+ */
+export function takeoffStepBack (window: MeleeWindow, afterHit: boolean): boolean {
+  return window.activity === 'leaving' || afterHit || (window.takeoffSoon && window.phase === 'sitting_flaming')
+}
+
+/** a point `distance` from `from` straight away from `threat` (horizontally) */
+export function awayFrom (from: Vec3, threat: Pos, distance: number): Vec3 {
+  const away = new Vec3(from.x - threat.x, 0, from.z - threat.z)
+  const len = Math.hypot(away.x, away.z)
+  return len < 1e-6 ? from.offset(distance, 0, 0) : from.plus(away.scaled(distance / len))
+}
+
 export interface FightDragonOptions extends SkillOptions {
   /** the world seed (the crystals' spikes, when their blocks aren't loaded) */
   seed?: Seed
@@ -257,6 +286,9 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   let wasRisky = false
   let wasOverVoid = false
   let retreating = false
+  let wasInContact = false
+  /** stepping back from a perch that may end with the last hit, till this tick */
+  let stepBackUntil = -1
   const retreatHealth = opts.retreatHealth ?? RETREAT_HEALTH
   const returnHealth = opts.returnHealth ?? RETURN_HEALTH
   const hasArrows = (): boolean => bot.inventory.items().some(i => ARROW_NAMES.includes(i.name))
@@ -346,6 +378,20 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       if (window.breath != null && (window.phase === 'sitting_flaming' || (window.phase === 'sitting_attacking' && window.phaseTicks > 10))) {
         dangers.push({ center: window.breath.center, y: portalY, radius: window.breath.radius, why: 'breath' })
       }
+      // under its head, neck or wings as they are now (taking off, landing, a sitting dragon turned to the bot): out
+      // from under them, away from its body, before anything else (EnderDragon.aiStep: 10 a touch, the wings 5 when it
+      // isn't sitting)
+      const contact = dragon != null ? hurtingContact({ position: dragon.position, yaw: vanillaYaw(dragon.yaw), ...tracker.flight() }, me, window.phase) : null
+      if (contact != null && dragon != null) {
+        stopDraw()
+        if (!wasInContact) log(`under the dragon's ${contact} (${String(window.phase)}): out from under it`)
+        wasInContact = true
+        steerToward(bot, awayFrom(me, dragon.position, 6), { sprint: true })
+        bot.setControlState('jump', false)
+        await waitTicks(bot, 1, signal)
+        continue
+      }
+      wasInContact = false
       const danger = inDanger(me, dangers)
       if (danger != null) {
         stopDraw()
@@ -398,7 +444,18 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         continue
       }
 
-      // 4. the dragon on the fountain: to a melee spot, and hit the head
+      // 4. a takeoff coming or under way (the 4th flame ending, the hit that may have passed the sitting damage's limit,
+      // the takeoff itself): TAKEOFF_CLEARANCE off its body, where neither the head turning round nor the wings, which
+      // hurt once it isn't sitting (EnderDragon.knockBack), come
+      if (dragon != null && takeoffStepBack(window, tick < stepBackUntil) && Math.hypot(me.x - dragon.position.x, me.z - dragon.position.z) < TAKEOFF_CLEARANCE) {
+        stopDraw()
+        steerToward(bot, awayFrom(me, dragon.position, 6), { sprint: true })
+        bot.setControlState('jump', false)
+        await waitTicks(bot, 1, signal)
+        continue
+      }
+
+      // 5. the dragon on the fountain: to a melee spot, and hit the head
       if (window.open && dragon != null) {
         stopDraw()
         const view = { position: dragon.position, yaw: vanillaYaw(dragon.yaw) }
@@ -443,7 +500,8 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         const { yaw, pitch } = yawPitchOf(aimAt.minus(eye))
         await bot.look(yaw, pitch, true)
         // a crit only where the jump stays clear of the head, neck and wings (a jump under the head touches it)
-        const critOk = at && choice != null ? choice.crit : touchedZone(me, zones, JUMP_HEIGHT, CONTACT_MARGIN) == null
+        // and none when it may take off (its wings hurt then)
+        const critOk = !window.takeoffSoon && (at && choice != null ? choice.crit : touchedZone(me, zones, JUMP_HEIGHT, CONTACT_MARGIN) == null)
         const airborne = tick - jumpedAt <= 14 && !bot.entity.onGround
         const falling = !bot.entity.onGround && bot.entity.velocity.y < 0
         if (critOk && bot.entity.onGround && !airborne && strength.ticksToFull() <= 5 && strength.ticksToFull() > 0) {
@@ -455,6 +513,8 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         }
         if (strength.scale(0.5) >= 1 && (falling || (bot.entity.onGround && tick - jumpedAt > 14))) {
           strength.attack({ id: dragonPartId(dragon, target) } as any)
+          // a hit near the sitting damage's limit may be the one that sends it off: back out of its way
+          if (window.takeoffSoon) stepBackUntil = tick + TAKEOFF_STEP_BACK_TICKS
           meleeHits++
           if (falling) crits++
         }
@@ -463,7 +523,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       }
       bot.setControlState('jump', false)
 
-      // 6. a bow shot while it flies (arrows are wasted on it sitting: AbstractDragonSittingPhase.onHurt)
+      // 7. a bow shot while it flies (arrows are wasted on it sitting: AbstractDragonSittingPhase.onHurt)
       if (dragon != null && bow() && window.activity !== 'perched' && window.activity !== 'landing') {
         const solution = aimAtDragon(bot, dragon, drawing != null ? Math.max(1, 21 - (tick - drawing)) : 22)
         if (drawing == null) {
@@ -488,7 +548,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       }
       stopDraw()
 
-      // 7. wait near the podium, out of the way
+      // 8. wait near the podium, out of the way
       const off = Math.hypot(me.x - home.x, me.z - home.z)
       if (off > homeRadius * 0.6 || off < 6) {
         const to = off < 6 ? me.plus(new Vec3(me.x - home.x, 0, me.z - home.z).normalize().scaled(4)) : home

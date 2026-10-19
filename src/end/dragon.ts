@@ -102,18 +102,33 @@ export interface DragonView {
   position: Pos
   /** vanilla yaw, degrees */
   yaw: number
+  /** in flight: getHeadYOffset (DragonFlightHistory y 5 ticks back less now), from DragonPhaseTracker.flight */
+  headYOffset?: number
+  /** in flight: the tilt in radians ((y 5 ticks back less 10 back) × 10°) */
+  tilt?: number
 }
 
-/** where the head part is (EnderDragon.aiStep with the sitting head offset -1 and a level body) */
-export function headPosition (dragon: DragonView, sitting = true): Pos {
+/**
+ * EnderDragon.aiStep's head and neck out `distance` along the head: getHeadYOffset (-1 sitting, else the flight
+ * history's y 5 ticks back less now) and the tilt from the flight history (y 5 ticks back less 10 back, × 10°): a dragon
+ * starting to climb off the perch has its head under its body before the tilt raises it
+ */
+function partOut (dragon: DragonView, distance: number, sitting: boolean): Pos {
   const d = headDirection(dragon.yaw)
-  return { x: dragon.position.x + d.x * HEAD_DISTANCE, y: dragon.position.y + (sitting ? -1 : 0), z: dragon.position.z + d.z * HEAD_DISTANCE }
+  const tilt = sitting ? 0 : (dragon.tilt ?? 0)
+  const yOffset = sitting ? -1 : (dragon.headYOffset ?? 0)
+  const flat = distance * Math.cos(tilt)
+  return { x: dragon.position.x + d.x * flat, y: dragon.position.y + yOffset + Math.sin(tilt) * distance, z: dragon.position.z + d.z * flat }
+}
+
+/** where the head part is (EnderDragon.aiStep: the sitting head offset -1 and a level body; in flight partOut's) */
+export function headPosition (dragon: DragonView, sitting = true): Pos {
+  return partOut(dragon, HEAD_DISTANCE, sitting)
 }
 
 /** where the neck part is: the bottom middle of its 3 × 3 box, NECK_DISTANCE out at the head's height */
 export function neckPosition (dragon: DragonView, sitting = true): Pos {
-  const d = headDirection(dragon.yaw)
-  return { x: dragon.position.x + d.x * NECK_DISTANCE, y: dragon.position.y + (sitting ? -1 : 0), z: dragon.position.z + d.z * NECK_DISTANCE }
+  return partOut(dragon, NECK_DISTANCE, sitting)
 }
 
 /** a perched dragon's part boxes (EnderDragonPart sizes: head 1 × 1, neck 3 × 3, body 5 × 3 half a block forward) */
@@ -309,7 +324,18 @@ export interface MeleeWindow {
   breath: BreathZone | null
   /** sitting damage dealt since it last took off for it (it carries over from perch to perch); over 50 makes it take off */
   sittingDamage: number
+  /**
+   * it may take off within a hit or a few ticks: the 4th flame ending (DragonSittingFlamingPhase: flameCount 4 at
+   * FLAME_DURATION), or the sitting damage a hit short of the limit (EnderDragon.hurt). A taking-off dragon's wings hurt
+   * too (EnderDragon.knockBack, not sitting), so no jump then.
+   */
+  takeoffSoon: boolean
 }
+
+/** the ticks before a flame's end that count as a takeoff soon */
+export const TAKEOFF_WARNING_TICKS = 15
+/** a hit's worth of sitting damage (a diamond sword's crit, 10.5): this close to the limit a takeoff may come with the next */
+export const TAKEOFF_HIT_MARGIN = 12
 
 /**
  * Follows the dragon's phase from its metadata and tells when it is safe to melee: it is
@@ -323,6 +349,7 @@ export class DragonPhaseTracker {
   /** flames since it landed (DragonSittingFlamingPhase.flameCount, reset by DragonLandingPhase) */
   flames = 0
   sittingDamage = 0
+  private readonly ys: Array<{ tick: number, y: number }> = []
   private lastHealth: number | null = null
 
   constructor (readonly perch: Pos | null = null) {}
@@ -339,6 +366,23 @@ export class DragonPhaseTracker {
       this.phaseStart = sample.tick
     }
     this.last = sample
+    // DragonFlightHistory: the y a tick, the last 11 kept here
+    if (this.ys.length === 0 || this.ys[this.ys.length - 1].tick !== sample.tick) this.ys.push({ tick: sample.tick, y: sample.position.y })
+    if (this.ys.length > 11) this.ys.shift()
+  }
+
+  /** the y `ticksBack` ticks before the last sample (the oldest kept when the history is shorter) */
+  private yAgo (ticksBack: number): number {
+    const ys = this.ys
+    return ys[Math.max(0, ys.length - 1 - ticksBack)]?.y ?? this.last?.position.y ?? 0
+  }
+
+  /**
+   * EnderDragon.getHeadYOffset and the tilt for the head and neck in flight, from the y history: (y 5 ago - y now) and
+   * (y 5 ago - y 10 ago) × 10°
+   */
+  flight (): { headYOffset: number, tilt: number } {
+    return { headYOffset: this.yAgo(5) - this.yAgo(0), tilt: (this.yAgo(5) - this.yAgo(10)) * 10 * Math.PI / 180 }
   }
 
   /** feed the dragon's health (metadata) to count the sitting damage */
@@ -382,6 +426,8 @@ export class DragonPhaseTracker {
     }
     // it takes off once the sitting damage is over the limit (sittingDamageReceived > 0.25F * getMaxHealth())
     const open = activity === 'perched' && this.sittingDamage <= SITTING_DAMAGE_LIMIT
-    return { open, phase, activity, phaseTicks, ticksLeft: open ? ticksLeft : 0, breath, sittingDamage: this.sittingDamage }
+    const takeoffSoon = activity === 'perched' && ((phase === 'sitting_flaming' && this.flames >= SITTING_FLAME_ATTACKS && phaseTicks >= FLAME_DURATION - TAKEOFF_WARNING_TICKS) ||
+      this.sittingDamage > SITTING_DAMAGE_LIMIT - TAKEOFF_HIT_MARGIN)
+    return { open, phase, activity, phaseTicks, ticksLeft: open ? ticksLeft : 0, breath, sittingDamage: this.sittingDamage, takeoffSoon }
   }
 }
