@@ -282,6 +282,24 @@ test('at night with a pickaxe and no bed the runner mines the night: the iron do
   assert.equal(mined.length, 1)
 })
 
+test('at night with a bed in the bag the runner sleeps on the surface; below it, down a staircase, the night is work', async () => {
+  const bot = fakeBot({ stone_pickaxe: 1, white_bed: 1 })
+  bot.time = { timeOfDay: 13000, day: 1 }
+  bot.findBlock = () => null
+  const block = (name: string, p: Vec3): any => ({ name, position: p, boundingBox: name === 'air' ? 'empty' : 'block' })
+  // a 1-wide staircase along +x through stone to y 80, the step at x with its feet at 75 - x
+  bot.blockAt = (p: Vec3) => { const q = p.floored(); return block(q.z === 0 && q.x >= 0 && q.x <= 20 && q.y >= 75 - q.x && q.y <= 77 - q.x ? 'air' : q.y < 80 ? 'stone' : 'air', q) }
+  bot.entity.position = new Vec3(10.5, 65, 0.5)
+  const lines: string[] = []
+  const runner = new Runner(bot, { log: l => lines.push(l), executor: { log: () => {} } })
+  await runner.nightCheck()
+  assert.deepEqual(lines, [])
+  // on the surface: the bed
+  bot.entity.position = new Vec3(30.5, 80, 0.5)
+  await runner.nightCheck().catch(() => {})
+  assert.ok(lines.some(l => /sleeping/.test(l)), lines.join(' | '))
+})
+
 test('the reflexes that fire are logged, a run of the same one counted', async () => {
   const bot = fakeBot()
   const lines: string[] = []

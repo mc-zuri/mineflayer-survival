@@ -1,13 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { armorReflex, creeperReflex, drowningReflex, eatReflex, emergencyEatReflex, hazardReflex, hostilesReflex, nightReflex, totemReflex } from '../../src/reflexes/rules'
+import { armorReflex, creeperReflex, drowningReflex, eatReflex, emergencyEatReflex, hazardReflex, hostilesReflex, nightChoice, nightReflex, totemReflex, type NightChoiceInputs } from '../../src/reflexes/rules'
 import { ReflexEngine } from '../../src/reflexes/engine'
 import { DEFAULT_REFLEX_CONFIG, type ReflexConfigInput } from '../../src/reflexes/config'
 import type { Reflex } from '../../src/reflexes/types'
 import { CREEPER_IGNITED_INDEX, CREEPER_SWELL_DIR_INDEX, creeperSwelling } from '../../src/skills/fight'
 import { metadataIndex } from '../../src/skills/combatUtil'
-import { rememberShelter, shelterToLeave } from '../../src/skills/shelter'
+import { rememberShelter, setTicksSinceRest, shelterToLeave } from '../../src/skills/shelter'
 import { entity, fakeBot, item, type FakeBotInput } from './fakeBot'
 
 const at = (x: number, y = 64, z = 0.5): Vec3 => new Vec3(0.5 + x, y, z)
@@ -285,6 +285,82 @@ test('night reflex: no ground to dig in about (the sea all round): tried again o
   await assert.rejects(task!.run(new AbortController().signal), /NOT_FOUND/)
   assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 100 }), null)
   assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 200 })?.detail, 'shelter')
+  engine.stop()
+})
+
+test('nightChoice: below the surface at work the night is work, the bed only with the rest due; a failed bed not again that night', () => {
+  const base: NightChoiceInputs = { plan: 'sleep', sleep: true, shelter: true, underground: false, restDue: false, sleepFailed: false, out: true }
+  assert.strictEqual(nightChoice(base), 'sleep')
+  assert.strictEqual(nightChoice({ ...base, underground: true, out: false }), 'work')
+  assert.strictEqual(nightChoice({ ...base, underground: true, out: false, restDue: true }), 'sleep')
+  assert.strictEqual(nightChoice({ ...base, underground: true, out: false, restDue: true, sleep: false }), 'work')
+  assert.strictEqual(nightChoice({ ...base, underground: true, out: false, plan: 'shelter' }), 'work')
+  assert.strictEqual(nightChoice({ ...base, underground: true, out: false, plan: 'shelter', restDue: true }), 'work')
+  // the bed failed this night: out in it, a shelter; below the surface, work
+  assert.strictEqual(nightChoice({ ...base, sleepFailed: true }), 'shelter')
+  assert.strictEqual(nightChoice({ ...base, sleepFailed: true, shelter: false }), 'work')
+  assert.strictEqual(nightChoice({ ...base, sleepFailed: true, out: false }), 'work')
+  assert.strictEqual(nightChoice({ ...base, underground: true, out: false, restDue: true, sleepFailed: true }), 'work')
+  assert.strictEqual(nightChoice({ ...base, plan: 'fight' }), 'work')
+  assert.strictEqual(nightChoice({ ...base, plan: 'shelter' }), 'shelter')
+  assert.strictEqual(nightChoice({ ...base, plan: 'shelter', out: false }), 'work')
+})
+
+/** a 1-wide staircase down along +x through stone to y 80: the step at x has its feet at 75 - x, open to feet + 2 */
+const staircase = (p: Vec3): string => p.z === 0 && p.x >= 0 && p.x <= 20 && p.y >= 75 - p.x && p.y <= 77 - p.x ? 'air' : p.y < 80 ? 'stone' : 'air'
+
+test('night reflex: down a 1-wide staircase with a bed in the bag the night is work; the bed when the rest is due (the phantoms\' 72000 ticks)', () => {
+  const night = (input: FakeBotInput, setup?: (bot: any) => void): string | null => {
+    const bot = fakeBot(input)
+    bot.time = { timeOfDay: 13000 }
+    bot.game.dimension = 'overworld'
+    bot.findBlock = () => null
+    setup?.(bot)
+    const engine = new ReflexEngine(bot, { enabled: false })
+    const task = nightReflex.check(engine.context())
+    engine.stop()
+    return task == null ? null : (task.detail ?? task.name)
+  }
+  const kit = [item('stone_sword'), item('stone_pickaxe'), item('white_bed')]
+  const down = new Vec3(10.5, 65, 0.5)
+  assert.strictEqual(night({ items: kit, world: staircase, position: down }), null)
+  assert.strictEqual(night({ items: kit, world: staircase, position: down }, bot => setTicksSinceRest(bot, 47999)), null)
+  assert.strictEqual(night({ items: kit, world: staircase, position: down }, bot => setTicksSinceRest(bot, 48000)), 'sleep')
+  // no bed: the staircase is no night out either
+  assert.strictEqual(night({ items: [item('stone_sword')], world: staircase, position: down }), null)
+  // its first step, under two blocks of rock: not underground yet, the bed as on the surface
+  assert.strictEqual(night({ items: kit, world: staircase, position: new Vec3(0.5, 75, 0.5) }), 'sleep')
+  // a wide dark cave a few blocks down (the surface's monsters come down it): the bed
+  const cave = (p: Vec3): string => Math.abs(p.x) <= 10 && Math.abs(p.z) <= 10 && p.y >= 60 && p.y <= 70 ? 'air' : p.y < 75 ? 'stone' : 'air'
+  assert.strictEqual(night({ items: kit, world: cave, position: new Vec3(0.5, 60, 0.5) }), 'sleep')
+  // deep down (16 blocks of rock over the head): work
+  const deep = (p: Vec3): string => Math.abs(p.x) <= 10 && Math.abs(p.z) <= 10 && p.y >= 60 && p.y <= 70 ? 'air' : p.y < 90 ? 'stone' : 'air'
+  assert.strictEqual(night({ items: kit, world: deep, position: new Vec3(0.5, 60, 0.5) }), null)
+})
+
+test('night reflex: a bed that failed is not tried again that night (the shelter instead, its search backing off twice as long each time); the next night it is', async () => {
+  const bot = fakeBot({ items: [item('stone_sword'), item('white_bed')], world: (p: Vec3) => p.y < 64 ? 'water' : 'air' })
+  bot.time = { timeOfDay: 13000 }
+  bot.game.dimension = 'overworld'
+  bot.findBlock = () => null
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const ctx = engine.context()
+  const sleep = nightReflex.check(ctx)
+  assert.strictEqual(sleep?.detail, 'sleep')
+  // no room for the bed on the sea, nor ground for a shelter
+  await assert.rejects(sleep!.run(new AbortController().signal), /NOT_FOUND|CANNOT_PLACE/)
+  assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 100 }), null)
+  const shelter = nightReflex.check({ ...ctx, tick: ctx.tick + 200 })
+  assert.strictEqual(shelter?.detail, 'shelter')
+  await assert.rejects(shelter!.run(new AbortController().signal), /NOT_FOUND/)
+  // the second time, 400 ticks on
+  assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 599 }), null)
+  assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 600 })?.detail, 'shelter')
+  // the day forgets the failed bed
+  bot.time = { timeOfDay: 1000 }
+  assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 700 }), null)
+  bot.time = { timeOfDay: 13000 }
+  assert.strictEqual(nightReflex.check({ ...ctx, tick: ctx.tick + 900 })?.detail, 'sleep')
   engine.stop()
 })
 

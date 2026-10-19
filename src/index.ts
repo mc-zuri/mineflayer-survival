@@ -5,6 +5,7 @@ import { WorldMemory, normalizeDimension } from './core/memory'
 import { ReflexEngine, type ReflexEngineOptions } from './reflexes'
 import { play, type MilestoneHandler, type PlayOptions, type PlayResult } from './runner'
 import { keepHeadAboveWater } from './skills/breath'
+import { countRest } from './skills/shelter'
 import { keepOffDripstone, keepOutOfHazardsLeft } from './skills/hazardCells'
 import { openSky } from './executor/explore'
 import type { MilestoneId } from './planner/progression'
@@ -90,6 +91,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     keepOutOfHazardsLeft(bot)
     // no walk or drop onto a stalagmite (impaled, PointedDripstoneBlock.fallOn)
     keepOffDripstone(bot)
+    // the ticks since the bot last slept (Stats.TIME_SINCE_REST): the night below the surface is slept only when due
+    countRest(bot)
     const tasks = new TaskRunner(bot)
     const memory = new WorldMemory()
     const reflexes = options.reflexes === false ? null : new ReflexEngine(bot, { sink: tasks, ...(options.reflexes === true ? {} : options.reflexes) })

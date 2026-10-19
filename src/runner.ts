@@ -31,7 +31,7 @@ import { canSleepNow, sleep } from './skills/sleep'
 import { MILESTONE_HANDLERS, harvestGrownFarms } from './milestones'
 import { EPOCHS, EPOCH_HANDLERS, isEpoch, nextEpoch } from './epochs'
 import { TRIP_KIT, keepUnbroken, takeTripKit } from './skills/tripKit'
-import { armorPoints, shelter, sleepThroughNight } from './skills/shelter'
+import { armorPoints, shelter, sleepThroughNight, undergroundAtWork } from './skills/shelter'
 import { overland } from './end/strongholdSkills'
 import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
@@ -984,6 +984,8 @@ export class Runner {
     if (!canSleepNow(bot.time.timeOfDay, thundering)) return
     if (this.bot.survival.tasks.tick < this.sleepCooldownUntil) return
     if (normalizeDimension(bot.game?.dimension) !== 'overworld') return
+    // below the surface the night is work (the night reflex sleeps there when the rest is due, its bed's room dug)
+    if (typeof bot.blockAt === 'function' && undergroundAtWork(p => bot.blockAt(p) as any, bot.entity.position)) return
     const base = baseRecord(this.memory)
     const baseBed = base?.bed != null && bot.entity.position.distanceTo(new Vec3(base.bed.x, base.bed.y, base.bed.z)) <= 64 ? new Vec3(base.bed.x, base.bed.y, base.bed.z) : null
     const held = bot.inventory.items().some(i => isBed(i.name))

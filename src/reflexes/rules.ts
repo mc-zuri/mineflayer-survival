@@ -4,7 +4,8 @@ import { eat, bestFoodInInventory } from '../skills/eat'
 import { escapeHazard, evadeCreeper, fleeFrom, headInWater, inHazard, surface } from '../skills/escape'
 import { creeperSwelling, fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
-import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterToLeave, sleepThroughNight, type NightPlan } from '../skills/shelter'
+import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterToLeave, sleepThroughNight, ticksSinceRest, undergroundAtWork, type NightPlan } from '../skills/shelter'
+import type { Vec3 } from 'vec3'
 import { bestMeleeWeapon } from '../skills/weapons'
 import { hasLineOfSight, isAlive, type Entity } from '../skills/combatUtil'
 import { holdOffBlazes } from '../nether/blazeFight'
@@ -383,8 +384,8 @@ export const armorReflex: Reflex = {
 }
 
 const planCache = new WeakMap<Bot, { tick: number, plan: NightPlan }>()
-/** no ground to dig a shelter in found: not before this tick, and this far out next time */
-const noGround = new WeakMap<Bot, { until: number, radius: number }>()
+/** no ground to dig a shelter in found: not before this tick (`wait` after the last try), and this far out next time */
+const noGround = new WeakMap<Bot, { until: number, wait: number, radius: number }>()
 
 /** the night's plan, looked at again every 100 ticks (a bed nearby is a block search) */
 function cachedNightPlan (ctx: ReflexContext): NightPlan {
@@ -413,10 +414,63 @@ export function outInTheNight (bot: Bot): boolean {
   return true
 }
 
+const undergroundCache = new WeakMap<Bot, { tick: number, feet: string, underground: boolean }>()
+
+/** undergroundAtWork where the feet are, looked at again every 20 ticks or as the feet go to another cell */
+function cachedUnderground (ctx: ReflexContext): boolean {
+  const { bot } = ctx
+  const feet = bot.entity.position.floored()
+  const key = feet.toString()
+  const cached = undergroundCache.get(bot)
+  if (cached != null && cached.feet === key && ctx.tick - cached.tick < 20 && cached.tick <= ctx.tick) return cached.underground
+  const underground = undergroundAtWork((p: Vec3) => bot.blockAt(p) as any, feet)
+  undergroundCache.set(bot, { tick: ctx.tick, feet: key, underground })
+  return underground
+}
+
+/** what the night reflex does with the night now */
+export type NightChoice = 'sleep' | 'shelter' | 'work'
+
+export interface NightChoiceInputs {
+  plan: NightPlan
+  /** the config's sleep and shelter */
+  sleep: boolean
+  shelter: boolean
+  /** below the surface at work (undergroundAtWork) */
+  underground: boolean
+  /** the rest due (ticksSinceRest past restTicks: the phantoms) */
+  restDue: boolean
+  /** the bed failed this night already */
+  sleepFailed: boolean
+  /** out in the night (outInTheNight: the open sky over the head, or in a shelter) */
+  out: boolean
+}
+
 /**
- * At night in the overworld: a bed means sleep (the monsters that keep the bot up fought first), good gear means stay
- * out and let the hostiles reflex fight, else a shelter dug into the ground till the day. Not underground at work: the
- * dark there is the same day and night.
+ * The night's choice: good gear works on (the hostiles reflex fights); below the surface the night is work, a bed
+ * only when the rest is due; a bed sleeps, once a night (a bed that failed isn't tried again till the day: tried every
+ * 200 ticks in a 1-wide staircase, each try cut off the 300-tick dig of a block by hand, and the night went by with
+ * nothing dug, run full-26.3-f); else out in the night, a shelter.
+ */
+export function nightChoice (i: NightChoiceInputs): NightChoice {
+  if (i.plan === 'fight') return 'work'
+  if (i.underground && !(i.plan === 'sleep' && i.sleep && i.restDue)) return 'work'
+  if (i.plan === 'sleep' && i.sleep && !i.sleepFailed) return 'sleep'
+  if (i.shelter && i.out) return 'shelter'
+  return 'work'
+}
+
+/** the bots whose bed failed this night (cleared at the day) */
+const sleepFailed = new WeakSet<Bot>()
+/** ticks the shelter's search for ground waits after it found none, at first; doubled each time after, to SHELTER_BACKOFF_MAX */
+export const SHELTER_BACKOFF = 200
+export const SHELTER_BACKOFF_MAX = 3200
+
+/**
+ * At night in the overworld (nightChoice): a bed means sleep (the monsters that keep the bot up fought first), good
+ * gear means stay out and let the hostiles reflex fight, else a shelter dug into the ground till the day. Not below the
+ * surface at work (undergroundAtWork): the dark there is the same day and night, and the night's mining is the
+ * schedule; there the bed only when the rest is due (the phantoms), its room dug beside the bot.
  */
 export const nightReflex: Reflex = {
   name: 'night',
@@ -426,6 +480,7 @@ export const nightReflex: Reflex = {
     if (!config.night.enabled || bot.isSleeping === true || bot.time == null) return null
     if (bot.game?.dimension != null && !/overworld/.test(String(bot.game.dimension))) return null
     if (botIsBrightOutside(bot)) {
+      sleepFailed.delete(bot)
       // cut off on its way out of the shelter at sunrise (a fight): out the rest of the way
       if (shelterToLeave(bot) == null) return null
       return { name: 'night', priority: config.night.priority, detail: 'leave shelter', run: async (signal) => await leaveShelter(bot, signal) }
@@ -434,36 +489,53 @@ export const nightReflex: Reflex = {
     if ((bot as any).survival?.nightWork === true) return null
     const plan = cachedNightPlan(ctx)
     if (plan === 'fight') return null
+    const underground = cachedUnderground(ctx)
+    const choice = nightChoice({
+      plan,
+      sleep: config.night.sleep,
+      shelter: config.night.shelter,
+      underground,
+      restDue: ticksSinceRest(bot) >= config.night.restTicks,
+      sleepFailed: sleepFailed.has(bot),
+      out: outInTheNight(bot)
+    })
+    if (choice === 'work') return null
     const backoff = noGround.get(bot)
-    if (backoff != null && ctx.tick < backoff.until) return null
+    if (choice === 'shelter' && backoff != null && ctx.tick < backoff.until) return null
     const dig = async (signal: AbortSignal): Promise<unknown> => {
       try {
         const result = await shelter(bot, { signal, radius: backoff?.radius ?? config.night.shelterRadius })
         noGround.delete(bot)
         return result
       } catch (err) {
-        // nowhere to dig about (a swamp, the sea, bare rock without a pickaxe): look again in a while, further out
-        if (isSkillError(err, 'NOT_FOUND')) noGround.set(bot, { until: ctx.tick + 200, radius: Math.min(24, (backoff?.radius ?? config.night.shelterRadius) * 2) })
+        // nowhere to dig about (a swamp, the sea, bare rock without a pickaxe): look again in a while, further out,
+        // and twice as long each time
+        if (isSkillError(err, 'NOT_FOUND')) {
+          const wait = Math.min(SHELTER_BACKOFF_MAX, backoff == null ? SHELTER_BACKOFF : backoff.wait * 2)
+          noGround.set(bot, { until: ctx.tick + wait, wait, radius: Math.min(24, (backoff?.radius ?? config.night.shelterRadius) * 2) })
+        }
         throw err
       }
     }
-    if (plan === 'sleep' && config.night.sleep) {
+    if (choice === 'sleep') {
       return {
         name: 'night',
         priority: config.night.priority,
         detail: 'sleep',
         run: async (signal) => {
           try {
-            return await sleepThroughNight(bot, { signal, bedDistance: config.night.bedDistance })
+            return await sleepThroughNight(bot, { signal, bedDistance: config.night.bedDistance, digRoom: underground })
           } catch (err) {
-            if (signal.aborted || !config.night.shelter) throw err
+            if (signal.aborted) throw err
+            // once a night: not again till the day
+            sleepFailed.add(bot)
             planCache.delete(bot)
+            if (!config.night.shelter || underground || !outInTheNight(bot)) throw err
             return await dig(signal)
           }
         }
       }
     }
-    if (!config.night.shelter || !outInTheNight(bot)) return null
     return { name: 'night', priority: config.night.priority, detail: 'shelter', run: dig }
   }
 }

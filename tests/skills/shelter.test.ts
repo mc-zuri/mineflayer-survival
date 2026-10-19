@@ -3,7 +3,7 @@ import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import {
   armorPoints, celestialAngle, defaultDigCost, findShelterSpot, isBrightOutside, isEnclosed, leaveAtDay, monstersPreventingRest, nightPlan, roomForBed, sealItem,
-  shelterAt, skyDarken
+  shelterAt, skyDarken, undergroundAtWork, rockOverHead, inNarrowPassage, countRest, ticksSinceRest, setTicksSinceRest
 } from '../../src/skills/shelter'
 import type { BlockLookup } from '../../src/skills/placement'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
@@ -94,6 +94,50 @@ test('the sky: bright (the undead burn, no sleeping) from about 23460 to 12540, 
   assert.ok(Math.abs(firstDark - 12541) <= 2, `dark from ${firstDark}`)
   assert.ok(Math.abs(lastDark - 23458) <= 2, `dark to ${lastDark}`)
   assert.strictEqual(isBrightOutside(11000, 1, 1), false)
+})
+
+test('undergroundAtWork: 3 blocks of rock over the head and lit, in a dug passage, or 16 down; not a roof, an overhang or a wide dark cave near the surface', () => {
+  // a staircase along +x through stone to y 80: the step at x, feet at 75 - x, open to feet + 2
+  const stairs = (p: Vec3): string => p.z === 0 && p.x >= 0 && p.x <= 20 && p.y >= 75 - p.x && p.y <= 77 - p.x ? 'air' : p.y < 80 ? 'stone' : 'air'
+  assert.strictEqual(rockOverHead(world(stairs), new Vec3(10, 65, 0)), 12)
+  assert.strictEqual(inNarrowPassage(world(stairs), new Vec3(10, 65, 0)), true)
+  assert.strictEqual(undergroundAtWork(world(stairs), new Vec3(10, 65, 0)), true)
+  // its first step: 2 blocks over the head
+  assert.strictEqual(undergroundAtWork(world(stairs), new Vec3(0, 75, 0)), false)
+  // a 1x2 tunnel along x
+  const tunnel = (p: Vec3): string => p.z === 0 && (p.y === 50 || p.y === 51) && Math.abs(p.x) <= 30 ? 'air' : p.y < 64 ? 'stone' : 'air'
+  assert.strictEqual(undergroundAtWork(world(tunnel), new Vec3(0, 50, 0)), true)
+  // a wide cave 5 under the surface, dark: not; lit (a torch's light), or 16 under: yes
+  const cave = (top: number) => (p: Vec3): string => Math.abs(p.x) <= 10 && Math.abs(p.z) <= 10 && p.y >= 60 && p.y <= 70 ? 'air' : p.y < top ? 'stone' : 'air'
+  assert.strictEqual(inNarrowPassage(world(cave(75)), new Vec3(0, 60, 0)), false)
+  assert.strictEqual(undergroundAtWork(world(cave(75)), new Vec3(0, 60, 0)), false)
+  assert.strictEqual(undergroundAtWork(world(cave(87)), new Vec3(0, 60, 0)), true)
+  const lit: BlockLookup = (p) => ({ ...world(cave(75))(p) as any, light: p.y === 61 ? 9 : 0 })
+  assert.strictEqual(undergroundAtWork(lit, new Vec3(0, 60, 0)), true)
+  // under a house's roof or a tree's leaves on the surface: not
+  const roof = (p: Vec3): string => p.y < 64 ? 'stone' : p.y === 67 ? 'cobblestone' : p.y >= 68 && p.y <= 72 ? 'oak_leaves' : 'air'
+  assert.strictEqual(rockOverHead(world(roof), new Vec3(0, 64, 0)), 1)
+  assert.strictEqual(undergroundAtWork(world(roof), new Vec3(0, 64, 0)), false)
+})
+
+test('ticksSinceRest: up a tick at a time while awake (Stats.TIME_SINCE_REST), back to 0 on lying down or a death', () => {
+  const bot = fakeBot()
+  assert.strictEqual(ticksSinceRest(bot), 0)
+  countRest(bot)
+  countRest(bot)
+  for (let i = 0; i < 5; i++) bot.emit('physicsTick')
+  assert.strictEqual(ticksSinceRest(bot), 5)
+  bot.isSleeping = true
+  bot.emit('physicsTick')
+  assert.strictEqual(ticksSinceRest(bot), 5)
+  bot.emit('sleep')
+  assert.strictEqual(ticksSinceRest(bot), 0)
+  bot.isSleeping = false
+  setTicksSinceRest(bot, 50000)
+  bot.emit('physicsTick')
+  assert.strictEqual(ticksSinceRest(bot), 50001)
+  bot.emit('death')
+  assert.strictEqual(ticksSinceRest(bot), 0)
 })
 
 test('nightPlan: a bed means sleep; armor and a weapon that can fight, fight; else shelter', () => {

@@ -12,7 +12,7 @@ import { eat, bestFoodInInventory } from './eat'
 import { armorPiece } from './armor'
 import { hitDamage } from './weapons'
 import { CARDINALS, countItems, trace, vecKey, waitUntil, type Block } from './util'
-import { findBedPlacement, type BlockLookup, type BlockView } from './placement'
+import { bedRoomToDig, findBedPlacement, type BlockLookup, type BlockView } from './placement'
 import { SCAFFOLD_ITEMS, towerUp } from '../end/skills/world'
 import { isBed } from '../core/items'
 import { dig } from '../core/actions'
@@ -129,6 +129,101 @@ export function isEnclosed (lookup: BlockLookup, feet: Vec3): boolean {
   if (!open(lookup(f)) || !open(lookup(head))) return false
   if (!isSolid(lookup(f.offset(0, -1, 0))) || !isSolid(lookup(head.offset(0, 1, 0)))) return false
   return CARDINALS.every(side => isSolid(lookup(f.plus(side))) && isSolid(lookup(head.plus(side))))
+}
+
+/** solid blocks over the head that make the bot underground, not under a roof, a tree or an overhang */
+export const UNDERGROUND_ROOF = 3
+/** solid blocks over the head deep enough that the surface's monsters rarely find their way down to the bot */
+export const DEEP_ROOF = 16
+/** a dug passage (a staircase, a tunnel): at most this many open cells within NARROW_RADIUS of the feet; a cave has more */
+export const NARROW_CELLS = 48
+export const NARROW_RADIUS = 4
+
+/** the solid blocks (leaves left out) in the column over the head, up to `max` cells up or the first unloaded one */
+export function rockOverHead (lookup: BlockLookup, feet: Vec3, max = 64): number {
+  const f = feet.floored()
+  let n = 0
+  for (let dy = 2; dy <= max; dy++) {
+    const b = lookup(f.offset(0, dy, 0))
+    if (b == null) break
+    if (isSolid(b) && !/_leaves$/.test(b.name)) n++
+  }
+  return n
+}
+
+/**
+ * The open cells joined to the feet within NARROW_RADIUS (a flood over the passable cells, liquids left out) number
+ * NARROW_CELLS at most: a staircase or a tunnel the bot dug, not a cave the surface's monsters come down.
+ */
+export function inNarrowPassage (lookup: BlockLookup, feet: Vec3): boolean {
+  const f = feet.floored()
+  const seen = new Set<string>([vecKey(f)])
+  const queue = [f]
+  const open = (b: BlockView | null): boolean => b != null && b.boundingBox === 'empty' && !LIQUIDS.has(b.name)
+  while (queue.length > 0) {
+    const p = queue.pop() as Vec3
+    for (const d of [...CARDINALS, new Vec3(0, 1, 0), new Vec3(0, -1, 0)]) {
+      const q = p.plus(d)
+      if (Math.max(Math.abs(q.x - f.x), Math.abs(q.y - f.y), Math.abs(q.z - f.z)) > NARROW_RADIUS) continue
+      const k = vecKey(q)
+      if (seen.has(k) || !open(lookup(q))) continue
+      seen.add(k)
+      if (seen.size > NARROW_CELLS) return false
+      queue.push(q)
+    }
+  }
+  return true
+}
+
+/** a block light (a torch's) at the feet or the head: no monster spawns there (Monster.isDarkEnoughToSpawn, the overworld's limit 0) */
+export function litAt (lookup: BlockLookup, feet: Vec3): boolean {
+  const f = feet.floored()
+  return [f, f.offset(0, 1, 0)].some(p => ((lookup(p) as any)?.light ?? 0) > 0)
+}
+
+/**
+ * Below the surface where the night is work: UNDERGROUND_ROOF solid blocks over the head, and the bot lit (a torch's
+ * light), in a passage it dug (inNarrowPassage), or DEEP_ROOF down. Down there the dark is the same day and night and
+ * the surface's monsters don't come: the night's mining is the schedule, and a staircase's night spent in a shelter or
+ * on a bed with no room cost a 26.3 whole game some 40000 ticks (run full-26.3-f).
+ */
+export function undergroundAtWork (lookup: BlockLookup, feet: Vec3): boolean {
+  const rock = rockOverHead(lookup, feet)
+  if (rock < UNDERGROUND_ROOF) return false
+  return rock >= DEEP_ROOF || litAt(lookup, feet) || inNarrowPassage(lookup, feet)
+}
+
+/**
+ * Ticks without rest at which a bot below the surface sleeps all the same: Stats.TIME_SINCE_REST, which brings the
+ * phantoms (PhantomSpawner: a player under the open sky at night, at or over the sea level, from 72000), less a day,
+ * so a bot that sleeps when it's due at a night's start is never out at night past 72000
+ */
+export const REST_DUE_TICKS = 48000
+
+const restCounts = new WeakMap<Bot, { ticks: number }>()
+
+/**
+ * Counts Stats.TIME_SINCE_REST as the server does: up each tick the bot isn't asleep (ServerPlayer.tick), back to 0
+ * when it lies down (ServerPlayer.startSleeping) or dies (ServerPlayer.die). Once per bot.
+ */
+export function countRest (bot: Bot): void {
+  if (restCounts.has(bot)) return
+  const count = { ticks: 0 }
+  restCounts.set(bot, count)
+  bot.on('physicsTick', () => { if (bot.isSleeping !== true) count.ticks++ })
+  bot.on('sleep', () => { count.ticks = 0 })
+  bot.on('death', () => { count.ticks = 0 })
+}
+
+/** the bot's ticks since it last slept or died (countRest), 0 uncounted */
+export function ticksSinceRest (bot: Bot): number {
+  return restCounts.get(bot)?.ticks ?? 0
+}
+
+/** sets the count (a bot that joined an old world: its stat; the tests) */
+export function setTicksSinceRest (bot: Bot, ticks: number): void {
+  countRest(bot)
+  ;(restCounts.get(bot) as { ticks: number }).ticks = ticks
 }
 
 /**
@@ -546,6 +641,29 @@ export interface SleepThroughNightOptions {
   bedDistance?: number
   /** tries before giving up on the monsters (default 6) */
   tries?: number
+  /**
+   * with no room for the bed about, dig it out beside the bot (bedRoomToDig: the bed's two cells and the head room
+   * over them), as below the surface, where the cells about a 1-wide staircase or tunnel are rock (default false)
+   */
+  digRoom?: boolean
+}
+
+/**
+ * Digs the room for a bed out beside the bot (bedRoomToDig), each block with the quickest tool carried; whether there
+ * was a way to.
+ */
+export async function digBedRoom (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  const room = bedRoomToDig(blockLookup(bot), bot.entity.position)
+  trace('digBedRoom: from', bot.entity.position.floored().toString(), room == null ? 'no room to dig' : `foot ${room.foot.toString()} facing ${room.facing.toString()} dig ${room.dig.length}`)
+  if (room == null) return false
+  for (const cell of room.dig) {
+    throwIfAborted(signal)
+    const block = bot.blockAt(cell)
+    if (block == null || block.boundingBox !== 'block') continue
+    await equipFor(bot, block)
+    await dig(bot, block, { signal })
+  }
+  return room.dig.every(cell => bot.blockAt(cell)?.boundingBox !== 'block')
 }
 
 /**
@@ -578,11 +696,14 @@ export async function sleepThroughNight (bot: Bot, opts: SleepThroughNightOption
       return { slept: true, fought }
     } catch (err) {
       trace('sleepThroughNight: try', attempt, (err as Error).message)
-      // no room for the bed here (up a tree, in a corner): down to the ground, or a few steps to where there is, once
+      // no room for the bed here (up a tree, in a corner): down to the ground, or a few steps to where there is, once;
+      // below the surface (digRoom), dug out beside the bot
       if (isSkillError(err, 'CANNOT_PLACE') && !moved) {
         moved = true
         if (onTree(bot)) {
           await climbDownTree(bot, signal)
+        } else if (opts.digRoom === true && await digBedRoom(bot, signal)) {
+          // (the bed goes into the room from where the bot stands)
         } else {
           const room = roomForBed((pos) => bot.blockAt(pos) as BlockView | null, bot.entity.position, 8)
           if (room == null) throw err

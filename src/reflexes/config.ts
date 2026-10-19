@@ -124,6 +124,11 @@ export interface ReflexConfig {
     /** how far to look for a bed standing (default 16) and for a column to dig the shelter in (default 8) */
     bedDistance: number
     shelterRadius: number
+    /**
+     * below the surface at work the night is worked through, the bed only once the bot has gone this many ticks
+     * without rest (Stats.TIME_SINCE_REST, the phantoms'; default REST_DUE_TICKS, 48000)
+     */
+    restTicks: number
     /** below the eat (50) and hostiles reflexes: it waits for a fight or a meal to end (default 40) */
     priority: number
   }
@@ -171,7 +176,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
   fireball: { enabled: true, range: 32, priority: 92 },
   // under the fireball (92) and the lava and fire (90), above a creeper (80)
   ghast: { enabled: true, range: 48, holdTicks: 200, budgetTicks: 600, priority: 88 },
-  night: { enabled: true, sleep: true, shelter: true, minArmor: 10, minDamage: 6, bedDistance: 16, shelterRadius: 8, priority: 40 },
+  night: { enabled: true, sleep: true, shelter: true, minArmor: 10, minDamage: 6, bedDistance: 16, shelterRadius: 8, restTicks: 48000, priority: 40 },
   totem: { enabled: true, always: true, health: 10, priority: 95 },
   fall: { enabled: true, priority: 93 },
   retryCooldownTicks: 20
