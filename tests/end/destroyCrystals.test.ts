@@ -40,3 +40,19 @@ test('explosionDamage: a crystal blast (power 6) at 3 blocks is lethal through d
   assert.strictEqual(explosionDamage(6, 12.5), 0)
   assert.strictEqual(explosionDamage(6, 3, 0), 1)
 })
+
+test('pillarUnderCloud: a caged crystal\'s pillar column in a cloud is passed over for the next crystal', async () => {
+  const { pillarUnderCloud } = await import('../../src/end/skills/destroyCrystals')
+  const { planCrystals } = await import('../../src/end/crystals')
+  const { getSpikesForLevel } = await import('../../src/end/spikes')
+  const { parseSeed } = await import('../../src/worldgen/random')
+  const spikes = getSpikesForLevel(parseSeed('2'))
+  const plan = planCrystals(spikes, { from: { x: -23.5, z: 9.5 } })
+  const caged = plan.find(t => t.method === 'pillar' && t.pillar != null)
+  assert.ok(caged?.pillar != null)
+  const col = caged.pillar.column
+  const avoid = (x: number, z: number): boolean => Math.hypot(x - (col.x + 0.5), z - (col.z + 0.5)) < 6
+  assert.strictEqual(pillarUnderCloud(caged, avoid), true)
+  assert.strictEqual(pillarUnderCloud(caged, () => false), false)
+  assert.ok(plan.some(t => !pillarUnderCloud(t, avoid)))
+})

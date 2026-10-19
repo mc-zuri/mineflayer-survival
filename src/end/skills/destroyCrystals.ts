@@ -8,7 +8,7 @@ import { attackStrengthOf, bestMeleeWeapon } from '../../skills/weapons'
 import { wornArmor, armorPiece, damageAfterArmor } from '../../skills/armor'
 import { getSpikesForLevel, spikeCenters, type EndSpike } from '../spikes'
 import { CRYSTAL_EXPLOSION_POWER, planCrystals, type CrystalTarget, type ShootSpot } from '../crystals'
-import { dragonDangers, eatIfHurt, inDanger, underDragonWatch } from './danger'
+import { dragonDangers, eatIfHurt, evadeDangers, inDanger, underDragonWatch } from './danger'
 import { blockGetter, groundY, digDown, gotoBlock, holdOneOf, pillarUp, PICKAXES, VoidGuard, findPortalY, worldMinY, type BlockGetter } from './world'
 
 // destroyCrystals: the end crystals on the obsidian spikes, by the crystal plan (src/end/crystals): the open ones shot
@@ -176,8 +176,16 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
         // the world's own blocks on the way too (the shot's arrowWorld clips on them; the cage's bars are the plan's)
         solidAt: (x, y, z) => { const b = get(new Vec3(x, y, z)); return b != null && b.boundingBox === 'block' && b.name !== 'iron_bars' }
       })
-      let target = plan[0]
-      if (target == null) break
+      if (plan.length === 0) break
+      // a pillar's column under a cloud is no place to go: the next crystal, or a wait out of the clouds when every one's
+      // is (a 26.3 bot went back to spike 4's column in a fireball's cloud 20 times and died in it)
+      let target = plan.find(t => !pillarUnderCloud(t, avoid))
+      if (target == null) {
+        opts.log?.(`every crystal's pillar under a cloud: waiting it out`)
+        await evadeDangers(bot, () => dragonDangers(bot, ground), guard, { signal, island: ground, maxTicks: 40 })
+        await waitTicks(bot, 20, signal)
+        continue
+      }
       const open = opened.get(target.spike.index)
       if (open != null) target = { ...target, method: 'shoot', shootFrom: open }
       const crystal = left.get(target.spike.index) as Entity
@@ -210,6 +218,11 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
     bot.clearControlStates()
   }
   return { destroyed, remaining: [...remaining().keys()], ticks }
+}
+
+/** the target is a pillar job whose column is in ground to avoid (a cloud) */
+export function pillarUnderCloud (target: CrystalTarget, avoid: (x: number, z: number) => boolean): boolean {
+  return target.method === 'pillar' && target.pillar != null && avoid(target.pillar.column.x + 0.5, target.pillar.column.z + 0.5)
 }
 
 /** tries at a crystal before it is left (a dodge of the dragon is not one) */
