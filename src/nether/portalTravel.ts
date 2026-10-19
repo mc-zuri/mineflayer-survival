@@ -11,6 +11,7 @@ import { travel } from '../skills/travel'
 import { trace, waitTicks, waitUntil } from '../skills/util'
 import { portalDestination } from './coords'
 import { buildPortal, type BuildPortalArgs } from './portalSkills'
+import { withNetherSafety } from './safety'
 
 /** NetherPortalBlock.getPortalTransitionTime: a survival player stands in the portal 80 ticks (gamerule players_nether_portal_default_delay) */
 export const PORTAL_TRANSITION_TICKS = 80
@@ -257,7 +258,9 @@ async function takePortal (bot: Bot, to: Dimension, args: EnterNetherArgs, signa
       trace('takePortal: walking to the remembered portal at', at.toString())
       // to its height too (exactY): a portal built in a cave lies under the ground the walk ends on, and the bot on
       // the surface 100 blocks over a 26.3 portal at y -43 saw none and built another ('0 lava sources found')
-      await travel(bot, { target: at, range: 4, exactY: true }, signal)
+      // in the nether with its path settings (no lava edges, no magma, the deaths kept away from) and by its trail
+      const walk = async (): Promise<unknown> => await travel(bot, { target: at, range: 4, exactY: true }, signal)
+      await (here === 'the_nether' ? withNetherSafety(bot, walk) : walk())
       portal = findPortal(bot, 16)
     }
   }

@@ -12,6 +12,7 @@ import { StockPolicy, type StockOptions } from './planner/stock'
 import { advancementsDone, type AdvancementProgressPacket } from './core/advancements'
 import { SCAFFOLD_ITEMS } from './executor/steps'
 import { rememberNetherDeath } from './nether/deaths'
+import { keepNetherTrail, pruneTrail } from './nether/trail'
 
 export * from './core'
 export * from './planner'
@@ -91,6 +92,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     const stock = options.stock === false || options.stock.enabled === false ? null : new StockPolicy(options.stock)
     bot.survival = { options, tasks, memory, reflexes, handlers: {}, advancements: new Set(), play: async (playOptions) => await play(bot, playOptions), diagnostics, stock }
     bot.on('physicsTick', () => { memory.now = tasks.tick })
+    // where the bot walks the nether, to go that way again (travel by trailRoute)
+    keepNetherTrail(bot, memory)
     // the advancements as the server tells them: the End milestone's check is the dragon's minecraft:end/kill_dragon
     ;(bot as any)._client?.on?.('advancements', (packet: AdvancementProgressPacket) => {
       for (const id of advancementsDone(packet)) bot.survival.advancements.add(id)
@@ -102,7 +105,10 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
         const dimension = normalizeDimension(bot.game?.dimension)
         const lookup = (p: any): any => bot.blockAt(p)
         memory.setDeath(bot.entity.position, dimension, dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined)
-        if (dimension === 'the_nether') rememberNetherDeath(memory, bot.entity.position)
+        if (dimension === 'the_nether') {
+          rememberNetherDeath(memory, bot.entity.position)
+          pruneTrail(memory, bot.entity.position)
+        }
       }
       tasks.cancelAll('DIED', 'the bot died')
     })

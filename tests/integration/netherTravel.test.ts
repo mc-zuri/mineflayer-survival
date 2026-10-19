@@ -20,6 +20,7 @@ import { fight } from '../../src/skills/fight'
 import { countItems, waitUntil } from '../../src/skills/gather'
 import { Executor } from '../../src/executor/executor'
 import { leaveTripKit } from '../../src/milestones'
+import { NETHER_TRAIL, extendTrail, trailPoints } from '../../src/nether/trail'
 
 const USERNAME = 'deltabot'
 const SEED = '4'
@@ -168,6 +169,38 @@ describe(`nether travel on a ${DEFAULT_VERSION} server (seed 4)`, { timeout: 20 
       bot.off('physicsTick', onTick)
       memory.removePoi('nether_death', death, 'the_nether')
     }
+  })
+
+  it('goes the way walked before (the nether trail) round the open floor, not straight across it', async () => {
+    // an open room 48 long and 40 wide; a trail laid out in an arc 14 blocks off the straight line between its ends
+    const [x0, y, z0] = [200, 100, 330]
+    const start = new Vec3(x0 + 0.5, y, z0 + 0.5)
+    await arrive(start)
+    await fill(`${x0 - 2} ${y - 2} ${z0 - 20} ${x0 + 50} ${y + 5} ${z0 + 20} netherrack`)
+    await fill(`${x0 - 1} ${y} ${z0 - 19} ${x0 + 49} ${y + 4} ${z0 + 19} air`)
+    await nether(`tp ${USERNAME} ${start.x} ${y} ${start.z}`)
+    await run(`effect clear ${USERNAME} minecraft:slow_falling`)
+    await kit([['netherrack', 16], ['cooked_beef', 8]])
+    assert.ok(await waitUntil(bot, () => bot.entity.onGround && bot.entity.position.distanceTo(start) < 1.5, 200))
+    const memory = bot.survival.memory
+    for (const p of trailPoints(memory)) memory.removePoi(NETHER_TRAIL, p, 'the_nether')
+    const arc: Array<[number, number]> = [[0, 0], [8, 10], [20, 14], [32, 14], [43, 8]]
+    for (const [dx, dz] of arc) extendTrail(memory, { x: x0 + dx, y, z: z0 + dz })
+    // (the trail the bot lays as it goes is left out: the arc is the one to follow)
+    const passed = arc.map(() => Infinity)
+    const onTick = (): void => {
+      arc.forEach(([dx, dz], i) => { passed[i] = Math.min(passed[i], Math.hypot(bot.entity.position.x - x0 - dx, bot.entity.position.z - z0 - dz)) })
+    }
+    bot.on('physicsTick', onTick)
+    try {
+      await withNetherSafety(bot, async () => await travel(bot, { target: new Vec3(x0 + 48, y, z0), range: 2 }))
+    } finally {
+      bot.off('physicsTick', onTick)
+      for (const p of trailPoints(memory)) memory.removePoi(NETHER_TRAIL, p, 'the_nether')
+    }
+    console.log(`along the trail: nearest to its points ${passed.map(d => d.toFixed(1)).join(', ')}; at ${bot.entity.position.toString()}`)
+    assert.ok(Math.hypot(bot.entity.position.x - x0 - 48, bot.entity.position.z - z0) <= 3, `the trip ended at ${bot.entity.position.toString()}`)
+    for (const i of [2, 3]) assert.ok(passed[i] <= 7, `the trip went ${passed[i].toFixed(1)} from the trail's point ${arc[i].join(', ')}`)
   })
 
   it('makes the trip kit a spare iron chestplate, leggings and shield from the iron it holds, golden boots from its gold, and leaves them in it', async () => {

@@ -259,6 +259,9 @@ export async function findBlazeSpawner (bot: Bot, args: FindSpawnerArgs = {}, si
   return args.safety === false ? await run() : await withNetherSafety(bot, run, args.safety)
 }
 
+/** from further than this from the spawner, the camp is gone to by a trip (travel) first */
+export const CAMP_TRIP = 48
+
 export interface BlazeRodsArgs {
   /** rods wanted in the inventory (default 6: 12 eyes) */
   count?: number
@@ -303,6 +306,14 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     const spots = campSpots(bot, spawner, standOff)
     const camp = async (): Promise<void> => {
       if (bot.entity.position.distanceTo(spawner) <= standOff + 3 && seesFrom(bot, eyePosition(bot), spawner.offset(0.5, 0.5, 0.5), spawner)) return
+      // from afar (back from the portal after a death): a trip to the fortress first, by the way walked before (the
+      // nether's trail) and in hops, not one goto on a straight line across the lava sea
+      if (bot.entity.position.distanceTo(spawner) > CAMP_TRIP) {
+        await travel(bot, { target: spawner, range: 16 }, signal).catch(err => {
+          if (isAbort(err)) throw err
+          trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
+        })
+      }
       for (const spot of spots.slice(0, 3)) {
         try {
           await moveNear(bot, spot, 0, signal)

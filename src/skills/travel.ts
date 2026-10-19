@@ -3,10 +3,12 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
-import { SkillError, isAbort, throwIfAborted } from './errors'
+import { SkillError, isAbort, isSkillError, throwIfAborted } from './errors'
 import { navigate } from './navigate'
 import { gridWalk } from './gridWalk'
 import { trace, waitTicks, waitUntil } from './util'
+import { normalizeDimension } from '../core/memory'
+import { trailRoute } from '../nether/trail'
 
 /** hops in a row that leave the bot where it was before a trip is given up */
 export const TRAVEL_STILL_HOPS = 8
@@ -26,6 +28,11 @@ export interface TravelArgs {
   onHop?: (pos: Vec3) => boolean | Promise<boolean>
   /** fall back on a grid walk for a hop the pathfinder fails (default true) */
   grid?: boolean
+  /**
+   * in the nether, go by the way walked there before when it runs from near the bot to near the target (the nether's
+   * trail: trailRoute) (default true)
+   */
+  trail?: boolean
 }
 
 export interface TravelResult {
@@ -85,8 +92,36 @@ export async function swimToward (bot: Bot, point: Vec3, range: number, signal?:
   }
 }
 
+/**
+ * The trip by the points of the nether's trail (each to within 6 blocks, a point with no way to it passed over), then
+ * on to the target; the hops, ticks and stop of them all
+ */
+async function travelAlong (bot: Bot, route: Vec3[], args: TravelArgs, signal?: AbortSignal): Promise<TravelResult> {
+  trace('travel: along the nether trail,', route.length, 'points to', args.target.toString())
+  let ticks = 0
+  let hops = 0
+  for (const point of route) {
+    try {
+      const leg = await travel(bot, { ...args, target: point, range: 6, exactY: false, trail: false, maxTicks: undefined }, signal)
+      ticks += leg.ticks
+      hops += leg.hops
+      if (leg.stopped) return { ...leg, ticks, hops }
+    } catch (err) {
+      if (isAbort(err) || !isSkillError(err, 'NO_PATH')) throw err
+      trace('travel: no way to the trail point', point.toString(), (err as Error).message)
+    }
+  }
+  const last = await travel(bot, { ...args, trail: false }, signal)
+  return { ...last, ticks: ticks + last.ticks, hops: hops + last.hops }
+}
+
 export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal): Promise<TravelResult> {
   throwIfAborted(signal)
+  const memory = bot.survival?.memory
+  if (args.trail !== false && memory != null && normalizeDimension(bot.game?.dimension) === 'the_nether') {
+    const route = trailRoute(memory, bot.entity.position, args.target)
+    if (route.length > 0) return await travelAlong(bot, route, args, signal)
+  }
   const range = args.range ?? 3
   const hop = args.hop ?? 48
   const target = args.target
