@@ -637,6 +637,12 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
   }
 }
 
+/**
+ * legs the nether's pearl search walks before the overworld's nights (10: 4 legs found no piglin, enderman nor warped
+ * forest on 26.3 seed 2, and three overworld nights found no enderman either)
+ */
+export const PEARL_NETHER_LEGS = 10
+
 /** blocks a pearl search in the nether goes on each leg looking for piglins or endermen */
 export const PEARL_LEG = 96
 /** rounds of the overworld's night hunt at most (a hunt, a leg, a day's levels each) */
@@ -671,7 +677,7 @@ export function pearlGround (bot: Bot, gold: boolean): { kind: 'warped forest' |
  */
 export async function pearlsInTheNether (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
   const count = (name: string): number => countItems(bot, name)
-  let legs = 4
+  let legs = PEARL_NETHER_LEGS
   for (let leg = 0; leg < legs && count('ender_pearl') < want; leg++) {
     if (signal.aborted) throw signal.reason
     const piglin = Object.values(bot.entities).some(e => isAdultPiglin(bot, e) && e.position.distanceTo(bot.entity.position) <= 48)

@@ -58,7 +58,7 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
 })
 
 test('pearls in the nether: the endermen in sight hunted, else a leg on to find piglins or endermen, a few legs at most', async () => {
-  const { pearlsInTheNether } = await import('../../src/milestones')
+  const { pearlsInTheNether, PEARL_NETHER_LEGS } = await import('../../src/milestones')
   const { fakeBot } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
   const tasks: string[] = []
@@ -66,12 +66,12 @@ test('pearls in the nether: the endermen in sight hunted, else a leg on to find 
   const bot = fakeBot({ entities: [{ id: 7, name: 'enderman', position: new Vec3(10, 64, 0), metadata: [] }] })
   bot.game.dimension = 'the_nether'
   assert.equal(await pearlsInTheNether(bot, executor, 4, new AbortController().signal, () => {}), 0)
-  assert.deepEqual(tasks, ['endermen for pearls', 'endermen for pearls', 'endermen for pearls', 'endermen for pearls'])
+  assert.deepEqual(tasks, Array(PEARL_NETHER_LEGS).fill('endermen for pearls'))
   tasks.length = 0
   const alone = fakeBot()
   alone.game.dimension = 'the_nether'
   await pearlsInTheNether(alone, executor, 4, new AbortController().signal, () => {})
-  assert.deepEqual(tasks, ['a leg for pearls', 'a leg for pearls', 'a leg for pearls', 'a leg for pearls'])
+  assert.deepEqual(tasks, Array(PEARL_NETHER_LEGS).fill('a leg for pearls'))
 })
 
 test('a portal\'s frame from the obsidian in sight first (the caves\' lava met by water): mined, then placed', async () => {
