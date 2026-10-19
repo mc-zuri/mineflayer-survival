@@ -80,3 +80,40 @@ test('collectBlazeRods backs off 36 blocks along the way the bot came to heal wh
   // a move 36 off the spawner, along the way the bot came (+x)
   assert.ok(moves.some(m => { const [x, , z] = m.replace(/[()]/g, '').split(',').map(Number); return x >= 30 && Math.abs(z) <= 2 }), moves.slice(0, 4).join(' | '))
 })
+
+test('the blaze fight is cut off when the health falls to the retreat, 12 among three blazes or more', async () => {
+  const { retreatHealth, collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  assert.equal(retreatHealth(1), 8)
+  assert.equal(retreatHealth(3), 12)
+  assert.equal(retreatHealth(5, 6), 6)
+  const fightModule = require('../../src/skills/fight')
+  const gridModule = require('../../src/skills/gridWalk')
+  const bot = fakeBot({ position: new Vec3(3.5, 64, 0.5), world: (p: any) => p.y < 64 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).health = 20
+  ;(bot as any).food = 20
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  bot.entities[9] = { id: 9, name: 'blaze', type: 'hostile', position: new Vec3(4.5, 64, 0.5), metadata: [] } as any
+  ;(bot as any).lookAt = async () => {}
+  ;(bot as any).activateItem = () => {}
+  ;(bot as any).deactivateItem = () => {}
+  const realFight = fightModule.fight
+  const realMove = gridModule.moveNear
+  let cut = false
+  fightModule.fight = async (_b: unknown, _t: unknown, o: any) => await new Promise((_resolve, reject) => {
+    o.signal.addEventListener('abort', () => { cut = true; reject(o.signal.reason) })
+    setTimeout(() => { (bot as any).health = 7; bot.emit('health') }, 20)
+  })
+  const moves: string[] = []
+  gridModule.moveNear = async (_b: unknown, to: Vec3) => { moves.push(to.toString()) }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 200, safety: false }), /TIMEOUT|rods/)
+  } finally {
+    clearInterval(ticking)
+    fightModule.fight = realFight
+    gridModule.moveNear = realMove
+  }
+  assert.ok(cut)
+})

@@ -172,6 +172,11 @@ export async function putOutFiresNear (bot: Bot, radius: number, signal?: AbortS
 /** health the blaze fight backs off at to heal, and how many times a fight does */
 export const BLAZE_RETREAT_HEALTH = 8
 export const BLAZE_RETREATS = 6
+/** the health the blaze fight backs off at: higher among 3 blazes or more (their fireballs come together) */
+export function retreatHealth (blazes: number, set?: number): number {
+  return set ?? (blazes >= 3 ? 12 : BLAZE_RETREAT_HEALTH)
+}
+
 /** how far from the spawner the bot backs off to (along the way it came) */
 export const BLAZE_RETREAT_DISTANCE = 36
 
@@ -363,7 +368,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         if (ticks > maxTicks) throw new SkillError('TIMEOUT', `${countItems(bot, 'blaze_rod')} of ${count} blaze rods after ${ticks} ticks`, { rods: countItems(bot, 'blaze_rod'), kills, ticks })
         // low: back out of the blazes' reach (the way the bot came) to eat up and heal, then on again (a 26.3 bot fought
         // on at the spawner, fireballed and burning, till it died)
-        if (bot.health <= (args.retreatAt ?? BLAZE_RETREAT_HEALTH) && retreats < BLAZE_RETREATS) {
+        if (bot.health <= retreatHealth(blazesInView(bot, 24).length, args.retreatAt) && retreats < BLAZE_RETREATS) {
           retreats++
           trace('collectBlazeRods: health', bot.health, 'retreating to', retreatTo.toString())
           // farther first (out of their sight: 20 blocks off they shot on and the bot was low again in a while, 26.3),
@@ -423,18 +428,31 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         const d = blaze.position.distanceTo(bot.entity.position)
         const canShoot = countItems(bot, 'bow') > 0 && countItems(bot, ['arrow', 'spectral_arrow', 'tipped_arrow']) > 0
         trace('collectBlazeRods: health', bot.health, 'blazes', blazes.length, 'target at', d.toFixed(1), canShoot && d > Math.min(shootFrom, 3.5) ? 'shoot' : 'fight', 'tick', ticks)
+        // the swing or the shot cut off as soon as the health falls to the retreat's (a fight of 300 ticks among 6 blazes
+        // took a 26.3 bot from 20 to 5 before the retreat was looked at, and it burned on the way out)
+        const low = retreatHealth(blazes.length, args.retreatAt)
+        const cut = new AbortController()
+        const onParent = (): void => { cut.abort(signal?.reason) }
+        signal?.addEventListener('abort', onParent, { once: true })
+        const onHealth = (): void => { if (bot.health <= low) cut.abort(new Error('low health')) }
+        bot.on('health', onHealth)
         try {
           if (d > Math.min(shootFrom, 3.5) && canShoot) {
-            await shoot(bot, blaze, { signal, maxShots: 2 })
+            await shoot(bot, blaze, { signal: cut.signal, maxShots: 2 })
           } else {
-            await fight(bot, blaze, { signal, maxTicks: 300, maxDistance: 16 })
+            await fight(bot, blaze, { signal: cut.signal, maxTicks: 300, maxDistance: 16 })
           }
         } catch (err) {
+          if (isAbort(err) && signal?.aborted === true) throw err
+          if (isAbort(err) && cut.signal.aborted) { trace('collectBlazeRods: low,', bot.health, ': the fight cut off'); continue }
           if (isAbort(err)) throw err
           // no clear shot (a wall, the fortress in the way), or it got away: another, or wait for it to come nearer
           trace('collectBlazeRods:', (err as Error).message)
           noShot.set(blaze.id, ticks)
           await waitTicks(bot, 5, signal)
+        } finally {
+          bot.off('health', onHealth)
+          signal?.removeEventListener('abort', onParent)
         }
         if (dead.has(blaze.id)) {
           kills++
