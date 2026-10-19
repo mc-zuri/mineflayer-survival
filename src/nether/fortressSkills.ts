@@ -168,6 +168,10 @@ export async function putOutFiresNear (bot: Bot, radius: number, signal?: AbortS
   return out
 }
 
+/** health the blaze fight backs off at to heal, and how many times a fight does */
+export const BLAZE_RETREAT_HEALTH = 8
+export const BLAZE_RETREATS = 6
+
 /** ticks the blaze fight waits with blazes about and none in sight before it moves to another camp spot */
 export const BLIND_TICKS = 200
 
@@ -273,6 +277,8 @@ export interface BlazeRodsArgs {
   standOff?: number
   /** eat at or below this health (default 12) */
   eatAt?: number
+  /** back out of the fight to heal at this health or lower (default BLAZE_RETREAT_HEALTH) */
+  retreatAt?: number
   /** give up after this many ticks (default 24000) */
   maxTicks?: number
   /** drink fire resistance when the bot has a potion of it and the effect is off (default true) */
@@ -299,6 +305,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
   let kills = 0
   const onTick = (): void => { ticks++ }
   bot.on('physicsTick', onTick)
+  const cameFrom = bot.entity.position.clone()
   const run = async (): Promise<BlazeRodsResult> => {
     if (countItems(bot, 'blaze_rod') >= count) return { rods: countItems(bot, 'blaze_rod'), kills, ticks }
     const spawner = args.spawner != null ? v3(args.spawner) : v3(await findBlazeSpawner(bot, { safety: false }, signal))
@@ -337,6 +344,9 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     const onDead = (e: Entity): void => { dead.add(e.id) }
     bot.on('entityDead', onDead)
     const noShot = new Map<number, number>()
+    // where the bot came from: out of the blazes' way, to back off to when low
+    const retreatTo = cameFrom.distanceTo(spawner) > 16 ? cameFrom : spawner.plus(cameFrom.minus(spawner).normalize().scaled(20)).floored()
+    let retreats = 0
     let lastSight = ticks
     const triedSpots = new Set<string>()
     try {
@@ -348,6 +358,19 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
           await drinkPotion(bot, 'fire_resistance', signal)
         }
         if (ticks > maxTicks) throw new SkillError('TIMEOUT', `${countItems(bot, 'blaze_rod')} of ${count} blaze rods after ${ticks} ticks`, { rods: countItems(bot, 'blaze_rod'), kills, ticks })
+        // low: back out of the blazes' reach (the way the bot came) to eat up and heal, then on again (a 26.3 bot fought
+        // on at the spawner, fireballed and burning, till it died)
+        if (bot.health <= (args.retreatAt ?? BLAZE_RETREAT_HEALTH) && retreats < BLAZE_RETREATS) {
+          retreats++
+          trace('collectBlazeRods: health', bot.health, 'retreating to', retreatTo.toString())
+          await moveNear(bot, retreatTo, 2, signal).catch(err => { if (isAbort(err)) throw err; trace('collectBlazeRods: no retreat:', (err as Error).message) })
+          await putOutFiresNear(bot, 2, signal)
+          for (let i = 0; i < 6 && bot.health < 16; i++) {
+            if (bot.food < 20) { try { await eat(bot, { signal }) } catch (err) { if (isAbort(err)) throw err } }
+            await waitTicks(bot, 80, signal)
+          }
+          continue
+        }
         if (bot.health <= (args.eatAt ?? 12) && bot.food < 20) {
           try { await eat(bot, { signal }) } catch (err) { if (isAbort(err)) throw err }
         }

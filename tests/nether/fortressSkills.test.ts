@@ -53,3 +53,29 @@ test('nextCampSpot: the first untried spot that sees a blaze, else the first unt
   assert.deepEqual(nextCampSpot(bot, spots, blaze, new Set(['(6, 64, 0)'])), new Vec3(0, 64, 0))
   assert.equal(nextCampSpot(bot, spots, blaze, new Set(spots.map(s => s.toString()))), null)
 })
+
+test('collectBlazeRods backs off to where the bot came from to heal when low, then fights on', async () => {
+  const gridModule = require('../../src/skills/gridWalk')
+  const eatModule = require('../../src/skills/eat')
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const bot = fakeBot({ position: new Vec3(40.5, 64, 0.5), world: (p: any) => p.y < 64 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).health = 6
+  ;(bot as any).food = 18
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  const moves: string[] = []
+  const realMove = gridModule.moveNear
+  const realEat = eatModule.eat
+  gridModule.moveNear = async (_b: unknown, to: Vec3) => { moves.push(to.toString()) }
+  eatModule.eat = async () => { (bot as any).health = 20 }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 300, safety: false }), /TIMEOUT|blaze rods/)
+  } finally {
+    clearInterval(ticking)
+    gridModule.moveNear = realMove
+    eatModule.eat = realEat
+  }
+  assert.ok(moves.includes(new Vec3(40.5, 64, 0.5).toString()), moves.join(' | '))
+})
