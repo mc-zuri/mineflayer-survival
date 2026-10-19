@@ -12,7 +12,7 @@ import { moveNear } from '../skills/gridWalk'
 import { countItems, trace, waitTicks } from '../skills/util'
 import { eat } from '../skills/eat'
 import { drinkPotion, findPotion, hasEffect } from '../skills/potion'
-import { fight } from '../skills/fight'
+import { fight, lowerShield, raiseShield } from '../skills/fight'
 import { shoot } from '../skills/shoot'
 import { collectDropsNear } from '../skills/hunt'
 import { type Entity, eyePosition, isAlive } from '../skills/combatUtil'
@@ -171,6 +171,8 @@ export async function putOutFiresNear (bot: Bot, radius: number, signal?: AbortS
 /** health the blaze fight backs off at to heal, and how many times a fight does */
 export const BLAZE_RETREAT_HEALTH = 8
 export const BLAZE_RETREATS = 6
+/** how far from the spawner the bot backs off to (along the way it came) */
+export const BLAZE_RETREAT_DISTANCE = 36
 
 /** ticks the blaze fight waits with blazes about and none in sight before it moves to another camp spot */
 export const BLIND_TICKS = 200
@@ -363,12 +365,27 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         if (bot.health <= (args.retreatAt ?? BLAZE_RETREAT_HEALTH) && retreats < BLAZE_RETREATS) {
           retreats++
           trace('collectBlazeRods: health', bot.health, 'retreating to', retreatTo.toString())
-          await moveNear(bot, retreatTo, 2, signal).catch(err => { if (isAbort(err)) throw err; trace('collectBlazeRods: no retreat:', (err as Error).message) })
+          // farther first (out of their sight: 20 blocks off they shot on and the bot was low again in a while, 26.3),
+          // where it came from else
+          const away = spawner.plus(retreatTo.minus(spawner).normalize().scaled(BLAZE_RETREAT_DISTANCE)).floored()
+          await moveNear(bot, away, 3, signal).catch(async err => {
+            if (isAbort(err)) throw err
+            await moveNear(bot, retreatTo, 2, signal).catch(e => { if (isAbort(e)) throw e; trace('collectBlazeRods: no retreat:', (e as Error).message) })
+          })
           await putOutFiresNear(bot, 2, signal)
-          for (let i = 0; i < 6 && bot.health < 16; i++) {
+          // healed up behind the shield, held toward the nearest blaze (it takes their fireballs)
+          for (let i = 0; i < 12 && bot.health < 18; i++) {
             if (bot.food < 20) { try { await eat(bot, { signal }) } catch (err) { if (isAbort(err)) throw err } }
-            await waitTicks(bot, 80, signal)
+            for (let k = 0; k < 8; k++) {
+              const near = blazesInView(bot, 32).sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
+              if (near != null) {
+                await bot.lookAt(near.position.offset(0, 0.9, 0), true)
+                await raiseShield(bot).catch(() => false)
+              } else lowerShield(bot)
+              await waitTicks(bot, 10, signal)
+            }
           }
+          lowerShield(bot)
           continue
         }
         if (bot.health <= (args.eatAt ?? 12) && bot.food < 20) {

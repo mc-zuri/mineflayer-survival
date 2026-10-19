@@ -54,7 +54,7 @@ test('nextCampSpot: the first untried spot that sees a blaze, else the first unt
   assert.equal(nextCampSpot(bot, spots, blaze, new Set(spots.map(s => s.toString()))), null)
 })
 
-test('collectBlazeRods backs off to where the bot came from to heal when low, then fights on', async () => {
+test('collectBlazeRods backs off 36 blocks along the way the bot came to heal when low, then fights on', async () => {
   const gridModule = require('../../src/skills/gridWalk')
   const eatModule = require('../../src/skills/eat')
   const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
@@ -77,5 +77,6 @@ test('collectBlazeRods backs off to where the bot came from to heal when low, th
     gridModule.moveNear = realMove
     eatModule.eat = realEat
   }
-  assert.ok(moves.includes(new Vec3(40.5, 64, 0.5).toString()), moves.join(' | '))
+  // a move 36 off the spawner, along the way the bot came (+x)
+  assert.ok(moves.some(m => { const [x, , z] = m.replace(/[()]/g, '').split(',').map(Number); return x >= 30 && Math.abs(z) <= 2 }), moves.slice(0, 4).join(' | '))
 })
