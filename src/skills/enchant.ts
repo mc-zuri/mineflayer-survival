@@ -86,6 +86,9 @@ export function offerCostRange (slot: 0 | 1 | 2, bookshelves: number): { min: nu
 /** whether a top offer's cost is one the table makes with that many shelves counted (offerCostRange) */
 export function topOfferFits (cost: number, bookshelves: number): boolean {
   const range = offerCostRange(2, bookshelves)
+  // a cost under the slot's number (3) is no offer, 0 (EnchantmentMenu.slotsChanged: costs[i] < i + 1 is cleared):
+  // with few shelves the top cost may roll 1 or 2 and show as 0 (a 26.3 table of 0 shelves failed its check 5 times)
+  if (cost === 0) return range.min < 3
   return cost >= range.min && cost <= range.max
 }
 

@@ -217,6 +217,9 @@ test('the full setup planned from nothing: 45 + 1 books from 138 sugar cane and 
 
 test('topOfferFits: the top offer a table makes with fewer shelves (no shelves: 1 to 8; 6: 12 to 17; 15: 30)', () => {
   for (let c = 1; c <= 8; c++) assert.ok(topOfferFits(c, 0))
+  // a top cost rolled under 3 shows as 0 (no offer): a table of few shelves, not of 15
+  assert.ok(topOfferFits(0, 0))
+  assert.ok(!topOfferFits(0, 15))
   assert.ok(!topOfferFits(9, 0))
   assert.ok(!topOfferFits(11, 6))
   assert.ok(topOfferFits(12, 6) && topOfferFits(17, 6))
