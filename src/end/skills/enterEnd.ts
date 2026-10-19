@@ -4,6 +4,7 @@ import { normalizeDimension } from '../../core/memory'
 import { TaskError, type SkillOptions, throwIfAborted, waitTicks, waitUntil, eyePosition } from '../../skills/combatUtil'
 import { analyzePortalRoom, FACING_STEP, findPortalFrames, readPortalFrame, type PortalRoom } from '../portalRoom'
 import { steerToward } from '../../skills/steer'
+import { trace } from '../../skills/util'
 import { blockGetter, gotoBlock, gotoNear, groundY } from './world'
 
 // enterEnd: the eyes the portal room's frames are missing put in (EnderEyeItem.useOn on each frame's top), then into
@@ -34,6 +35,17 @@ export interface EnterEndResult {
   eyesPlaced: number
   /** where the bot came out (the obsidian platform, ServerLevel.END_SPAWN_POINT) */
   arrival: Vec3
+}
+
+/**
+ * Where to step into the portal from: the cell outside each side's middle frame, at the frames' own level (on the
+ * platform), nearest first
+ */
+export function portalApproach (room: PortalRoom, from: Vec3): Vec3[] {
+  return room.expected
+    .filter(f => f.pos.x === room.center.x || f.pos.z === room.center.z)
+    .map(f => new Vec3(f.pos.x - FACING_STEP[f.facing].x, f.pos.y, f.pos.z - FACING_STEP[f.facing].z))
+    .sort((a, b) => a.distanceTo(from) - b.distanceTo(from))
 }
 
 function framePos (p: { x: number, y: number, z: number }): Vec3 {
@@ -91,11 +103,25 @@ export async function enterEnd (bot: Bot, opts: EnterEndOptions = {}): Promise<E
   const open = await waitUntil(bot, () => bot.blockAt(center)?.name === 'end_portal', 20, signal)
   if (!open) throw new TaskError('NO_PATH', 'the frames are full but no portal opened')
 
-  // onto the frames (13/16 high) and off them into the portal
+  // up beside a frame in the middle of a side, onto it (13/16 high) and off it into the portal: the frames stand on the
+  // room's platform, a block over its floor (StrongholdPieces.PortalRoom: the stairs lead up to it), and steered at
+  // from the floor at a corner the bot jumped against the frames for 200 ticks (26.3 seed 2)
   try {
-    if (bot.entity.position.distanceTo(center.offset(0.5, 0, 0.5)) > 4) await gotoNear(bot, center.offset(0.5, 0, 0.5), 2.5, { signal })
+    let at = false
+    for (const spot of portalApproach(room, bot.entity.position)) {
+      try {
+        await gotoBlock(bot, spot, { signal })
+        at = true
+        break
+      } catch (err) {
+        if (TaskError.is(err) && ['ABORTED', 'DIED'].includes(err.code)) throw err
+        if (signal?.aborted === true) throw err
+      }
+    }
+    if (!at && bot.entity.position.distanceTo(center.offset(0.5, 0, 0.5)) > 4) await gotoNear(bot, center.offset(0.5, 0, 0.5), 2.5, { signal })
     for (let t = 0; t < 200 && !isInEnd(bot); t++) {
       steerToward(bot, center.offset(0.5, 0, 0.5), { sprint: false })
+      if (t % 20 === 0) trace('enterEnd: into the portal at', center.toString(), 'from', bot.entity.position.toString(), 'on ground', bot.entity.onGround, 'feet in', bot.blockAt(bot.entity.position)?.name, 'below', bot.blockAt(bot.entity.position.offset(0, -0.5, 0))?.name)
       await waitTicks(bot, 1, signal)
     }
     bot.clearControlStates()

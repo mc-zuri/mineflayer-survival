@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { enterEnd, isInEnd, readPortalRoom } from '../../src/end/skills/enterEnd'
+import { enterEnd, isInEnd, portalApproach, readPortalRoom } from '../../src/end/skills/enterEnd'
 import { leaveEnd } from '../../src/end/skills/leaveEnd'
 import { TaskError } from '../../src/core/errors'
 import { fakeBot, item } from '../reflexes/fakeBot'
@@ -54,4 +54,17 @@ test('leaveEnd: NOT_FOUND outside the End, or with the exit portal shut', async 
   const end = fakeBot({ world: (p) => p.x === 0 && p.z === 0 && p.y >= 61 && p.y <= 65 ? 'bedrock' : p.y < 61 ? 'stone' : 'air' })
   end.game.dimension = 'minecraft:the_end'
   await assert.rejects(leaveEnd(end), (err: unknown) => TaskError.is(err) && err.code === 'NOT_FOUND' && /shut/.test(err.message))
+})
+
+test('portalApproach: into the portal from outside a side\'s middle frame, on the frames\' level (the platform), nearest first', () => {
+  const { expectedFrames } = require('../../src/end/portalRoom')
+  const center = { x: 2351, y: -22, z: 1013 }
+  const room: any = { center, expected: expectedFrames(center) }
+  const spots = portalApproach(room, new Vec3(2349.7, -23, 1015.3))
+  assert.strictEqual(spots.length, 4)
+  for (const s of spots) assert.strictEqual(s.y, -22)
+  // two blocks out from the middle on each side, the nearest to the bot first
+  const keys = spots.map(s => `${s.x},${s.z}`)
+  assert.deepStrictEqual([...keys].sort(), ['2348,1013', '2351,1010', '2351,1016', '2354,1013'].sort())
+  assert.ok(['2348,1013', '2351,1016'].includes(keys[0]), keys[0])
 })
