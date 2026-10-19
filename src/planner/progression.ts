@@ -31,8 +31,12 @@ export interface Milestone {
   goals: (state: ProgressState) => ObtainRequest[]
 }
 
-/** eyes to have before looking for the stronghold: 12 for a frame with none filled, and 2 for the throws, which break 1 in 5 (vanilla EyeOfEnder) */
-export const EYES_TARGET = 14
+/**
+ * eyes to have before looking for the stronghold: 12 for a frame with none filled, and 4 for the throws, which break
+ * 1 in 5 (vanilla EyeOfEnder) and can come down out of reach: the search on 26.3 seed 2 threw 9 and had 5 back, and
+ * stood in the portal room with 10 eyes for 11 empty frames
+ */
+export const EYES_TARGET = 16
 /** eyes left once the stronghold is found: enough for any frame */
 export const EYES_FOR_FRAME = 12
 /** bookshelves around the table for level 30 enchantments (vanilla EnchantmentHelper caps at 15), the most the milestone gets */

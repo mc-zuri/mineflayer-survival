@@ -59,7 +59,7 @@ export const STAGES: Record<string, Stage> = {
     until: 'end',
     kit: [
       ...ENCHANTED_GEAR,
-      ['ender_eye', 14], ['arrow', 128], ['cobblestone', 128], ['cooked_beef', 48], ['bread', 16], ['golden_apple', 2],
+      ['ender_eye', 16], ['arrow', 128], ['cobblestone', 128], ['cooked_beef', 48], ['bread', 16], ['golden_apple', 2],
       ['water_bucket', 1], ['bucket', 1], ['torch', 32], ['oak_log', 64], ['crafting_table', 1], ['iron_ingot', 16], ['coal', 16],
       ['flint_and_steel', 1], ['iron_pickaxe', 1]
     ]
@@ -96,6 +96,8 @@ for (const [name, stage] of Object.entries(STAGES)) {
         const out = await server.command(`give ${USERNAME} ${item} ${count}`)
         assert.ok(out.some(l => /^Gave /.test(l)), `give ${item} ${count}: ${out.join(' | ')}`)
       }
+      // for reading the log: where the nearest stronghold is (the server's /locate; the bot finds it by its eyes)
+      if (stage.until === 'end') console.log(`[stage] ${(await server.command('locate structure minecraft:stronghold')).join(' | ')}`)
       if (stage.levels != null) await server.command(`xp add ${USERNAME} ${stage.levels} levels`)
       const last = stage.kit[stage.kit.length - 1][0].replace(/\[.*$/, '')
       assert.ok(await waitUntil(bot, () => countItems(bot, last) > 0, 200), 'the kit never arrived')

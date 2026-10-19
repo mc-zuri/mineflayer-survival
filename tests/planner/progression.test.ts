@@ -141,8 +141,8 @@ test('nether: the rods and pearls still missing for the eyes, and the portal onl
   assert.deepEqual(milestone('nether').goals(s), [
     { item: 'obsidian', count: 10 },
     { item: 'flint_and_steel', count: 1 },
-    { item: 'blaze_rod', count: 6 },
-    { item: 'ender_pearl', count: 14 }
+    { item: 'blaze_rod', count: 7 },
+    { item: 'ender_pearl', count: 16 }
   ])
   s.memory.addPoi('nether_portal', { x: 0, y: 70, z: 0 })
   const goals = milestone('nether').goals(s)

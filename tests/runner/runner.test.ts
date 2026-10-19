@@ -168,9 +168,9 @@ test('maxTicks: play stops when its tick budget runs out, the work in hand abort
 test('netherNeeds: the rods and pearls still wanted for the eyes', async () => {
   const { netherNeeds } = await import('../../src/milestones')
   const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
-  assert.deepEqual(netherNeeds(inv({})), { rods: 7, pearls: 14 })
-  assert.deepEqual(netherNeeds(inv({ blaze_rod: 3, ender_pearl: 10, ender_eye: 2 })), { rods: 3, pearls: 2 })
-  assert.deepEqual(netherNeeds(inv({ ender_eye: 14 })), { rods: 0, pearls: 0 })
+  assert.deepEqual(netherNeeds(inv({})), { rods: 8, pearls: 16 })
+  assert.deepEqual(netherNeeds(inv({ blaze_rod: 3, ender_pearl: 10, ender_eye: 2 })), { rods: 4, pearls: 4 })
+  assert.deepEqual(netherNeeds(inv({ ender_eye: 16 })), { rods: 0, pearls: 0 })
 })
 
 test('a death spot the bot died at again going back for its items is left for good, and so is a death near it', async () => {
