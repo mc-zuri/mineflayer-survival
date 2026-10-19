@@ -549,8 +549,8 @@ export class Resolver {
     if (!Number.isFinite(own)) return null
     t.cost += own
     if (t.cost > limit) return null
-    t.inv.add(item, Math.max(n, Math.floor(blockCount * perBlock)))
-    const extra = extras(src.drops, item, blockCount)
+    const extra = [...surplus(item, n, blockCount * perBlock), ...extras(src.drops, item, blockCount)]
+    t.inv.add(item, n)
     for (const e of extra) t.inv.add(e.name, e.count)
     t.visited.add(src.block)
     t.dims.add(src.dimension)
@@ -570,8 +570,8 @@ export class Resolver {
     const own = this.dimensionCost(s, src.dimension) + this.findCost(s, src.mob, 'mob', src.dimension, src.find, src.each) + (kills - 1) * src.each + kills * (FIGHT_TICKS + PICKUP_TICKS)
     s.cost += own
     if (s.cost > limit) return null
-    s.inv.add(item, Math.max(n, Math.floor(kills * perKill)))
-    const extra = extras(src.drops, item, kills)
+    const extra = [...surplus(item, n, kills * perKill), ...extras(src.drops, item, kills)]
+    s.inv.add(item, n)
     for (const e of extra) s.inv.add(e.name, e.count)
     s.visited.add(src.mob)
     s.dims.add(src.dimension)
@@ -676,6 +676,17 @@ function takeFrom (inv: Inventory, alts: readonly string[], count: number): Item
   }
   if (left > 0) throw new Error(`planner bug: ${left} of [${alts.join(', ')}] missing`)
   return out
+}
+
+/**
+ * What the blocks or kills are expected to drop of the item beyond the n wanted (a second cow's second beef, the rest
+ * of a redstone ore's 4 or 5): a step's extra, which the plan's check (checkPlan) counts as the planning does. Left out
+ * of the step, a later step planned on it found it missing ("smelt 4 cooked_beef needs 4 beef, has 3" on each of 30
+ * plans on 26.3 seed 2, the food milestone given up); in the step's count, it would be wanted of every kill.
+ */
+function surplus (item: string, n: number, expected: number): ItemCount[] {
+  const more = Math.floor(expected + 1e-9) - n
+  return more > 0 ? [{ name: item, count: more }] : []
 }
 
 function extras (drops: ReadonlyArray<{ item: string, count: number }>, item: string, times: number): ItemCount[] {

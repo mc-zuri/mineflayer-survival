@@ -276,3 +276,25 @@ test('the logs a plan burns and crafts are cut before the trip down for its ore'
   const fresh = obtain(registry, 'stone_pickaxe', 1)
   assert.equal(checkPlan(registry, fresh.steps, {}).ok, true)
 })
+
+test('a plan counts what its kills and blocks drop beyond the count wanted as its check does: the second beef of a cow, the rest of an ore\'s redstone', () => {
+  // 26.3 seed 2: a cooked beef wanted, then 5 in all: the first cow's second beef was planned on for the 4 more, and
+  // the check of every one of 30 plans found "smelt 4 cooked_beef needs 4 beef, has 3"
+  const food = { furnace: 1, coal: 8, stone_sword: 1 }
+  const beef = obtainAll(registry, [{ item: 'cooked_beef', count: 1 }, { item: 'cooked_beef', count: 5 }], { inventory: food })
+  assert.equal(beef.ok, true)
+  const check = checkPlan(registry, beef.steps, food)
+  assert.equal(check.ok, true, check.error?.reason)
+  assert.equal(total(kills(beef.steps, 'cow')), 4)
+  assert.equal(kills(beef.steps, 'cow').reduce((n, s) => n + s.kills, 0), 3)
+  assert.deepEqual(kills(beef.steps, 'cow')[0].extra?.find(e => e.name === 'beef'), { name: 'beef', count: 2 })
+  assert.equal(check.inventory.count('cooked_beef'), 5)
+  assert.equal(check.inventory.count('beef'), beef.inventory.count('beef'))
+
+  const ore = { iron_pickaxe: 1 }
+  const redstone = obtainAll(registry, [{ item: 'redstone', count: 3 }, { item: 'redstone', count: 9 }], { inventory: ore })
+  assert.equal(redstone.ok, true)
+  const oreCheck = checkPlan(registry, redstone.steps, ore)
+  assert.equal(oreCheck.ok, true, oreCheck.error?.reason)
+  assert.equal(oreCheck.inventory.count('redstone'), redstone.inventory.count('redstone'))
+})

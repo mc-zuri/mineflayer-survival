@@ -15,7 +15,7 @@ interface StepBase {
   count: number
   /** estimated ticks */
   cost: number
-  /** other items it is expected to yield (the flint of gravel, the leather of a cow) */
+  /** other items it is expected to yield (the flint of gravel, the leather of a cow), and of `item` what's expected beyond `count` */
   extra?: ItemCount[]
 }
 
