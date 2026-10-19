@@ -11,6 +11,10 @@ import { countItems, findInventoryItem, settleInventory, trace, waitTicks } from
 import { type Entity, distanceToBox, entityBox, eyePosition, isAlive, yawPitchOf } from '../skills/combatUtil'
 import { attackStrengthOf } from '../skills/weapons'
 import { requireGoldArmor } from '../skills/armor'
+import type { Pos } from '../core/memory'
+import { NETHER_DEATH_COST, nearDeath } from './deaths'
+
+export { NETHER_DEATHS_KEPT, NETHER_DEATH_COST, NETHER_DEATH_RADIUS, nearDeath, rememberNetherDeath } from './deaths'
 
 export { requireGoldArmor, goldArmorRequired } from '../skills/armor'
 
@@ -43,6 +47,8 @@ export interface NetherSafetyOptions {
    * and blazes' and ghasts' fireballs knock the bot about; more widens the search a lot)
    */
   edgeCost?: number
+  /** a higher cost near the nether's deaths remembered (rememberNetherDeath) (default true) */
+  avoidDeaths?: boolean
 }
 
 interface BlockInfoLike { position: Vec3, type: number }
@@ -86,7 +92,8 @@ export function overLava (isLava: (pos: Vec3) => boolean, isAir: (pos: Vec3) => 
  * The pathfinder's movement settings for the nether: exclusion areas (the pathfinder's own hook) that forbid
  * standing next to lava or on magma, breaking a block lava rests against, placing a block over lava (the
  * pathfinder's bridges have no rails: bridgeOverLava does), and breaking what piglins guard while one is near; and a
- * high cost on a ledge's edge (edgeHazardCost), so that the path keeps to the inner side or tunnels.
+ * high cost on a ledge's edge (edgeHazardCost), so that the path keeps to the inner side or tunnels, and near where
+ * the bot died.
  */
 export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): Partial<MovementOptions> {
   const gap = opts.lavaGap ?? 1
@@ -113,6 +120,8 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
     }
     return v
   }
+  // where the bot died in the nether: kept away from (rememberNetherDeath)
+  const deaths: Pos[] = opts.avoidDeaths === false ? [] : (bot.survival?.memory?.getPois('nether_death', { dimension: 'the_nether' }) ?? [])
   const magmaStates = stateRange(bot, 'magma_block')
   const isMagma = (p: Vec3): boolean => { const s = stateAt(p); return s != null && s >= magmaStates[0] && s <= magmaStates[1] }
   const isAir = (p: Vec3): boolean => { const s = stateAt(p); return s != null && airStates.some(([a, b]) => s >= a && s <= b) }
@@ -138,6 +147,7 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
     // deltas' lava pockets)
     if (isLava(p) || isLava(p.offset(0, 1, 0)) || isLava(p.offset(0, -1, 0)) || lavaBeside(isLava, p, gap) || isMagma(p.offset(0, -1, 0))) cost = FORBID
     else if (nearCost > 0 && lavaBeside(isLava, p, gap + 1)) cost = nearCost
+    if (cost < FORBID && deaths.length > 0 && nearDeath(deaths, p)) cost += NETHER_DEATH_COST
     stepCache.set(key, cost)
     return cost
   }

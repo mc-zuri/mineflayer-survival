@@ -8,6 +8,7 @@ import { SkillError, isSkillError, throwIfAborted } from './errors'
 import { navigate, walkTo } from './navigate'
 import { trace } from './util'
 import { normalizeDimension } from '../core/memory'
+import { nearDeath } from '../nether/deaths'
 
 export interface GridCellView {
   /** the cell holds nothing to collide with (air, plants, a portal), and no lava or fire */
@@ -21,6 +22,8 @@ export interface GridCellView {
    * over the nether's lava sea is walked only when there's no way round (default 0)
    */
   edgeCost?: number
+  /** cells' worth charged on top for standing in the cell (the nether's death spots) */
+  cellCost?: (c: Vec3) => number
 }
 
 /** blocks without a collision box that hurt or hold the bot: kept out of */
@@ -102,7 +105,7 @@ export function gridPath (view: GridCellView, start: Vec3, isGoal: (c: Vec3) => 
       return path
     }
     for (const n of gridNeighbours(view, c)) {
-      const cost = g + 1 + (n.y !== c.y ? 0.5 : 0) + (edgeCost > 0 ? edgeCost * deadlySides(view, n) : 0)
+      const cost = g + 1 + (n.y !== c.y ? 0.5 : 0) + (edgeCost > 0 ? edgeCost * deadlySides(view, n) : 0) + (view.cellCost?.(n) ?? 0)
       const k = key(n)
       if ((best.get(k) ?? Infinity) <= cost) continue
       best.set(k, cost)
@@ -154,16 +157,21 @@ class MinHeap<T> {
 
 /** cells' worth charged for each deadly side of a cell the grid walk goes by: in the nether, and elsewhere */
 export const GRID_EDGE_COST = { the_nether: 10, other: 2 }
+/** cells' worth charged for a cell near where the bot died in the nether (nearDeath) */
+export const GRID_DEATH_COST = 5
 
 /** the bot's world as gridWalk sees it */
 export function botGridView (bot: Bot): GridCellView {
   const isLava = (p: Vec3): boolean => bot.blockAt(p)?.name === 'lava'
   const nether = normalizeDimension(bot.game?.dimension) === 'the_nether'
+  // where the bot died in the nether: kept away from, as the pathfinder's nether settings do
+  const deaths = nether ? (bot.survival?.memory?.getPois('nether_death', { dimension: 'the_nether' }) ?? []) : []
   return {
     free: p => { const b = bot.blockAt(p); return b != null && b.boundingBox === 'empty' && !HARMFUL.has(b.name) },
     floor: p => { const b = bot.blockAt(p); return b != null && b.boundingBox === 'block' && b.name !== 'magma_block' },
     lava: isLava,
-    edgeCost: nether ? GRID_EDGE_COST.the_nether : GRID_EDGE_COST.other
+    edgeCost: nether ? GRID_EDGE_COST.the_nether : GRID_EDGE_COST.other,
+    cellCost: deaths.length > 0 ? c => nearDeath(deaths, c) ? GRID_DEATH_COST : 0 : undefined
   }
 }
 

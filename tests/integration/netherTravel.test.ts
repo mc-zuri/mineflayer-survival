@@ -3,7 +3,7 @@
 // to it in pairs that touch at a corner, lava pockets in the floor) crossed with the nether's settings, there and back,
 // without going into the lava; a magma cube fought across a lava pocket without the bot walking into it. 26.3 nether
 // runs died in the lava: a Diagonal across two shafts' corners, a fight chasing a magma cube into a pocket, a step back
-// off a ledge over the lava sea.
+// off a ledge over the lava sea. And a room walked across round the spot where the bot died, there and back.
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import { appendFileSync } from 'node:fs'
@@ -12,7 +12,7 @@ import { Vec3 } from 'vec3'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
-import { withNetherSafety } from '../../src/nether/safety'
+import { NETHER_DEATH_RADIUS, rememberNetherDeath, withNetherSafety } from '../../src/nether/safety'
 import { travel } from '../../src/skills/travel'
 import { fight } from '../../src/skills/fight'
 import { countItems, waitUntil } from '../../src/skills/gather'
@@ -131,6 +131,39 @@ describe(`nether travel on a ${DEFAULT_VERSION} server (seed 4)`, { timeout: 20 
     assert.strictEqual(lava, 0, 'the bot was in the lava')
     assert.ok(lowest >= y - 1, `the bot fell to ${lowest}`)
     assert.ok(bot.health > 0)
+  })
+
+  it('walks round where it died in the nether on the way across, with the grid walk and with the pathfinder', async () => {
+    // an open room 40 long and 25 wide, a death remembered in its middle
+    const [x0, y, z0] = [200, 100, 260]
+    const start = new Vec3(x0 + 0.5, y, z0 + 0.5)
+    const death = { x: x0 + 20, y, z: z0 }
+    await arrive(start)
+    await fill(`${x0 - 2} ${y - 2} ${z0 - 13} ${x0 + 42} ${y + 5} ${z0 + 13} netherrack`)
+    await fill(`${x0 - 1} ${y} ${z0 - 12} ${x0 + 41} ${y + 4} ${z0 + 12} air`)
+    await nether(`tp ${USERNAME} ${start.x} ${y} ${start.z}`)
+    await run(`effect clear ${USERNAME} minecraft:slow_falling`)
+    await kit([['netherrack', 16], ['cooked_beef', 8]])
+    assert.ok(await waitUntil(bot, () => bot.entity.onGround && bot.entity.position.distanceTo(start) < 1.5, 200))
+    const memory = bot.survival.memory
+    for (const old of memory.getPois('nether_death', { dimension: 'the_nether' })) memory.removePoi('nether_death', old, 'the_nether')
+    rememberNetherDeath(memory, death)
+    let nearest = Infinity
+    const onTick = (): void => { nearest = Math.min(nearest, Math.hypot(bot.entity.position.x - death.x - 0.5, bot.entity.position.z - death.z - 0.5)) }
+    bot.on('physicsTick', onTick)
+    try {
+      await withNetherSafety(bot, async () => await travel(bot, { target: new Vec3(x0 + 40, y, z0), range: 2 }))
+      const gridNearest = nearest
+      nearest = Infinity
+      await withNetherSafety(bot, async () => await bot.pathfinder.goto(new goals.GoalNear(x0, y, z0, 1)))
+      console.log(`round the death: the grid walk ${gridNearest.toFixed(1)} from it at nearest, the pathfinder ${nearest.toFixed(1)}; back at ${bot.entity.position.toString()}`)
+      assert.ok(gridNearest > NETHER_DEATH_RADIUS - 1.5, `the walk there went ${gridNearest.toFixed(1)} from the death`)
+      assert.ok(nearest > NETHER_DEATH_RADIUS - 1.5, `the walk back went ${nearest.toFixed(1)} from the death`)
+      assert.ok(bot.entity.position.distanceTo(start) <= 2.5, `the walk back ended at ${bot.entity.position.toString()}`)
+    } finally {
+      bot.off('physicsTick', onTick)
+      memory.removePoi('nether_death', death, 'the_nether')
+    }
   })
 
   it('fights a magma cube across a lava pocket from its edge, never stepping into the lava', async () => {

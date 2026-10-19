@@ -11,6 +11,7 @@ import { Diagnostics, type DiagnosticsOptions } from './diagnostics'
 import { StockPolicy, type StockOptions } from './planner/stock'
 import { advancementsDone, type AdvancementProgressPacket } from './core/advancements'
 import { SCAFFOLD_ITEMS } from './executor/steps'
+import { rememberNetherDeath } from './nether/deaths'
 
 export * from './core'
 export * from './planner'
@@ -101,6 +102,7 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
         const dimension = normalizeDimension(bot.game?.dimension)
         const lookup = (p: any): any => bot.blockAt(p)
         memory.setDeath(bot.entity.position, dimension, dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined)
+        if (dimension === 'the_nether') rememberNetherDeath(memory, bot.entity.position)
       }
       tasks.cancelAll('DIED', 'the bot died')
     })
