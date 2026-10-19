@@ -6,8 +6,8 @@ import { creeperSwelling, fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
 import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterToLeave, sleepThroughNight, type NightPlan } from '../skills/shelter'
 import { bestMeleeWeapon } from '../skills/weapons'
-import { hasLineOfSight, type Entity } from '../skills/combatUtil'
-import { GHAST_FIREBALL, deflectFireball, fireballIncoming } from '../nether/safety'
+import { hasLineOfSight, isAlive, type Entity } from '../skills/combatUtil'
+import { GHAST_FIREBALL, deadlyDropBeside, deflectFireball, fireballIncoming, keepFromGhast, nearestGhast } from '../nether/safety'
 import { isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
 import { isBed } from '../core/items'
@@ -62,7 +62,50 @@ export const fireballReflex: Reflex = {
     if (!config.fireball.enabled) return null
     const fireball = Object.values(bot.entities).find(e => e.name === GHAST_FIREBALL && fireballIncoming(bot, e, config.fireball.range))
     if (fireball == null) return null
-    return { name: 'fireball', priority: config.fireball.priority, detail: 'deflect fireball', run: async (signal) => await deflectFireball(bot, fireball, { signal }) }
+    return { name: 'fireball', priority: config.fireball.priority, detail: 'deflect fireball', run: async (signal) => await deflectFireball(bot, fireball, { signal, range: config.fireball.range }) }
+  }
+}
+
+/** the ticks each bot has held back from each ghast (ghastReflex's budget) */
+const ghastHeld = new WeakMap<Bot, Map<number, number>>()
+
+/**
+ * A ghast in sight while the bot stands by a deadly drop (a bridge or a ledge over the lava sea): back to firm ground
+ * and held there facing it (keepFromGhast), its fireballs hit back by the fireball reflex, till it's gone or dead, or
+ * the bot has held config.ghast.budgetTicks for it. A 26.3 bot on a ledge over the lava sea was blown off it by a
+ * ghast's fireball; one walking a bridge stopped for a fireball only once its pathfinder let go of it, 10 ticks on and
+ * too late.
+ */
+export const ghastReflex: Reflex = {
+  name: 'ghast',
+  priority: 88,
+  check (ctx) {
+    const { bot, config } = ctx
+    if (!config.ghast.enabled) return null
+    const ghast = nearestGhast(bot, config.ghast.range)
+    if (ghast == null) return null
+    let held = ghastHeld.get(bot)
+    if (held == null) ghastHeld.set(bot, held = new Map())
+    for (const id of held.keys()) if (bot.entities[id] == null) held.delete(id)
+    const spent = held.get(ghast.id) ?? 0
+    if (spent >= config.ghast.budgetTicks) return null
+    if (!deadlyDropBeside(p => bot.blockAt(p) as any, bot.entity.position) || !hasLineOfSight(bot, ghast)) return null
+    // (a mob come to fight first: the hostiles reflex's)
+    const fightNear = (): boolean => Object.values(bot.entities).some(e => e.name !== 'ghast' && isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.range)
+    if (fightNear()) return null
+    const counts = held
+    return {
+      name: 'ghast',
+      priority: config.ghast.priority,
+      detail: 'keep from ghast',
+      run: async (signal) => await keepFromGhast(bot, ghast, {
+        signal,
+        range: config.ghast.range,
+        maxTicks: Math.min(config.ghast.holdTicks, config.ghast.budgetTicks - spent),
+        onHold: () => counts.set(ghast.id, (counts.get(ghast.id) ?? 0) + 1),
+        until: fightNear
+      })
+    }
   }
 }
 
@@ -384,4 +427,4 @@ export const nightReflex: Reflex = {
   }
 }
 
-export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, nightReflex, armorReflex]
+export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, nightReflex, armorReflex]

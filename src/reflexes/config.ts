@@ -94,8 +94,22 @@ export interface ReflexConfig {
   }
   fireball: {
     enabled: boolean
-    /** hit back a ghast's fireball coming at the bot within this distance (default 12) */
+    /**
+     * hit back a ghast's fireball coming at the bot within this distance (default 32: the task it stops may take 10 ticks
+     * and more to let go of the bot, its move finished, and a fireball crosses 12 blocks in 10; one seen at 12 blew a
+     * 26.3 bot off a bridge before the reflex had it)
+     */
     range: number
+    priority: number
+  }
+  ghast: {
+    enabled: boolean
+    /** a ghast within this distance, in sight, while the bot stands by a deadly drop: back to firm ground (default 48) */
+    range: number
+    /** ticks held there at a time (default 200) */
+    holdTicks: number
+    /** ticks held for one ghast in all, then it's let be (default 600: one that won't come into sight to shoot or die) */
+    budgetTicks: number
     priority: number
   }
   night: {
@@ -154,7 +168,9 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
   drowning: { enabled: true, air: 6, recoverTo: 18, searchRadius: 8, maxTicks: 300, priority: 85 },
   // above fighting (60): a few clicks, and a fight in bare skin took every hit at full (a zombie's 3, not 1.2 through iron)
   armor: { enabled: true, priority: 70 },
-  fireball: { enabled: true, range: 12, priority: 92 },
+  fireball: { enabled: true, range: 32, priority: 92 },
+  // under the fireball (92) and the lava and fire (90), above a creeper (80)
+  ghast: { enabled: true, range: 48, holdTicks: 200, budgetTicks: 600, priority: 88 },
   night: { enabled: true, sleep: true, shelter: true, minArmor: 10, minDamage: 6, bedDistance: 16, shelterRadius: 8, priority: 40 },
   totem: { enabled: true, always: true, health: 10, priority: 95 },
   fall: { enabled: true, priority: 93 },

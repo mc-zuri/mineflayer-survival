@@ -7,8 +7,9 @@ import type { MovementOptions } from '@nxg-org/mineflayer-pathfinder'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { craft } from '../skills/craft'
 import { placeBlock } from '../skills/placeBlock'
+import { walkTo } from '../skills/navigate'
 import { countItems, findInventoryItem, settleInventory, trace, waitTicks } from '../skills/util'
-import { type Entity, distanceToBox, entityBox, eyePosition, isAlive, yawPitchOf } from '../skills/combatUtil'
+import { type Entity, distanceToBox, entityBox, eyePosition, hasLineOfSight, isAlive, yawPitchOf } from '../skills/combatUtil'
 import { attackStrengthOf } from '../skills/weapons'
 import { requireGoldArmor } from '../skills/armor'
 import type { Pos } from '../core/memory'
@@ -283,29 +284,269 @@ export function fireballIncoming (bot: Bot, fireball: Entity, range = 12): boole
 }
 
 /**
- * Hits a ghast's fireball back: looks at it and swings when it's within reach (AbstractHurtingProjectile.hurt turns it
- * along the attacker's look, and it explodes on the ghast or far off). The shield is the fallback (it takes the blast
- * when raised toward it). Returns whether it was hit.
+ * A fireball's place and motion `ticks` ticks on, as it flies (AbstractHurtingProjectile.tick, from 1.21.2: its motion
+ * sped up 0.1 along itself and slowed by its inertia 0.95, then the move; mineflayer moves it so between the server's
+ * updates)
  */
-export async function deflectFireball (bot: Bot, fireball: Entity, opts: { signal?: AbortSignal, maxTicks?: number, reach?: number } = {}): Promise<boolean> {
-  const reach = opts.reach ?? 3
-  const strength = attackStrengthOf(bot)
-  for (let t = 0; t < (opts.maxTicks ?? 60); t++) {
-    throwIfAborted(opts.signal)
-    if (!isAlive(bot, fireball)) return false
-    const point = fireball.position.offset(0, 0.5, 0)
-    const { yaw, pitch } = yawPitchOf(point.minus(eyePosition(bot)))
-    await bot.look(yaw, pitch, true)
-    if (distanceToBox(eyePosition(bot), entityBox({ position: fireball.position, width: 1, height: 1 })) <= reach) {
-      // any swing turns it: attack strength doesn't matter
-      strength.attack(fireball)
-      trace('deflectFireball: hit at', fireball.position.toString())
-      await waitTicks(bot, 2, opts.signal)
-      return true
+export function fireballAhead (fireball: Pick<Entity, 'position' | 'velocity'>, ticks: number): { position: Vec3, velocity: Vec3 } {
+  const position = fireball.position.clone()
+  const velocity = fireball.velocity.clone()
+  for (let t = 0; t < ticks; t++) {
+    const length = velocity.norm()
+    if (length >= 1e-5) velocity.translate(velocity.x * 0.1 / length, velocity.y * 0.1 / length, velocity.z * 0.1 / length)
+    velocity.scale(Math.fround(0.95))
+    position.add(velocity)
+  }
+  return { position, velocity }
+}
+
+type BlockLookup = (pos: Vec3) => { name: string, boundingBox: string } | null
+
+/**
+ * Where a fireball's flight ends within `maxTicks` (fireballAhead): the first point of its way in a block with a
+ * collision box (ProjectileUtil.getHitResultOnMoveVector clips its move against the blocks; LargeFireball.onHit blows
+ * up there). Null when it flies on that long.
+ */
+export function fireballImpact (lookup: BlockLookup, fireball: Pick<Entity, 'position' | 'velocity'>, maxTicks = 40): { at: Vec3, ticks: number } | null {
+  let now = { position: fireball.position.clone(), velocity: fireball.velocity.clone() }
+  for (let t = 1; t <= maxTicks; t++) {
+    const next = fireballAhead(now, 1)
+    const move = next.position.minus(now.position)
+    const steps = Math.max(1, Math.ceil(move.norm() / 0.1))
+    for (let i = 1; i <= steps; i++) {
+      const p = now.position.plus(move.scaled(i / steps))
+      if (lookup(p.floored())?.boundingBox === 'block') return { at: p, ticks: t }
     }
-    await waitTicks(bot, 1, opts.signal)
+    now = next
+  }
+  return null
+}
+
+/** blocks from a fireball's blast the bot keeps (ServerExplosion: a ghast's power 1 reaches 2 blocks, and breaks the netherrack within one or so of it) */
+export const FIREBALL_BLAST_CLEAR = 3
+
+/**
+ * Where the bot steps out of a fireball's blast at `impact` (one it can't hit back: it comes from under the bridge, or
+ * hits a block by the bot first): the nearest cell within `radius` FIREBALL_BLAST_CLEAR off the blast, away from it,
+ * with a floor, room for the bot, and a floor under every cell on the straight walk there (along a bridge, not off
+ * its side). Null when there's none.
+ */
+export function dodgeCell (lookup: BlockLookup, position: Vec3, impact: Vec3, radius = 4): Vec3 | null {
+  const solid = (p: Vec3): boolean => lookup(p)?.boundingBox === 'block'
+  const open = (p: Vec3): boolean => {
+    const b = lookup(p)
+    return b != null && b.boundingBox === 'empty' && !/lava|fire|water/.test(b.name)
+  }
+  const stand = (p: Vec3): boolean => solid(p.offset(0, -1, 0)) && open(p) && open(p.offset(0, 1, 0))
+  const feet = position.floored()
+  const away = position.minus(impact)
+  let best: { cell: Vec3, d: number } | null = null
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      const cell = feet.offset(dx, 0, dz)
+      const middle = cell.offset(0.5, 0, 0.5)
+      if (middle.offset(0, 0.9, 0).distanceTo(impact) < FIREBALL_BLAST_CLEAR) continue
+      if ((middle.x - position.x) * away.x + (middle.z - position.z) * away.z < 0) continue
+      if (!stand(cell)) continue
+      const d = Math.hypot(middle.x - position.x, middle.z - position.z)
+      if (best != null && d >= best.d) continue
+      // the walk: every cell a fifth of a block apart on the line there stood on
+      let ok = true
+      for (let s = 0.2; s < d && ok; s += 0.2) ok = stand(position.plus(middle.minus(position).scaled(s / d)).floored())
+      if (ok) best = { cell, d }
+    }
+  }
+  return best?.cell ?? null
+}
+
+/**
+ * Whether the bot can hit a fireball back before it blows up: on one of its ticks to `ticks` (fireballAhead) it's
+ * within reach of the bot's eyes with nothing in the way
+ */
+function hittableBefore (bot: Bot, fireball: Entity, ticks: number, reach: number): boolean {
+  const eye = eyePosition(bot)
+  for (let t = 0; t <= ticks; t++) {
+    const { position } = fireballAhead(fireball, t)
+    const box = entityBox({ position, width: 1, height: 1 })
+    if (distanceToBox(eye, box) > reach) continue
+    const to = position.offset(0, 0.5, 0)
+    const delta = to.minus(eye)
+    const dist = delta.norm()
+    let clear = true
+    for (let s = 0.2; s < dist - 0.5 && clear; s += 0.2) clear = bot.blockAt(eye.plus(delta.scaled(s / dist)).floored())?.boundingBox !== 'block'
+    if (clear) return true
   }
   return false
+}
+
+/**
+ * Hits ghasts' fireballs back while any comes at the bot (fireballIncoming), the nearest first (one let go for the first
+ * kept a 26.3 bot from the next, which blew it off a bridge into the lava): a swing turns it along the attacker's look
+ * (Player.attack: ProjectileDeflection.AIM_DEFLECT), the look the server has, the one the last tick's move sent. So each
+ * tick the bot looks through where the fireball will be next tick (fireballAhead): at the ghast when that look goes
+ * through it (one sent back kills its ghast), else at its top (an upward look sends it up, off the bridge and the
+ * ground); and swings when it's within reach and in the crosshair. One that will blow up by the bot before it can be
+ * hit (from under its bridge, against a block beside it) is stepped away from (dodgeCell). Returns whether one was hit.
+ */
+export async function deflectFireball (bot: Bot, fireball: Entity, opts: { signal?: AbortSignal, maxTicks?: number, reach?: number, range?: number } = {}): Promise<boolean> {
+  const reach = opts.reach ?? 3
+  const strength = attackStrengthOf(bot)
+  let hit = false
+  let target: Entity | null = fireball
+  for (let t = 0; t < (opts.maxTicks ?? 100); t++) {
+    throwIfAborted(opts.signal)
+    // the one coming nearest (the first, till it's gone or turned)
+    const incoming = Object.values(bot.entities).filter(e => e.name === GHAST_FIREBALL && isAlive(bot, e) && fireballIncoming(bot, e, opts.range ?? 12))
+      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))
+    if (target == null || !isAlive(bot, target) || !incoming.includes(target)) target = incoming[0] ?? null
+    if (target == null) return hit
+    // one that blows up by the bot before it can be hit (from under the bridge it stands on, against a block beside
+    // it): out of its blast (tests/integration/ghast's bot had its bridge blown from under it into the lava)
+    const impact = fireballImpact(p => bot.blockAt(p) as any, target)
+    if (impact != null && impact.at.distanceTo(bot.entity.position.offset(0, 0.9, 0)) < FIREBALL_BLAST_CLEAR && !hittableBefore(bot, target, impact.ticks, reach)) {
+      const to = dodgeCell(p => bot.blockAt(p) as any, bot.entity.position, impact.at)
+      if (to != null) {
+        trace('deflectFireball: out of the blast at', impact.at.toString(), 'in', impact.ticks, 'ticks, to', to.toString())
+        bot.setControlState('sprint', true)
+        await walkTo(bot, to.offset(0.5, 0, 0.5), { within: 0.3, maxTicks: Math.max(4, impact.ticks + 2) }, opts.signal)
+        continue
+      }
+    }
+    const box = entityBox({ position: target.position, width: 1, height: 1 })
+    // the look the last tick sent is on it now: the swing
+    if (distanceToBox(eyePosition(bot), box) <= reach) {
+      // any swing turns it: attack strength doesn't matter (none sent when a block is in the way)
+      if (strength.attack(target)) {
+        trace('deflectFireball: hit at', target.position.toString(), 'from', bot.entity.position.toString())
+        hit = true
+        target = null
+        await waitTicks(bot, 1, opts.signal)
+        continue
+      }
+      trace('deflectFireball: not in the crosshair at', target.position.toString(), 'from', bot.entity.position.toString())
+    }
+    // the look for the next tick's swing, through where it will be then: at the ghast when that look goes through it
+    // (sent back at it: a ghast's own fireball kills it), else at the top of its box
+    const ahead = fireballAhead(target, 1).position
+    const eye = eyePosition(bot)
+    const ghast = nearestGhast(bot)
+    const atGhast = ghast?.position.offset(0, 2, 0).minus(eye)
+    const look = atGhast != null && rayHitsBox(eye, atGhast, entityBox({ position: ahead, width: 1, height: 1 })) ? atGhast : ahead.offset(0, 0.85, 0).minus(eye)
+    const { yaw, pitch } = yawPitchOf(look)
+    await bot.look(yaw, pitch, true)
+    await waitTicks(bot, 1, opts.signal)
+  }
+  return hit
+}
+
+/** whether a ray from `origin` along `dir` goes through a box (the slab test) */
+export function rayHitsBox (origin: Vec3, dir: Vec3, box: { min: Vec3, max: Vec3 }): boolean {
+  let near = 0
+  let far = Infinity
+  for (const axis of ['x', 'y', 'z'] as const) {
+    if (Math.abs(dir[axis]) < 1e-9) {
+      if (origin[axis] < box.min[axis] || origin[axis] > box.max[axis]) return false
+      continue
+    }
+    const a = (box.min[axis] - origin[axis]) / dir[axis]
+    const b = (box.max[axis] - origin[axis]) / dir[axis]
+    near = Math.max(near, Math.min(a, b))
+    far = Math.min(far, Math.max(a, b))
+  }
+  return near <= far
+}
+
+/** the ghast nearest the bot within `range`, alive */
+export function nearestGhast (bot: Bot, range = 64): Entity | null {
+  let best: Entity | null = null
+  for (const e of Object.values(bot.entities)) {
+    if (e.name !== 'ghast' || !isAlive(bot, e)) continue
+    const d = e.position.distanceTo(bot.entity.position)
+    if (d <= range && (best == null || d < best.position.distanceTo(bot.entity.position))) best = e
+  }
+  return best
+}
+
+/** blocks a fall may be and not kill or hurt much: deeper (or onto lava) is a deadly one */
+export const SAFE_DROP = 4
+
+/**
+ * Whether one of the 8 cells about `feet` (at its level) is a deadly drop: no floor under it, and lava, or no ground
+ * within SAFE_DROP blocks, below. A blast pushes a bot standing by one over the edge (ServerExplosion knocks it 1 - d /
+ * 2 blocks a tick from 2 off, the shield or not).
+ */
+export function deadlyDropBeside (lookup: BlockLookup, feet: Vec3): boolean {
+  const f = feet.floored()
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      if (dx === 0 && dz === 0) continue
+      const cell = f.offset(dx, 0, dz)
+      if (lookup(cell)?.boundingBox === 'block') continue
+      for (let dy = 1; dy <= SAFE_DROP + 1; dy++) {
+        const b = lookup(cell.offset(0, -dy, 0))
+        if (b == null) break
+        if (b.name === 'lava') return true
+        if (b.boundingBox === 'block') break
+        if (dy === SAFE_DROP + 1) return true
+      }
+    }
+  }
+  return false
+}
+
+/**
+ * The nearest cell within `radius` with no deadly drop beside it (deadlyDropBeside), room for the bot and a floor, walked
+ * to straight on with a floor under every cell on the way (off a bridge onto the ground it starts from). Null for none.
+ */
+export function firmCell (lookup: BlockLookup, position: Vec3, radius = 6): Vec3 | null {
+  const solid = (p: Vec3): boolean => lookup(p)?.boundingBox === 'block'
+  const open = (p: Vec3): boolean => {
+    const b = lookup(p)
+    return b != null && b.boundingBox === 'empty' && !/lava|fire|water/.test(b.name)
+  }
+  const stand = (p: Vec3): boolean => solid(p.offset(0, -1, 0)) && open(p) && open(p.offset(0, 1, 0))
+  const feet = position.floored()
+  let best: { cell: Vec3, d: number } | null = null
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dz = -radius; dz <= radius; dz++) {
+      const cell = feet.offset(dx, 0, dz)
+      const middle = cell.offset(0.5, 0, 0.5)
+      const d = Math.hypot(middle.x - position.x, middle.z - position.z)
+      if (d > radius || (best != null && d >= best.d)) continue
+      if (!stand(cell) || deadlyDropBeside(lookup, cell)) continue
+      let ok = true
+      for (let s = 0.2; s < d && ok; s += 0.2) ok = stand(position.plus(middle.minus(position).scaled(s / d)).floored())
+      if (ok) best = { cell, d }
+    }
+  }
+  return best?.cell ?? null
+}
+
+/**
+ * A ghast about while the bot stands by a deadly drop (a bridge or a ledge over the lava sea): back to firm ground near
+ * (firmCell) and held there facing it while it's in sight, `maxTicks` at most, its fireballs hit back meanwhile (the
+ * fireball reflex: one sent back kills it). A 26.3 bot stood on a ledge 58 blocks over the lava sea when a ghast's
+ * fireball came, and its blast knocked it off. Held till `until` too (another mob come to fight). Resolves the ticks held.
+ */
+export async function keepFromGhast (bot: Bot, ghast: Entity, opts: { signal?: AbortSignal, maxTicks?: number, range?: number, onHold?: () => void, until?: () => boolean } = {}): Promise<number> {
+  const lookup: BlockLookup = p => bot.blockAt(p) as any
+  if (deadlyDropBeside(lookup, bot.entity.position)) {
+    const to = firmCell(lookup, bot.entity.position)
+    if (to != null) {
+      trace('keepFromGhast: off the edge to', to.toString(), 'from', bot.entity.position.toString(), 'the ghast at', ghast.position.toString())
+      await walkTo(bot, to.offset(0.5, 0, 0.5), { within: 0.25, maxTicks: 40 }, opts.signal)
+    }
+  }
+  let held = 0
+  for (; held < (opts.maxTicks ?? 200); held++) {
+    throwIfAborted(opts.signal)
+    if (!isAlive(bot, ghast) || ghast.position.distanceTo(bot.entity.position) > (opts.range ?? 48) || !hasLineOfSight(bot, ghast) || opts.until?.() === true) break
+    const { yaw, pitch } = yawPitchOf(ghast.position.offset(0, 2, 0).minus(eyePosition(bot)))
+    await bot.look(yaw, pitch, true)
+    await waitTicks(bot, 1, opts.signal)
+    opts.onHold?.()
+  }
+  return held
 }
 
 // ---- a guarded bridge over lava

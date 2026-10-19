@@ -148,3 +148,90 @@ test('netherMoveSettings lavaBelow: no step onto a floor with lava under it (a l
   assert.equal(lid({ position: new Vec3(1, 64, 0), type: 0 }), FORBID)
   assert.equal(lid({ position: new Vec3(-3, 64, 0), type: 0 }), 0)
 })
+
+// a one-wide stone bridge along x at z 0 (its top at y 63, the feet at 64) from x 0 to 20 over lava at y 58, a landing
+// of stone x -6 to -1 all across; the rest air
+function bridgeWorld (pos: Vec3): string {
+  if (pos.y === 58) return 'lava'
+  if (pos.y === 63 && pos.x >= 0 && pos.x <= 20 && pos.z === 0) return 'stone'
+  if (pos.y <= 63 && pos.y > 58 && pos.x >= -6 && pos.x <= -1) return 'stone'
+  return 'air'
+}
+const blocks = (pos: Vec3): { name: string, boundingBox: string } => {
+  const name = bridgeWorld(pos.floored())
+  return { name, boundingBox: name === 'stone' ? 'block' : 'empty' }
+}
+
+test('fireballAhead: sped up 0.1 along its motion and slowed by 0.95 each tick, then moved (AbstractHurtingProjectile from 1.21.2)', async () => {
+  const { fireballAhead } = await import('../../src/nether/safety')
+  const fb = { position: new Vec3(0, 70, 0), velocity: new Vec3(0.5, 0, 0) }
+  const one = fireballAhead(fb, 1)
+  assert.ok(Math.abs(one.velocity.x - 0.57) < 1e-6 && Math.abs(one.position.x - 0.57) < 1e-6, one.position.toString())
+  assert.ok(Math.abs(fireballAhead(fb, 3).position.x - 1.906175) < 1e-5)
+  assert.deepEqual(fb.position.toArray(), [0, 70, 0], 'the fireball itself is left where it is')
+})
+
+test('fireballImpact: where its way first meets a block, and when; none when it flies clear', async () => {
+  const { fireballImpact } = await import('../../src/nether/safety')
+  // from under the bridge, rising at it
+  const hit = fireballImpact(blocks, { position: new Vec3(5.5, 60, 0.5), velocity: new Vec3(0, 0.5, 0) })
+  assert.ok(hit != null)
+  assert.ok(hit.at.y >= 63 && hit.at.y < 63.2 && Math.floor(hit.at.x) === 5, hit.at.toString())
+  assert.ok(hit.ticks >= 4 && hit.ticks <= 6, `${hit.ticks} ticks`)
+  assert.equal(fireballImpact(blocks, { position: new Vec3(5.5, 70, 0.5), velocity: new Vec3(0, 0, 0.5) }, 20), null)
+})
+
+test('dodgeCell: out of a blast under the bot along the bridge, 3 blocks off it, never off its side', async () => {
+  const { dodgeCell, FIREBALL_BLAST_CLEAR } = await import('../../src/nether/safety')
+  const bot = new Vec3(5.5, 64, 0.5)
+  const impact = new Vec3(5.5, 63.1, 0.5)
+  const to = dodgeCell(blocks, bot, impact)
+  assert.ok(to != null)
+  assert.equal(to.z, 0, `${to.toString()} is off the bridge`)
+  assert.ok(to.offset(0.5, 0.9, 0.5).distanceTo(impact) >= FIREBALL_BLAST_CLEAR, to.toString())
+  assert.equal(Math.abs(to.x + 0.5 - bot.x), 3, 'the nearest such cell')
+  // a blast east of the bot: west, away from it
+  const west = dodgeCell(blocks, bot, new Vec3(7.5, 64.5, 0.5))
+  assert.ok(west != null && west.x < 5, String(west))
+})
+
+test('deadlyDropBeside and firmCell: a bridge over lava is by a deadly drop, the landing\'s middle is not, and is the cell to go back to', async () => {
+  const { deadlyDropBeside, firmCell } = await import('../../src/nether/safety')
+  assert.equal(deadlyDropBeside(blocks, new Vec3(3.5, 64, 0.5)), true)
+  assert.equal(deadlyDropBeside(blocks, new Vec3(-3.5, 64, 0.5)), false)
+  // the landing's edge cell by the bridge (x -1) has the bridge's sides beside it
+  assert.equal(deadlyDropBeside(blocks, new Vec3(-0.5, 64, 0.5)), true)
+  const to = firmCell(blocks, new Vec3(2.5, 64, 0.5))
+  assert.ok(to != null && to.x === -2 && to.z === 0, String(to))
+  // the middle of a long bridge: none near
+  assert.equal(firmCell(blocks, new Vec3(15.5, 64, 0.5)), null)
+  // a step down of 2 onto ground is no deadly drop
+  const ledge = (p: Vec3): { name: string, boundingBox: string } => ({ name: p.y <= (p.x > 0 ? 61 : 63) ? 'stone' : 'air', boundingBox: p.y <= (p.x > 0 ? 61 : 63) ? 'block' : 'empty' })
+  assert.equal(deadlyDropBeside(ledge, new Vec3(0.5, 64, 0.5)), false)
+})
+
+test('rayHitsBox: a look through a box, past it, and away from it', async () => {
+  const { rayHitsBox } = await import('../../src/nether/safety')
+  const box = { min: new Vec3(4, 0, -0.5), max: new Vec3(5, 1, 0.5) }
+  assert.equal(rayHitsBox(new Vec3(0, 0.5, 0), new Vec3(1, 0, 0), box), true)
+  assert.equal(rayHitsBox(new Vec3(0, 0.5, 0), new Vec3(1, 0.5, 0), box), false)
+  assert.equal(rayHitsBox(new Vec3(0, 0.5, 0), new Vec3(-1, 0, 0), box), false)
+})
+
+test('ghast reflex: a ghast in sight while the bot is on a bridge over lava; not on firm ground, nor behind a wall, nor with a mob to fight', async () => {
+  const { ghastReflex } = await import('../../src/reflexes/rules')
+  const { ReflexEngine } = await import('../../src/reflexes/engine')
+  const check = (position: Vec3, world: (p: Vec3) => string, extra: any[] = []): string | null => {
+    const ghast = entity({ name: 'ghast', position: new Vec3(8, 62, 12) })
+    const bot = fakeBot({ position, world, entities: [ghast, ...extra] })
+    const engine = new ReflexEngine(bot, { enabled: false })
+    const task = ghastReflex.check(engine.context())
+    engine.stop()
+    return task?.detail ?? null
+  }
+  assert.equal(check(new Vec3(5.5, 64, 0.5), bridgeWorld), 'keep from ghast')
+  assert.equal(check(new Vec3(-3.5, 64, 0.5), bridgeWorld), null)
+  const walled = (p: Vec3): string => p.z >= 3 && p.z <= 4 && p.y < 80 ? 'stone' : bridgeWorld(p)
+  assert.equal(check(new Vec3(5.5, 64, 0.5), walled), null)
+  assert.equal(check(new Vec3(5.5, 64, 0.5), bridgeWorld, [entity({ name: 'blaze', position: new Vec3(8.5, 64, 0.5) })]), null)
+})
