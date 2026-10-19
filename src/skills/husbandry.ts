@@ -8,6 +8,7 @@ import { SkillError, isAbort, throwIfAborted } from './errors'
 import { navigateNear } from './navigate'
 import { countItems, findInventoryItem, trace, waitTicks, waitUntil } from './util'
 import { type Entity, isAlive, metadataValue } from './combatUtil'
+import { steerToward } from './steer'
 
 /** what each kept animal is bred with (Animal.isFood: the items tags of 1.21.11 and 26.3) */
 export const BREEDING_FOOD: Readonly<Record<string, readonly string[]>> = {
@@ -172,4 +173,45 @@ export async function releaseAnimals (bot: Bot, args: ReleaseArgs = {}, signal?:
   }
   trace('releaseAnimals:', released, 'from', egg)
   return released
+}
+
+/**
+ * The herd brought back together by home: the animals of the kind more than 8 blocks off it (and within 96) walked up
+ * to with their food in hand, and walked home again at a walk, not a sprint (TemptGoal: an animal follows a player
+ * holding its food within 10 blocks, at 1.25 its speed), the nearest first, at most `max` trips. Resolves the trips.
+ */
+export async function gatherHerd (bot: Bot, home: Vec3, opts: { mob?: string, max?: number } = {}, signal?: AbortSignal): Promise<number> {
+  const mob = opts.mob ?? 'cow'
+  const food = (BREEDING_FOOD[mob] ?? []).find(f => countItems(bot, f) > 0)
+  if (food == null) return 0
+  let trips = 0
+  for (; trips < (opts.max ?? 3); trips++) {
+    throwIfAborted(signal)
+    const stray = Object.values(bot.entities)
+      .filter(e => e.name === mob && isAlive(bot, e) && e.position.distanceTo(home) > 8 && e.position.distanceTo(home) <= 96)
+      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
+    if (stray == null) break
+    try {
+      await navigateNear(bot, stray.position, 3, signal)
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('gatherHerd: no way to the', mob, stray.id, (err as Error).message)
+      continue
+    }
+    const item = findInventoryItem(bot, food)
+    if (item == null) break
+    await bot.equip(item, 'hand')
+    // a walk home with the food in hand, looking back now and then for the herd to keep up (the bot stops while none
+    // is within 6)
+    for (let t = 0; t < 1200 && bot.entity.position.distanceTo(home) > 3; t++) {
+      throwIfAborted(signal)
+      const following = Object.values(bot.entities).some(e => e.name === mob && e.position.distanceTo(bot.entity.position) <= 6)
+      if (following) steerToward(bot, home, { sprint: false })
+      else bot.clearControlStates()
+      await waitTicks(bot, 1, signal)
+    }
+    bot.clearControlStates()
+  }
+  trace('gatherHerd:', trips, 'trips for the', mob + 's')
+  return trips
 }

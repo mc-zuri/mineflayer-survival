@@ -22,7 +22,7 @@ import { collectBlock } from './skills/collectBlock'
 import { countBookshelves, enchant, enchantGear, findEnchantingTable } from './skills/enchant'
 import { applyBooks } from './skills/anvil'
 import { experience, gainLevels } from './skills/xp'
-import { BREEDING_FOOD, breedAnimals, isAdult, releaseAnimals } from './skills/husbandry'
+import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from './skills/husbandry'
 import { plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
 import { TRIP_KIT, stashTripKit } from './skills/tripKit'
@@ -74,7 +74,7 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
   const start = executor.tasks.tick
   const home = executor.memory.getPois(HERD, { dimension: 'overworld', near: bot.entity.position })[0]
   const at = home != null ? new Vec3(home.x, home.y, home.z) : bot.entity.position.clone()
-  const near = (e: any): boolean => e.position.distanceTo(at) <= 48
+  const near = (e: any): boolean => e.position.distanceTo(at) <= 96
   let lastLine = ''
   for (;;) {
     if (signal.aborted) throw signal.reason
@@ -102,8 +102,10 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
       })
       continue
     }
-    // the farm's wheat for the herd, and the pairs ready
+    // the farm's wheat for the herd, the strays brought home (cows wander: the herd of 8 let out was 5 to 8 by home
+    // over 150000 ticks, its calves gone off), and the pairs ready
     await harvestGrownFarms(bot, executor, signal, log, false).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+    await executor.task('gather the herd', async (s) => await gatherHerd(bot, at, { mob: 'cow' }, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
     if (countItems(bot, 'wheat') >= 2 && state.adults >= 2) {
       await executor.task('breed the cows', async (s) => await breedAnimals(bot, { mob: 'cow', pairs: Math.floor(state.adults / 2), radius: 48 }, s), signal)
         .then(r => log(`herd: ${r.fed} fed (${state.adults} cows, ${state.calves} calves, ${state.leather} leather of ${want})`))

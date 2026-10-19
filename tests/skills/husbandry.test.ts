@@ -2,7 +2,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { BREED_COOLDOWN_TICKS, breedingPairs, releaseSpots } from '../../src/skills/husbandry'
+import { BREED_COOLDOWN_TICKS, breedingPairs, gatherHerd, releaseSpots } from '../../src/skills/husbandry'
 import { caneSpot, caneSpots, waterHoleSite } from '../../src/skills/caneFarm'
 
 test('breedingPairs: adults within 8 blocks of each other, not fed in the cooldown, nearest first', () => {
@@ -106,4 +106,12 @@ test('herdChore: breed and wait while the adults beyond the two breeders fall sh
   assert.strictEqual(herdChore({ leather: 45, want: 46, adults: 3, calves: 0, wheat: 0 }), 'kill')
   assert.strictEqual(herdChore({ leather: 45, want: 46, adults: 2, calves: 0, wheat: 0 }), 'breed')
   assert.strictEqual(herdChore({ leather: 46, want: 46, adults: 2, calves: 0, wheat: 0 }), 'done')
+})
+
+test('gatherHerd: nothing to do without the food or with the herd all by home', async () => {
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const home = new Vec3(0, 64, 0)
+  const cow = (id: number, x: number): any => ({ id, name: 'cow', position: new Vec3(x, 64, 0), metadata: [] })
+  assert.strictEqual(await gatherHerd(fakeBot({ entities: [cow(5, 30)] }), home), 0)
+  assert.strictEqual(await gatherHerd(fakeBot({ items: [item('wheat', 10)], entities: [cow(5, 3), cow(6, -4)] }), home), 0)
 })
