@@ -106,3 +106,24 @@ test('headInWater: seagrass or kelp at the eyes is under water too', () => {
   const kelp = (p: Vec3): string => p.y < 60 ? 'stone' : p.y < 64 ? 'kelp_plant' : 'air'
   assert.strictEqual(headInWater(fakeBot({ position: new Vec3(0.5, 60, 0.5), world: kelp })), true)
 })
+
+test('inHazard: on a magma block (the hot floor), unless sneaking or off the ground', async () => {
+  const { onHotFloor } = await import('../../src/skills/escape')
+  const magma = (p: Vec3): string => p.y === 63 && p.x === 0 && p.z === 0 ? 'magma_block' : p.y < 64 ? 'stone' : 'air'
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: magma })
+  bot.entity.onGround = true
+  assert.strictEqual(onHotFloor(bot), true)
+  assert.strictEqual(inHazard(bot), true)
+  bot.setControlState('sneak', true)
+  assert.strictEqual(inHazard(bot), false)
+  bot.setControlState('sneak', false)
+  bot.entity.onGround = false
+  assert.strictEqual(inHazard(bot), false)
+  const beside = fakeBot({ position: new Vec3(1.5, 64, 0.5), world: magma })
+  beside.entity.onGround = true
+  assert.strictEqual(inHazard(beside), false)
+  // its way off: the stand next to it, not the magma
+  const { isSafeStand } = await import('../../src/skills/escape')
+  assert.strictEqual(isSafeStand(bot, new Vec3(0, 64, 0)), false)
+  assert.strictEqual(isSafeStand(bot, new Vec3(1, 64, 0)), true)
+})

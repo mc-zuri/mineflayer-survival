@@ -40,11 +40,22 @@ export function boxCells (bot: Bot): Vec3[] {
 /**
  * In lava, fire or powder snow: a block of the cells the bot's box is in (boxCells), or mineflayer's lava flag. A
  * 26.3 bot stood 140 ticks by a fire on the netherrack, its box in the fire's cell and its middle out of it, hurt every
- * 10 ticks (in_fire), and the reflex, which looked at its middle's cells alone, never went.
+ * 10 ticks (in_fire), and the reflex, which looked at its middle's cells alone, never went. Or on a magma block not
+ * sneaking (onHotFloor).
  */
 export function inHazard (bot: Bot): boolean {
   const bad = (n: string | undefined): boolean => BURNING.has(n ?? '') || FREEZING.has(n ?? '')
-  return (bot.entity as any).isInLava === true || boxCells(bot).some(p => bad(nameAt(bot, p)))
+  return (bot.entity as any).isInLava === true || boxCells(bot).some(p => bad(nameAt(bot, p))) || onHotFloor(bot)
+}
+
+/**
+ * On a magma block, not sneaking: hurt every 10 ticks (MagmaBlock.stepOn, the block at Entity.getOnPos, 0.2 under the
+ * feet, unless isSteppingCarefully). A 26.3 bot knocked onto one in a basalt delta by a magma cube swarm stood there
+ * 150 ticks, the hostiles reflex 'cornered' over and over, and died of the floor (hot_floor 14 times) and the cubes.
+ */
+export function onHotFloor (bot: Bot): boolean {
+  if (bot.entity.onGround !== true || bot.getControlState?.('sneak') === true) return false
+  return nameAt(bot, bot.entity.position.offset(0, -0.2, 0).floored()) === 'magma_block'
 }
 
 const CLIMB_FILLERS = ['cobblestone', 'netherrack', 'cobbled_deepslate', 'dirt', 'stone', 'andesite', 'diorite', 'granite', 'blackstone', 'basalt', 'end_stone']
