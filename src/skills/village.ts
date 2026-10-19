@@ -6,6 +6,7 @@ import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
+import { findBlock, findBlocks } from '../core/findBlocks'
 
 /** blocks only villages have, one enough (a bell, VillagerProfession's job sites with paths) */
 export const VILLAGE_BLOCKS = ['bell']
@@ -45,11 +46,11 @@ export function villageAt (signs: VillageSigns): Vec3 | null {
 export function villageSigns (bot: Bot, radius = VILLAGE_RADIUS): VillageSigns {
   const id = (n: string): number | undefined => bot.registry.blocksByName[n]?.id
   const bellId = id('bell')
-  const bell = bellId == null ? null : bot.findBlock({ matching: bellId, maxDistance: radius })?.position ?? null
+  const bell = bellId == null ? null : findBlock(bot, { matching: bellId, maxDistance: radius })?.position ?? null
   const hints: Record<string, number> = {}
   for (const n of VILLAGE_HINTS) {
     const i = id(n)
-    hints[n] = i == null ? 0 : bot.findBlocks({ matching: i, maxDistance: radius, count: 16 }).length
+    hints[n] = i == null ? 0 : findBlocks(bot, { matching: i, maxDistance: radius, count: 16 }).length
   }
   const villagers = Object.values(bot.entities)
     .filter(e => e !== bot.entity && VILLAGE_MOBS.includes(e.name ?? '') && e.position.distanceTo(bot.entity.position) <= radius)

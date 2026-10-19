@@ -7,6 +7,7 @@ import { Vec3 } from 'vec3'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
+import { findBlocks } from '../core/findBlocks'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { navigate } from '../skills/navigate'
@@ -187,7 +188,7 @@ export function rememberAround (bot: Bot, memory: WorldMemory, names: readonly s
   const dimension = normalizeDimension(bot.game?.dimension)
   let n = 0
   const counts = new Map<number, number>()
-  for (const pos of bot.findBlocks({ matching: ids, maxDistance: radius, count: perName * ids.length })) {
+  for (const pos of findBlocks(bot, { matching: ids, maxDistance: radius, count: perName * ids.length })) {
     const block = bot.blockAt(pos)
     if (block == null) continue
     const seen = counts.get(block.type) ?? 0
@@ -761,7 +762,7 @@ export interface ExploreForBlocksArgs {
 export function findNear (bot: Bot, names: readonly string[], radius: number, exclude?: (pos: Vec3) => boolean): Vec3 | null {
   const ids = names.map(n => bot.registry.blocksByName[n]?.id).filter((id): id is number => id != null)
   if (ids.length === 0) return null
-  const found = bot.findBlocks({ matching: ids, maxDistance: radius, count: 64 }).filter(p => exclude == null || !exclude(p))
+  const found = findBlocks(bot, { matching: ids, maxDistance: radius, count: 64 }).filter(p => exclude == null || !exclude(p))
   return found[0] ?? null
 }
 

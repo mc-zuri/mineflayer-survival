@@ -4,6 +4,7 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import type { Pos } from '../core/memory'
+import { findBlocks } from '../core/findBlocks'
 import type { Seed } from '../worldgen/random'
 import { parseSeed } from '../worldgen/random'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
@@ -33,7 +34,7 @@ export function levelSeed (seed: Seed): Seed {
 /** fortress blocks in the loaded chunks around the bot */
 export function scanFortressBlocks (bot: Bot, maxDistance = 128, count = 4096): Array<{ name: string, pos: Pos }> {
   const ids = FORTRESS_BLOCKS.map(n => bot.registry.blocksByName[n]?.id).filter((n): n is number => n != null)
-  return bot.findBlocks({ matching: ids, maxDistance, count }).map(p => ({ name: bot.blockAt(p)?.name ?? '', pos: { x: p.x, y: p.y, z: p.z } }))
+  return findBlocks(bot, { matching: ids, maxDistance, count }).map(p => ({ name: bot.blockAt(p)?.name ?? '', pos: { x: p.x, y: p.y, z: p.z } }))
 }
 
 /** the fortress in view (the loaded chunks), or null */
@@ -203,8 +204,8 @@ export function fortressSpawnersInView (bot: Bot, maxDistance = 128): Pos[] {
   const id = bot.registry.blocksByName.spawner?.id
   if (id == null) return []
   const bricks = FORTRESS_BLOCKS.map(n => bot.registry.blocksByName[n]?.id).filter((n): n is number => n != null)
-  return bot.findBlocks({ matching: id, maxDistance, count: 16 })
-    .filter(p => bot.findBlocks({ point: p, matching: bricks, maxDistance: 6, count: 1 }).length > 0)
+  return findBlocks(bot, { matching: id, maxDistance, count: 16 })
+    .filter(p => findBlocks(bot, { point: p, matching: bricks, maxDistance: 6, count: 1 }).length > 0)
     .map(p => ({ x: p.x, y: p.y, z: p.z }))
 }
 

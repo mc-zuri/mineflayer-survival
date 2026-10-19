@@ -12,6 +12,7 @@ import {
   type Block, type ItemCounts
 } from './util'
 import { dig } from '../core/actions'
+import { findBlocks } from '../core/findBlocks'
 
 export interface CollectBlockArgs {
   /** block names to look for, nearest first */
@@ -140,7 +141,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     // a column plant's bottom block stays to grow back: the one above it is broken instead (and the rest falls)
     const keepBase = args.keepBase !== false
     const targets = new Map<string, Vec3>()
-    for (const pos of bot.findBlocks({ matching: ids, maxDistance, count: 256 })) {
+    for (const pos of findBlocks(bot, { matching: ids, maxDistance, count: 256 })) {
       const target = keepBase && COLUMN_PLANTS.has(bot.blockAt(pos)?.name ?? '') ? columnHarvestTarget(p => bot.blockAt(p), pos) : pos
       if (target != null) targets.set(vecKey(target), target)
     }
