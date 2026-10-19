@@ -473,3 +473,18 @@ test('pearls by night: an enderman there\'s no way to is passed over for the nig
   assert.equal(tasks.filter(t => t === 'endermen for pearls').length, 1)
   assert.equal(tasks[1], 'a night leg for endermen')
 })
+
+test('pearls in the nether: PEARL_BARTERS barters at most, then the legs, a piglin in sight or not', async () => {
+  const { pearlsInTheNether, PEARL_BARTERS } = await import('../../src/milestones')
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('gold_ingot', 32)] })
+  bot.game.dimension = 'the_nether'
+  const piglin = entity({ name: 'piglin', position: new Vec3(5.5, 64, 0.5) })
+  bot.entities[piglin.id] = piglin
+  const tasks: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (name: string) => { tasks.push(name); executor.tasks.tick += 1000; if (name === 'barter for pearls') throw new Error('TIMEOUT: 0 of 16 pearls') } }
+  await pearlsInTheNether(bot, executor, 4, new AbortController().signal, () => {}, '2')
+  assert.equal(tasks.filter(t => t === 'barter for pearls').length, PEARL_BARTERS)
+  assert.equal(tasks[PEARL_BARTERS], 'a leg for pearls')
+})

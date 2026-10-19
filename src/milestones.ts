@@ -869,6 +869,12 @@ export function pearlGround (bot: Bot, gold: boolean): { kind: 'warped forest' |
 export const PEARL_NETHER_TICKS = 48000
 /** rounds (a barter, a hunt, a wait or a leg each) the nether's pearl search takes at most, ticks or not */
 export const PEARL_NETHER_ROUNDS = 80
+/**
+ * barters the nether's pearl search tries at most: a piglin in sight with gold held was a barter each round, 7 in a row
+ * timing out with no pearl and 14000 ticks gone before the first leg to the warped forest (26.3 run n2-d; a pearl is
+ * one barter in about 47)
+ */
+export const PEARL_BARTERS = 2
 /** a wait in a warped forest for its endermen to spawn round the bot */
 export const FOREST_WAIT = 300
 /** ticks with no enderman come to a spot in a warped forest before the search goes on to another spot in one */
@@ -899,6 +905,7 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
   let lastEnderman = executor.tasks.tick
   // the endermen there was no way to (huntEndermen's), left alone unless they come
   const passOver = new Set<number>()
+  let barters = 0
   const goLeg = async (to: Vec3, why: string): Promise<boolean> => {
     legsWalked++
     log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for ${why}`)
@@ -922,7 +929,8 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
     const enderman = Object.values(bot.entities).some(e => huntable(bot, e, passOver) && e.position.distanceTo(bot.entity.position) <= 48)
     if (enderman) lastEnderman = executor.tasks.tick
     try {
-      if (piglin && count('gold_ingot') > 0) {
+      if (piglin && count('gold_ingot') > 0 && barters < PEARL_BARTERS) {
+        barters++
         // room for what the piglins throw (a full bag ended the bartering at once: NO_SPACE, 26.3)
         await executor.makeRoom?.({ gold_ingot: count('gold_ingot') }, signal)?.catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err; log(`ender pearls: no room: ${(err as Error).message}`) })
         await executor.task('barter for pearls', async (s) => await barterForPearls(bot, { pearls: want, range: 48 }, s), signal)
