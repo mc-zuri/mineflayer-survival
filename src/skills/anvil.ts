@@ -4,7 +4,7 @@ import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
 import type { Vec3 } from 'vec3'
 import { SkillError, throwIfAborted } from './errors'
-import { ENCHANT_PREFERENCES, bestOfKind, itemKind, type ItemKind } from './enchant'
+import { ENCHANT_PREFERENCES, GEAR_ORDER, bestOfKind, itemKind, type ItemKind } from './enchant'
 import { navigateToReach } from './navigate'
 import { placeBlock } from './placeBlock'
 import { findPlacement } from './placement'
@@ -150,11 +150,13 @@ export async function repairItem (bot: Bot, args: { item: string, anvil?: Vec3 }
 /** where each kind of armor is worn */
 const WORN_SLOTS: Partial<Record<ItemKind, 'head' | 'torso' | 'legs' | 'feet'>> = { helmet: 'head', chestplate: 'torso', leggings: 'legs', boots: 'feet' }
 
-/** the kinds of gear an enchantment is wanted on (ENCHANT_PREFERENCES), most wanted first */
-function kindsFor (enchantment: string): ItemKind[] {
-  return (Object.keys(ENCHANT_PREFERENCES) as ItemKind[])
-    .filter(kind => kind !== 'book' && kind !== 'other' && ENCHANT_PREFERENCES[kind].includes(enchantment))
-    .sort((a, b) => ENCHANT_PREFERENCES[a].indexOf(enchantment) - ENCHANT_PREFERENCES[b].indexOf(enchantment))
+/**
+ * The kinds of gear an enchantment is wanted on (ENCHANT_PREFERENCES), the gear's own order (GEAR_ORDER: the
+ * pickaxe, the sword, the armor...), the kinds not in it left out: a book of unbreaking went on a wooden hoe, whose
+ * list has it first, on 26.3
+ */
+export function kindsFor (enchantment: string): ItemKind[] {
+  return GEAR_ORDER.filter(kind => ENCHANT_PREFERENCES[kind]?.includes(enchantment))
 }
 
 /**

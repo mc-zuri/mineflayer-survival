@@ -43,3 +43,11 @@ test('applyBooks: a book of protection goes on the helmet worn, taken off for th
   }
   assert.deepStrictEqual(calls, ['unequip head', 'equip diamond_helmet head'])
 })
+
+test('kindsFor: a book goes to the gear in its order (the pickaxe before a hoe, the armor for protection), never a hoe', async () => {
+  const { kindsFor } = await import('../../src/skills/anvil')
+  assert.ok(!kindsFor('unbreaking').includes('hoe' as any))
+  assert.equal(kindsFor('unbreaking')[0], 'pickaxe')
+  assert.equal(kindsFor('protection')[0], 'chestplate')
+  assert.equal(kindsFor('sharpness')[0], 'sword')
+})
