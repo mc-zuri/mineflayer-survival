@@ -14,6 +14,7 @@ import { portalDestination } from './coords'
 import { blockGetter, buildPortal, lightPortal, type BuildPortalArgs } from './portalSkills'
 import { checkPortalFrame, portalFrame, type PortalFrame } from './portal'
 import { withNetherSafety } from './safety'
+import { findBlocks } from '../core/findBlocks'
 
 /** NetherPortalBlock.getPortalTransitionTime: a survival player stands in the portal 80 ticks (gamerule players_nether_portal_default_delay) */
 export const PORTAL_TRANSITION_TICKS = 80
@@ -41,7 +42,7 @@ export function dimensionOf (bot: Bot): Dimension {
 /** the portal's bottom cells: nether_portal blocks with something else below (where a player walks in) */
 function portalFloor (bot: Bot, near: Vec3, radius = 4): Vec3[] {
   const id = bot.registry.blocksByName.nether_portal.id
-  return bot.findBlocks({ point: near, matching: id, maxDistance: radius, count: 64 })
+  return findBlocks(bot, { point: near, matching: id, maxDistance: radius, count: 64 })
     .filter(p => bot.blockAt(p.offset(0, -1, 0))?.type !== id)
     .sort((a, b) => a.distanceTo(near) - b.distanceTo(near))
 }
@@ -49,7 +50,7 @@ function portalFloor (bot: Bot, near: Vec3, radius = 4): Vec3[] {
 /** the nearest nether_portal block that stands on something, within `maxDistance` */
 export function findPortal (bot: Bot, maxDistance = 32): Vec3 | null {
   const id = bot.registry.blocksByName.nether_portal.id
-  const found = bot.findBlocks({ matching: id, maxDistance, count: 256 })
+  const found = findBlocks(bot, { matching: id, maxDistance, count: 256 })
     .filter(p => bot.blockAt(p.offset(0, -1, 0))?.type !== id)
     .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
   return found[0] ?? null

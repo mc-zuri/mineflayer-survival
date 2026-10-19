@@ -14,6 +14,7 @@ import { navigate, navigateToReach } from '../skills/navigate'
 import { placeBlock } from '../skills/placeBlock'
 import { findPlacement } from '../skills/placement'
 import { countItems, findInventoryItem, settleInventory, trace, waitTicks, waitUntil, withinReach } from '../skills/util'
+import { findBlock } from '../core/findBlocks'
 import {
   type Axis, type BlockGetter, type CastStep, type LavaCastOptions, type LavaCastPlan, type PortalFrame,
   checkPortalFrame, chooseFrameSite, findLavaSources, frameCell, isAir, isSolid, planLavaCast, portalFrame
@@ -393,7 +394,7 @@ export async function flintFromGravel (bot: Bot, signal?: AbortSignal, maxBreaks
     throwIfAborted(signal)
     if (countItems(bot, 'gravel') === 0) {
       // gravel in the world nearby
-      const found = bot.findBlock({ matching: bot.registry.blocksByName.gravel.id, maxDistance: 32 })
+      const found = findBlock(bot, { matching: bot.registry.blocksByName.gravel.id, maxDistance: 32 })
       if (found == null) throw new SkillError('MISSING_ITEMS', 'no gravel for flint')
       await collectBlock(bot, { positions: [found.position] }, signal)
       continue

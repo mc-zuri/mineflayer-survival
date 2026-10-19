@@ -18,6 +18,7 @@ import { placeBlock } from './placeBlock'
 import { isFree, isSolid, type BlockLookup, type BlockView } from './placement'
 import { experience, gainLevels, type GainLevelsArgs } from './xp'
 import { REPLACEABLE_BLOCKS, countItems, inventoryItems, resyncInventory, settleInventory, trace, waitTicks, waitUntil, type Block } from './util'
+import { findBlock } from '../core/findBlocks'
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The bookshelves
@@ -351,7 +352,7 @@ export function findEnchantingTable (bot: Bot, opts: { table?: Vec3, memory?: Wo
     const block = bot.blockAt(new Vec3(poi.x, poi.y, poi.z))
     if (block?.type === tableId) return block
   }
-  return bot.findBlock({ matching: tableId, maxDistance: opts.maxDistance ?? 32 })
+  return findBlock(bot, { matching: tableId, maxDistance: opts.maxDistance ?? 32 })
 }
 
 /** an item to read the offers with: a book, else any unenchanted item that takes enchantments */

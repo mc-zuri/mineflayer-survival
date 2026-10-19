@@ -12,6 +12,7 @@ import { isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
 import { isBed } from '../core/items'
 import { breakFall, landingY, shouldBreakFall } from '../skills/fall'
+import { blockIdsNamed, findBlock } from '../core/findBlocks'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
 /**
@@ -351,7 +352,7 @@ function cachedNightPlan (ctx: ReflexContext): NightPlan {
   const cached = planCache.get(bot)
   if (cached != null && ctx.tick - cached.tick < 100 && cached.tick <= ctx.tick) return cached.plan
   const bedNearby = config.night.sleep && typeof bot.findBlock === 'function' &&
-    bot.findBlock({ matching: (b: any) => isBed(b.name), maxDistance: config.night.bedDistance }) != null
+    findBlock(bot, { matching: blockIdsNamed(bot, isBed), maxDistance: config.night.bedDistance }) != null
   const plan = nightPlan(bot, { minArmor: config.night.minArmor, minDamage: config.night.minDamage, bedNearby })
   planCache.set(bot, { tick: ctx.tick, plan })
   return plan

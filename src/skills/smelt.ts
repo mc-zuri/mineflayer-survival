@@ -11,6 +11,7 @@ import { placeBlock } from './placeBlock'
 import { findPlacementNear } from './placement'
 import { countItems, countsDelta, inventoryCounts, itemId, settleInventory, waitTicks, waitUntil, type Block, type ItemCounts } from './util'
 import { burnTicks, SMELT_TICKS } from '../core/items'
+import { findBlock } from '../core/findBlocks'
 
 // AbstractFurnaceBlockEntity's cook time and the furnace burn times (FuelValues), one table for the planner and the skill
 export { SMELT_TICKS, burnTicks }
@@ -96,7 +97,7 @@ async function getFurnace (bot: Bot, args: SmeltArgs, signal?: AbortSignal): Pro
     if (block == null || !ids.includes(block.type)) throw new SkillError('NOT_FOUND', `no furnace at ${args.furnace.toString()}`)
     return { furnace: block, placed: false }
   }
-  const found = bot.findBlock({ matching: ids, maxDistance: args.furnaceDistance ?? 16 })
+  const found = findBlock(bot, { matching: ids, maxDistance: args.furnaceDistance ?? 16 })
   if (found != null) return { furnace: found, placed: false }
   if (countItems(bot, 'furnace') === 0) await craft(bot, { item: 'furnace' }, signal)
   const pos = findPlacementNear(pos => bot.blockAt(pos), bot.entity.position)

@@ -157,7 +157,7 @@ export function campSpots (bot: Bot, spawner: Vec3, standOff = 5): Vec3[] {
 /** puts out the fire blocks within `radius` of the bot's feet (a hit each, from where it stands); resolves how many */
 export async function putOutFiresNear (bot: Bot, radius: number, signal?: AbortSignal): Promise<number> {
   const ids = ['fire', 'soul_fire'].map(n => bot.registry.blocksByName[n]?.id).filter((id): id is number => id != null)
-  const fires = bot.findBlocks({ matching: ids, maxDistance: radius + 1, count: 16 })
+  const fires = findBlocks(bot, { matching: ids, maxDistance: radius + 1, count: 16 })
     .filter(p => p.distanceTo(bot.entity.position) <= radius + 1)
   let out = 0
   for (const p of fires) {

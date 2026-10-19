@@ -9,6 +9,7 @@ import { navigateToReach } from './navigate'
 import { placeBlock } from './placeBlock'
 import { findPlacementNear } from './placement'
 import { countItems, inventoryItems, itemId, resyncInventory, settleInventory, type Block } from './util'
+import { findBlock } from '../core/findBlocks'
 
 type CraftingFunc = Awaited<ReturnType<typeof buildStatic>>
 export type CraftingPlan = ReturnType<CraftingFunc>
@@ -78,7 +79,7 @@ async function getTable (bot: Bot, args: CraftArgs, signal?: AbortSignal): Promi
     if (block?.type !== tableId) throw new SkillError('NOT_FOUND', `no crafting table at ${args.table.toString()}`)
     return { table: block, placed: false }
   }
-  const found = bot.findBlock({ matching: tableId, maxDistance: args.tableDistance ?? 16 })
+  const found = findBlock(bot, { matching: tableId, maxDistance: args.tableDistance ?? 16 })
   if (found != null) return { table: found, placed: false }
 
   if (countItems(bot, 'crafting_table') === 0) await craft(bot, { item: 'crafting_table' }, signal)

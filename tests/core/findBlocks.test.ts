@@ -53,3 +53,25 @@ test('findBlocks: the nearest blocks of the ids within reach, as a look at every
     rig.stopPassivePhysics()
   }
 })
+
+test('blockIdsNamed: a bed of any colour is found by its ids (the night checks: bedAtHand, nightCheck, the night plan), one Block made for the answer', async () => {
+  const { isBed } = await import('../../src/core/items')
+  const { blockIdsNamed } = await import('../../src/core/findBlocks')
+  const { rig, world } = netherSnapshotRig(new Vec3(470.5, 70, 20.5))
+  try {
+    const bot = rig.bot
+    bot.game = { ...(bot.game ?? {}), minY: -64, height: 384 }
+    const ids = blockIdsNamed(bot, isBed)
+    assert.strictEqual(ids.length, 16)
+    assert.ok(ids.includes(bot.registry.blocksByName.white_bed.id) && ids.includes(bot.registry.blocksByName.black_bed.id))
+    world.setBlock(new Vec3(475, 75, 22), 'red_bed')
+    let blockAts = 0
+    const blockAt = bot.blockAt.bind(bot)
+    bot.blockAt = (p: Vec3) => { blockAts++; return blockAt(p) }
+    assert.strictEqual(findBlock(bot, { matching: ids, point: new Vec3(470, 70, 20), maxDistance: 32 })?.name, 'red_bed')
+    assert.strictEqual(blockAts, 1)
+    assert.strictEqual(findBlock(bot, { matching: ids, point: new Vec3(470, 70, 20), maxDistance: 4 }), null)
+  } finally {
+    rig.stopPassivePhysics()
+  }
+})

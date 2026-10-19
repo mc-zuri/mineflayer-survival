@@ -13,6 +13,7 @@ import { navigateNear } from '../skills/navigate'
 import { countItems, findInventoryItem, trace, waitTicks, waitUntil } from '../skills/util'
 import { isLavaSource } from './portal'
 import { withNetherSafety } from './safety'
+import { findBlocks } from '../core/findBlocks'
 
 /** a block as the obsidian maker reads it: its name, collision and state */
 export type ObsidianLookup = (pos: Vec3) => { name: string, boundingBox: string, properties?: Record<string, any> } | null
@@ -93,7 +94,7 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
     // (not one with lava against it, a deep lake's lid, nor the one under the bot: mined, the lava takes the bot)
     const feet = bot.entity.position.floored().offset(0, -1, 0)
     const lavaNext = (p: Vec3): boolean => [...SIDES, new Vec3(0, -1, 0), new Vec3(0, 1, 0)].some(d => get(p.plus(d))?.name === 'lava')
-    const made = bot.findBlocks({ matching: obsidianId, maxDistance: 8, count: 64 })
+    const made = findBlocks(bot, { matching: obsidianId, maxDistance: 8, count: 64 })
       .filter(p => !p.equals(feet) && !lavaNext(p))
       .slice(0, count - countItems(bot, 'obsidian'))
     if (made.length > 0) {
@@ -112,7 +113,7 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
     // a source with ground beside it to pour on, else one open to the air above (the bucket's ray goes through the
     // lava, and the water it pours there flows into the sources about it: a lake's sources are lava on every side,
     // and none had ground beside it on 26.3 seed 2)
-    const all = bot.findBlocks({ matching: lavaId, maxDistance: 16, count: 256 })
+    const all = findBlocks(bot, { matching: lavaId, maxDistance: 16, count: 256 })
       .filter(p => isLavaSource(get(p)))
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
     let target = pourTarget(get, all, false)
@@ -156,7 +157,7 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
       bot.activateItem()
     }
     // poured beside a source it turns the source; poured on the pedestal it turns the sources about it
-    const turned = (): boolean => side ? bot.blockAt(source)?.name === 'obsidian' : bot.findBlocks({ matching: obsidianId, point: spot, maxDistance: 2, count: 1 }).length > 0
+    const turned = (): boolean => side ? bot.blockAt(source)?.name === 'obsidian' : findBlocks(bot, { matching: obsidianId, point: spot, maxDistance: 2, count: 1 }).length > 0
     await waitUntil(bot, turned, 40, signal)
     await waitTicks(bot, 5, signal)
     // the water back up
@@ -165,7 +166,7 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
     const waterId = bot.registry.blocksByName.water.id
     const placed = bot.blockAt(spot)?.name === 'water'
       ? spot
-      : bot.findBlocks({ matching: waterId, point: spot, maxDistance: 4, count: 16 }).find(p => Number((bot.blockAt(p) as any)?.getProperties?.()?.level ?? 1) === 0) ?? null
+      : findBlocks(bot, { matching: waterId, point: spot, maxDistance: 4, count: 16 }).find(p => Number((bot.blockAt(p) as any)?.getProperties?.()?.level ?? 1) === 0) ?? null
     if (placed == null) trace('obsidianFromLava: no water source left about', spot.toString())
     if (empty != null && placed != null) {
       spot = placed

@@ -11,6 +11,7 @@ import { placeBlock } from './placeBlock'
 import { findPlacement } from './placement'
 import { experience } from './xp'
 import { countItems, inventoryItems, resyncInventory, settleInventory, trace, waitTicks, waitUntil, type Block } from './util'
+import { findBlock } from '../core/findBlocks'
 
 export const ANVIL_BLOCKS = ['anvil', 'chipped_anvil', 'damaged_anvil']
 
@@ -67,7 +68,7 @@ async function getAnvil (bot: Bot, at: Vec3 | undefined, signal?: AbortSignal): 
     if (block == null || !ids.includes(block.type)) throw new SkillError('NOT_FOUND', `no anvil at ${at.toString()}`)
     return block
   }
-  const found = bot.findBlock({ matching: ids, maxDistance: 16 })
+  const found = findBlock(bot, { matching: ids, maxDistance: 16 })
   if (found != null) return found
   if (countItems(bot, 'anvil') === 0) throw new SkillError('NOT_FOUND', 'no anvil nearby or held')
   const pos = findPlacement(p => bot.blockAt(p), bot.entity.position)

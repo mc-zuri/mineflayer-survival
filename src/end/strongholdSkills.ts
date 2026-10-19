@@ -18,6 +18,7 @@ import { secondThrowPoint, triangulate, type EyeRay, type Triangulation, type XZ
 import { guessFromOneThrow, strongholdRings } from './stronghold'
 import { analyzePortalRoom, findPortalFrames, type PortalRoom } from './portalRoom'
 import { ensureSurface, inWater, onTheSurface, toShore } from '../executor/explore'
+import { findBlocks } from '../core/findBlocks'
 
 // ---- eyes
 
@@ -462,7 +463,7 @@ export const STRONGHOLD_BLOCKS = ['stone_bricks', 'mossy_stone_bricks', 'cracked
 
 export function strongholdBlocksNear (bot: Bot, point: Vec3, maxDistance = 96, count = 2048): Vec3[] {
   const ids = STRONGHOLD_BLOCKS.map(n => bot.registry.blocksByName[n]?.id).filter((n): n is number => n != null)
-  return bot.findBlocks({ point, matching: ids, maxDistance, count })
+  return findBlocks(bot, { point, matching: ids, maxDistance, count })
 }
 
 export interface FindPortalRoomArgs {
@@ -497,7 +498,7 @@ export async function findPortalRoom (bot: Bot, args: FindPortalRoomArgs = {}, s
     let bricks = 0
     for (let trip = 0; trip < (args.maxTrips ?? 8); trip++) {
       throwIfAborted(signal)
-      const frames = bot.findBlocks({ matching: frameId, maxDistance: 128, count: 12 })
+      const frames = findBlocks(bot, { matching: frameId, maxDistance: 128, count: 12 })
       if (frames.length > 0) {
         const f = frames.sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))[0]
         trace('findPortalRoom: frames seen at', f.toString())
@@ -546,7 +547,7 @@ async function toward (bot: Bot, p: Vec3, range: number, signal?: AbortSignal): 
     trace('findPortalRoom: walk to', p.toString(), 'failed:', (err as Error).message, '- digging')
   }
   const frameId = bot.registry.blocksByName.end_portal_frame.id
-  const frameNear = (): boolean => p.distanceTo(bot.entity.position) > 12 && bot.findBlocks({ matching: frameId, maxDistance: 10, count: 1 }).length > 0
+  const frameNear = (): boolean => p.distanceTo(bot.entity.position) > 12 && findBlocks(bot, { matching: frameId, maxDistance: 10, count: 1 }).length > 0
   try {
     await tunnelTo(bot, { target: p, range, until: frameNear }, signal)
   } catch (err) {

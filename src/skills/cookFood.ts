@@ -2,6 +2,7 @@ import type { Bot } from 'mineflayer'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { burnTicks } from '../core/items'
 import { TaskError, type SkillOptions, throwIfAborted, waitTicks } from './combatUtil'
+import { findBlock } from '../core/findBlocks'
 
 // Cooking: the raw foods and what the furnace, smoker or campfire makes of them (the smelting and smoking recipes).
 export const COOKED: Record<string, string> = {
@@ -55,7 +56,7 @@ export function chooseFuel (items: Array<{ name: string, count: number }>, ticks
 export async function cookNearby (bot: Bot, args: { input: string, count?: number }, signal?: AbortSignal): Promise<{ output: string | null, count: number }> {
   const output = COOKED[args.input] ?? null
   const ids = ['smoker', 'furnace'].map(n => bot.registry.blocksByName[n]?.id).filter((id): id is number => id != null)
-  const block = bot.findBlock({ matching: ids, maxDistance: 32 })
+  const block = findBlock(bot, { matching: ids, maxDistance: 32 })
   if (block == null) throw new TaskError('NOT_FOUND', 'no furnace or smoker within 32 blocks')
   const count = Math.min(args.count ?? Infinity, countOf(bot, args.input), 64)
   if (count <= 0) throw new TaskError('MISSING_ITEMS', `no ${args.input}`)

@@ -36,6 +36,7 @@ import { FARM_PLOTS } from './core/crops'
 import { findFarmSite, knownFarms, plantFarm, rememberFarm, SEED_OF } from './skills/farm'
 import { ownedInventory, type Executor } from './executor/executor'
 import { Vec3 } from 'vec3'
+import { findBlocks } from './core/findBlocks'
 
 const inNether = (bot: Bot): boolean => normalizeDimension(bot.game?.dimension) === 'the_nether'
 
@@ -433,7 +434,7 @@ export function fortressRoute (memory: WorldMemory, from: Vec3): ExploreOptions 
 export function nearestLavaPools (bot: Bot): Array<{ x: number, y: number, z: number }> {
   const id = bot.registry.blocksByName.lava?.id
   if (id == null || typeof bot.findBlocks !== 'function') return []
-  const sources = bot.findBlocks({ matching: id, maxDistance: 96, count: 4096 })
+  const sources = findBlocks(bot, { matching: id, maxDistance: 96, count: 4096 })
     .filter(p => isLavaSource({ name: 'lava', properties: (bot.blockAt(p) as any)?.getProperties?.() } as any))
     .map(p => ({ x: p.x, y: p.y, z: p.z }))
   return lavaPools(sources, bot.entity.position, PORTAL_LAVA).map(p => p.center)
@@ -443,7 +444,7 @@ export function nearestLavaPools (bot: Bot): Array<{ x: number, y: number, z: nu
 export function nearestLavaPool (bot: Bot): { x: number, y: number, z: number } | null {
   const id = bot.registry.blocksByName.lava?.id
   if (id == null || typeof bot.findBlocks !== 'function') return null
-  const sources = bot.findBlocks({ matching: id, maxDistance: 96, count: 4096 })
+  const sources = findBlocks(bot, { matching: id, maxDistance: 96, count: 4096 })
     .filter(p => isLavaSource({ name: 'lava', properties: (bot.blockAt(p) as any)?.getProperties?.() } as any))
     .map(p => ({ x: p.x, y: p.y, z: p.z }))
   return lavaPools(sources, bot.entity.position, PORTAL_LAVA)[0]?.center ?? null
@@ -732,10 +733,10 @@ const BASTION_BLOCKS = ['gilded_blackstone', 'polished_blackstone_bricks', 'crac
 export function pearlGround (bot: Bot, gold: boolean): { kind: 'warped forest' | 'bastion', at: Vec3 } | null {
   if (typeof bot.findBlocks !== 'function') return null
   const ids = (names: string[]): number[] => names.map(n => bot.registry.blocksByName[n]?.id).filter((id): id is number => id != null)
-  const warped = bot.findBlocks({ matching: ids(WARPED_BLOCKS), maxDistance: 128, count: 16 })
+  const warped = findBlocks(bot, { matching: ids(WARPED_BLOCKS), maxDistance: 128, count: 16 })
   if (warped.length > 8) return { kind: 'warped forest', at: warped[0].offset(0, 1, 0) }
   if (gold) {
-    const bastion = bot.findBlocks({ matching: ids(BASTION_BLOCKS), maxDistance: 128, count: 16 })
+    const bastion = findBlocks(bot, { matching: ids(BASTION_BLOCKS), maxDistance: 128, count: 16 })
     if (bastion.length > 8) return { kind: 'bastion', at: bastion[0] }
   }
   return null
@@ -1037,7 +1038,7 @@ export function endStoneTopLayer (bot: Bot, count: number): Vec3[] {
   if (id == null || typeof bot.findBlocks !== 'function') return []
   const feet = bot.entity.position.floored()
   const open = (p: Vec3): boolean => bot.blockAt(p.offset(0, 1, 0))?.boundingBox === 'empty'
-  return bot.findBlocks({ matching: id, maxDistance: 16, count: 512 })
+  return findBlocks(bot, { matching: id, maxDistance: 16, count: 512 })
     .filter(p => p.y === feet.y - 1 && open(p) && Math.hypot(p.x - feet.x, p.z - feet.z) >= 2)
     .sort((a, b) => a.distanceTo(feet) - b.distanceTo(feet))
     .slice(0, count)

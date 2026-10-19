@@ -36,6 +36,7 @@ import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { Diagnostics, ReportSummary, WatchdogOptions } from './diagnostics'
 import { isDeathMessage } from './diagnostics/death'
+import { blockIdsNamed, findBlock } from './core/findBlocks'
 
 export interface MilestoneContext {
   bot: Bot
@@ -731,7 +732,7 @@ export class Runner {
     const base = baseRecord(this.memory)
     if (base?.bed != null && bot.entity.position.distanceTo(new Vec3(base.bed.x, base.bed.y, base.bed.z)) <= 64) return true
     if (bot.inventory.items().some(i => isBed(i.name))) return true
-    return typeof bot.findBlock === 'function' && bot.findBlock({ matching: (b: any) => isBed(b.name), maxDistance: 32 }) != null
+    return typeof bot.findBlock === 'function' && findBlock(bot, { matching: blockIdsNamed(bot, isBed), maxDistance: 32 }) != null
   }
 
   /**
@@ -906,7 +907,7 @@ export class Runner {
     const base = baseRecord(this.memory)
     const baseBed = base?.bed != null && bot.entity.position.distanceTo(new Vec3(base.bed.x, base.bed.y, base.bed.z)) <= 64 ? new Vec3(base.bed.x, base.bed.y, base.bed.z) : null
     const held = bot.inventory.items().some(i => isBed(i.name))
-    const near = bot.findBlock({ matching: (b: any) => isBed(b.name), maxDistance: 32 }) != null
+    const near = findBlock(bot, { matching: blockIdsNamed(bot, isBed), maxDistance: 32 }) != null
     if (baseBed == null && !held && !near) return
     this.log(`night (time ${bot.time.timeOfDay}): sleeping`)
     try {
@@ -1036,7 +1037,7 @@ export class Runner {
       this.log(`night, ${far.toFixed(0)} blocks from the trip kit with no armor: the night waited out first`)
       await this.executor.task('wait out the night', async (s) => {
         // the respawn's bed if it is by, else a hole dug in the ground
-        const bed = typeof bot.findBlock === 'function' ? bot.findBlock({ matching: (b: any) => isBed(b.name), maxDistance: 16 }) : null
+        const bed = typeof bot.findBlock === 'function' ? findBlock(bot, { matching: blockIdsNamed(bot, isBed), maxDistance: 16 }) : null
         if (bed != null) return await sleepThroughNight(bot, { signal: s, bedDistance: 16 })
         return await shelter(bot, { signal: s })
       }, signal).catch(err => {

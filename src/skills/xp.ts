@@ -13,6 +13,7 @@ import { chooseFuel, smelt } from './smelt'
 import { blockIds, countItems, inventoryItems, trace, waitUntil } from './util'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { TaskError } from '../core/errors'
+import { findBlocks } from '../core/findBlocks'
 
 /** Player.getXpNeededForNextLevel: the points from `level` to the next */
 export function xpNeededForNextLevel (level: number): number {
@@ -183,7 +184,7 @@ export async function gainLevels (bot: Bot, args: GainLevelsArgs, signal?: Abort
   const mineOre = async (): Promise<boolean> => {
     if (oreIds.length === 0) return false
     const items = inventoryItems(bot)
-    const found = bot.findBlocks({ matching: oreIds, maxDistance: range, count: 64 })
+    const found = findBlocks(bot, { matching: oreIds, maxDistance: range, count: 64 })
       .filter(p => !skipped.has(p.toString()))
       .map(p => bot.blockAt(p))
       .filter((b): b is NonNullable<typeof b> => b != null && harvestToolFor(b, items) !== null)

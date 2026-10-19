@@ -49,7 +49,7 @@ export function findBlocks (bot: Bot, opts: FindBlocksOptions): Vec3[] {
   const ids = typeof opts.matching === 'number' ? [opts.matching] : opts.matching
   const world = bot.world as any
   const table = typeof world?.getColumn === 'function' ? matchTable(bot, ids) : null
-  if (table == null) return bot.findBlocks({ ...opts, matching: [...ids] })
+  if (table == null) return bot.findBlocks({ ...opts, matching: opts.matching as number | number[] })
   const point = (opts.point ?? bot.entity.position).floored()
   const maxDistance = opts.maxDistance ?? 16
   const count = opts.count ?? 1
@@ -110,7 +110,20 @@ export function findBlocks (bot: Bot, opts: FindBlocksOptions): Vec3[] {
 
 /** the nearest block of the ids within reach (as bot.findBlock), or null */
 export function findBlock (bot: Bot, opts: Omit<FindBlocksOptions, 'count'>): ReturnType<Bot['blockAt']> {
-  if (typeof (bot.world as any)?.getColumn !== 'function') return bot.findBlock({ ...opts, matching: typeof opts.matching === 'number' ? opts.matching : [...opts.matching] })
+  if (typeof (bot.world as any)?.getColumn !== 'function') return bot.findBlock({ ...opts, matching: opts.matching as number | number[] })
   const at = findBlocks(bot, { ...opts, count: 1 })[0]
   return at == null ? null : bot.blockAt(at)
+}
+
+/** per registry and predicate: the block ids whose names pass it */
+const namedIds = new WeakMap<object, Map<(name: string) => boolean, number[]>>()
+
+/** the ids of the blocks whose names pass `pred` (every bed: isBed), for findBlocks' matching */
+export function blockIdsNamed (bot: Bot, pred: (name: string) => boolean): number[] {
+  const registry = bot.registry as any
+  let byPred = namedIds.get(registry)
+  if (byPred == null) namedIds.set(registry, byPred = new Map())
+  let ids = byPred.get(pred)
+  if (ids == null) byPred.set(pred, ids = (registry.blocksArray as Array<{ id: number, name: string }>).filter(b => pred(b.name)).map(b => b.id))
+  return ids
 }
