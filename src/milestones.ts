@@ -59,6 +59,17 @@ export const HERD = 'herd'
  */
 export const ENCHANTING_KEEP: Record<string, number> = { wheat: 64, wheat_seeds: 64, sugar_cane: 256, paper: 256, leather: 64, book: 64, bookshelf: 64, oak_log: 64, oak_planks: 64, lapis_lazuli: 64, iron_ingot: 31, iron_block: 3, enchanting_table: 1, anvil: 1, diamond: 3, obsidian: 4 }
 
+/**
+ * Room in the bag for the enchanting's work, what it takes kept (ENCHANTING_KEEP); a bag that can't be made room in
+ * (INVENTORY_FULL: nothing left the makeRoom may throw or store) is gone on with, the work trying as it is
+ */
+async function enchantingRoom (executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  await executor.makeRoom?.(ENCHANTING_KEEP, signal, true)?.catch(err => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`enchanting: no room: ${(err as Error).message}`)
+  })
+}
+
 /** the herd pen's sizes tried, biggest first (cells across, the ring included) */
 export const PEN_SIZES = [9, 7, 5]
 /** tries at a pen of a size: the fences got once, a placement failed tried again */
@@ -158,7 +169,7 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
     if (chore === 'kill') {
       // room for the leather and the beef first (a full bag left the drops on the ground: 'hunt killed the cow drops
       // {}' over and over, the leather short of the shelves, 26.3)
-      if ((bot.inventory.emptySlotCount?.() ?? 9) < 2) await executor.makeRoom?.(ENCHANTING_KEEP, signal, true)
+      if ((bot.inventory.emptySlotCount?.() ?? 9) < 2) await enchantingRoom(executor, signal, log)
       await executor.obtain([{ item: 'leather', count: state.leather + 1 }], signal).catch(err => {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
         log(`herd: no leather: ${(err as Error).message}`)
@@ -371,7 +382,7 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   const cap = Math.min(shelvesForLeather({ count: (n: string) => countItems(bot, n) }, cows, around), shelvesForPaper({ count: (n: string) => countItems(bot, n) }, around))
   // room for the shelves' crafts, what they take kept (the stage's bag full of cobblestone, coal and raw meat failed
   // the paper's craft five times, 'the inventory is full', and the milestone was left out, 26.3)
-  await executor.makeRoom?.(ENCHANTING_KEEP, signal, true)
+  await enchantingRoom(executor, signal, log)
   for (let attempt = 0; attempt < 2; attempt++) {
     const held = countItems(bot, 'bookshelf')
     const want = shelvesWithin(n => {
@@ -402,7 +413,7 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   }
   // room in the bag to take the armor off for the table (a full bag kept it on: 'no unenchanted diamond_chestplate')
   // (forced: the junk alone left the bag full, and the armor stayed on unenchanted again, 26.3)
-  await executor.makeRoom?.(ENCHANTING_KEEP, signal, true)
+  await enchantingRoom(executor, signal, log)
   await executor.task('enchant the gear', async (s) => await enchantGear(bot, { executor, signal: s, bookshelves: shelves }), signal)
   await enchantBooksAndApply(bot, executor, signal, log)
 }
@@ -759,7 +770,7 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
     try {
       if (piglin && count('gold_ingot') > 0) {
         // room for what the piglins throw (a full bag ended the bartering at once: NO_SPACE, 26.3)
-        await executor.makeRoom?.({ gold_ingot: count('gold_ingot') }, signal)
+        await executor.makeRoom?.({ gold_ingot: count('gold_ingot') }, signal)?.catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err; log(`ender pearls: no room: ${(err as Error).message}`) })
         await executor.task('barter for pearls', async (s) => await barterForPearls(bot, { pearls: want, range: 48 }, s), signal)
         continue
       }

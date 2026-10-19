@@ -285,3 +285,24 @@ test('ENCHANTING_KEEP keeps the table, its makings and the anvil from a forced r
   const { ENCHANTING_KEEP } = await import('../../src/milestones')
   for (const name of ['enchanting_table', 'anvil', 'diamond', 'obsidian', 'lapis_lazuli', 'leather', 'sugar_cane']) assert.ok((ENCHANTING_KEEP[name] ?? 0) > 0, name)
 })
+
+test('the enchanting goes on when no room can be made in the bag (INVENTORY_FULL)', async () => {
+  const { enchantingHandler } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { TaskError } = await import('../../src/core/errors')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('leather', 40), item('sugar_cane', 120), item('enchanting_table', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.findBlock = () => null
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    plan: () => ({ ok: true, cost: 0 }),
+    makeRoom: async () => { throw new TaskError('INVENTORY_FULL', 'nothing to throw') },
+    obtain: async () => {},
+    task: async (name: string) => { calls.push(name); if (name === 'enchant the gear') throw new Error('stop here') }
+  }
+  await assert.rejects(enchantingHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: { goals: () => [] } as any, state: null as any }), /stop here/)
+})
