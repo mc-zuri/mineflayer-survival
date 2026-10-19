@@ -194,3 +194,26 @@ test('unknownChestNear: the chest the kit\'s stash put down before a fight cut i
   memory.rememberChest({ x: 2, y: 64, z: 1 }, { cobblestone: 64 }, 'overworld')
   assert.strictEqual(unknownChestNear(bot, memory), null)
 })
+
+test('stashTripKit puts the chest where there is room over it (a chest under a block does not open)', async () => {
+  const placeModule = require('../../src/skills/placeBlock')
+  const chestModule = require('../../src/skills/chest')
+  const { stashTripKit } = await import('../../src/skills/tripKit')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  // a cave 1 high but for one cell 2 off: stone under y 64, over y 64 but at (2, 65, 0)
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('chest', 1), item('arrow', 64)], world: (p: any) => p.y < 64 ? 'stone' : p.y === 64 ? 'air' : (p.x === 2 && p.z === 0 && p.y === 65 ? 'air' : 'stone') })
+  const placed: string[] = []
+  const realPlace = placeModule.placeBlock
+  const realStore = chestModule.storeItems
+  placeModule.placeBlock = async (_b: unknown, a: any) => { placed.push(a.pos.toString()); return { placed: true } }
+  chestModule.storeItems = async () => ({ moved: {} })
+  try {
+    await stashTripKit(bot, new WorldMemory())
+  } finally {
+    placeModule.placeBlock = realPlace
+    chestModule.storeItems = realStore
+  }
+  assert.equal(placed[0], new Vec3(2, 64, 0).toString())
+})

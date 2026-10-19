@@ -201,7 +201,9 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
     pos = placed
   } else {
     if (!bot.inventory.items().some(i => i.name === 'chest')) throw new SkillError('MISSING_ITEMS', 'no chest for a trip kit')
-    const at = findPlacement(lookup, bot.entity.position, { radius: 3, avoid: p => nearPortal(lookup, p) })
+    // (room over it: a chest under a block doesn't open, ChestBlock.isChestBlockedAt, and each item's store waited
+    // 20 s for the window, 58000 ticks gone in a 26.3 cave)
+    const at = findPlacement(lookup, bot.entity.position, { radius: 3, freeAbove: true, avoid: p => nearPortal(lookup, p) })
     if (at == null) throw new SkillError('CANNOT_PLACE', 'no room for a chest')
     pos = at
     await placeBlock(bot, { pos, item: 'chest' }, signal)
@@ -215,6 +217,8 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
     } catch (err) {
       if (isAbort(err)) throw err
       trace('stashTripKit:', it.name, (err as Error).message)
+      // a chest that won't open won't for the next item either
+      if (/windowOpen|did not fire|won't open|blocked/i.test((err as Error).message)) break
     }
   }
   memory.rememberChest(pos, stored, 'overworld')
