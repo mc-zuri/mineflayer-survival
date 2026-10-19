@@ -118,6 +118,11 @@ export interface ReflexConfig {
     health: number
     priority: number
   }
+  /** a long fall broken with a water bucket held (the fall reflex; default priority 93, above all but the totem) */
+  fall: {
+    enabled: boolean
+    priority: number
+  }
   /** ticks before a reflex whose task failed may fire again (default 20) */
   retryCooldownTicks: number
 }
@@ -150,6 +155,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
   fireball: { enabled: true, range: 12, priority: 92 },
   night: { enabled: true, sleep: true, shelter: true, minArmor: 10, minDamage: 6, bedDistance: 16, shelterRadius: 8, priority: 40 },
   totem: { enabled: true, always: true, health: 10, priority: 95 },
+  fall: { enabled: true, priority: 93 },
   retryCooldownTicks: 20
 }
 

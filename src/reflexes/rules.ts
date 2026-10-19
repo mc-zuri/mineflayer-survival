@@ -11,6 +11,7 @@ import { GHAST_FIREBALL, deflectFireball, fireballIncoming } from '../nether/saf
 import { isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
 import { isBed } from '../core/items'
+import { breakFall, landingY, shouldBreakFall } from '../skills/fall'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
 export function isHostile (bot: Bot, e: Entity): boolean {
@@ -230,6 +231,31 @@ export const eatReflex: Reflex = {
   }
 }
 
+/** the highest feet height since the bot last stood on the ground, per bot (where a fall began) */
+const fallStarts = new WeakMap<Bot, number>()
+
+/** A long fall broken with the water bucket held, just before the landing (breakFall). */
+export const fallReflex: Reflex = {
+  name: 'fall',
+  priority: 93,
+  check (ctx) {
+    const { bot, config } = ctx
+    if (!config.fall.enabled || bot.entity == null) return null
+    const y = bot.entity.position.y
+    if (bot.entity.onGround || (bot.entity as any).isInWater === true) { fallStarts.set(bot, y); return null }
+    const start = Math.max(fallStarts.get(bot) ?? y, y)
+    fallStarts.set(bot, start)
+    const landing = landingY(p => bot.blockAt(p) as any, bot.entity.position)
+    const go = shouldBreakFall({
+      y, vy: bot.entity.velocity.y, onGround: false, fallStart: start, landing,
+      hasBucket: bot.inventory.items().some(i => i.name === 'water_bucket'),
+      nether: /nether/.test(String(bot.game?.dimension ?? ''))
+    })
+    if (!go || landing == null) return null
+    return { name: 'fall', priority: config.fall.priority, detail: `water at ${landing}`, run: async (signal) => await breakFall(bot, landing, signal) }
+  }
+}
+
 /** the golden apples, best first: eaten whatever the food bar (Consumable, the ALWAYS_EDIBLE foods) */
 export const GOLDEN_APPLES = ['enchanted_golden_apple', 'golden_apple']
 
@@ -348,4 +374,4 @@ export const nightReflex: Reflex = {
   }
 }
 
-export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fireballReflex, hazardReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, nightReflex, armorReflex]
+export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, nightReflex, armorReflex]
