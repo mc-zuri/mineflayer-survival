@@ -146,3 +146,19 @@ test('till sneaks with a shield in the off hand, the shift sent a tick before th
   assert.ok(sneaking[0].ticks >= 1, `the use ${sneaking[0].ticks} ticks after the shift`)
   assert.equal(bot.getControlState('sneak'), false)
 })
+
+test('a farm sown further by its water grows its one record; another water is a farm of its own', async () => {
+  const { extendFarm, farmPlots } = await import('../../src/skills/farm')
+  const memory = new WorldMemory()
+  const water = new Vec3(10, 63, 10)
+  extendFarm(memory, { water, cells: [new Vec3(9, 63, 10), new Vec3(11, 63, 10)], crop: 'wheat' }, 100)
+  const rec = extendFarm(memory, { water, cells: [new Vec3(11, 63, 10), new Vec3(10, 63, 9)], crop: 'wheat' }, 500)
+  assert.equal(rec.cells.length, 3)
+  // sown when it was first
+  assert.equal(rec.sown, 100)
+  assert.equal(knownFarms(memory).length, 1)
+  extendFarm(memory, { water: new Vec3(30, 63, 10), cells: [new Vec3(29, 63, 10)], crop: 'wheat' }, 600)
+  assert.equal(knownFarms(memory).length, 2)
+  assert.equal(farmPlots(memory), 4)
+  assert.equal(farmPlots(memory, 'the_nether'), 0)
+})

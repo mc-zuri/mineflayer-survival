@@ -5,7 +5,7 @@ import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
-import { plantFarm } from '../../src/skills/farm'
+import { boneMealFarm, grownPlots, harvestFarm, plantFarm, type FarmResult } from '../../src/skills/farm'
 import { countItems, waitUntil } from '../../src/skills/util'
 
 const USERNAME = 'farmbot'
@@ -13,6 +13,7 @@ const USERNAME = 'farmbot'
 describe(`a wheat farm on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
+  let farm: FarmResult | null = null
   const run = async (cmd: string): Promise<string> => (await server.command(cmd)).join(' | ')
 
   before(async () => {
@@ -44,5 +45,30 @@ describe(`a wheat farm on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 * 100
     const res = await plantFarm(bot, { seed: 'wheat_seeds', center: bot.entity.position, plots: 8 })
     console.log(`plantFarm: ${res.cells.length} sown by ${res.water.toString()}`)
     assert.ok(res.cells.length >= 4, `${res.cells.length} sown`)
+    farm = res
+  })
+
+  it('a farm cycle: bone meal grows the wheat, the harvest sows each plot again', async () => {
+    assert.ok(farm != null, 'no farm from the test before')
+    const cells = farm.cells
+    await run(`give ${USERNAME} bone_meal 64`)
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'bone_meal') > 0, 100))
+    const t0 = Date.now()
+    let ticks = 0
+    const onTick = (): void => { ticks++ }
+    bot.on('physicsTick', onTick)
+    try {
+      const uses = await boneMealFarm(bot, { cells, crop: 'wheat' })
+      const grown = grownPlots(p => bot.blockAt(p) as any, cells, 'wheat')
+      console.log(`bone meal: ${uses} uses, ${grown.length} of ${cells.length} grown`)
+      assert.strictEqual(grown.length, cells.length)
+      const got = await harvestFarm(bot, { cells, crop: 'wheat' })
+      console.log(`harvest: ${JSON.stringify(got)} in ${ticks} ticks, ${((Date.now() - t0) / 1000).toFixed(1)} s`)
+      assert.strictEqual(got.wheat, cells.length)
+      // sown again, from the seeds the wheat dropped
+      for (const c of cells) assert.strictEqual(bot.blockAt(c.offset(0, 1, 0))?.name, 'wheat', `nothing sown again on ${c.toString()} (${bot.blockAt(c)?.name ?? "?"} there)`)
+    } finally {
+      bot.off('physicsTick', onTick)
+    }
   })
 })

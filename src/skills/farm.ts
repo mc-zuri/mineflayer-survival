@@ -135,7 +135,9 @@ export async function sow (bot: Bot, cell: Vec3, seed: string, signal?: AbortSig
   const crop = cropOf(seed)
   if (crop == null) throw new SkillError('MISSING_ITEMS', `${seed} sows no crop`)
   if (bot.blockAt(cell.offset(0, 1, 0))?.name === crop) return
-  await navigateToReach(bot, cell, signal)
+  // (from on the plot too: a seed goes on the farmland under the feet, the crop having no collision. Asked to stand
+  // off it, the pathfinder found no way from the plot the harvest left the bot on, and the plot stayed bare)
+  await navigateToReach(bot, cell, signal, { outside: false })
   await holdItem(bot, seed)
   await bot.activateBlock(bot.blockAt(cell) as Block, new Vec3(0, 1, 0))
   if (!(await waitUntil(bot, () => bot.blockAt(cell.offset(0, 1, 0))?.name === crop, 10, signal))) {
@@ -196,6 +198,7 @@ export async function harvestFarm (bot: Bot, farm: { cells: readonly Vec3[], cro
       if (countItems(bot, seed) > 0 && bot.blockAt(cell)?.name === 'farmland') await sow(bot, cell, seed, signal)
     } catch (err) {
       if (isAbort(err)) throw err
+      trace('harvestFarm: the plot at', cell.toString(), 'failed:', (err as Error).message)
     }
   }
   const gained: Record<string, number> = {}
@@ -223,4 +226,52 @@ export function rememberFarm (memory: WorldMemory, farm: FarmResult, age: number
 
 export function farmCells (rec: FarmRecord): Vec3[] {
   return rec.cells.map(([x, y, z]) => new Vec3(x, y, z))
+}
+
+/** the plots a farm's records hold, all its farms in a dimension together */
+export function farmPlots (memory: WorldMemory, dimension = 'overworld'): number {
+  return knownFarms(memory, dimension).reduce((n, f) => n + f.cells.length, 0)
+}
+
+/**
+ * Notes a farm sown at `farm.water`: its cells added to the farm the memory has at that water (one record a water,
+ * the cells of both), else a new one
+ */
+export function extendFarm (memory: WorldMemory, farm: FarmResult, age: number, dimension = 'overworld'): FarmRecord {
+  const old = knownFarms(memory, dimension).find(f => f.water.equals(farm.water) && f.crop === farm.crop)
+  const cells = [...(old?.cells ?? [])]
+  for (const c of farm.cells) if (!cells.some(([x, y, z]) => x === c.x && y === c.y && z === c.z)) cells.push([c.x, c.y, c.z])
+  const rec: FarmRecord = { crop: farm.crop, cells, sown: old?.sown ?? age }
+  if (old != null) memory.removePoi('farm', farm.water, dimension)
+  memory.addPoi('farm', farm.water, dimension, JSON.stringify(rec))
+  return rec
+}
+
+/**
+ * Bone meal on a farm's crops not grown yet (BoneMealItem.useOn, CropBlock.performBonemeal: 2 to 5 stages a use),
+ * each until it's grown or the bone meal runs out. Resolves the uses.
+ */
+export async function boneMealFarm (bot: Bot, farm: { cells: readonly Vec3[], crop: string }, signal?: AbortSignal): Promise<number> {
+  let uses = 0
+  for (const cell of farm.cells) {
+    const at = cell.offset(0, 1, 0)
+    for (let tries = 0; tries < 4; tries++) {
+      throwIfAborted(signal)
+      const crop = bot.blockAt(at)
+      if (crop?.name !== farm.crop || isGrown(crop as any) || countItems(bot, 'bone_meal') === 0) break
+      const age = Number((crop as any).getProperties?.().age ?? 0)
+      try {
+        await navigateToReach(bot, at, signal)
+        await holdItem(bot, 'bone_meal')
+        await bot.activateBlock(crop as Block, new Vec3(0, 1, 0))
+        uses++
+      } catch (err) {
+        if (isAbort(err)) throw err
+        break
+      }
+      // the crop's new age with the block's update
+      if (!(await waitUntil(bot, () => Number((bot.blockAt(at) as any)?.getProperties?.().age ?? 0) > age, 10, signal))) break
+    }
+  }
+  return uses
 }
