@@ -6,7 +6,8 @@
 // preempts it) until it has BLAZE_RODS rods (default 6), the bot dies, or BLAZE_MAX_TICKS (default 16000) go by.
 // BLAZE_RUNS runs (default 3), each from a fresh kit with the blazes, the items, the fires and the cobblestone the last
 // one left taken away; each run's rods, kills, deaths, hits and ticks are logged, and every run must end with the rods
-// and no death. BLAZE_START="x y z" puts the bot elsewhere.
+// and no death. BLAZE_START="x y z" puts the bot elsewhere, BLAZE_SPAWNER="x y z" fights at another spawner (the
+// 26.3 runs' nooks at (97, 64, -515) and (925, 64, 123) killed blazes for 20000 ticks and got no rod).
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import { appendFileSync } from 'node:fs'
@@ -21,8 +22,9 @@ import { STAGES } from './stageKits'
 
 const USERNAME = 'blazebot'
 const SEED = '2'
-const SPAWNER = new Vec3(59, 64, -534)
-const START = process.env.BLAZE_START != null ? new Vec3(...(process.env.BLAZE_START.split(/[ ,]+/).map(Number) as [number, number, number])) : new Vec3(43.5, 89, -515.5)
+const vec = (text: string): Vec3 => new Vec3(...(text.split(/[ ,]+/).map(Number) as [number, number, number]))
+const SPAWNER = process.env.BLAZE_SPAWNER != null ? vec(process.env.BLAZE_SPAWNER) : new Vec3(59, 64, -534)
+const START = process.env.BLAZE_START != null ? vec(process.env.BLAZE_START) : new Vec3(43.5, 89, -515.5)
 const RUNS = Number(process.env.BLAZE_RUNS ?? 3)
 const RODS = Number(process.env.BLAZE_RODS ?? 6)
 const MAX_TICKS = Number(process.env.BLAZE_MAX_TICKS ?? 16000)
@@ -60,7 +62,7 @@ describe(`the blaze fight at seed 2's fortress spawner on a ${DEFAULT_VERSION} s
   async function resetArea (): Promise<void> {
     const cmds = ['kill @e[type=blaze]', 'kill @e[type=item]', 'kill @e[type=small_fireball]']
     // (in slabs under /fill's 32768 blocks)
-    for (let y = 55; y < 91; y += 8) for (const b of ['fire', 'cobblestone']) cmds.push(`fill 29 ${y} -566 89 ${y + 7} -504 air replace ${b}`)
+    for (let y = SPAWNER.y - 9; y < SPAWNER.y + 27; y += 8) for (const b of ['fire', 'cobblestone']) cmds.push(`fill ${SPAWNER.x - 30} ${y} ${SPAWNER.z - 32} ${SPAWNER.x + 30} ${y + 7} ${SPAWNER.z + 30} air replace ${b}`)
     for (const cmd of cmds) {
       for (let i = 0; i < 20; i++) {
         const out = await nether(cmd)

@@ -41,3 +41,15 @@ describe('the nether\'s biomes from the seed', () => {
     assert.strictEqual(at(seen, 480, -176), 'bastion_remnant')
   })
 })
+
+test('seededComplexes: seed 2\'s fortresses with the deltas known, the bastions by a delta maybe fortresses, the rest bastions', async () => {
+  const { seededComplexes } = await import('../../src/nether/fortress')
+  const list = seededComplexes(2, { x: 0, z: 0 }, { radius: 2 })
+  const at = (x: number, z: number): any => list.find(c => c.chunkX * 16 === x && c.chunkZ * 16 === z)
+  assert.strictEqual(at(80, 768).structure, 'fortress')
+  assert.strictEqual(at(1072, 672).structure, 'fortress')
+  // the server's bastion at -568..-513, 33..96: no delta near; at 289..344, 80..143 one by a delta, a maybe
+  assert.deepStrictEqual([at(-544, 80).structure, at(-544, 80).maybe], ['bastion_remnant', false])
+  assert.deepStrictEqual([at(320, 96).structure, at(320, 96).maybe], ['bastion_remnant', true])
+  assert.ok(list.filter(c => c.maybe).every(c => c.structure === 'bastion_remnant'))
+})

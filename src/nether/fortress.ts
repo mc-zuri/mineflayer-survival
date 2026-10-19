@@ -1,6 +1,7 @@
 import type { Pos } from '../core/memory'
 import { NETHER_COMPLEXES, getPotentialStructureChunk, selectStructure, type RandomSpreadPlacement } from '../worldgen/placement'
 import type { Seed } from '../worldgen/random'
+import { NetherBiomeSource } from '../worldgen/netherBiomes'
 
 // The nether complexes (placement, the fortress or bastion roll, bastions never in basalt deltas) and the fortress pieces
 // are the same in 1.21.11 and 26.3.
@@ -68,6 +69,27 @@ export function netherComplexes (levelSeed: Seed, from: { x: number, z: number }
     }
   }
   return out.sort((a, b) => a.distance - b.distance)
+}
+
+/** how near a delta a bastion roll's chunk middle makes it maybe a fortress after all (the server checks the biome at its start piece's middle, which can be a few tens of blocks off) */
+export const BASTION_DELTA_MARGIN = 48
+
+/**
+ * The complexes around `from` with the seed's nether biomes (NetherBiomeSource): a bastion roll whose chunk is in a
+ * basalt delta is the fortress the server builds there; `maybe` marks a bastion with a delta within
+ * BASTION_DELTA_MARGIN, which may be a fortress all the same. Nearest first.
+ */
+export function seededComplexes (levelSeed: Seed, from: { x: number, z: number }, opts: { radius?: number } = {}): Array<ComplexCandidate & { maybe: boolean }> {
+  const biomes = new NetherBiomeSource(levelSeed)
+  const delta = (x: number, z: number): boolean => biomes.biomeAt(x, z) === 'basalt_deltas'
+  return netherComplexes(levelSeed, from, { radius: opts.radius, isBasaltDeltas: (cx, cz) => delta(cx * 16 + 8, cz * 16 + 8) }).map(c => {
+    let maybe = false
+    if (c.structure === 'bastion_remnant') {
+      const m = BASTION_DELTA_MARGIN
+      for (let dx = -m; dx <= m && !maybe; dx += 16) for (let dz = -m; dz <= m && !maybe; dz += 16) maybe = delta(c.chunkX * 16 + 8 + dx, c.chunkZ * 16 + 8 + dz)
+    }
+    return { ...c, maybe }
+  })
 }
 
 /** the fortresses among the complexes around `from`, nearest first */

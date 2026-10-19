@@ -21,7 +21,7 @@ import { shoot } from '../skills/shoot'
 import { collectDropsNear } from '../skills/hunt'
 import { type Entity, eyePosition, isAlive } from '../skills/combatUtil'
 import {
-  FORTRESS_BLOCKS, estimateBlazeSpawner, explorationRoute, fortressCandidates, netherComplexes, recognizeFortress,
+  FORTRESS_BLOCKS, estimateBlazeSpawner, explorationRoute, fortressCandidates, recognizeFortress, seededComplexes,
   type ExploreOptions, type FortressSighting, type SpawnerEstimate
 } from './fortress'
 import { dimensionOf } from './portalTravel'
@@ -140,9 +140,11 @@ export async function findFortress (bot: Bot, args: FindFortressArgs = {}, signa
     if (args.seed != null) {
       const seed = levelSeed(args.seed)
       const from = bot.entity.position
-      const sure = fortressCandidates(seed, from, { radius: args.regions ?? 2 })
-      const maybe = netherComplexes(seed, from, { radius: args.regions ?? 2 }).filter(c => c.structure === 'bastion_remnant')
-      // a sure fortress first unless a bastion roll is much nearer (it is one only in basalt deltas)
+      // with the seed's biomes: a bastion roll in a basalt delta is a fortress, one by a delta maybe one, the rest bastions
+      const complexes = seededComplexes(seed, from, { radius: args.regions ?? 2 })
+      const sure = complexes.filter(c => c.structure === 'fortress')
+      const maybe = complexes.filter(c => c.maybe)
+      // a sure fortress first unless a maybe one is much nearer
       const order = [...sure.map(c => ({ c, cost: c.distance })), ...maybe.map(c => ({ c, cost: c.distance * 2.5 }))]
         .filter(({ c }) => !near({ x: c.x + 8, y: 64, z: c.z + 8 }, 128))
         .sort((a, b) => a.cost - b.cost)
