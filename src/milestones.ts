@@ -8,9 +8,11 @@ import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, eyesForPortal } from './plann
 import type { MilestoneHandler } from './runner'
 import { blockGetter, buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
+import { obsidianFromLava } from './nether/obsidian'
+import { ensureSurface } from './executor/explore'
 import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
-import { isAbort } from './skills/errors'
+import { isAbort, isSkillError } from './skills/errors'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
 import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd, readPortalRoom, SCAFFOLD_ITEMS } from './end/skills'
@@ -243,7 +245,17 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
         await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], signal)
       }
       log('building a nether portal')
-      await executor.task('build a nether portal', async (s) => await buildPortal(bot, {}, s), signal)
+      try {
+        await executor.task('build a nether portal', async (s) => await buildPortal(bot, {}, s), signal)
+      } catch (err) {
+        if (signal.aborted || TaskError.is(err, 'DIED') || !isSkillError(err, 'CANNOT_PLACE')) throw err
+        // no room by the lava for the cast's mould (a cave's lake): obsidian made from the pool with the water
+        // bucket and mined, and the frame placed from it up on the surface
+        log(`a portal frame: ${(err as Error).message}: obsidian from the lava instead`)
+        await executor.task('obsidian from the lava', async (s) => await obsidianFromLava(bot, PORTAL_OBSIDIAN, s), signal)
+        await executor.task('up to the surface', async (s) => await ensureSurface(bot, s), signal)
+        await executor.task('build a nether portal', async (s) => await buildPortal(bot, { method: 'obsidian' }, s), signal)
+      }
     }
     await executor.task('into the nether', async (s) => await enterNether(bot, { build: true }, s), signal)
   }
