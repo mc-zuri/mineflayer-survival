@@ -1,7 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
+import { DEFAULT_SCAFFOLDING_BLOCKS, scaffoldCount, scaffoldItem } from '@nxg-org/mineflayer-pathfinder'
 import { createPlugin, TaskError, nether, end, worldgen } from '../src'
+import { SCAFFOLD_ITEMS } from '../src/executor/steps'
 
 function fakeBot (): any {
   const bot: any = new EventEmitter()
@@ -33,6 +35,24 @@ test('createPlugin with stock options, or the stock policy off', () => {
   const disabled = fakeBot()
   createPlugin({ stock: { enabled: false } })(disabled)
   assert.strictEqual(disabled.survival.stock, null)
+})
+
+test('createPlugin gives the pathfinder SCAFFOLD_ITEMS to build with: its budget and its places go by the survival list', () => {
+  const bot = fakeBot()
+  const before = { canDig: false, scaffoldReserve: 4, scaffoldingBlocks: [...DEFAULT_SCAFFOLDING_BLOCKS] }
+  bot.pathfinder = { defaultMoveSettings: before, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+  // stone bricks (a stronghold's) are the survival list's, not the pathfinder's own
+  bot.inventory.items = () => [{ name: 'stone_bricks', count: 20 }, { name: 'cobblestone', count: 3 }, { name: 'netherrack', count: 5 }]
+  assert.strictEqual(scaffoldCount(bot, before.scaffoldingBlocks), 8)
+  createPlugin()(bot)
+  const settings = bot.pathfinder.defaultMoveSettings
+  assert.deepStrictEqual(settings.scaffoldingBlocks, SCAFFOLD_ITEMS)
+  assert.strictEqual(settings.canDig, false, 'the other settings are kept')
+  assert.strictEqual(scaffoldCount(bot, settings.scaffoldingBlocks), 28)
+  // cheapest first: the netherrack before the cobblestone
+  assert.strictEqual(scaffoldItem(bot, settings.scaffoldingBlocks)?.name, 'netherrack')
+  // the End's pillars and the shelter's towers build of the same list
+  assert.strictEqual(end.skills.SCAFFOLD_ITEMS, SCAFFOLD_ITEMS)
 })
 
 test('createPlugin without reflexes', () => {

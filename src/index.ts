@@ -10,6 +10,7 @@ import type { MilestoneId } from './planner/progression'
 import { Diagnostics, type DiagnosticsOptions } from './diagnostics'
 import { StockPolicy, type StockOptions } from './planner/stock'
 import { advancementsDone, type AdvancementProgressPacket } from './core/advancements'
+import { SCAFFOLD_ITEMS } from './executor/steps'
 
 export * from './core'
 export * from './planner'
@@ -65,10 +66,21 @@ export interface Survival {
   stock: StockPolicy | null
 }
 
+/**
+ * the pathfinder builds with the blocks the survival skills count and keep (SCAFFOLD_ITEMS, cheapest first): its
+ * search's budget and its places, the other settings as they are
+ */
+function useScaffoldItems (bot: Bot): void {
+  const pf = bot.pathfinder as any
+  if (pf?.setMoveOptions == null || pf.defaultMoveSettings == null) return
+  pf.setMoveOptions({ ...pf.defaultMoveSettings, scaffoldingBlocks: [...SCAFFOLD_ITEMS] })
+}
+
 export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
   const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, ...opts }
   return function (bot: Bot): void {
     if (options.loadPathfinder && bot.pathfinder == null) bot.loadPlugin(createPathfinder())
+    useScaffoldItems(bot)
     // no walk or swim with the head under water and no air over it (a flooded cave): the bot drowns on the way
     keepHeadAboveWater(bot)
     const tasks = new TaskRunner(bot)

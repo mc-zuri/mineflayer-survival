@@ -58,8 +58,13 @@ export interface StepOutcome {
 
 export type StepRunner<S extends PlanStep = PlanStep> = (step: S, ctx: StepContext) => Promise<StepOutcome>
 
-/** the blocks the pathfinder builds with (BlockInfo.scaffoldingBlockItems), kept this many on top of what a plan uses */
-export const SCAFFOLD_ITEMS = ['cobblestone', 'cobbled_deepslate', 'dirt']
+/**
+ * The blocks the bot builds with, cheapest first: the pathfinder's bridges, towers and floors (its scaffoldingBlocks
+ * setting is this list, createPlugin), the End's pillars and the shelter's towers. Full solid blocks that don't fall,
+ * have no block entity, and that a mine or a walk through the nether leaves the bot with (no planks: the crafts want
+ * them). A mine step for one brings SCAFFOLD_BUFFER more than its plan uses.
+ */
+export const SCAFFOLD_ITEMS = ['dirt', 'coarse_dirt', 'netherrack', 'andesite', 'diorite', 'granite', 'tuff', 'basalt', 'end_stone', 'cobbled_deepslate', 'cobblestone', 'blackstone', 'deepslate', 'stone', 'stone_bricks', 'sandstone']
 export const SCAFFOLD_BUFFER = 24
 
 /** the blocks a mine step climbs out of a mine for first */
