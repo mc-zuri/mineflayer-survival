@@ -261,9 +261,10 @@ export async function buildPortal (bot: Bot, args: BuildPortalArgs = {}, signal?
     await placeFrame(bot, frame, signal)
   } else {
     const lava = args.lava?.map(p => p.floored()) ?? findLavaSources(getBlock, bot.entity.position, args.lavaRadius ?? 16).map(v3)
-    if (lava.length < 10) throw new SkillError('NOT_FOUND', `${lava.length} lava sources found; a cast frame takes 10`)
+    const held = countItems(bot, 'obsidian')
+    if (lava.length + held < 10) throw new SkillError('NOT_FOUND', `${lava.length} lava sources found and ${held} obsidian; a cast frame takes 10`)
     const scaffoldItem = args.scaffoldItem ?? fillerItem(bot, 1) ?? 'cobblestone'
-    const opts: LavaCastOptions = { scaffoldItem, ...(args.origin != null ? { origin: args.origin.floored() } : {}), ...(args.axis != null ? { axis: args.axis } : {}) }
+    const opts: LavaCastOptions = { scaffoldItem, obsidian: held, ...(args.origin != null ? { origin: args.origin.floored() } : {}), ...(args.axis != null ? { axis: args.axis } : {}) }
     const plan = planLavaCast(getBlock, lava, opts)
     if (plan == null) throw new SkillError('CANNOT_PLACE', 'no site to cast a portal frame by the lava')
     frame = plan.frame
@@ -321,7 +322,7 @@ async function pour (bot: Bot, pos: Vec3, fluid: 'water' | 'lava', signal?: Abor
 export async function castFrame (bot: Bot, plan: LavaCastPlan, signal?: AbortSignal): Promise<void> {
   if (findInventoryItem(bot, 'water_bucket') == null) throw new SkillError('MISSING_ITEMS', 'no water bucket to cast the frame with')
   if (findInventoryItem(bot, ['bucket', 'lava_bucket']) == null) throw new SkillError('MISSING_ITEMS', 'no empty bucket to carry the lava in')
-  const scaffold = plan.steps.filter(s => s.kind === 'place_block').length
+  const scaffold = plan.steps.filter(s => s.kind === 'place_block' && s.item === plan.scaffoldItem).length
   if (countItems(bot, plan.scaffoldItem) < scaffold) throw new SkillError('MISSING_ITEMS', `${countItems(bot, plan.scaffoldItem)} ${plan.scaffoldItem} of the ${scaffold} the mould takes`)
   const frameCells = new Set(plan.frame.obsidian.map(p => `${p.x},${p.y},${p.z}`))
   const getBlock = blockGetter(bot)
@@ -488,7 +489,8 @@ export async function castPortalAway (bot: Bot, lava: readonly Vec3[], lavaBucke
   }
   if (site == null) throw new SkillError('CANNOT_PLACE', `no open flat ground for a cast frame near ${here.toString()}`)
   const scaffoldItem = fillerItem(bot, 1) ?? 'cobblestone'
-  const plan = planLavaCast(getBlock, lava.map(v3), { origin: site.origin, axis: site.axis, lavaBuckets, scaffoldItem })
+  // (the obsidian made at the pool and mined, before its sources ran out, goes in the frame too)
+  const plan = planLavaCast(getBlock, lava.map(v3), { origin: site.origin, axis: site.axis, lavaBuckets, scaffoldItem, obsidian: countItems(bot, 'obsidian') })
   if (plan == null) throw new SkillError('CANNOT_PLACE', `no cast at ${JSON.stringify(site.origin)} from the ${lava.length} lava sources`)
   trace('castPortalAway: a frame at', site.origin, 'from lava', lava.length, 'carried', lavaBuckets, 'a trip')
   await castFrame(bot, plan, signal)

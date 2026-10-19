@@ -148,6 +148,29 @@ test('a hillside behind the frame saves the mould blocks; too little lava gives 
   assert.equal(planLavaCast(get, findLavaSources(get, { x: 9, y: 63, z: 0 }, 6).slice(0, 9)), null)
 })
 
+test('obsidian carried goes in the first cells of the frame, against the mould, and only the rest is cast: 8 sources and 6 obsidian make a frame', () => {
+  const w = world()
+  const get = getter(w)
+  const eight = findLavaSources(get, { x: 9, y: 63, z: 0 }, 6).slice(0, 8)
+  assert.equal(planLavaCast(get, eight), null)
+  const plan = planLavaCast(get, eight, { obsidian: 6 })
+  assert.ok(plan != null)
+  const placed = plan.steps.filter(s => s.kind === 'place_block' && s.item === 'obsidian')
+  assert.deepEqual(placed.map(s => k(s.pos)), plan.frame.obsidian.slice(0, 6).map(k))
+  assert.equal(plan.steps.filter(s => s.kind === 'place_lava').length, 4)
+  assert.equal(plan.sources.length, 4)
+  // every obsidian placed before the first lava
+  const firstLava = plan.steps.findIndex(s => s.kind === 'fill_lava')
+  assert.ok(plan.steps.findIndex(s => s.kind === 'place_block' && s.item === 'obsidian') < firstLava)
+  assert.ok(placed.every(s => plan.steps.indexOf(s) < firstLava))
+  run(plan, w)
+  assert.deepEqual(checkPortalFrame(get, plan.frame), { valid: true, missing: [], blocked: [] })
+  // more than a frame's worth: all placed, nothing cast
+  const all = planLavaCast(getter(world()), eight, { obsidian: 14 })
+  assert.ok(all != null)
+  assert.equal(all.steps.filter(s => s.kind === 'place_lava').length, 0)
+})
+
 test('lavaPools: lava sources within 2 blocks of each other are a pool, the ones of 10 or more nearest first', async () => {
   const { lavaPools } = await import('../../src/nether/portal')
   const lake = (x0: number, y: number, n: number) => Array.from({ length: n }, (_, i) => ({ x: x0 + (i % 4), y, z: Math.floor(i / 4) }))

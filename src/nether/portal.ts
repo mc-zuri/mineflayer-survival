@@ -205,6 +205,11 @@ export interface LavaCastOptions {
   /** the mould's block (default cobblestone) */
   scaffoldItem?: string
   /**
+   * obsidian carried (default 0): placed in the frame's first cells (the bottom row, then the sides from the bottom),
+   * so only the rest are cast (a pool's 8 sources left after 6 were turned to obsidian and mined still make a frame)
+   */
+  obsidian?: number
+  /**
    * keep the frame this far from any lava, horizontally (default 9): the water poured over each cast cell falls to the
    * ground in front of the frame and spreads 7 blocks before it is scooped back (WaterFluid: slope 4, a level less a
    * block), and turns the pool's sources it reaches to obsidian and its flowing lava to cobblestone
@@ -312,7 +317,10 @@ export function planLavaCast (getBlock: BlockGetter, lava: Pos[], opts: LavaCast
   if (site == null) return null
   const { origin, axis, back } = site
   const frame = portalFrame(origin, axis)
-  if (sources.length < frame.obsidian.length) return null
+  const held = Math.max(0, Math.min(opts.obsidian ?? 0, frame.obsidian.length))
+  const placedCells = frame.obsidian.slice(0, held)
+  const castCells = frame.obsidian.slice(held)
+  if (sources.length < castCells.length) return null
   const scaffoldItem = opts.scaffoldItem ?? 'cobblestone'
   const perTrip = Math.max(1, opts.lavaBuckets ?? 1)
   const n = frameNormal(axis)
@@ -332,11 +340,14 @@ export function planLavaCast (getBlock: BlockGetter, lava: Pos[], opts: LavaCast
       solid.add(key(m))
     }
   }
+  // the obsidian carried, against the mould (the cells under the cast ones: the water over each cast cell goes in the
+  // cell above it, still empty)
+  for (const cell of placedCells) steps.push({ kind: 'place_block', item: 'obsidian', pos: cell, against: add(cell, toBack), face: toFront, why: 'obsidian carried' })
   // nearest lava first from the site
   const ordered = [...sources].sort((a, b) => Math.hypot(a.x - origin.x, a.y - origin.y, a.z - origin.z) - Math.hypot(b.x - origin.x, b.y - origin.y, b.z - origin.z))
-  const used = ordered.slice(0, frame.obsidian.length)
-  for (let i = 0; i < frame.obsidian.length; i += perTrip) {
-    const batch = frame.obsidian.slice(i, i + perTrip)
+  const used = ordered.slice(0, castCells.length)
+  for (let i = 0; i < castCells.length; i += perTrip) {
+    const batch = castCells.slice(i, i + perTrip)
     batch.forEach((_, j) => steps.push({ kind: 'fill_lava', pos: used[i + j] }))
     for (const cell of batch) {
       const water = add(cell, UP)
