@@ -106,6 +106,67 @@ export function choosePortalSite (getBlock: BlockGetter, near: Pos, opts: Portal
   return best == null ? null : { origin: best.origin, axis: best.axis }
 }
 
+/** the blocks a portal site's holes are filled with */
+const SITE_FILLERS = ['cobblestone', 'cobbled_deepslate', 'netherrack', 'dirt', 'stone', 'andesite', 'diorite', 'granite', 'tuff', 'deepslate']
+
+/**
+ * The cells a frame at `origin` needs cleared (the frame, its inside and a row each side of it) and filled (the
+ * ground under its four columns and those rows): what preparePortalSite digs and places
+ */
+export function portalSiteWork (getBlock: BlockGetter, origin: Pos, axis: Axis): { dig: Pos[], fill: Pos[] } {
+  const dig: Pos[] = []
+  const fill: Pos[] = []
+  for (let u = 0; u < 4; u++) {
+    for (const depth of [-1, 0, 1]) {
+      const under = frameCell(origin, axis, u, -1, depth)
+      if (!isSolid(getBlock(under))) fill.push(under)
+      for (let v = 0; v < 5; v++) {
+        const cell = frameCell(origin, axis, u, v, depth)
+        const b = getBlock(cell)
+        if (b != null && !PASSABLE.has(b.name)) dig.push(cell)
+      }
+    }
+  }
+  return { dig, fill }
+}
+
+/**
+ * Makes a site for a placed frame where the bot stands when there is no flat clear ground near (a cave, a slope):
+ * the frame's cells and a row each side dug out, the ground under them filled; resolves the origin, along x
+ * (a cave's bot with 11 obsidian found 'no flat clear ground' and the milestone failed five times at once, 26.3)
+ */
+export async function preparePortalSite (bot: Bot, signal?: AbortSignal): Promise<{ origin: Vec3, axis: Axis }> {
+  const getBlock = blockGetter(bot)
+  const feet = bot.entity.position.floored()
+  const origin = feet.offset(-1, 0, 2)
+  const axis: Axis = 'x'
+  const work = portalSiteWork(getBlock, origin, axis)
+  // the liquids aren't dug into
+  if (work.dig.some(p => /lava|water/.test(getBlock(p)?.name ?? ''))) throw new SkillError('CANNOT_PLACE', `liquid where a portal site would be at ${origin.toString()}`)
+  // top down, so nothing falls into a dug cell; a few passes, each cell on its own (one out of reach from where the
+  // bot stands is reached once the cells by it are dug)
+  let dig = [...work.dig].sort((a, b) => b.y - a.y).map(v3)
+  for (let pass = 0; pass < 3 && dig.length > 0; pass++) {
+    for (const p of dig) {
+      throwIfAborted(signal)
+      if (PASSABLE.has(getBlock(p)?.name ?? 'air')) continue
+      await collectBlock(bot, { positions: [p], pickup: false }, signal).catch(err => { if (isAbort(err)) throw err; trace('preparePortalSite:', p.toString(), (err as Error).message) })
+    }
+    dig = portalSiteWork(getBlock, origin, axis).dig.map(v3)
+  }
+  // the frame's own plane must be clear (the obsidian goes in it); a side row's block left is walked round
+  const blocked = portalSiteWork(getBlock, origin, axis).dig.filter(p => (axis === 'x' ? p.z : p.x) === (axis === 'x' ? origin.z : origin.x))
+  if (blocked.length > 0) throw new SkillError('CANNOT_PLACE', `${blocked.length} blocks left in the portal site at ${origin.toString()}`)
+  for (const p of work.fill.map(v3)) {
+    throwIfAborted(signal)
+    const filler = SITE_FILLERS.find(n => countItems(bot, n) > 0)
+    if (filler == null) throw new SkillError('MISSING_ITEMS', 'no block to fill the ground of the portal site with')
+    if (!isSolid(getBlock(p))) await placeBlock(bot, { pos: p, item: filler }, signal)
+  }
+  trace('preparePortalSite: dug', work.dig.length, 'filled', work.fill.length, 'at', origin.toString())
+  return { origin, axis }
+}
+
 export interface BuildPortalArgs {
   /** where to put the frame (its bottom corner) and along which axis; default: a site near the bot or the lava */
   origin?: Vec3

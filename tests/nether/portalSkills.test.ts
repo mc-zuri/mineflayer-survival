@@ -69,3 +69,13 @@ test('choosePortalSite: rough ground near the bot, flat ground 12 blocks off fou
   assert.ok(site != null)
   assert.ok(site.origin.x >= 10)
 })
+
+test('portalSiteWork: the frame, its inside and a row each side dug, the ground under them filled', async () => {
+  const { portalSiteWork } = await import('../../src/nether/portalSkills')
+  // a cave: stone everywhere above y 64 but an air pocket, the floor at y 63 missing at x 1
+  const get = (p: Pos): BlockInfo => ({ name: p.y < 64 ? (p.x === 1 && p.y === 63 ? 'air' : 'stone') : (p.y < 66 && p.x === 0 ? 'air' : 'stone') })
+  const work = portalSiteWork(get, { x: 0, y: 64, z: 0 }, 'x')
+  // 4 columns x 3 rows x 5 high, the air pocket at x 0, y 64 - 65 left out
+  assert.equal(work.dig.length, 4 * 3 * 5 - 3 * 2)
+  assert.deepEqual(work.fill.map(p => `${p.x},${p.y},${p.z}`).sort(), ['1,63,-1', '1,63,0', '1,63,1'])
+})

@@ -6,7 +6,7 @@
 import type { Bot } from 'mineflayer'
 import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
-import { barterForPearls, blockGetter, buildPortal, castPortalAway, collectBlazeRods, enterNether, findFortress, huntEndermen, isAdultPiglin, returnOverworld, withNetherSafety } from './nether/skills'
+import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, isAdultPiglin, returnOverworld, withNetherSafety } from './nether/skills'
 import { travel } from './skills/travel'
 import { dayPhase } from './planner/schedule'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
@@ -421,7 +421,17 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   const count = (name: string): number => countItems(bot, name)
   const placeFromObsidian = async (): Promise<void> => {
     await executor.task('up to the surface', async (s) => await ensureSurface(bot, s), signal)
-    await executor.task('build a nether portal', async (s) => await buildPortal(bot, { method: 'obsidian' }, s), signal)
+    try {
+      await executor.task('build a nether portal', async (s) => await buildPortal(bot, { method: 'obsidian' }, s), signal)
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED') || !/no flat clear ground/.test((err as Error).message)) throw err
+      // no flat clear ground near: a site made where the bot is
+      log('a portal frame: no flat clear ground: a site dug out here')
+      await executor.task('build a nether portal', async (s) => {
+        const site = await preparePortalSite(bot, s)
+        return await buildPortal(bot, { method: 'obsidian', origin: site.origin, axis: site.axis }, s)
+      }, signal)
+    }
   }
   if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
   // a bucket and its water first (a death lost the kit's: every pool after was 'no water bucket to make obsidian with')
