@@ -146,6 +146,31 @@ describe(`gathering skills on a ${DEFAULT_VERSION} server`, { timeout: 15 * 60 *
     assert.strictEqual(left, 8)
   })
 
+  it('takes planks out of a chest, then crafts sticks in its own grid with the inventory menu\'s state id', async () => {
+    // (26.3 seeds 2 and 3: "craft 4 stick: VERIFY_FAILED: crafting stick x1 gave 0 of 4" after a loot or a table's
+    // craft: the clicks went with the chest's state id, each answered with the whole inventory)
+    const chest = at(-2, 0, -2)
+    await setblock(chest, 'chest')
+    await give('oak_planks', 6)
+    await storeItems(bot, { chest, filter: ['oak_planks'] })
+    await retrieveItems(bot, { chest, filter: 'oak_planks', count: 2 })
+    assert.strictEqual(countItems(bot, 'oak_planks'), 2)
+
+    let resyncs = 0
+    const onItems = (packet: any): void => { if (packet.windowId === 0) resyncs++ }
+    bot._client.on('window_items', onItems)
+    try {
+      const crafted = await craft(bot, { item: 'stick', count: 4 })
+      assert.strictEqual(crafted.crafted, 4)
+    } finally {
+      bot._client.off('window_items', onItems)
+    }
+    assert.strictEqual(countItems(bot, 'stick'), 4)
+    assert.strictEqual(countItems(bot, 'oak_planks'), 0)
+    // the craft's own resync (resyncInventory) only: no click went with a state id behind the server's
+    assert.strictEqual(resyncs, 1)
+  })
+
   it('takes lava up in a bucket, pours it back, and casts it to obsidian with water', async () => {
     const pit = at(3, -1, 0)
     await setblock(pit, 'lava')
