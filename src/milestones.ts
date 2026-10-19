@@ -9,7 +9,7 @@ import type { MilestoneHandler } from './runner'
 import { buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
-import { enterEnd, fightDragon, isInEnd, leaveEnd } from './end/skills'
+import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd } from './end/skills'
 import { countBookshelves, enchantGear, findEnchantingTable } from './skills/enchant'
 import { countItems } from './skills/util'
 import { normalizeDimension, type WorldMemory } from './core/memory'
@@ -173,7 +173,9 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
     }
     await executor.task('into the End', async (s) => await enterEnd(bot, { signal: s }), signal)
   }
-  const fight = await executor.task('fight the dragon', async (s) => await fightDragon(bot, { signal: s }), signal)
+  // off the arrival platform over the void to the island first (the fight goes for the podium in a straight line)
+  await executor.task('over to the island', async (s) => await crossToIsland(bot, { signal: s }), signal)
+  const fight = await executor.task('fight the dragon', async (s) => await fightDragon(bot, { signal: s, log: line => log(`dragon: ${line}`) }), signal)
   log(`dragon ${fight.killed ? 'killed' : 'not killed'} in ${fight.ticks} ticks (${fight.meleeHits} hits, ${fight.arrows} arrows)`)
   if (!fight.killed) return
   // the milestone's check: vanilla's end/kill_dragon advancement
