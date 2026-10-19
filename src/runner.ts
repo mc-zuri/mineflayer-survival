@@ -649,10 +649,17 @@ export class Runner {
       }
       this.log(`stock: ${describeLevel(up.level)}: ${up.units} more, in ${up.budget} ticks at most`)
       const start = this.bot.survival.tasks.tick
+      // the stall watchdog is told of what a top-up gathered, so a long trip for it is no stall
+      const gained = (): void => {
+        const now = this.stockLevels()?.find(l => l.mark.id === up.mark.id)?.have ?? up.level.have
+        if (now > up.level.have) this.diagnostics?.progress(`stock ${up.mark.id} ${Math.floor(now)}`)
+      }
       try {
         await this.withBudget(up.budget, signal, async (s) => await this.executor.obtain([up.request], s, options))
+        gained()
       } catch (err) {
         if (signal.aborted || TaskError.is(err, 'DIED') || this.bot.health <= 0) throw err
+        gained()
         this.log(`stock: ${up.mark.id} stopped after ${this.bot.survival.tasks.tick - start} ticks: ${(err as Error).message}`)
         retryLater()
       }

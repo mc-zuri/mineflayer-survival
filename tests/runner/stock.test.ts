@@ -148,3 +148,15 @@ test('by day the top-ups are the surface\'s unless the bot is deep down: a pit u
     assert.ok(!steps.some(s => s.endsWith(want === 'coal' ? 'oak_log' : 'coal')), `y ${y}: ${steps.join(', ')}`)
   }
 })
+
+test('a top-up that gathers tells the stall watchdog (bot.survival.diagnostics.progress)', async () => {
+  const bot = fakeBot({ stone_axe: 1, crafting_table: 1 })
+  const progress: string[] = []
+  const steps: string[] = []
+  const runner = new Runner(bot, { log: () => {}, executor: { runners: giving(bot, steps), log: () => {} } })
+  // the diagnostics' other hooks (arm, planMade, stepStarted...) left as no-ops
+  bot.survival.diagnostics = new Proxy({}, { get: (_t, k) => k === 'progress' ? (what: string) => progress.push(what) : k === 'step' ? undefined : () => () => {} })
+  await runner.topUp(['surface'], new AbortController().signal)
+  assert.deepEqual(steps, ['mine 64 oak_log'])
+  assert.ok(progress.includes('stock wood 64'), progress.join(', '))
+})
