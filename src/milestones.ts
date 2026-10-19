@@ -137,6 +137,9 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
       return state.leather
     }
     if (chore === 'kill') {
+      // room for the leather and the beef first (a full bag left the drops on the ground: 'hunt killed the cow drops
+      // {}' over and over, the leather short of the shelves, 26.3)
+      if ((bot.inventory.emptySlotCount?.() ?? 9) < 2) await executor.makeRoom?.({ leather: 64, wheat: 64, sugar_cane: 256, paper: 256, book: 64, lapis_lazuli: 64 }, signal, true)
       await executor.obtain([{ item: 'leather', count: state.leather + 1 }], signal).catch(err => {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
         log(`herd: no leather: ${(err as Error).message}`)

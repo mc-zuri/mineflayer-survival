@@ -237,3 +237,25 @@ test('shelvesForPaper: the shelves the paper and canes at hand make books for', 
   assert.strictEqual(shelvesForPaper(inv({ enchanting_table: 1, paper: 200 })), 15)
   assert.strictEqual(shelvesForPaper(inv({})), 0)
 })
+
+test('leatherFromHerd makes room in a full bag before it kills for leather', async () => {
+  const { leatherFromHerd } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wheat', 0)] })
+  bot.game.dimension = 'overworld'
+  ;(bot.inventory as any).emptySlotCount = () => 0
+  for (let i = 1; i <= 10; i++) bot.entities[i] = { id: i, name: 'cow', type: 'animal', position: new Vec3(i, 64, 0), metadata: [] } as any
+  let tick = 0
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { get tick () { return tick } },
+    makeRoom: async (_n: unknown, _s: unknown, force: boolean) => { calls.push(`room ${String(force)}`) },
+    obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs[0].item}`); tick += 1e6 },
+    task: async (name: string) => { if (name === 'the herd pen') throw new Error('NOT_FOUND: no ground for a pen'); return { fed: 0 } }
+  }
+  await leatherFromHerd(bot, executor, 46, new AbortController().signal, () => {})
+  assert.deepStrictEqual(calls.slice(0, 2), ['room true', 'obtain leather'])
+})
