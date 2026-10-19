@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, EYE_RAY } from '../../src/end/strongholdSkills'
+import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, nextAlongRay, EYE_RAY } from '../../src/end/strongholdSkills'
 import { isSkillError } from '../../src/skills/errors'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
@@ -54,4 +54,23 @@ test('toThrowingSpot: a bot on dry ground under the open sky throws where it sta
   cave.pathfinder = pathfinder
   await toThrowingSpot(cave).catch(() => {})
   assert.ok(used.length > 0, 'no way up was looked for')
+})
+
+test('nextAlongRay: on along the eyes\' flight, the step doubling while they fly on and halving once one flies back; a good crossing ahead is gone to', () => {
+  const east = (x: number) => ({ origin: { x, z: 0 }, direction: { x: 1, z: 0 } })
+  const west = (x: number) => ({ origin: { x, z: 0 }, direction: { x: -1, z: 0 } })
+  let a = nextAlongRay(null, east(0), null)
+  assert.deepStrictEqual([a.step, a.target], [32, { x: 32, z: 0 }])
+  a = nextAlongRay(a, east(32), null)
+  assert.deepStrictEqual([a.step, a.target], [64, { x: 96, z: 0 }])
+  a = nextAlongRay(a, east(96), null)
+  assert.deepStrictEqual([a.step, a.target], [128, { x: 224, z: 0 }])
+  // passed it: the eye flies back
+  a = nextAlongRay(a, west(224), null)
+  assert.deepStrictEqual([a.step, a.target], [64, { x: 160, z: 0 }])
+  // a crossing well conditioned and ahead
+  const crossing: any = { x: 190, z: 3, crossingAngle: 30 }
+  assert.deepStrictEqual(nextAlongRay(a, east(160), crossing).target, { x: 190, z: 3 })
+  // behind the throw: on along the ray instead
+  assert.deepStrictEqual(nextAlongRay(null, east(200), crossing).target, { x: 232, z: 0 })
 })

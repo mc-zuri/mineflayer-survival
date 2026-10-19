@@ -281,12 +281,40 @@ function done (bot: Bot, estimate: Triangulation | null, target: XZ, throws: Thr
   return { estimate, target: { x: target.x, z: target.z }, throws, ticks }
 }
 
+/** the search along the eyes' flight near the stronghold: the last ray and the step taken along it */
+export interface AlongRay {
+  ray: EyeRay
+  step: number
+  target: XZ
+}
+
+/**
+ * The next place to throw from near the stronghold: the rays' crossing when it is well conditioned and ahead, else on
+ * along the eye's flight, the step doubling while the eyes fly on the same way (32, 64, 128...) and halving back once
+ * one flies back (the stronghold passed): a fixed step of 12 to 24 blocks crept along for 6 throws on 26.3 seed 2 with
+ * the stronghold 100 blocks further on, and ran out of eyes
+ */
+export function nextAlongRay (prev: AlongRay | null, ray: EyeRay, crossing: Triangulation | null): AlongRay {
+  const dir = { x: ray.direction.x / Math.hypot(ray.direction.x, ray.direction.z), z: ray.direction.z / Math.hypot(ray.direction.x, ray.direction.z) }
+  if (crossing != null && crossing.crossingAngle > 5) {
+    const ahead = (crossing.x - ray.origin.x) * dir.x + (crossing.z - ray.origin.z) * dir.z
+    if (ahead > 2) return { ray, step: ahead, target: { x: crossing.x, z: crossing.z } }
+  }
+  let step = 32
+  if (prev != null) {
+    const pd = Math.hypot(prev.ray.direction.x, prev.ray.direction.z)
+    const back = (prev.ray.direction.x * dir.x + prev.ray.direction.z * dir.z) / pd < 0
+    step = back ? Math.max(TOO_FAR_DISTANCE, prev.step / 2) : Math.min(256, prev.step * 2)
+  }
+  return { ray, step, target: { x: ray.origin.x + dir.x * step, z: ray.origin.z + dir.z * step } }
+}
+
 export interface ReachStrongholdArgs {
   /** the estimate (default: the remembered stronghold_estimate) */
   target?: XZ
   /** rays thrown so far, crossed with the new ones */
   rays?: EyeRay[]
-  /** throws near the estimate before giving up (default 6) */
+  /** throws near the estimate before giving up (default 8) */
   maxThrows?: number
   hop?: number
 }
@@ -311,7 +339,8 @@ export async function reachStronghold (bot: Bot, args: ReachStrongholdArgs = {},
     let target: XZ | null = args.target ?? (remembered != null ? { x: remembered.x, z: remembered.z } : null)
     if (target == null) throw new SkillError('NOT_FOUND', 'no stronghold estimate to go to')
     const rays: EyeRay[] = [...(args.rays ?? [])]
-    for (let n = 1; n <= (args.maxThrows ?? 6); n++) {
+    let along: AlongRay | null = null
+    for (let n = 1; n <= (args.maxThrows ?? 8); n++) {
       throwIfAborted(signal)
       const d = Math.hypot(target.x - bot.entity.position.x, target.z - bot.entity.position.z)
       if (d > 6) {
@@ -334,9 +363,8 @@ export async function reachStronghold (bot: Bot, args: ReachStrongholdArgs = {},
       rays.push(t.ray)
       rememberRay(bot.survival?.memory, t.ray)
       const est = rays.length >= 2 ? triangulate(rays) : null
-      // the crossing when it's ahead and well conditioned, else on along this ray (the eye was 12+ blocks short)
-      if (est != null && est.crossingAngle > 5 && Math.hypot(est.x - bot.entity.position.x, est.z - bot.entity.position.z) > 2) target = est
-      else target = { x: t.ray.origin.x + t.ray.direction.x * Math.max(TOO_FAR_DISTANCE * 2, d / 2), z: t.ray.origin.z + t.ray.direction.z * Math.max(TOO_FAR_DISTANCE * 2, d / 2) }
+      along = nextAlongRay(along, t.ray, est)
+      target = along.target
       rememberEstimate(bot.survival?.memory, target, 'reach')
     }
     throw new SkillError('NOT_FOUND', 'no eye came down near the estimate')
