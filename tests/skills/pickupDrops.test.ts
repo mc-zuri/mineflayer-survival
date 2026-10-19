@@ -186,3 +186,29 @@ test('tossAway into lava throws along the look given, and what it threw counts a
     clearInterval(ticker)
   }
 })
+
+test('settlePickups: waits while an item lies in the bot\'s reach, till it comes in or PICKUP_SETTLE_TICKS are up; none farther off', async () => {
+  const { EventEmitter } = await import('node:events')
+  const { PICKUP_SETTLE_TICKS, settlePickups } = await import('../../src/skills/pickupDrops')
+  const bot: any = new EventEmitter()
+  bot.entity = { position: new Vec3(0.5, -60, 0.5) }
+  bot.entities = { 1: bot.entity }
+  let ticks = 0
+  const tick = (): void => { ticks++; bot.emit('physicsTick') }
+  const run = async (until: (n: number) => boolean): Promise<boolean> => {
+    ticks = 0
+    const timer = setInterval(() => { tick(); if (until(ticks)) delete bot.entities[2] }, 1)
+    try { return await settlePickups(bot) } finally { clearInterval(timer) }
+  }
+  // none near: at once
+  bot.entities[2] = { name: 'item', position: new Vec3(3.5, -60, 0.5) }
+  assert.strictEqual(await run(() => false), true)
+  assert.strictEqual(ticks, 0)
+  // one at the feet, picked up 4 ticks on
+  bot.entities[2] = { name: 'item', position: new Vec3(1.2, -60, 0.5) }
+  assert.strictEqual(await run(n => n >= 4), true)
+  assert.ok(ticks >= 4 && ticks < PICKUP_SETTLE_TICKS, String(ticks))
+  // one that stays (a full bag): given up
+  bot.entities[2] = { name: 'item', position: new Vec3(1.2, -60, 0.5) }
+  assert.strictEqual(await run(() => false), false)
+})

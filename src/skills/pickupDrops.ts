@@ -181,6 +181,19 @@ export async function tossAway (bot: Bot, name: string, count: number, signal?: 
   return thrown
 }
 
+/** ticks to wait for the items in the bot's reach to come in (ItemEntity's pickup delay of 10, and a tick or two) */
+export const PICKUP_SETTLE_TICKS = 12
+
+/**
+ * Waits, up to PICKUP_SETTLE_TICKS, till no item entity lies in the bot's reach (touches): the drops of the blocks it
+ * just broke picked up now, not in the middle of what comes next (a craft's menu changed by each one that came in,
+ * and failed 'the server's menu kept changing'). Resolves whether none is left.
+ */
+export async function settlePickups (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  const inReach = (): boolean => Object.values(bot.entities ?? {}).some(e => e !== bot.entity && isItemEntity(e) && touches(bot.entity.position, e.position))
+  return await waitUntil(bot, () => !inReach(), PICKUP_SETTLE_TICKS, signal)
+}
+
 /**
  * Whether the player standing at `player` picks up an item at `item`: Player.aiStep touches the entities its box,
  * inflated by 1 horizontally and 0.5 vertically, meets (the player 0.6 wide and 1.8 high, the item 0.25 a side).

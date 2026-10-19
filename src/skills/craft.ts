@@ -6,6 +6,7 @@ import { buildStatic } from 'mineflayer-crafting-util'
 import { SkillError, throwIfAborted } from './errors'
 import { collectBlock } from './collectBlock'
 import { navigateToReach } from './navigate'
+import { settlePickups } from './pickupDrops'
 import { placeBlock } from './placeBlock'
 import { findPlacementNear } from './placement'
 import { countItems, inventoryItems, itemId, resyncInventory, settleInventory, type Block } from './util'
@@ -140,6 +141,11 @@ export async function craft (bot: Bot, args: CraftArgs, signal?: AbortSignal): P
       }
     }
     await navigateToReach(bot, table.position, signal)
+  }
+  // the drops in reach in before the menu opens (a staircase stopped mid-dig by a worn pickaxe crafted its next one
+  // as the last block's drops came in, and the craft failed 'the server's menu kept changing')
+  if (plan.recipesToDo.length > 0) {
+    await settlePickups(bot, signal)
   }
 
   for (const step of plan.recipesToDo) {

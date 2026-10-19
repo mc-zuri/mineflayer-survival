@@ -11,7 +11,7 @@ import { findBlocks } from '../core/findBlocks'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { navigate, walkTo } from '../skills/navigate'
-import { isItemEntity, touches } from '../skills/pickupDrops'
+import { settlePickups } from '../skills/pickupDrops'
 import { keepRoom } from '../skills/bag'
 import { headInWater, surface } from '../skills/escape'
 import { placeBlock } from '../skills/placeBlock'
@@ -806,9 +806,6 @@ async function ensureFloor (bot: Bot, floor: Vec3, signal?: AbortSignal): Promis
  * walked in level: a block more to dig each step (a 26.3 staircase dug by hand took 220 ticks a step for it, 70
  * without), and the bot a block lower beside the pit it had thrown into, the stack picked up again.
  */
-/** ticks a step waits for the drops in its reach to come in (ItemEntity's pickup delay of 10 and a tick or two) */
-const DROP_PICKUP_TICKS = 12
-
 async function walkInto (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise<void> {
   const there = (): boolean => feetOf(bot).equals(cell) && bot.entity.onGround
   await walkTo(bot, cell.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 40, until: there }, signal)
@@ -817,7 +814,7 @@ async function walkInto (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise<vo
   if (!there()) await navigate(bot, { goal: new goals.GoalBlock(cell.x, cell.y, cell.z) }, signal)
   // the drops of the step's blocks lying in its reach picked up now (ItemEntity's 10 ticks of pickup delay), not in the
   // middle of what comes next: a craft there failed 'the server's menu kept changing' as they came in
-  await waitUntil(bot, () => !Object.values(bot.entities).some(e => e !== bot.entity && isItemEntity(e) && touches(bot.entity.position, e.position)), DROP_PICKUP_TICKS, signal)
+  await settlePickups(bot, signal)
 }
 
 /** the bot's feet cell */
