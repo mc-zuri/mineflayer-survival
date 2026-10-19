@@ -424,4 +424,7 @@ test('a trip across the world (the eyes\' stronghold search, the End) isn\'t sto
   const home = new Runner(bot2, { log: () => {} })
   for (const id of ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting'] as const) home.reached.push({ id, title: '', tick: 0, wallMs: 0 })
   assert.notEqual(home.nightDue(), null)
+  // the rods got: the pearls are the night's work, on the surface
+  bot2.give('blaze_rod', 8)
+  assert.equal(home.nightDue(), null)
 })

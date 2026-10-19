@@ -733,6 +733,9 @@ export class Runner {
     const upNext = nextToWork(progressState(bot, this.memory), reached, new Set(this.options.skip ?? []))
     if (upNext != null && TRIP_MILESTONES.includes(upNext.id)) return null
     const inv = ownedInventory(bot)
+    // the nether's pearls hunted by night (its rods got: the endermen come out on the surface at night): a 26.3 bot
+    // back from the fortress with its rods went down a mine for redstone at dusk, the night's endermen left
+    if (upNext?.id === 'nether' && inv.count('blaze_rod') + inv.count('blaze_powder') > 0) return null
     const goals = nightGoals(inv, reached)
     const action = nightAction({
       phase,
