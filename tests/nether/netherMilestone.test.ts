@@ -230,5 +230,5 @@ test('a pool the tunnel stops short of, within 8 blocks, is worked from there', 
     gridModule.moveNear = realMove
     tunnelModule.tunnelTo = realTunnel
   }
-  assert.ok(calls.indexOf('build a nether portal') > calls.indexOf('to the lava'), calls.join(', '))
+  assert.equal(calls[calls.indexOf('to the lava') + 1], 'build a nether portal', calls.join(', '))
 })
