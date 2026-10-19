@@ -854,6 +854,9 @@ export const PUMPKIN_TICKS = 2000
 /** blocks to have for the crystals' pillars (the caged ones are 76 to 103 high, the ground at 64) */
 export const END_BLOCKS = 64
 
+/** the arrows the End is never entered with fewer of (the crystals: 10, some missed) */
+export const END_ARROWS = 16
+
 export const endHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {
   if (!isInEnd(bot)) {
     // the End kit: a bow, arrows, blocks to pillar, a water bucket, food
@@ -861,6 +864,11 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
       await executor.obtain(milestone.goals(state).map(g => ({ ...g, optional: true })), signal)
     } catch (err) {
       log(`End kit short: ${(err as Error).message}`)
+    }
+    // the bow and some arrows at least, not optional: the crystals are shot (a 26.3 bot went in with its bow worn out
+    // and every fight failed at once, 'a bow is needed', five times over in the End)
+    if (countItems(bot, 'bow') === 0 || countItems(bot, ['arrow', 'spectral_arrow', 'tipped_arrow']) < END_ARROWS) {
+      await executor.obtain([{ item: 'bow', count: 1 }, { item: 'arrow', count: Math.max(END_ARROWS, countItems(bot, 'arrow')) }], signal)
     }
     // back to the portal room when the kit's getting (or the stock's top-ups, a death) took the bot off from it:
     // enterEnd reads the frames within 12 blocks (1.21.11 seed 2: 48 gold mined 26 blocks off, 'no end portal frame

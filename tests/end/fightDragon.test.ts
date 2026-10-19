@@ -54,3 +54,24 @@ test('fightDragon waits for the podium\'s chunk to find the exit portal, and is 
   assert.ok(result.killed)
   assert.ok(ticks >= 30)
 })
+
+test('the end milestone gets a bow and arrows before the End, not optional: no bow is no way in', async () => {
+  const { endHandler, END_ARROWS } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('arrow', 64)] })
+  bot.game.dimension = 'overworld'
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async (reqs: any[]) => {
+      calls.push(reqs.map(r => `${r.item}${r.optional === true ? '?' : ''}`).join(','))
+      if (reqs.some(r => r.item === 'bow' && r.optional !== true)) throw new Error('NOT_FOUND: no string')
+    },
+    task: async (name: string) => { calls.push(name) }
+  }
+  await assert.rejects(endHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: { goals: () => [{ item: 'bow', count: 1 }] } as any, state: null as any }), /no string/)
+  assert.deepStrictEqual(calls, ['bow?', 'bow,arrow'])
+  assert.ok(END_ARROWS > 0)
+})
