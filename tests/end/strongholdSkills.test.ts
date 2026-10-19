@@ -170,3 +170,24 @@ test('overland: a trip from a cave or a mine climbs out first; one from the surf
   await overland(cave, { target: new Vec3(1, -6, 1), range: 3 }).catch(() => {})
   assert.ok(used.length > 0, 'no way up was looked for')
 })
+
+test('overland to a height with no path down to it tunnels down', async () => {
+  const travelModule = require('../../src/skills/travel')
+  const tunnelModule = require('../../src/skills/tunnel')
+  const { Vec3 } = require('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 70, 0.5), world: (p: any) => p.y < 70 ? 'stone' : 'air' })
+  bot.game.dimension = 'overworld'
+  bot.pathfinder = { pathfinderSettings: {}, defaultMoveSettings: {}, setOptions: () => {}, setMoveOptions: () => {} } as any
+  const realTravel = travelModule.travel
+  const realTunnel = tunnelModule.tunnelTo
+  const calls: string[] = []
+  travelModule.travel = async (_b: unknown, a: any) => { calls.push(`travel ${String(a.exactY)}`); if (a.exactY === true) throw new Error('NO_PATH: no way on') }
+  tunnelModule.tunnelTo = async (_b: unknown, a: any) => { calls.push(`tunnel ${a.target.y}`) }
+  try {
+    await overland(bot, { target: new Vec3(0, 5, 0), range: 2, exactY: true })
+  } finally {
+    travelModule.travel = realTravel
+    tunnelModule.tunnelTo = realTunnel
+  }
+  assert.deepStrictEqual(calls, ['travel false', 'travel true', 'tunnel 5'])
+})

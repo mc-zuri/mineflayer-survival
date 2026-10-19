@@ -319,7 +319,15 @@ export async function overland (bot: Bot, args: TravelArgs, signal?: AbortSignal
   // to a height (exactY): over the surface to above it, then down to it with the pathfinder's own costs (the surface's
   // keep it from digging down: a kit chest 13 blocks under the ground was never reached)
   await onTheSurface(bot, async () => await travel(bot, { ...args, exactY: false, range: Math.max(args.range ?? 3, 3) }, signal))
-  if (args.exactY === true) await travel(bot, args, signal)
+  if (args.exactY !== true) return
+  try {
+    await travel(bot, args, signal)
+  } catch (err) {
+    if (isAbort(err)) throw err
+    // no path down to it (65 blocks under the ground over a cave's portal, 26.3): a stair tunnel down
+    trace('overland: down by a tunnel:', (err as Error).message)
+    await tunnelTo(bot, { target: args.target, range: Math.max(2, args.range ?? 2) }, signal)
+  }
 }
 
 /**
