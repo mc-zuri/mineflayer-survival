@@ -147,7 +147,8 @@ export function planCrystals (spikes: EndSpike[], opts: CrystalPlanOptions = {})
   // a spike's top is no place to shoot from: the ground there is the obsidian's top, 20 to 40 blocks up; nor a caged
   // one's cage, whose bars stand round the obsidian (the 5 × 5 round its middle): seed 2's spike 9 was to be shot from
   // on top of spike 0's cage, and the 26.3 bots walked into the cage after it, by the crystal's fire, and died there
-  const spikeCells = new Set(spikes.flatMap(s => [...spikeColumns(s), ...(s.guarded ? cageBars(s) : [])].map(c => `${c.x},${c.z}`)))
+  // (the cage's 5 × 5 round every spike's middle, caged or not as read: what bars a blast left stand on it)
+  const spikeCells = new Set(spikes.flatMap(s => [...spikeColumns(s), ...cageFootprint(s)].map(c => `${c.x},${c.z}`)))
   const avoid = opts.avoid
   const offLimits = (x: number, z: number): boolean => spikeCells.has(`${Math.floor(x)},${Math.floor(z)}`) || (avoid?.(x, z) ?? false)
   const blocked = (p: Pos): boolean => blocks.has(keyOf(p.x, p.y, p.z)) || (opts.solidAt?.(p.x, p.y, p.z) ?? false)
@@ -173,6 +174,13 @@ export function planCrystals (spikes: EndSpike[], opts: CrystalPlanOptions = {})
     targets.push({ spike, crystal, aim: crystal.center, method: 'pillar', shootFrom: found?.spot ?? null, pillar: { column, topY, breakBars } })
   }
   return route(targets, opts.from ?? { x: 0, z: 0 })
+}
+
+/** the 5 × 5 columns a spike's cage stands on (SpikeFeature: the bars 2 out from its middle every way) */
+export function cageFootprint (spike: EndSpike): Array<{ x: number, z: number }> {
+  const out: Array<{ x: number, z: number }> = []
+  for (let m = -2; m <= 2; m++) for (let n = -2; n <= 2; n++) out.push({ x: spike.centerX + m, z: spike.centerZ + n })
+  return out
 }
 
 /**

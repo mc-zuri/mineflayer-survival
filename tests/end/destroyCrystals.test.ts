@@ -101,3 +101,12 @@ test('cloudUnder: a cloud across the pillar\'s column under the bot\'s feet is w
   assert.strictEqual(cloudUnder([cloud(39, 82)], feet, pillar), null)
   assert.strictEqual(cloudUnder([{ ...cloud(39, 80), why: 'fireball' }], feet, pillar), null)
 })
+
+test('readSpikes: a cage with some of its bars broken (a blast, the shot\'s line) is still a cage', () => {
+  const caged = SPIKES.find(s => s.guarded) as (typeof SPIKES)[number]
+  const blocks = endIsland(SPIKES)
+  // the bar readSpikes once looked at alone, and the rest of that side, gone
+  for (let n = -2; n <= 2; n++) for (let o = 0; o <= 3; o++) blocks.delete(`${caged.centerX + 2},${caged.height + o},${caged.centerZ + n}`)
+  const read = readSpikes(world(blocks))
+  assert.strictEqual(read.find(s => s.index === caged.index)?.guarded, true)
+})

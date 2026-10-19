@@ -127,3 +127,21 @@ test('a caged crystal\'s shooting spot keeps its line clear of the world\'s own 
   const eye2 = { x: again.shootFrom.x, y: again.shootFrom.y + 1.62, z: again.shootFrom.z }
   assert.ok(!cellsOnLine(eye2, boxEntry(eye2, again.shootFrom.aim, again.crystal.box)).some(c => solidAt(c.x, c.y, c.z)))
 })
+
+test('no shooting spot on a cage the spike is read as open for (its bars broken: seed 2\'s spike 9 from the top of spike 0\'s, a 26.3 bot thrown off it into the void)', () => {
+  const spikes = getSpikesForLevel(parseSeed('2'))
+  const tops = new Map<string, number>()
+  for (const s of spikes) {
+    for (const c of spikeColumns(s)) tops.set(`${c.x},${c.z}`, s.height)
+    if (s.guarded) for (const b of cageBars(s)) tops.set(`${b.x},${b.z}`, Math.max(tops.get(`${b.x},${b.z}`) ?? 0, b.y + 1))
+  }
+  const groundY = (x: number, z: number): number => tops.get(`${Math.floor(x)},${Math.floor(z)}`) ?? 63
+  // every spike read as open (a broken bar where the reading looked)
+  const open = spikes.map(s => ({ ...s, guarded: false }))
+  const plan = planCrystals(open, { groundY, from: { x: 30, z: 0 } })
+  for (const t of plan) {
+    const spot = t.shootFrom
+    if (spot == null) continue
+    assert.ok(!tops.has(`${Math.floor(spot.x)},${Math.floor(spot.z)}`), `spike ${t.spike.index} shot from ${spot.x}, ${spot.y}, ${spot.z}, on a spike or its cage`)
+  }
+})

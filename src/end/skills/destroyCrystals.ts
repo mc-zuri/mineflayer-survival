@@ -43,8 +43,22 @@ export function readSpikes (get: BlockGetter, crystals: Pos[] = [], seed?: Seed)
       radius = 0
       while (radius < 6 && get(new Vec3(c.x + radius + 1, height - 1, c.z))?.name === 'obsidian') radius++
     }
-    const bar = get(new Vec3(c.x + 2, height + 1, c.z))
-    const guarded = bar != null ? bar.name === 'iron_bars' : known?.guarded ?? false
+    // any of the cage's bars left (a crystal's blast, power 6, breaks some; the bot breaks those on its shot's line):
+    // one bar read alone, broken, took a caged spike for an open one, and its cage's top for ground to shoot from
+    let guarded = known?.guarded ?? false
+    let seen = false
+    for (let m = -2; m <= 2 && !guarded; m++) {
+      for (let n = -2; n <= 2 && !guarded; n++) {
+        for (let o = 0; o <= 3 && !guarded; o++) {
+          if (Math.abs(m) !== 2 && Math.abs(n) !== 2 && o !== 3) continue
+          const bar = get(new Vec3(c.x + m, height + o, c.z + n))
+          if (bar == null) continue
+          seen = true
+          if (bar.name === 'iron_bars') guarded = true
+        }
+      }
+    }
+    if (!seen) guarded = known?.guarded ?? false
     out.push({ index, centerX: c.x, centerZ: c.z, radius, height, guarded })
   })
   return out
