@@ -537,7 +537,9 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
     try {
       await executor.task('to the lava', async (s) => await moveNear(bot, at, 5, s).catch(async err => {
         if (isAbort(err)) throw err
-        await tunnelTo(bot, { target: at, range: 5 }, s)
+        // (a tunnel stops short of the lava, a step from it refused: near enough to work by from 8 blocks, the pool
+        // seen from there: 'no safe step' 5 blocks over a 26.3 cave lake ended the pool's try)
+        await tunnelTo(bot, { target: at, range: 5 }, s).catch(e => { if (isAbort(e) || bot.entity.position.distanceTo(at) > 8) throw e })
       }), signal)
       try {
         await executor.task('build a nether portal', async (s) => await buildPortal(bot, {}, s), signal)

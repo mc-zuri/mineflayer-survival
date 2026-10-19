@@ -199,3 +199,36 @@ test('the night pearl hunt holds the night reflex off (nightWork) while it hunts
   assert.ok(seen.length > 0 && seen.every(v => v === true))
   assert.equal((bot as any).survival.nightWork, false)
 })
+
+test('a pool the tunnel stops short of, within 8 blocks, is worked from there', async () => {
+  const gridModule = require('../../src/skills/gridWalk')
+  const tunnelModule = require('../../src/skills/tunnel')
+  const { buildAPortal } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 51, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1)] })
+  bot.game.dimension = 'overworld'
+  const lava = bot.registry.blocksByName.lava.id
+  // a pool of 12 lava sources 5 below and beside the bot
+  bot.findBlocks = (opts: any) => opts.matching === lava ? Array.from({ length: 12 }, (_, i) => new Vec3(i % 4, 46, Math.floor(i / 4))) : []
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => (p.y === 46 && p.x >= 0 && p.x < 4 && p.z >= 0 && p.z < 3) ? { ...realAt(p), name: 'lava', getProperties: () => ({ level: 0 }) } : realAt(p)) as any
+  const calls: string[] = []
+  const realMove = gridModule.moveNear
+  const realTunnel = tunnelModule.tunnelTo
+  gridModule.moveNear = async () => { throw new Error('NO_PATH: none') }
+  tunnelModule.tunnelTo = async () => { throw new Error('NO_PATH: no safe step') }
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async () => {},
+    task: async (name: string, fn: any) => { calls.push(name); if (name === 'to the lava') return await fn(new AbortController().signal); if (name === 'build a nether portal') throw new Error('stop here') }
+  }
+  try {
+    await assert.rejects(buildAPortal(bot, executor, new AbortController().signal, () => {}), /stop here/)
+  } finally {
+    gridModule.moveNear = realMove
+    tunnelModule.tunnelTo = realTunnel
+  }
+  assert.ok(calls.indexOf('build a nether portal') > calls.indexOf('to the lava'), calls.join(', '))
+})
