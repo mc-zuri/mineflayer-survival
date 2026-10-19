@@ -127,3 +127,32 @@ test('the blaze fight camps 9 off the spawner by default, out of its swarm', asy
   assert.ok(spots.length > 0)
   assert.ok(Math.hypot(spots[0].x, spots[0].z) >= BLAZE_STAND_OFF - 1, spots[0].toString())
 })
+
+test('collectBlazeRods leaves the blazes and the meals to itself: the hostiles reflex sees no blaze and the eat reflex waits, till it ends', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const { ReflexEngine } = await import('../../src/reflexes/engine')
+  const gridModule = require('../../src/skills/gridWalk')
+  const bot = fakeBot({ position: new Vec3(9.5, 64, 0.5), world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  const engine = new ReflexEngine(bot, { reflexes: [] })
+  bot.survival = { reflexes: engine }
+  const realMove = gridModule.moveNear
+  gridModule.moveNear = async () => {}
+  const held: string[][] = []
+  const onTick = (): void => { held.push([...engine.leftAloneNames, ...engine.inhibitedNames]) }
+  bot.on('physicsTick', onTick)
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlazeRods(bot, { count: 2, spawner: new Vec3(0, 64, 0), maxTicks: 40, safety: false }), /TIMEOUT|rods/)
+  } finally {
+    clearInterval(ticking)
+    bot.off('physicsTick', onTick)
+    gridModule.moveNear = realMove
+    engine.stop()
+  }
+  assert.ok(held.some(h => h.includes('blaze') && h.includes('eat')), JSON.stringify(held.slice(0, 3)))
+  assert.deepStrictEqual(engine.leftAloneNames, [])
+  assert.deepStrictEqual(engine.inhibitedNames, [])
+})

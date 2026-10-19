@@ -39,6 +39,8 @@ export class ReflexEngine {
   private readonly cooldownUntil = new Map<string, number>()
   /** reflexes kept from firing (inhibit), with how many holds each has */
   private readonly inhibited = new Map<string, number>()
+  /** mobs the reflexes leave to a skill (leaveAlone), with how many holds each has */
+  private readonly leftAlone = new Map<string, number>()
   private readonly onTick = (): void => this.physicsTick()
   /** the tick each entity last hurt the bot at (the damage event's cause) */
   private readonly attackers = new Map<number, number>()
@@ -81,7 +83,8 @@ export class ReflexEngine {
       // a mob killed stays in the world for its death animation (LivingEntity.tickDeath, 20 ticks) at health 0: no threat
       // and a neutral mob that hurt the bot lately (a polar bear by its cub, a wolf hit by mistake), to be fought back:
       // on seed 4 a polar bear killed the bot, which never looked at it, not being a hostile
-      .filter(e => (isHostile(bot, e) || this.provokedNeutral(e)) && isAlive(bot, e) && e.position.distanceTo(pos) <= scan)
+      // (and the mobs a skill fights itself: leaveAlone)
+      .filter(e => (isHostile(bot, e) || this.provokedNeutral(e)) && isAlive(bot, e) && e.position.distanceTo(pos) <= scan && !this.leftAlone.has(e.name ?? ''))
       .sort((a, b) => a.position.distanceTo(pos) - b.position.distanceTo(pos))
     const ticksSinceHurt = this.tick - this.lastHurtTick
     const inCombat = ticksSinceHurt < this.config.combat.hurtTicks || hostiles.some(e => e.position.distanceTo(pos) <= this.config.combat.range)
@@ -187,6 +190,31 @@ export class ReflexEngine {
         else this.inhibited.set(n, k)
       }
     }
+  }
+
+  /**
+   * Leaves the named mobs out of what the reflexes see (their context's hostiles) until the returned release is called
+   * (each hold released once; the holds count): for a skill that fights them its own way. The blaze fight holds the
+   * blazes: the hostiles reflex took them over each time one came in range and fought them in melee by the spawner,
+   * chasing them about the throne under the others' fireballs (every blaze death of 26.3 runs as to av was in it).
+   */
+  leaveAlone (names: string[]): () => void {
+    for (const n of names) this.leftAlone.set(n, (this.leftAlone.get(n) ?? 0) + 1)
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      for (const n of names) {
+        const k = (this.leftAlone.get(n) ?? 1) - 1
+        if (k <= 0) this.leftAlone.delete(n)
+        else this.leftAlone.set(n, k)
+      }
+    }
+  }
+
+  /** the mobs left to a skill now (leaveAlone) */
+  get leftAloneNames (): string[] {
+    return [...this.leftAlone.keys()]
   }
 
   /** the reflexes held back now (inhibit) */

@@ -172,6 +172,8 @@ export async function putOutFiresNear (bot: Bot, radius: number, signal?: AbortS
 /** health the blaze fight backs off at to heal, and how many times a fight does */
 export const BLAZE_RETREAT_HEALTH = 8
 export const BLAZE_RETREATS = 6
+/** the food level the blaze fight eats at, whatever the health (the eat reflex's 14, held back through the fight) */
+export const BLAZE_EAT_FOOD = 14
 /** how far from a spawner the blaze fight camps */
 export const BLAZE_STAND_OFF = 9
 
@@ -319,6 +321,20 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
   const cameFrom = bot.entity.position.clone()
   const run = async (): Promise<BlazeRodsResult> => {
     if (countItems(bot, 'blaze_rod') >= count) return { rods: countItems(bot, 'blaze_rod'), kills, ticks }
+    // the blazes are this skill's to fight (the hostiles reflex took them over each time one came in range, and fought
+    // them in melee about the spawner: every blaze death of 26.3 runs as to av was in it), and its meals (the eat
+    // reflex, the blazes out of its sight, would eat in the open with the shield down)
+    const engine = bot.survival?.reflexes
+    const leave = engine?.leaveAlone(['blaze'])
+    const noEat = engine?.inhibit(['eat'])
+    try {
+      return await fightForRods()
+    } finally {
+      leave?.()
+      noEat?.()
+    }
+  }
+  const fightForRods = async (): Promise<BlazeRodsResult> => {
     const spawner = args.spawner != null ? v3(args.spawner) : v3(await findBlazeSpawner(bot, { safety: false }, signal))
     // (from 9 off, out of the swarm the spawner keeps about it, the blazes come one or two at a time and are shot:
     // camped 5 off, among 6 of them, a diamond-armored 26.3 bot burned to death five times at one spawner)
@@ -399,7 +415,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
           lowerShield(bot)
           continue
         }
-        if (bot.health <= (args.eatAt ?? 12) && bot.food < 20) {
+        if ((bot.health <= (args.eatAt ?? 12) && bot.food < 20) || bot.food <= BLAZE_EAT_FOOD) {
           try { await eat(bot, { signal }) } catch (err) { if (isAbort(err)) throw err }
         }
         // the spawner's blazes, and any that came at the bot
