@@ -727,6 +727,8 @@ export function pearlGround (bot: Bot, gold: boolean): { kind: 'warped forest' |
 export async function pearlsInTheNether (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
   const count = (name: string): number => countItems(bot, name)
   let legs = PEARL_NETHER_LEGS
+  const spiral = spiralWaypoints(bot.entity.position, PEARL_LEG, PEARL_LEG * PEARL_NETHER_LEGS)
+  let walked = 0
   for (let leg = 0; leg < legs && count('ender_pearl') < want; leg++) {
     if (signal.aborted) throw signal.reason
     const piglin = Object.values(bot.entities).some(e => isAdultPiglin(bot, e) && e.position.distanceTo(bot.entity.position) <= 48)
@@ -759,9 +761,10 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
         continue
       }
     } else {
-      const route = fortressRoute(executor.memory, bot.entity.position)
-      const dir = route.axis === 'x' ? new Vec3(route.direction as number, 0, 0) : new Vec3(0, 0, route.direction as number)
-      to = bot.entity.position.plus(dir.scaled(PEARL_LEG))
+      // a spiral out from where the search began (the fortress walks' legs went back and forth over the same 100
+      // blocks round the fortress, 10 legs and no new ground, 26.3)
+      const point = spiral[walked++ % spiral.length]
+      to = new Vec3(point.x, bot.entity.position.y, point.z)
     }
     log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for ${seen?.kind ?? 'piglins or endermen'}`)
     await executor.task('a leg for pearls', async (s) => await withNetherSafety(bot, async () => await travel(bot, {

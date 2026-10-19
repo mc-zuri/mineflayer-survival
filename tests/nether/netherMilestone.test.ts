@@ -266,3 +266,17 @@ test('goldOnInTheNether: the golden piece put on once in the nether, not in the 
   await goldOnInTheNether(bot, executor, new AbortController().signal, () => {})
   assert.deepStrictEqual(calls, ['gold on for the piglins'])
 })
+
+test('the nether pearl legs spiral out from where the search began, no point twice', async () => {
+  const { pearlsInTheNether, PEARL_NETHER_LEGS } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  bot.game.dimension = 'the_nether'
+  const lines: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async () => {} }
+  await pearlsInTheNether(bot, executor, 4, new AbortController().signal, l => lines.push(l))
+  const points = lines.map(l => /on to \(([^)]+)\)/.exec(l)?.[1]).filter(p => p != null)
+  assert.equal(points.length, PEARL_NETHER_LEGS)
+  assert.equal(new Set(points).size, points.length)
+})
