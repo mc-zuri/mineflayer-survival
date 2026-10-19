@@ -36,6 +36,9 @@ export const UNREACHABLE_SPAWNER = 'blaze_spawner_unreachable'
 /** a spawner this near one the bot found no way to is that one */
 export const SAME_SPAWNER = 6
 
+/** blazes this near (sideways) a spawner left out are taken for its */
+export const SPAWNER_BLAZES_RANGE = 32
+
 /** a fortress whose seen bounds come within this of a spawner the bot found no way to is that spawner's */
 export const SAME_FORTRESS = 32
 
@@ -300,8 +303,11 @@ export async function findBlazeSpawner (bot: Bot, args: FindSpawnerArgs = {}, si
       // (and the ones the bot found no way to left out: a fortress often has two)
       const spawners = fortressSpawnersInView(bot).filter(p => !excludedSpawner(p, exclude))
       if (spawners.length > 0) return estimateBlazeSpawner({ spawners, from: bot.entity.position })
-      const est = estimateBlazeSpawner({ blazes: sightings.filter(b => !excludedSpawner(b, exclude) && exclude.every(e => Math.hypot(e.x - b.x, e.z - b.z) > SAME_SPAWNER * 2)), fortress, from: bot.entity.position })
-      return est != null && est.source !== 'explore' && excludedSpawner(est, exclude) ? null : est
+      // (the blazes about one of them are its: they wander 20 blocks and more from it, and a cluster of them made a
+      // spawner of nothing 30 off one left out, where a nook waited 24000 ticks for none, 26.3)
+      const away = (p: Pos): boolean => exclude.every(e => Math.hypot(e.x - p.x, e.z - p.z) > SPAWNER_BLAZES_RANGE)
+      const est = estimateBlazeSpawner({ blazes: sightings.filter(away), fortress, from: bot.entity.position })
+      return est != null && est.source === 'blazes' && !away(est) ? null : est
     }
     let est = look()
     // the chunks round the bot may still be coming in (a fresh arrival)
@@ -424,6 +430,9 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
   const onTick = (): void => { ticks++ }
   bot.on('physicsTick', onTick)
   const cameFrom = bot.entity.position.clone()
+  // far enough from the spawner for a trip first: CAMP_TRIP off, or 16 over or under it (a 26.3 bot 46 blocks over
+  // seed 2's throne, 15 off it sideways, was where the trips by x and z alone had left it)
+  const farFrom = (spawner: Vec3): boolean => bot.entity.position.distanceTo(spawner) > CAMP_TRIP || Math.abs(bot.entity.position.y - spawner.y) > 16
   const run = async (): Promise<BlazeRodsResult> => {
     if (countItems(bot, 'blaze_rod') >= count) return { rods: countItems(bot, 'blaze_rod'), kills, ticks }
     // the blazes are this skill's to fight (the hostiles reflex took them over each time one came in range, and fought
@@ -445,8 +454,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
    */
   const fightFromCover = async (spawner: Vec3): Promise<BlazeRodsResult | null> => {
     if (nookBlocks(bot) < NOOK_MIN_BLOCKS) { trace('collectBlazeRods: too few blocks for a nook,', nookBlocks(bot)); return null }
-    if (bot.entity.position.distanceTo(spawner) > CAMP_TRIP) {
-      await travel(bot, { target: spawner, range: 16 }, signal).catch(err => {
+    if (farFrom(spawner)) {
+      await travel(bot, { target: spawner, range: 16, exactY: true }, signal).catch(err => {
         if (isAbort(err)) throw err
         trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
       })
@@ -477,6 +486,11 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       trace('collectBlazeRods: from the nook,', fought.kills, 'kills,', fought.shots, 'shots,', fought.ticks, 'ticks')
     } catch (err) {
       if (isAbort(err) || isSkillError(err, 'TIMEOUT') || bot.health <= 0) throw err
+      // a spawner that gives no blazes: given up as one there's no way to (the milestone's next spawner)
+      if (isSkillError(err, 'NOT_FOUND') && /no blaze came/.test((err as Error).message)) {
+        markSpawnerUnreachable(bot, spawner)
+        throw err
+      }
       trace('collectBlazeRods: the fight from the nook:', (err as Error).message)
       return null
     }
@@ -498,8 +512,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       if (bot.entity.position.distanceTo(spawner) <= standOff + 3 && seesFrom(bot, eyePosition(bot), spawner.offset(0.5, 0.5, 0.5), spawner)) return true
       // from afar (back from the portal after a death): a trip to the fortress first, by the way walked before (the
       // nether's trail) and in hops, not one goto on a straight line across the lava sea
-      if (bot.entity.position.distanceTo(spawner) > CAMP_TRIP) {
-        await travel(bot, { target: spawner, range: 16 }, signal).catch(err => {
+      if (farFrom(spawner)) {
+        await travel(bot, { target: spawner, range: 16, exactY: true }, signal).catch(err => {
           if (isAbort(err)) throw err
           trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
         })
@@ -536,13 +550,20 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       if (++campFails < CAMP_FAILS) return
       if (!tunnelled) {
         tunnelled = true
-        trace('collectBlazeRods: no way to the spawner at', spawner.toString(), ': tunnelling toward it')
-        try {
-          await tunnelTo(bot, { target: spawner, range: standOff }, signal)
-          if (await camp()) { campFails = 0; return }
-        } catch (err) {
-          if (isAbort(err)) throw err
-          trace('collectBlazeRods: the tunnel toward the spawner:', (err as Error).message)
+        // a trip there first, in hops on partial paths and to its height (moveNear's one search timed out over and
+        // over from 46 blocks over a spawner, the trip's end taken by x and z alone), then a staircase dug to it
+        trace('collectBlazeRods: no way to the spawner at', spawner.toString(), ': a trip, then a tunnel toward it')
+        for (const go of [
+          async () => await travel(bot, { target: spawner, range: standOff + 2, exactY: true, trail: false }, signal),
+          async () => await tunnelTo(bot, { target: spawner, range: standOff }, signal)
+        ]) {
+          try {
+            await go()
+            if (await camp()) { campFails = 0; return }
+          } catch (err) {
+            if (isAbort(err)) throw err
+            trace('collectBlazeRods: toward the spawner:', (err as Error).message)
+          }
         }
       }
       markSpawnerUnreachable(bot, spawner)

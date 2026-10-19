@@ -366,3 +366,26 @@ test('holdOffBlazes: the shield up toward a blaze in sight about to shoot, the b
   const r = await done
   assert.ok(r.ticks < 200, String(r.ticks))
 })
+
+test('fightFromNook gives up a spawner no blaze comes from (NOOK_IDLE_TICKS with none within 48), not before', async () => {
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, nookAround, NOOK_IDLE_TICKS } = await import('../../src/nether/blazeFight')
+  assert.strictEqual(NOOK_IDLE_TICKS, 3000)
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), items: [item('diamond_sword'), item('bow'), item('arrow', 64)], offhand: item('shield'), world: name })
+  bot.world = { raycast: () => null }
+  bot.equip = async (it: any) => { bot.heldItem = it }
+  bot.lookAt = async () => {}
+  bot.game.dimension = 'the_nether'
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  let settled: unknown = 'running'
+  const done = fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 1000, idleTicks: 50 }).then(r => { settled = r }, err => { settled = err })
+  for (let i = 0; i < 45; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  assert.strictEqual(settled, 'running')
+  for (let i = 0; i < 20; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  await done
+  assert.match(String((settled as Error)?.message), /no blaze came from the blaze spawner at \(0, 64, 0\) in 50 ticks/)
+})

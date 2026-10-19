@@ -758,7 +758,7 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
         const message = (err as Error).message
         // no way to it: the fortress's other spawner next (findBlazeSpawner leaves this one out); none other found
         // in a fortress with one out of reach: another fortress
-        const unreachable = /no way to the blaze spawner/.test(message)
+        const unreachable = /no way to the blaze spawner|no blaze came from the blaze spawner/.test(message)
         const none = exclude.length > 0 && /no blaze spawner found|no fortress in view/.test(message)
         if (!unreachable && !none) throw err
         if (none) otherFortress = true

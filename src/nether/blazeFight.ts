@@ -277,6 +277,13 @@ export function blazeEye (blaze: Entity): Vec3 {
   return blaze.position.offset(0, BLAZE_EYE_HEIGHT, 0)
 }
 
+/**
+ * ticks with no blaze about the nook after which its spawner is taken for one that gives none (a spawner makes up to 4
+ * every 200 to 800 ticks with the player within 16 of it: BaseSpawner.delay, requiredPlayerRange): a 26.3 bot sat in a
+ * nook by a fortress's spawner 24000 ticks for no rod, twice over
+ */
+export const NOOK_IDLE_TICKS = 3000
+
 export interface NookFightOptions {
   /** rods to have */
   count: number
@@ -293,6 +300,8 @@ export interface NookFightOptions {
   maxTicks?: number
   /** blazes further than this aren't shot (default 28) */
   shootRange?: number
+  /** give up when no blaze has been within 48 for this many ticks (default NOOK_IDLE_TICKS) */
+  idleTicks?: number
   /** called on each kill */
   onKill?: (blaze: Entity) => void
 }
@@ -340,6 +349,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   const eatFood = opts.eatFood ?? 14
   const maxTicks = opts.maxTicks ?? 24000
   const shootRange = opts.shootRange ?? 28
+  const idleTicks = opts.idleTicks ?? NOOK_IDLE_TICKS
+  let lastBlaze = 0
   const volleys = new BlazeVolleys()
   const world = arrowWorld(bot)
   const tracker = motionTrackerOf(bot)
@@ -401,6 +412,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       if (bot.health <= 0) throw new SkillError('VERIFY_FAILED', 'the bot died in the nook', { ...result, ticks: tick })
       if (tick > maxTicks) throw new SkillError('TIMEOUT', `${countItems(bot, 'blaze_rod')} of ${opts.count} blaze rods after ${tick} ticks in the nook`, { ...result, ticks: tick })
       const blazes = blazesNow()
+      if (blazes.length > 0) lastBlaze = tick
+      else if (tick - lastBlaze > idleTicks) throw new SkillError('NOT_FOUND', `no blaze came from the blaze spawner at ${opts.spawner.toString()} in ${idleTicks} ticks`, { ...result, ticks: tick })
       if (!inNook(bot, nook)) {
         // out of it (a drop fetched, a reflex's work): the shield up where it is while a blaze that sees it is about
         // to shoot, then in
