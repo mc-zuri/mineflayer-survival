@@ -9,7 +9,7 @@ import { attackStrengthOf } from '../../skills/weapons'
 import { bestFoodInInventory, eat } from '../../skills/eat'
 import { steerToward } from '../../skills/steer'
 import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataIndex, metadataValue, eyePosition, yawPitchOf, distanceToBox } from '../../skills/combatUtil'
-import { DragonPhaseTracker, activityOf, dragonZones, isSitting, type DragonZone, phaseName, type DragonActivity, type DragonPhase, meleeSpots, neckTakesFullDamage, partBox, touchedZone, vanillaYaw, CONTACT_MARGIN, JUMP_HEIGHT, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
+import { DragonPhaseTracker, activityOf, dragonZones, isSitting, yawFacing, SCAN_TURN_SLACK, type DragonZone, phaseName, type DragonActivity, type DragonPhase, meleeSpots, neckTakesFullDamage, partBox, touchedZone, vanillaYaw, CONTACT_MARGIN, JUMP_HEIGHT, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
 import { exitPortal } from '../spikes'
 import { destroyCrystals } from './destroyCrystals'
 import { blockGetter, groundY, isOpenAt, VoidGuard, findPortalY, exitPortalOpen, worldMinY, type BlockGetter } from './world'
@@ -44,8 +44,10 @@ export interface MeleeChoice {
 export function chooseMeleeSpot (get: BlockGetter, view: DragonView, portalY: number, window: MeleeWindow, dangers: Danger[], guard: VoidGuard | null, neckFullDamage = false, from: Pos | null = null): MeleeChoice | null {
   const spots: Array<MeleeChoice & { score: number }> = []
   const zones = dragonZones(view, true)
+  // scanning, it turns to the bot: each spot judged with the dragon facing it
+  const turning = window.phase === 'sitting_scanning'
   for (const g of [portalY, portalY + 1, portalY - 1]) {
-    for (const s of meleeSpots(view, g, window.breath, undefined, neckFullDamage, zones)) {
+    for (const s of meleeSpots(view, g, window.breath, undefined, neckFullDamage, zones, turning)) {
       const cell = new Vec3(Math.floor(s.x), g, Math.floor(s.z))
       if (groundY(get, s.x, s.z, g + 2, g - 2) !== g) continue
       if (!isOpenAt(get, cell) || !isOpenAt(get, cell.offset(0, 1, 0))) continue
@@ -529,6 +531,8 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         stopDraw()
         const view = { position: dragon.position, yaw: vanillaYaw(dragon.yaw) }
         const zones = dragonZones(view, true)
+        // scanning, it turns to the bot (DragonSittingScanningPhase): where it stands is judged with the dragon facing it too
+        const zoneSets = window.phase === 'sitting_scanning' ? [zones, ...[-SCAN_TURN_SLACK, 0, SCAN_TURN_SLACK].map(t => dragonZones({ ...view, yaw: yawFacing(view.position, me) + t }))] : [zones]
         const neckFull = neckTakesFullDamage(bot.registry.version as any)
         const choice = chooseMeleeSpot(get, view, portalY, window, dangers, guard, neckFull, me)
         const weapon = sword()
@@ -540,7 +544,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         }
         // the part to hit from here: the head, the neck where it takes full damage (26.3), else the body
         const target = reachTo('head') <= MELEE_REACH ? 'head' : neckFull && reachTo('neck') <= MELEE_REACH ? 'neck' : reachTo('body') <= MELEE_REACH ? 'body' : null
-        const touching = touchedZone(me, zones, 0, CONTACT_MARGIN)
+        const touching = zoneSets.map(zs => touchedZone(me, zs, 0, CONTACT_MARGIN)).find(z => z != null) ?? null
         const at = choice != null && Math.hypot(me.x - choice.spot.x, me.z - choice.spot.z) < 0.6 && Math.abs(me.y - choice.spot.y) < 0.5
         // where it stands will do: on the ground clear of the zones, and a full-damage part in reach (or the body, when
         // no spot has better)
@@ -570,7 +574,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         await bot.look(yaw, pitch, true)
         // a crit only where the jump stays clear of the head, neck and wings (a jump under the head touches it)
         // and none when it may take off (its wings hurt then)
-        const critOk = !window.takeoffSoon && (at && choice != null ? choice.crit : touchedZone(me, zones, JUMP_HEIGHT, CONTACT_MARGIN) == null)
+        const critOk = !window.takeoffSoon && (at && choice != null ? choice.crit : zoneSets.every(zs => touchedZone(me, zs, JUMP_HEIGHT, CONTACT_MARGIN) == null))
         const airborne = tick - jumpedAt <= 14 && !bot.entity.onGround
         const falling = !bot.entity.onGround && bot.entity.velocity.y < 0
         if (critOk && bot.entity.onGround && !airborne && strength.ticksToFull() <= 5 && strength.ticksToFull() > 0) {

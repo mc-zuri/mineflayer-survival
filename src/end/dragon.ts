@@ -246,8 +246,23 @@ export interface MeleeSpot extends Pos {
   crit: boolean
 }
 
-/** how much wider than the player's box the dragon's zones are kept from (drift, the dragon turning, rounding) */
-export const CONTACT_MARGIN = 0.3
+/**
+ * DragonSittingScanningPhase turns the sitting dragon to the player in its range until it faces it to within 10°
+ * (`angle < 0 || angle > 10`, the + 0.5 aside)
+ */
+export const SCAN_TURN_SLACK = 10
+
+/** the vanilla yaw (degrees) that points the head (sin yRot, -cos yRot) from `from` to `to` */
+export function yawFacing (from: Pos, to: Pos): number {
+  return Math.atan2(to.x - from.x, -(to.z - from.z)) * 180 / Math.PI
+}
+
+/**
+ * how much wider than the player's box the dragon's zones are kept from: drift, rounding, and the head's yaw, which is
+ * yRot less yRotA × 0.01 rad (the turn's leftover, kept once it stops turning): the server's head hit a 26.3 bot 0.06
+ * outside the box worked out from the entity's yaw
+ */
+export const CONTACT_MARGIN = 0.5
 
 /**
  * Standing spots on the ground (feet at groundY) around a perched dragon from which a part
@@ -257,12 +272,11 @@ export const CONTACT_MARGIN = 0.3
  * since the cloud lands just past it, and the spots under the body by the pillar remain.
  * Spots where the body touches one of the dragon's zones (dragonZones: the head and neck
  * hurt 10 a touch, the wings throw) are left out too, and a jump (a crit) is allowed only
- * where the jumping body stays clear of them as well.
+ * where the jumping body stays clear of them as well. `turning`: the dragon is scanning, and
+ * turns to face the player in its range (DragonSittingScanningPhase), so each spot is judged
+ * with the dragon facing it (within SCAN_TURN_SLACK): its head comes round over the player.
  */
-export function meleeSpots (dragon: DragonView, groundY: number, breath: BreathZone | null = null, margin = 0.8, neckFullDamage = false, zones: DragonZone[] = dragonZones(dragon)): MeleeSpot[] {
-  const head = headPosition(dragon)
-  const neck = partBox(dragon, 'neck')
-  const d = headDirection(dragon.yaw)
+export function meleeSpots (dragon: DragonView, groundY: number, breath: BreathZone | null = null, margin = 0.8, neckFullDamage = false, zones: DragonZone[] = dragonZones(dragon), turning = false): MeleeSpot[] {
   const out: MeleeSpot[] = []
   const cx = Math.floor(dragon.position.x)
   const cz = Math.floor(dragon.position.z)
@@ -273,8 +287,16 @@ export function meleeSpots (dragon: DragonView, groundY: number, breath: BreathZ
       const clearance = breath == null ? Infinity : Math.hypot(x - breath.center.x, z - breath.center.z) - breath.radius - margin
       if (clearance < 0) continue
       const feet = { x, y: groundY, z }
-      if (touchedZone(feet, zones, 0, CONTACT_MARGIN) != null) continue
-      const crit = touchedZone(feet, zones, JUMP_HEIGHT, CONTACT_MARGIN) == null
+      // turning (DragonSittingScanningPhase): the dragon as it will be, facing this spot to within SCAN_TURN_SLACK
+      const facing = turning ? yawFacing(dragon.position, feet) : dragon.yaw
+      const views = turning ? [-SCAN_TURN_SLACK, 0, SCAN_TURN_SLACK].map(t => ({ ...dragon, yaw: facing + t })) : [dragon]
+      const zonesOf = turning ? views.map(v => dragonZones(v)) : [zones]
+      if (zonesOf.some(zs => touchedZone(feet, zs, 0, CONTACT_MARGIN) != null)) continue
+      const crit = zonesOf.every(zs => touchedZone(feet, zs, JUMP_HEIGHT, CONTACT_MARGIN) == null)
+      const view = turning ? views[1] : dragon
+      const head = headPosition(view)
+      const neck = partBox(view, 'neck')
+      const d = headDirection(view.yaw)
       // the 1×1 head box; the player's eyes are 1.62 above its feet
       const hx = Math.max(Math.abs(x - head.x) - 0.5, 0)
       const hz = Math.max(Math.abs(z - head.z) - 0.5, 0)

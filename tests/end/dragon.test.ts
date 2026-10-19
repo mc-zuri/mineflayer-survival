@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import minecraftData from 'minecraft-data'
-import { CONTACT_MARGIN, DragonPhaseTracker, FLAME_DURATION, JUMP_HEIGHT, SITTING_DAMAGE_LIMIT, TAKEOFF_HIT_MARGIN, TAKEOFF_WARNING_TICKS, headPosition, activityOf, breathZone, dragonZones, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, touchedZone, vanillaYaw } from '../../src/end/dragon'
+import { SCAN_TURN_SLACK, yawFacing, CONTACT_MARGIN, DragonPhaseTracker, FLAME_DURATION, JUMP_HEIGHT, SITTING_DAMAGE_LIMIT, TAKEOFF_HIT_MARGIN, TAKEOFF_WARNING_TICKS, headPosition, activityOf, breathZone, dragonZones, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, touchedZone, vanillaYaw } from '../../src/end/dragon'
 import { exitPortal } from '../../src/end/spikes'
 
 test('phase ids are the EnderDragonPhase creation order', () => {
@@ -190,4 +190,23 @@ test('flight: the head\'s y offset and tilt from the y history (EnderDragon.getH
   // a level flight's head is level with the body; a sitting one's a block under
   assert.equal(headPosition({ position: view.position, yaw: 0 }, false).y, 68.5)
   assert.equal(headPosition(view, true).y, 67.5)
+})
+
+test('meleeSpots while it scans: each spot judged with the dragon turned to face it; with the ground a block up (no room under its zones) the head is hit from in front, past its reach (a 26.3 bot stood in reach of the head as it turned to it, and took 9 touches)', () => {
+  // the 26.3 run's perch: the dragon at 68 over a portal at 64, the island's ground round the podium at 65
+  const dragon = { position: { x: -0.1, y: 67.97, z: 0.9 }, yaw: 90 }
+  const spots = meleeSpots(dragon, 65, null, 0.8, true, undefined, true)
+  assert.ok(spots.length > 0)
+  assert.notEqual(spots[0].target, 'body')
+  for (const s of spots) {
+    for (const t of [-SCAN_TURN_SLACK, 0, SCAN_TURN_SLACK]) {
+      assert.equal(touchedZone(s, dragonZones({ ...dragon, yaw: yawFacing(dragon.position, s) + t }), 0, CONTACT_MARGIN), null, `${s.x} ${s.z}`)
+    }
+  }
+  // the death's spot: at the head's edge once the dragon faced it (within the margin; the server's hits came there)
+  const death = { x: -8.4, y: 65, z: 2.5 }
+  assert.ok(touchedZone(death, dragonZones({ ...dragon, yaw: yawFacing(dragon.position, death) }), 0, CONTACT_MARGIN) != null)
+  assert.ok(!spots.some(s => Math.hypot(s.x - death.x, s.z - death.z) < 0.6))
+  // not turning: judged as it faces now, the same spot is clear (the head points the other way)
+  assert.equal(touchedZone(death, dragonZones(dragon), 0, CONTACT_MARGIN), null)
 })

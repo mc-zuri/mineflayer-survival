@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
-import { breathZone, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
+import { breathZone, SCAN_TURN_SLACK, yawFacing, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
 import { ARROW_FLIGHT_TICKS, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, hurtContext, hurtingContact, retreatSpot, safeToEat, takeoffStepBack, walkClear } from '../../src/end/skills/fightDragon'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
@@ -23,8 +23,11 @@ test('chooseMeleeSpot: a standing spot within reach of the perched dragon\'s hea
   const scanning = chooseMeleeSpot(get, view, 62, tracker.window(5), [], null)
   assert.ok(scanning != null)
   assert.strictEqual(scanning.target, 'head')
-  const head = headPosition(view)
+  // scanning, the dragon turns to face the bot: the spot is in reach of the head as it will be then, and clear of it
+  const turned = { ...view, yaw: yawFacing(view.position, scanning.spot) }
+  const head = headPosition(turned)
   assert.ok(Math.hypot(scanning.spot.x - head.x, scanning.spot.z - head.z) < 3.5)
+  for (const t of [-SCAN_TURN_SLACK, 0, SCAN_TURN_SLACK]) assert.equal(touchedZone(scanning.spot, dragonZones({ ...turned, yaw: turned.yaw + t }), 0, CONTACT_MARGIN), null)
   // flaming: the cloud past the head; the spot left is by the body, outside it
   tracker.update({ tick: 10, phase: DRAGON_PHASES.indexOf('sitting_flaming'), position: view.position, yaw: 90 })
   const window = tracker.window(12)
@@ -288,3 +291,4 @@ test('chooseMeleeSpot: from the far side of a bump under the head, a spot the wa
   assert.ok(choice != null)
   assert.equal(walkClear(get, from, choice.spot, dragonZones(view)), true)
 })
+
