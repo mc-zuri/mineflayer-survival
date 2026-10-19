@@ -231,3 +231,27 @@ test('the enchanting milestone\'s shelves: the most within the budget, in steps 
   assert.equal(shelvesWithin(n => n > 6 ? null : n * 3000, 24000), 6)
   assert.equal(shelvesWithin(() => 30000, 24000), 0)
 })
+
+test('levelsToward: the near ores, then down for the deep ones, then tunnel legs, within the budget', async () => {
+  const { levelsToward, LEVELS_DEPTH } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  ;(bot as any).experience = { level: 20, points: 0, progress: 0 }
+  let tick = 0
+  const tasks: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { get tick () { return tick } },
+    task: async (name: string) => {
+      tasks.push(name)
+      tick += 10000
+      if (name === 'levels') throw new Error('NOT_FOUND: no ore, smelt, kill left')
+      if (name === 'down for the ores') bot.entity.position = new Vec3(0.5, LEVELS_DEPTH, 0.5)
+    }
+  }
+  await levelsToward(bot, executor, 30, new AbortController().signal, () => {})
+  assert.deepEqual(tasks.slice(0, 5), ['levels', 'down for the ores', 'levels', 'a tunnel for ores', 'levels'])
+  assert.ok(tick <= 72000 + 20000)
+})

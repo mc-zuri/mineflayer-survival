@@ -19,7 +19,7 @@ import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, overland, strongholdToPortalRoom } from './end/strongholdSkills'
 import { crossToIsland, enterEnd, fightDragon, gotoNear, isInEnd, leaveEnd, readPortalRoom, SCAFFOLD_ITEMS } from './end/skills'
 import { collectBlock } from './skills/collectBlock'
-import { countBookshelves, enchant, enchantGear, findEnchantingTable } from './skills/enchant'
+import { countBookshelves, enchant, enchantGear, findEnchantingTable, offerCostRange } from './skills/enchant'
 import { applyBooks } from './skills/anvil'
 import { experience, gainLevels } from './skills/xp'
 import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from './skills/husbandry'
@@ -253,6 +253,43 @@ export async function enchantBooksAndApply (bot: Bot, executor: Executor, signal
   }
 }
 
+/** ticks the enchanting may spend on the top offer's levels (lockstep: days of game time) */
+export const LEVELS_BUDGET_TICKS = 72000
+/** a tunnel leg's length for the levels' ores when none is near */
+export const LEVELS_LEG = 48
+/** where the levels' ores are looked for when the near ones are gone: the deep ores (redstone, lapis, diamond) */
+export const LEVELS_DEPTH = -30
+
+/**
+ * Levels up to `level` within LEVELS_BUDGET_TICKS: gainLevels (the ores, the smelting, the mobs within 48 blocks),
+ * and when none is left near, down to LEVELS_DEPTH for the deep ores, then tunnel legs of LEVELS_LEG blocks along
+ * the axes in turn to more; resolves the level got
+ */
+export async function levelsToward (bot: Bot, executor: Executor, level: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const start = executor.tasks.tick
+  let leg = 0
+  while (experience(bot).level < level && executor.tasks.tick - start < LEVELS_BUDGET_TICKS) {
+    if (signal.aborted) throw signal.reason
+    try {
+      await executor.task('levels', async (s) => await gainLevels(bot, { level, range: 48, maxTicks: 12000 }, s), signal)
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      if (!/NOT_FOUND/.test((err as Error).message)) continue
+      if (bot.entity.position.y > LEVELS_DEPTH + 10) {
+        log(`levels: ${experience(bot).level} of ${level}: down to y ${LEVELS_DEPTH} for the deep ores`)
+        await executor.task('down for the ores', async (s) => await descendTo(bot, LEVELS_DEPTH, {}, s), signal).catch(e => { if (signal.aborted || TaskError.is(e, 'DIED')) throw e })
+        continue
+      }
+      const dir = [new Vec3(1, 0, 0), new Vec3(0, 0, 1), new Vec3(-1, 0, 0), new Vec3(0, 0, -1)][leg++ % 4]
+      const to = bot.entity.position.floored().plus(dir.scaled(LEVELS_LEG))
+      log(`levels: ${experience(bot).level} of ${level}: a tunnel on to ${to.toString()} for ores`)
+      await executor.task('a tunnel for ores', async (s) => await tunnelTo(bot, { target: to, range: 2, maxSteps: LEVELS_LEG * 2 }, s), signal).catch(e => { if (signal.aborted || TaskError.is(e, 'DIED')) throw e })
+    }
+  }
+  log(`levels: ${experience(bot).level} of ${level} after ${executor.tasks.tick - start} ticks`)
+  return experience(bot).level
+}
+
 export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {
   await keepFarms(bot, executor, signal, log)
   // the wheat farm the herd is fed from (seeds held, water near)
@@ -289,6 +326,18 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
     }
   }
   const shelves = Math.min(BOOKSHELVES, countItems(bot, 'bookshelf') + around)
+  // the levels of the table's top offer first (30 with 15 shelves), the deep ores and the tunnels' after the near
+  // ones run out (gainLevels alone stopped at 26 of 29: 'no ore, smelt, kill left within 32 blocks', 26.3)
+  const workplace = bot.entity.position.clone()
+  await levelsToward(bot, executor, offerCostRange(2, shelves).max, signal, log)
+  // back to the table (the one remembered), or where the bot was to set it up, from the ores' tunnels
+  const poi = executor.memory.getPois('enchanting_table', { dimension: 'overworld', near: workplace })[0]
+  const tableAt = poi != null ? new Vec3(poi.x, poi.y, poi.z) : workplace
+  if (tableAt.distanceTo(bot.entity.position) > 8) {
+    await executor.task('back to the table', async (s) => await overland(bot, { target: tableAt, range: 3 }, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+  }
+  // room in the bag to take the armor off for the table (a full bag kept it on: 'no unenchanted diamond_chestplate')
+  await executor.makeRoom?.({}, signal)
   await executor.task('enchant the gear', async (s) => await enchantGear(bot, { executor, signal: s, bookshelves: shelves }), signal)
   await enchantBooksAndApply(bot, executor, signal, log)
 }
