@@ -113,6 +113,7 @@ export function fakeBot (input: FakeBotInput = {}): any {
   }
   bot.controls = {} as Record<string, boolean>
   bot.setControlState = (k: string, v: boolean) => { bot.controls[k] = v }
+  bot.getControlState = (k: string) => bot.controls[k] === true
   bot.clearControlStates = () => { bot.controls = {} }
   bot.look = async () => {}
   bot.waitForTicks = async () => {}

@@ -1,6 +1,7 @@
 // farm: a few plots by water tilled with a hoe and sown (wheat from the seeds grass drops, or carrots, potatoes,
 // beetroots), the grown crops harvested and sown again. A renewable food the bot can start on day 1 and come back to.
 import type { Bot } from 'mineflayer'
+import type { Item } from 'prismarine-item'
 import { Vec3 } from 'vec3'
 import { FARM_PLOTS, isGrown, type FarmRecord } from '../core/crops'
 import type { WorldMemory } from '../core/memory'
@@ -8,7 +9,7 @@ import { SkillError, isAbort, throwIfAborted } from './errors'
 import { collectBlock } from './collectBlock'
 import { navigateToReach } from './navigate'
 import { pickupDrops } from './pickupDrops'
-import { countItems, findInventoryItem, resyncInventory, settleInventory, trace, waitUntil, type Block } from './util'
+import { countItems, findInventoryItem, resyncInventory, settleInventory, trace, waitTicks, waitUntil, type Block } from './util'
 
 /** what each crop is sown from (vanilla's seed items: CropBlock.getBaseSeedId) */
 export const SEED_OF: Readonly<Record<string, string>> = {
@@ -91,6 +92,22 @@ export async function till (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise
   const hoe = bot.inventory.items().filter(i => i.name.endsWith('_hoe')).sort((a, b) => b.type - a.type)[0]
   if (hoe == null) throw new SkillError('NO_TOOL', 'no hoe to till with')
   await navigateToReach(bot, cell, signal)
+  // with a shield in the off hand the hoe tills only sneaking (from 26.3 the tilling is a block transformer, which
+  // passes while the player means to raise the shield: BlockTransformer.playerHasBlockingItemUseIntent, not
+  // Player.isSecondaryUseActive); the shift reaches the server with a tick's input, before the use
+  const sneak = bot.inventory.slots[45]?.name === 'shield' && !bot.getControlState('sneak')
+  if (sneak) {
+    bot.setControlState('sneak', true)
+    await waitTicks(bot, 2, signal)
+  }
+  try {
+    await tillHeld(bot, cell, hoe, signal)
+  } finally {
+    if (sneak) bot.setControlState('sneak', false)
+  }
+}
+
+async function tillHeld (bot: Bot, cell: Vec3, hoe: Item, signal?: AbortSignal): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (bot.heldItem?.name !== hoe.name) await bot.equip(hoe, 'hand')
     const block = bot.blockAt(cell) as Block

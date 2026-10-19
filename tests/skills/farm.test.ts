@@ -119,3 +119,30 @@ test('till selects the hoe afresh and tries again when the first use leaves gras
   assert.equal(uses, 2)
   assert.deepEqual(slots, [1])
 })
+
+test('till sneaks with a shield in the off hand, the shift sent a tick before the use, and lets go after', async () => {
+  const { till } = await import('../../src/skills/farm')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const cell = new Vec3(1, 63, 0)
+  let tilled = false
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wooden_hoe', 1)], offhand: item('shield', 1), world: p => p.y < 64 ? 'grass_block' : 'air' })
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => (tilled && p.equals?.(cell)) ? { ...realAt(p), name: 'farmland' } : realAt(p)) as any
+  ;(bot as any).equip = async () => {}
+  ;(bot as any).heldItem = { name: 'wooden_hoe' }
+  let ticks = 0
+  const sneaking: Array<{ sneak: boolean, ticks: number }> = []
+  // (BlockTransformer.playerHasBlockingItemUseIntent: the 26.3 server tills only for a sneaking player)
+  ;(bot as any).activateBlock = async () => { sneaking.push({ sneak: bot.getControlState('sneak'), ticks }); if (bot.getControlState('sneak')) tilled = true }
+  const ticking = setInterval(() => { ticks++; bot.emit('physicsTick') }, 1)
+  try {
+    await till(bot, cell)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.equal(sneaking.length, 1)
+  assert.equal(sneaking[0].sneak, true)
+  assert.ok(sneaking[0].ticks >= 1, `the use ${sneaking[0].ticks} ticks after the shift`)
+  assert.equal(bot.getControlState('sneak'), false)
+})
