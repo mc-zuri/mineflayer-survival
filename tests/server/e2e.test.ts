@@ -73,3 +73,16 @@ test('watchTicks: tells once of no tick for the time given, again only after tic
   clearInterval(timer)
   assert.equal(stalls.length, 2)
 })
+
+test('watchEventLoop: tells of a synchronous hold-up over the threshold', async () => {
+  const { watchEventLoop } = await import('../e2e/e2e')
+  const late: number[] = []
+  const timer = watchEventLoop(100, ms => late.push(ms), 20)
+  await new Promise(resolve => setTimeout(resolve, 60))
+  const until = Date.now() + 250
+  while (Date.now() < until) { /* held */ }
+  await new Promise(resolve => setTimeout(resolve, 60))
+  clearInterval(timer)
+  assert.equal(late.length, 1)
+  assert.ok(late[0] >= 100, String(late[0]))
+})

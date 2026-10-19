@@ -108,6 +108,23 @@ export function watchTicks (getTicks: () => number, seconds: number, onStall: (s
   return timer
 }
 
+/**
+ * A watch on the event loop: `onBlocked` with the milliseconds a timer of `everyMs` came late by, when over
+ * `thresholdMs` (a synchronous search or loop held the process: the server, getting no answer, dropped the bot after
+ * 30 s on 26.3, the status timer 17 s late)
+ */
+export function watchEventLoop (thresholdMs: number, onBlocked: (lateMs: number) => void, everyMs = 250): NodeJS.Timeout {
+  let last = Date.now()
+  const timer = setInterval(() => {
+    const now = Date.now()
+    const late = now - last - everyMs
+    last = now
+    if (late >= thresholdMs) onBlocked(late)
+  }, everyMs)
+  timer.unref()
+  return timer
+}
+
 export function testPassed (lines: readonly string[]): boolean {
   return lines.some(l => /^Test passed/.test(l))
 }
@@ -143,6 +160,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
   const wall0 = Date.now()
   let status: NodeJS.Timeout | null = null
   let noTicks: NodeJS.Timeout | null = null
+  let blocked: NodeJS.Timeout | null = null
   try {
     bot = await connectLockstepBot(server, { username: opts.username, op: false, timeoutMs: 120000 })
     const b = bot
@@ -177,6 +195,11 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
         fs.mkdirSync(dir, { recursive: true })
         fs.writeFileSync(path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${opts.username}-no_ticks.json`), JSON.stringify({ kind: 'no_ticks', seconds, ticks: b.lockstep.ticks, where: where(b), task: current }, null, 2))
       } catch {}
+    })
+    // the process held up for 2 s or more: what the bot was at (the task, the step) in the log
+    blocked = watchEventLoop(2000, late => {
+      const tasks = (b as any).survival?.tasks
+      log(`the event loop was held up ${late} ms: task ${String(tasks?.current?.name ?? null)}; ${where(b)}`)
     })
     let checkpointSeq = 0
     let checkpointing: Promise<void> = Promise.resolve()
@@ -217,6 +240,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
   } finally {
     if (status != null) clearInterval(status)
     if (noTicks != null) clearInterval(noTicks)
+    if (blocked != null) clearInterval(blocked)
     if (bot != null) {
       bot.survival?.reflexes?.stop()
       await quitBot(bot)
