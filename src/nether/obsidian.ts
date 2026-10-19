@@ -17,6 +17,17 @@ import { withNetherSafety } from './safety'
 /** a block as the obsidian maker reads it: its name, collision and state */
 export type ObsidianLookup = (pos: Vec3) => { name: string, boundingBox: string, properties?: Record<string, any> } | null
 
+/** runs `fn` with the pathfinder's paths digging nothing (canDig off), as before after */
+async function withoutDigging<T> (bot: Bot, fn: () => Promise<T>): Promise<T> {
+  const before = { ...((bot.pathfinder as any)?.defaultMoveSettings ?? {}) }
+  bot.pathfinder?.setMoveOptions?.({ ...before, canDig: false })
+  try {
+    return await fn()
+  } finally {
+    bot.pathfinder?.setMoveOptions?.(before)
+  }
+}
+
 /** the blocks a pedestal is put into the lava with */
 const PEDESTAL_BLOCKS = ['cobblestone', 'cobbled_deepslate', 'netherrack', 'dirt', 'andesite', 'diorite', 'granite', 'stone']
 const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1)]
@@ -89,7 +100,9 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
       try {
         // (each passed over once lava touches it: the obsidian mined before it opened a cell for the lake's lava to
         // flow along, and a 26.3 bot broke the next block into its flow and down the pit it stood in)
-        await collectBlock(bot, { positions: made, pickup: true, avoidLava: true }, signal)
+        // the walks to them and their drops dig nothing (a pickup's walk dug down beside the lake, the lava came in
+        // and the bot burned, 26.3)
+        await withoutDigging(bot, async () => await collectBlock(bot, { positions: made, pickup: true, avoidLava: true }, signal))
       } catch (err) {
         if (isAbort(err)) throw err
         trace('obsidianFromLava: mining', (err as Error).message)
