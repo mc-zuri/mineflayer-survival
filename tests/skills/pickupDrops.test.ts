@@ -72,3 +72,14 @@ test('pickupDrops: a drop the bot couldn\'t get to is passed over by the pickups
     clearInterval(ticker)
   }
 })
+
+test('nearbyDrops passes over an item entity whose item has not come yet (getDroppedItem throws)', async () => {
+  const { nearbyDrops } = await import('../../src/skills/pickupDrops')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  bot.entities[5] = { id: 5, name: 'item', position: new Vec3(1, 64, 0), getDroppedItem: () => { throw new TypeError("Cannot read properties of undefined (reading 'present')") } } as any
+  bot.entities[6] = { id: 6, name: 'item', position: new Vec3(2, 64, 0), getDroppedItem: () => ({ name: 'ender_pearl' }) } as any
+  const found = nearbyDrops(bot, bot.entity.position, 8, ['ender_pearl'])
+  assert.deepEqual(found.map(e => e.id), [6])
+})

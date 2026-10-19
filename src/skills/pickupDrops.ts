@@ -28,8 +28,14 @@ export interface PickupDropsResult {
 }
 
 function droppedName (entity: Entity): string | null {
-  const item = (entity as any).getDroppedItem?.()
-  return item?.name ?? null
+  // (an item entity whose item hasn't come yet, its metadata still to follow its spawn: prismarine-entity's
+  // getDroppedItem reads undefined and throws, which ended a 26.3 barter, 'reading present')
+  try {
+    const item = (entity as any).getDroppedItem?.()
+    return item?.name ?? null
+  } catch {
+    return null
+  }
 }
 
 export function isItemEntity (entity: Entity): boolean {
