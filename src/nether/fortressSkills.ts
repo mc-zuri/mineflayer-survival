@@ -11,6 +11,7 @@ import { parseSeed } from '../worldgen/random'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { travel } from '../skills/travel'
 import { moveNear } from '../skills/gridWalk'
+import { tunnelTo } from '../skills/tunnel'
 import { countItems, trace, waitTicks } from '../skills/util'
 import { eat } from '../skills/eat'
 import { craft } from '../skills/craft'
@@ -28,6 +29,43 @@ import { withNetherSafety, type NetherSafetyOptions } from './safety'
 import { type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, planBlazeNooks } from './blazeFight'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
+
+/** the memory's kind for a blaze spawner the bot found no way to (markSpawnerUnreachable) */
+export const UNREACHABLE_SPAWNER = 'blaze_spawner_unreachable'
+
+/** a spawner this near one the bot found no way to is that one */
+export const SAME_SPAWNER = 6
+
+/** a fortress whose seen bounds come within this of a spawner the bot found no way to is that spawner's */
+export const SAME_FORTRESS = 32
+
+/**
+ * Remembers the spawner as one the bot found no way to (UNREACHABLE_SPAWNER), and forgets it as the one to go to
+ * ('blaze_spawner')
+ */
+export function markSpawnerUnreachable (bot: Bot, spawner: Pos): void {
+  const memory = bot.survival?.memory
+  if (memory == null) return
+  for (const p of memory.getPois('blaze_spawner', { dimension: 'the_nether' })) {
+    if (Math.hypot(p.x - spawner.x, p.y - spawner.y, p.z - spawner.z) <= SAME_SPAWNER) memory.removePoi('blaze_spawner', p, 'the_nether')
+  }
+  memory.addPoi(UNREACHABLE_SPAWNER, { x: Math.floor(spawner.x), y: Math.floor(spawner.y), z: Math.floor(spawner.z) }, 'the_nether')
+}
+
+/** the spawners the bot found no way to */
+export function unreachableSpawners (bot: Bot): Pos[] {
+  return bot.survival?.memory?.getPois(UNREACHABLE_SPAWNER, { dimension: 'the_nether' }) ?? []
+}
+
+/** whether the spawner is (near) one of `exclude` */
+export function excludedSpawner (spawner: Pos, exclude: readonly Pos[]): boolean {
+  return exclude.some(e => Math.hypot(e.x - spawner.x, e.y - spawner.y, e.z - spawner.z) <= SAME_SPAWNER)
+}
+
+/** whether the fortress seen is the one with one of `exclude` in it (its bounds and SAME_FORTRESS round them) */
+export function excludedFortress (f: { min: Pos, max: Pos }, exclude: readonly Pos[]): boolean {
+  return exclude.some(e => e.x >= f.min.x - SAME_FORTRESS && e.x <= f.max.x + SAME_FORTRESS && e.z >= f.min.z - SAME_FORTRESS && e.z <= f.max.z + SAME_FORTRESS)
+}
 
 /** the seed as a level seed: a number or bigint as is, text as WorldOptions.parseSeed reads it */
 export function levelSeed (seed: Seed): Seed {
@@ -54,6 +92,8 @@ export interface FindFortressArgs {
   explore?: ExploreOptions
   /** blocks per travel hop, each followed by a scan (default 48) */
   hop?: number
+  /** spawners (or places) whose fortress isn't the one: the bot found no way to them (unreachableSpawners) */
+  exclude?: Pos[]
   safety?: NetherSafetyOptions | false
 }
 
@@ -76,15 +116,22 @@ export async function findFortress (bot: Bot, args: FindFortressArgs = {}, signa
   const onTick = (): void => { ticks++ }
   bot.on('physicsTick', onTick)
   const remember = (f: FortressSighting): void => { bot.survival?.memory.addPoi('fortress', f.center, 'the_nether') }
+  const exclude = args.exclude ?? []
+  // (a fortress with a spawner the bot found no way to isn't the one: another)
+  const inView = (): FortressSighting | null => {
+    const f = fortressInView(bot)
+    return f == null || excludedFortress(f, exclude) ? null : f
+  }
   const run = async (): Promise<FindFortressResult> => {
-    const seen = fortressInView(bot)
+    const seen = inView()
     if (seen != null) { remember(seen); return { fortress: seen, via: 'in_view', ticks } }
     let found: FortressSighting | null = null
-    const onHop = (): boolean => { found = fortressInView(bot); return found != null }
-    const known = bot.survival?.memory.getPois('fortress', { dimension: 'the_nether', near: bot.entity.position })[0]
+    const onHop = (): boolean => { found = inView(); return found != null }
+    const near = (p: Pos, d: number): boolean => exclude.some(e => Math.hypot(e.x - p.x, e.z - p.z) <= d)
+    const known = bot.survival?.memory.getPois('fortress', { dimension: 'the_nether', near: bot.entity.position }).filter(p => !near(p, 128))[0]
     if (known != null) {
       await travel(bot, { target: v3(known), range: 16, hop: args.hop, onHop }, signal)
-      found = found ?? fortressInView(bot)
+      found = found ?? inView()
       if (found != null) { remember(found); return { fortress: found, via: 'memory', ticks } }
     }
     if (args.seed != null) {
@@ -93,7 +140,9 @@ export async function findFortress (bot: Bot, args: FindFortressArgs = {}, signa
       const sure = fortressCandidates(seed, from, { radius: args.regions ?? 2 })
       const maybe = netherComplexes(seed, from, { radius: args.regions ?? 2 }).filter(c => c.structure === 'bastion_remnant')
       // a sure fortress first unless a bastion roll is much nearer (it is one only in basalt deltas)
-      const order = [...sure.map(c => ({ c, cost: c.distance })), ...maybe.map(c => ({ c, cost: c.distance * 2.5 }))].sort((a, b) => a.cost - b.cost)
+      const order = [...sure.map(c => ({ c, cost: c.distance })), ...maybe.map(c => ({ c, cost: c.distance * 2.5 }))]
+        .filter(({ c }) => !near({ x: c.x + 8, y: 64, z: c.z + 8 }, 128))
+        .sort((a, b) => a.cost - b.cost)
       for (const { c } of order) {
         trace('findFortress: candidate', c.structure, c.x, c.z, Math.round(c.distance))
         // the start piece sits in the fortress's middle rows, at y 48-70
@@ -103,7 +152,7 @@ export async function findFortress (bot: Bot, args: FindFortressArgs = {}, signa
           if (isAbort(err)) throw err
           trace('findFortress: trip to', c.x, c.z, 'failed:', (err as Error).message)
         }
-        found = found ?? fortressInView(bot)
+        found = found ?? inView()
         if (found != null) { remember(found); return { fortress: found, via: 'seed', ticks } }
       }
       throw new SkillError('NOT_FOUND', `no fortress at the seed's ${order.length} candidates`)
@@ -111,7 +160,7 @@ export async function findFortress (bot: Bot, args: FindFortressArgs = {}, signa
     const route = explorationRoute(bot.entity.position, args.explore)
     const last = route[route.length - 1]
     await travel(bot, { target: v3(last), range: 8, hop: args.hop ?? 32, onHop }, signal)
-    found = found ?? fortressInView(bot)
+    found = found ?? inView()
     if (found == null) throw new SkillError('NOT_FOUND', `no fortress along ${route.length * (args.explore?.step ?? 32)} blocks of the axis walk`)
     remember(found)
     return { fortress: found, via: 'explore', ticks }
@@ -206,6 +255,8 @@ export interface FindSpawnerArgs {
   seed?: Seed
   /** stop searching after this many trips round the fortress (default 6) */
   maxTrips?: number
+  /** spawners not to take (the bot found no way to them: unreachableSpawners) */
+  exclude?: Pos[]
   safety?: NetherSafetyOptions | false
 }
 
@@ -232,6 +283,7 @@ function blazesInView (bot: Bot, maxDistance = 64): Entity[] {
  * seen of it), looking again after each trip.
  */
 export async function findBlazeSpawner (bot: Bot, args: FindSpawnerArgs = {}, signal?: AbortSignal): Promise<SpawnerEstimate> {
+  const exclude = args.exclude ?? []
   const run = async (): Promise<SpawnerEstimate> => {
     let fortress = args.fortress ?? fortressInView(bot)
     if (fortress == null) throw new SkillError('NOT_FOUND', 'no fortress in view to look for the spawner in')
@@ -245,9 +297,11 @@ export async function findBlazeSpawner (bot: Bot, args: FindSpawnerArgs = {}, si
       fortress = recognizeFortress(scanFortressBlocks(bot, 128, 20000)) ?? fortress
       for (const b of blazesInView(bot)) sightings.push(b.position.clone())
       // (the spawners are checked against the fortress by the bricks about them: the sighting's extent is only what's in view)
-      const spawners = fortressSpawnersInView(bot)
+      // (and the ones the bot found no way to left out: a fortress often has two)
+      const spawners = fortressSpawnersInView(bot).filter(p => !excludedSpawner(p, exclude))
       if (spawners.length > 0) return estimateBlazeSpawner({ spawners, from: bot.entity.position })
-      return estimateBlazeSpawner({ blazes: sightings, fortress, from: bot.entity.position })
+      const est = estimateBlazeSpawner({ blazes: sightings.filter(b => !excludedSpawner(b, exclude) && exclude.every(e => Math.hypot(e.x - b.x, e.z - b.z) > SAME_SPAWNER * 2)), fortress, from: bot.entity.position })
+      return est != null && est.source !== 'explore' && excludedSpawner(est, exclude) ? null : est
     }
     let est = look()
     // the chunks round the bot may still be coming in (a fresh arrival)
@@ -321,6 +375,9 @@ export async function spareShield (bot: Bot, signal?: AbortSignal): Promise<numb
 /** from further than this from the spawner, the camp is gone to by a trip (travel) first */
 export const CAMP_TRIP = 48
 
+/** times in a row the blaze fight finds no way to a camp spot, no blaze in sight, before it tunnels, then gives up */
+export const CAMP_FAILS = 3
+
 export interface BlazeRodsArgs {
   /** rods wanted in the inventory (default 6: 12 eyes) */
   count?: number
@@ -340,6 +397,8 @@ export interface BlazeRodsArgs {
   nook?: boolean
   /** drink fire resistance when the bot has a potion of it and the effect is off (default true) */
   fireResistance?: boolean
+  /** spawners not to look for (default: the ones the bot found no way to, unreachableSpawners) */
+  exclude?: Pos[]
   safety?: NetherSafetyOptions | false
 }
 
@@ -424,7 +483,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     return { rods: countItems(bot, 'blaze_rod'), kills, ticks }
   }
   const fightForRods = async (): Promise<BlazeRodsResult> => {
-    const spawner = args.spawner != null ? v3(args.spawner) : v3(await findBlazeSpawner(bot, { safety: false }, signal))
+    const spawner = args.spawner != null ? v3(args.spawner) : v3(await findBlazeSpawner(bot, { safety: false, exclude: args.exclude ?? unreachableSpawners(bot) }, signal))
     // (from 9 off, out of the swarm the spawner keeps about it, the blazes come one or two at a time and are shot:
     // camped 5 off, among 6 of them, a diamond-armored 26.3 bot burned to death five times at one spawner)
     const standOff = args.standOff ?? BLAZE_STAND_OFF
@@ -434,8 +493,9 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       if (fought != null) return fought
     }
     const spots = campSpots(bot, spawner, standOff)
-    const camp = async (): Promise<void> => {
-      if (bot.entity.position.distanceTo(spawner) <= standOff + 3 && seesFrom(bot, eyePosition(bot), spawner.offset(0.5, 0.5, 0.5), spawner)) return
+    /** to a camp spot by the spawner; resolves whether the bot got there (or near the spawner) */
+    const camp = async (): Promise<boolean> => {
+      if (bot.entity.position.distanceTo(spawner) <= standOff + 3 && seesFrom(bot, eyePosition(bot), spawner.offset(0.5, 0.5, 0.5), spawner)) return true
       // from afar (back from the portal after a death): a trip to the fortress first, by the way walked before (the
       // nether's trail) and in hops, not one goto on a straight line across the lava sea
       if (bot.entity.position.distanceTo(spawner) > CAMP_TRIP) {
@@ -447,7 +507,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       for (const spot of spots.slice(0, 3)) {
         try {
           await moveNear(bot, spot, 0, signal)
-          return
+          return true
         } catch (err) {
           if (isAbort(err)) throw err
           trace('collectBlazeRods: no way to', spot.toString(), (err as Error).message)
@@ -455,13 +515,41 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       }
       try {
         await moveNear(bot, spawner, standOff, signal)
+        return true
       } catch (err) {
         if (isAbort(err)) throw err
         trace('collectBlazeRods: no way to the spawner:', (err as Error).message)
       }
+      return bot.entity.position.distanceTo(spawner) <= standOff + 3
+    }
+    // the camp got to (or a blaze fought) since the bot last found no way there, and the tunnel tried toward it
+    let campFails = 0
+    let tunnelled = false
+    /**
+     * No way to the camp CAMP_FAILS times in a row with no blaze in sight: a staircase dug and bridged toward the
+     * spawner once (tunnelTo, its range the stand-off), then given up as one there's no way to (markSpawnerUnreachable:
+     * the milestone tries the fortress's other spawner, else another fortress). A 26.3 bot 13 blocks over a fortress's
+     * spawner (870, 76, 143) found no path to it, its nook or any camp spot for 6000 ticks, till it fell into the lava
+     * under it and died (run blz-d).
+     */
+    const noWayToCamp = async (): Promise<void> => {
+      if (++campFails < CAMP_FAILS) return
+      if (!tunnelled) {
+        tunnelled = true
+        trace('collectBlazeRods: no way to the spawner at', spawner.toString(), ': tunnelling toward it')
+        try {
+          await tunnelTo(bot, { target: spawner, range: standOff }, signal)
+          if (await camp()) { campFails = 0; return }
+        } catch (err) {
+          if (isAbort(err)) throw err
+          trace('collectBlazeRods: the tunnel toward the spawner:', (err as Error).message)
+        }
+      }
+      markSpawnerUnreachable(bot, spawner)
+      throw new SkillError('NO_PATH', `no way to the blaze spawner at ${spawner.toString()}`, { rods: countItems(bot, 'blaze_rod'), kills, ticks, spawner })
     }
     trace('collectBlazeRods: spawner at', spawner.toString())
-    await camp()
+    if (!await camp()) await noWayToCamp()
     // deaths the server tells of (EntityEvent.DEATH): a blaze merely out of sight isn't a kill
     const dead = new Set<number>()
     const onDead = (e: Entity): void => { dead.add(e.id) }
@@ -535,11 +623,13 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
             }
             triedSpots.clear()
           }
-          await camp()
+          if (await camp()) campFails = 0
+          else await noWayToCamp()
           await waitTicks(bot, 5, signal)
           continue
         }
         lastSight = ticks
+        campFails = 0
         const d = blaze.position.distanceTo(bot.entity.position)
         const canShoot = countItems(bot, 'bow') > 0 && countItems(bot, ['arrow', 'spectral_arrow', 'tipped_arrow']) > 0
         trace('collectBlazeRods: health', bot.health, 'blazes', blazes.length, 'target at', d.toFixed(1), canShoot && d > Math.min(shootFrom, 3.5) ? 'shoot' : 'fight', 'tick', ticks)

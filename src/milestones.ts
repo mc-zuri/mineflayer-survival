@@ -39,6 +39,7 @@ import { ownedInventory, type Executor } from './executor/executor'
 import { Vec3 } from 'vec3'
 import { findBlocks } from './core/findBlocks'
 import { pearlLeg } from './nether/ground'
+import { excludedSpawner, unreachableSpawners } from './nether/fortressSkills'
 
 const inNether = (bot: Bot): boolean => normalizeDimension(bot.game?.dimension) === 'the_nether'
 
@@ -692,7 +693,7 @@ export const LAVA_BUCKETS = 5
 export const PORTAL_OBSIDIAN = 10
 export const PORTAL_LAVA = 10
 
-export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, log }) => {
+export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, log, seed }) => {
   const count = (name: string): number => countItems(bot, name)
   if (!inNether(bot)) {
     if (executor.memory.getPois('nether_portal', { dimension: 'overworld' }).length === 0) {
@@ -731,17 +732,39 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
   }
   if (needs.rods > 0) {
     log(`blaze rods: ${needs.rods} to get`)
-    // a fortress first: the spawner is looked for in the one in view (the arrival is seldom by one)
-    const spawner = executor.memory.getPois('blaze_spawner', { dimension: 'the_nether', near: bot.entity.position })[0]
-    if (spawner == null) {
-      const route = fortressRoute(executor.memory, bot.entity.position)
-      const found = await executor.task('find a fortress', async (s) => await findFortress(bot, { explore: route }, s), signal)
-      log(`a fortress at ${found.fortress.center.x} ${found.fortress.center.y} ${found.fortress.center.z} (${found.via}, ${found.ticks} ticks)`)
-    }
     // the rods wanted fixed before the task (a restart after a reflex read the rods held again and wanted 8 more: a
     // 26.3 bot fought at the spawner with 43 rods until a blaze killed it)
     const rods = count('blaze_rod') + needs.rods
-    await executor.task('blaze rods', async (s) => await collectBlazeRods(bot, { count: rods, spawner }, s), signal)
+    // a spawner the bot finds no way to is left for the fortress's other (they often have two), else another
+    // fortress (a 26.3 bot found no path to one for 6000 ticks, then fell into the lava under it, run blz-d)
+    let otherFortress = false
+    for (let attempt = 1; ; attempt++) {
+      const exclude = unreachableSpawners(bot)
+      // a fortress first: the spawner is looked for in the one in view (the arrival is seldom by one)
+      const spawner = executor.memory.getPois('blaze_spawner', { dimension: 'the_nether', near: bot.entity.position })
+        .find(p => !excludedSpawner(p, exclude))
+      // (after a spawner there was no way to, the fortress's other is looked for first: findBlazeSpawner leaves it out)
+      if (spawner == null && (attempt === 1 || otherFortress)) {
+        const route = fortressRoute(executor.memory, bot.entity.position)
+        const found = await executor.task('find a fortress', async (s) => await findFortress(bot, { explore: route, seed, exclude }, s), signal)
+        log(`a fortress at ${found.fortress.center.x} ${found.fortress.center.y} ${found.fortress.center.z} (${found.via}, ${found.ticks} ticks)`)
+        otherFortress = false
+      }
+      try {
+        await executor.task('blaze rods', async (s) => await collectBlazeRods(bot, { count: rods, spawner, exclude }, s), signal)
+        break
+      } catch (err) {
+        if (signal.aborted || TaskError.is(err, 'DIED') || attempt >= BLAZE_SPAWNER_TRIES) throw err
+        const message = (err as Error).message
+        // no way to it: the fortress's other spawner next (findBlazeSpawner leaves this one out); none other found
+        // in a fortress with one out of reach: another fortress
+        const unreachable = /no way to the blaze spawner/.test(message)
+        const none = exclude.length > 0 && /no blaze spawner found|no fortress in view/.test(message)
+        if (!unreachable && !none) throw err
+        if (none) otherFortress = true
+        log(`blaze rods: ${message}: ${none ? 'another fortress' : 'another spawner'}`)
+      }
+    }
   }
   const pearls = netherNeeds({ count }).pearls
   if (pearls > 0) {
@@ -761,6 +784,9 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     await pearlsByNight(bot, executor, count('ender_pearl') + still, signal, log)
   }
 }
+
+/** spawners (and fortresses) the blaze rods are tried at before the milestone gives up */
+export const BLAZE_SPAWNER_TRIES = 4
 
 /**
  * legs the nether's pearl search walks before the overworld's nights (10: 4 legs found no piglin, enderman nor warped

@@ -365,3 +365,49 @@ test('a night hunt\'s legs go round the spiral\'s points in turn, again from the
   assert.deepEqual(legs[distinct], legs[0])
   assert.ok(legs.every(p => Math.max(Math.abs(p.x - 100), Math.abs(p.z + 50)) <= 240))
 })
+
+test('the blaze rods: a spawner there\'s no way to is left for another of the fortress, and with none other found, another fortress', async () => {
+  const { netherHandler } = await import('../../src/milestones')
+  const fortressSkills = require('../../src/nether/fortressSkills')
+  const { SkillError } = await import('../../src/skills/errors')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('ender_eye', 0)] })
+  bot.game.dimension = 'the_nether'
+  bot.findBlocks = () => []
+  ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
+  const memory = new WorldMemory()
+  ;(bot as any).survival = { memory }
+  memory.addPoi('blaze_spawner', { x: 870, y: 76, z: 143 }, 'the_nether')
+  const calls: string[] = []
+  const real = { collect: fortressSkills.collectBlazeRods, find: fortressSkills.findFortress }
+  let collects = 0
+  fortressSkills.findFortress = async (_b: unknown, args: any) => {
+    calls.push(`find a fortress, not ${(args.exclude ?? []).map((p: any) => `${p.x} ${p.z}`).join(';')}`)
+    return { fortress: { center: { x: 300, y: 64, z: 40 } }, via: 'explore', ticks: 0 }
+  }
+  fortressSkills.collectBlazeRods = async (_b: unknown, args: any) => {
+    collects++
+    calls.push(`blaze rods at ${args.spawner == null ? 'one found' : `${args.spawner.x} ${args.spawner.z}`}, not ${(args.exclude ?? []).map((p: any) => `${p.x} ${p.z}`).join(';')}`)
+    if (collects === 1) {
+      fortressSkills.markSpawnerUnreachable(bot, args.spawner)
+      throw new SkillError('NO_PATH', 'no way to the blaze spawner at (870, 76, 143)')
+    }
+    if (collects === 2) throw new SkillError('NOT_FOUND', 'no blaze spawner found in the fortress')
+    throw new Error('stop here')
+  }
+  const executor: any = { memory, tasks: { tick: 0 }, obtain: async () => {}, task: async (_name: string, fn: (s: AbortSignal) => Promise<unknown>) => await fn(new AbortController().signal) }
+  try {
+    await assert.rejects(netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }), /stop here/)
+  } finally {
+    fortressSkills.collectBlazeRods = real.collect
+    fortressSkills.findFortress = real.find
+  }
+  assert.deepEqual(calls, [
+    'blaze rods at 870 143, not ',
+    // the fortress's other spawner looked for
+    'blaze rods at one found, not 870 143',
+    // none other: another fortress
+    'find a fortress, not 870 143',
+    'blaze rods at one found, not 870 143'
+  ])
+})

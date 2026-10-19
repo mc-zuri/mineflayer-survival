@@ -218,3 +218,47 @@ test('spareShield makes shields up to two while there are an iron ingot and wood
     craftModule.craft = real
   }
 })
+
+test('collectBlazeRods with no way to a camp by the spawner, no blaze in sight, 3 times running: a tunnel toward it once, then given up as one there\'s no way to, remembered so', async () => {
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { collectBlazeRods, CAMP_FAILS, UNREACHABLE_SPAWNER, unreachableSpawners } = await import('../../src/nether/fortressSkills')
+  const gridModule = require('../../src/skills/gridWalk')
+  const tunnelModule = require('../../src/skills/tunnel')
+  const bot = fakeBot({ position: new Vec3(-8.5, 77, 3.5), world: (p: any) => p.y < 77 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  const memory = new WorldMemory()
+  memory.addPoi('blaze_spawner', { x: 0, y: 64, z: 0 }, 'the_nether')
+  ;(bot as any).survival = { memory }
+  const moves: string[] = []
+  const tunnels: string[] = []
+  const realMove = gridModule.moveNear
+  const realTunnel = tunnelModule.tunnelTo
+  gridModule.moveNear = async (_b: unknown, to: Vec3) => { moves.push(to.toString()); throw Object.assign(new Error('NO_PATH: no path'), { code: 'NO_PATH' }) }
+  tunnelModule.tunnelTo = async (_b: unknown, args: any) => { tunnels.push(args.target.toString()); throw new Error('NO_PATH: lava in the way') }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 20000, nook: false, safety: false }), /no way to the blaze spawner at \(0, 64, 0\)/)
+  } finally {
+    clearInterval(ticking)
+    gridModule.moveNear = realMove
+    tunnelModule.tunnelTo = realTunnel
+  }
+  assert.equal(CAMP_FAILS, 3)
+  assert.deepEqual(tunnels, ['(0, 64, 0)'])
+  assert.deepEqual(memory.getPois('blaze_spawner', { dimension: 'the_nether' }), [])
+  assert.deepEqual(unreachableSpawners(bot).map(p => [p.x, p.y, p.z]), [[0, 64, 0]])
+  assert.equal(memory.getPois(UNREACHABLE_SPAWNER, { dimension: 'the_nether' }).length, 1)
+  // the camp tried each time (the spawner itself: no spot by it sees it in this rock)
+  assert.equal(moves.length, CAMP_FAILS, moves.join(' | '))
+})
+
+test('a spawner the bot found no way to: one near it is the same, a fortress round it the same', async () => {
+  const { excludedSpawner, excludedFortress } = await import('../../src/nether/fortressSkills')
+  const out = [{ x: 870, y: 76, z: 143 }]
+  assert.equal(excludedSpawner({ x: 872, y: 76, z: 145 }, out), true)
+  assert.equal(excludedSpawner({ x: 870, y: 64, z: 180 }, out), false)
+  assert.equal(excludedFortress({ min: { x: 840, y: 48, z: 60 }, max: { x: 900, y: 90, z: 120 } }, out), true)
+  assert.equal(excludedFortress({ min: { x: 300, y: 48, z: 60 }, max: { x: 400, y: 90, z: 120 } }, out), false)
+})
