@@ -31,6 +31,9 @@ describe(`a portal site dug out of a cave on a ${DEFAULT_VERSION} server`, { tim
     const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
     await run(`fill ${xyz(-20, -3, -20)} ${xyz(20, 8, 20)} stone`)
     await run(`fill ${xyz(0, 0, 0)} ${xyz(0, 1, 0)} air`)
+    // a hole 3 deep under where every site's frame would stand (its ground filled from the bottom up)
+    await run(`fill ${xyz(-2, -3, -2)} ${xyz(2, -1, 2)} air`)
+    await run(`setblock ${xyz(0, -1, 0)} stone`)
     await run(`clear ${USERNAME}`)
     for (const [item, n] of [['obsidian', 10], ['flint_and_steel', 1], ['diamond_pickaxe', 1], ['cobblestone', 16]] as const) await run(`give ${USERNAME} ${item} ${n}`)
     await run(`tp ${USERNAME} ${o.x + 0.5} ${o.y} ${o.z + 0.5}`)

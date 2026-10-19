@@ -143,7 +143,8 @@ export function chooseDigSite (getBlock: BlockGetter, feet: Vec3): { origin: Vec
   return sites
     .map(site => ({ ...site, work: portalSiteWork(getBlock, site.origin, site.axis) }))
     .filter(site => !site.work.dig.some(p => fluid(getBlock(p))) && !site.work.fill.some(p => fluid(getBlock(p))))
-    .sort((a, b) => (a.work.dig.length + a.work.fill.length) - (b.work.dig.length + b.work.fill.length))[0] ?? null
+    // (a hole to fill is more trouble than a block to dig)
+    .sort((a, b) => (a.work.dig.length + 4 * a.work.fill.length) - (b.work.dig.length + 4 * b.work.fill.length))[0] ?? null
 }
 
 /**
@@ -171,11 +172,22 @@ export async function preparePortalSite (bot: Bot, signal?: AbortSignal): Promis
   // the frame's own plane must be clear (the obsidian goes in it); a side row's block left is walked round
   const blocked = portalSiteWork(getBlock, origin, axis).dig.filter(p => (axis === 'x' ? p.z : p.x) === (axis === 'x' ? origin.z : origin.x))
   if (blocked.length > 0) throw new SkillError('CANNOT_PLACE', `${blocked.length} blocks left in the portal site at ${origin.toString()}`)
-  for (const p of work.fill.map(v3)) {
+  // the ground filled: a hole's bottom first, up (a cell with nothing solid by it can't take a block: 'nothing solid
+  // to place against', 26.3); the frame's own row must hold, a side row's hole is walked round
+  const inPlane = (p: Pos): boolean => (axis === 'x' ? p.z : p.x) === (axis === 'x' ? origin.z : origin.x)
+  for (const top of work.fill.map(v3)) {
     throwIfAborted(signal)
-    const filler = SITE_FILLERS.find(n => countItems(bot, n) > 0)
-    if (filler == null) throw new SkillError('MISSING_ITEMS', 'no block to fill the ground of the portal site with')
-    if (!isSolid(getBlock(p))) await placeBlock(bot, { pos: p, item: filler }, signal)
+    const column: Vec3[] = [top]
+    while (column.length < 5 && !isSolid(getBlock(column[column.length - 1].offset(0, -1, 0)))) column.push(column[column.length - 1].offset(0, -1, 0))
+    for (const p of column.reverse()) {
+      if (isSolid(getBlock(p))) continue
+      const filler = SITE_FILLERS.find(n => countItems(bot, n) > 0)
+      if (filler == null) throw new SkillError('MISSING_ITEMS', 'no block to fill the ground of the portal site with')
+      await placeBlock(bot, { pos: p, item: filler }, signal).catch(err => {
+        if (isAbort(err) || inPlane(top)) throw err
+        trace('preparePortalSite: the ground of a side row at', p.toString(), (err as Error).message)
+      })
+    }
   }
   trace('preparePortalSite: dug', work.dig.length, 'filled', work.fill.length, 'at', origin.toString())
   return { origin, axis }
