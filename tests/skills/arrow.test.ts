@@ -3,7 +3,7 @@ import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import {
   ARROW_GRAVITY, ARROW_INERTIA, arrowHits, bowArrowSpeed, bowPower, launchVelocity, mthCos, mthSin, simulateArrow, solveAim,
-  toVanillaRotation, vanillaShotDirection
+  toVanillaRotation, vanillaShotDirection, PEARL_PHYSICS, PEARL_SPEED
 } from '../../src/skills/arrow'
 
 const near = (a: number, b: number, eps = 1e-9): void => assert.ok(Math.abs(a - b) <= eps, `${a} != ${b} (eps ${eps})`)
@@ -159,4 +159,46 @@ test('blocks in the way stop the arrow', () => {
   const flight = simulateArrow(new Vec3(0, 0, 0), new Vec3(3, 0, 0), { target: { min: new Vec3(9, -1, -1), max: new Vec3(10, 1, 1) }, world: { clip: wall } })
   assert.strictEqual(flight.hit, null)
   near(flight.blocked?.x ?? 0, 5)
+})
+
+test('an ender pearl moves as ThrowableProjectile.tick: gravity 0.03, then the drag of 0.99F, then the move', () => {
+  assert.strictEqual(PEARL_PHYSICS.gravity, 0.03)
+  assert.strictEqual(PEARL_PHYSICS.inertia, 0.9900000095367432)
+  assert.strictEqual(PEARL_PHYSICS.waterInertia, Math.fround(0.8))
+  assert.strictEqual(PEARL_SPEED, 1.5)
+  // vanilla's loop, written out: applyGravity (y - 0.03), applyInertia (scale 0.99F), setPos(position + movement)
+  let p = { x: 0, y: 64, z: 0 }
+  let v = { x: 1.2, y: 0.9, z: 0 }
+  const flight = simulateArrow(new Vec3(p.x, p.y, p.z), new Vec3(v.x, v.y, v.z), { physics: PEARL_PHYSICS, maxTicks: 30 })
+  for (let t = 1; t <= 30; t++) {
+    v = { x: v.x * 0.9900000095367432, y: (v.y - 0.03) * 0.9900000095367432, z: v.z * 0.9900000095367432 }
+    p = { x: p.x + v.x, y: p.y + v.y, z: p.z + v.z }
+    near(flight.path[t].position.x, p.x, 1e-12)
+    near(flight.path[t].position.y, p.y, 1e-12)
+  }
+  // the first tick already falls (an arrow's first move is its launch velocity as it is)
+  near(flight.path[1].position.y, 64 + (0.9 - 0.03) * 0.9900000095367432, 1e-12)
+  const arrow = simulateArrow(new Vec3(0, 64, 0), new Vec3(1.2, 0.9, 0), { maxTicks: 1 })
+  near(arrow.path[1].position.y, 64.9, 1e-12)
+})
+
+test('the solver aims a pearl at a 1 x 1 gateway with the pearl\'s physics, which an arrow\'s aim misses', () => {
+  const start = new Vec3(0.5, 75.52, 0.5)
+  const gateway = { min: new Vec3(24, 75, 0), max: new Vec3(25, 76, 1) }
+  const middle = new Vec3(24.5, 75.5, 0.5)
+  const opts = { physics: PEARL_PHYSICS, speed: PEARL_SPEED, hitMargin: PEARL_PHYSICS.halfWidth }
+  const sol = solveAim(start, middle, opts)
+  assert.ok(sol != null)
+  assert.ok(Math.abs(sol.error) < 1e-3)
+  const flight = arrowHits(start, sol.yaw, sol.pitch, gateway, opts)
+  assert.ok(flight.hit != null, 'the pearl misses the gateway')
+  // a pearl thrown along an arrow's solution at the pearl's speed flies over it (an arrow falls 0.05 a tick, a pearl 0.03)
+  const arrowSol = solveAim(start, middle, { speed: PEARL_SPEED })
+  assert.ok(arrowSol != null)
+  assert.ok(arrowSol.pitch > sol.pitch)
+  assert.strictEqual(arrowHits(start, arrowSol.yaw, arrowSol.pitch, gateway, opts).hit, null)
+  // and lands far out with the high arc too
+  const high = solveAim(start, new Vec3(30.5, 70, 0.5), { ...opts, highArc: true })
+  assert.ok(high != null && high.pitch > 0.5)
+  assert.ok(arrowHits(start, high.yaw, high.pitch, { min: new Vec3(30, 69.5, 0), max: new Vec3(31, 70.5, 1) }, opts).hit != null)
 })

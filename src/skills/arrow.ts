@@ -17,6 +17,56 @@ export const BOW_MAX_SPEED = 3
 
 const f32 = Math.fround
 
+/**
+ * How a projectile moves each server tick. An arrow (AbstractArrow.tick) moves by its velocity, then slows by its
+ * inertia and loses its gravity; a thrown item (ThrowableProjectile.tick: an ender pearl, a snowball) loses its gravity
+ * first, then slows by its inertia, then moves.
+ */
+export interface ProjectilePhysics {
+  gravity: number
+  /** the velocity's scale a tick in air */
+  inertia: number
+  /** and in water */
+  waterInertia: number
+  /** ThrowableProjectile's order (gravity, inertia, move), not the arrow's (move, inertia, gravity) */
+  gravityFirst: boolean
+  /** half the projectile's width: how far its box reaches past its middle into a cell */
+  halfWidth: number
+}
+
+/** AbstractArrow: 0.05, 0.99, 0.6, moved first; EntityType.ARROW is 0.5 wide */
+export const ARROW_PHYSICS: ProjectilePhysics = { gravity: ARROW_GRAVITY, inertia: ARROW_INERTIA, waterInertia: ARROW_WATER_INERTIA, gravityFirst: false, halfWidth: 0.25 }
+
+/**
+ * ThrownEnderpearl: ThrowableProjectile's getDefaultGravity 0.03, getAirDrag 0.99F and 0.8F in water, gravity and
+ * drag before the move; EntityType.ENDER_PEARL is 0.25 wide. The same in 26.3.
+ */
+export const PEARL_PHYSICS: ProjectilePhysics = { gravity: 0.03, inertia: f32(0.99), waterInertia: f32(0.8), gravityFirst: true, halfWidth: 0.125 }
+
+/**
+ * EnderpearlItem.use: Projectile.spawnProjectileFromRotation's power 1.5, with an uncertainty of 1 (getMovementToShoot:
+ * a triangle of 0.0172275 on each axis of the unit direction)
+ */
+export const PEARL_SPEED = 1.5
+export const PEARL_SPREAD = 0.0172275
+/** ThrowableItemProjectile(type, owner, ...) starts at the owner's eye less 0.1, as an arrow does */
+export const PEARL_EYE_OFFSET = 0.1
+
+/** one tick's change of a projectile's velocity, in place */
+function applyPhysics (vel: { x: number, y: number, z: number }, physics: ProjectilePhysics, inWater: boolean): void {
+  const inertia = inWater ? physics.waterInertia : physics.inertia
+  if (physics.gravityFirst) {
+    vel.y -= physics.gravity
+    vel.x *= inertia
+    vel.y *= inertia
+    vel.z *= inertia
+  } else {
+    vel.x *= inertia
+    vel.y = vel.y * inertia - physics.gravity
+    vel.z *= inertia
+  }
+}
+
 /** BowItem.getPowerForTime: the power of a bow drawn for the ticks, (t^2 + 2t) / 3 of the seconds, at most 1 (in floats). */
 export function bowPower (useTicks: number): number {
   let f = f32(useTicks / 20)
@@ -83,13 +133,16 @@ export interface ArrowFlight {
 }
 
 /** Simulates the arrow for at most maxTicks or until it hits the target box or a block. */
-export function simulateArrow (position: Vec3, velocity: Vec3, opts: { maxTicks?: number, target?: Box, world?: ArrowWorld, stopBelowY?: number } = {}): ArrowFlight {
+export function simulateArrow (position: Vec3, velocity: Vec3, opts: { maxTicks?: number, target?: Box, world?: ArrowWorld, stopBelowY?: number, physics?: ProjectilePhysics, hitMargin?: number } = {}): ArrowFlight {
   const maxTicks = opts.maxTicks ?? 200
-  const target = opts.target != null ? inflate(opts.target, ARROW_HIT_MARGIN) : null
+  const physics = opts.physics ?? ARROW_PHYSICS
+  const target = opts.target != null ? inflate(opts.target, opts.hitMargin ?? ARROW_HIT_MARGIN) : null
   let pos = position.clone()
   const vel = velocity.clone()
   const path: ArrowStep[] = [{ tick: 0, position: pos.clone(), velocity: vel.clone() }]
   for (let tick = 1; tick <= maxTicks; tick++) {
+    // a thrown item's velocity changes before its move, in the water it starts the tick in
+    if (physics.gravityFirst) applyPhysics(vel, physics, opts.world?.isWater?.(pos) === true)
     let next = pos.plus(vel)
     const block = opts.world?.clip?.(pos, next) ?? null
     if (block != null) next = block
@@ -99,10 +152,7 @@ export function simulateArrow (position: Vec3, velocity: Vec3, opts: { maxTicks?
     }
     if (block != null) return { path, hit: null, blocked: block }
     pos = next
-    const inertia = opts.world?.isWater?.(pos) === true ? ARROW_WATER_INERTIA : ARROW_INERTIA
-    vel.x *= inertia
-    vel.y = vel.y * inertia - ARROW_GRAVITY
-    vel.z *= inertia
+    if (!physics.gravityFirst) applyPhysics(vel, physics, opts.world?.isWater?.(pos) === true)
     path.push({ tick, position: pos.clone(), velocity: vel.clone() })
     if (opts.stopBelowY != null && pos.y < opts.stopBelowY && vel.y < 0) break
   }
@@ -158,6 +208,10 @@ export interface AimOptions {
   leadTicks?: number
   maxTicks?: number
   world?: ArrowWorld
+  /** the projectile's physics (default an arrow's, ARROW_PHYSICS; PEARL_PHYSICS for a pearl at PEARL_SPEED) */
+  physics?: ProjectilePhysics
+  /** how far arrowHits inflates the target box (default ARROW_HIT_MARGIN, an entity's: ProjectileUtil.getEntityHitResult) */
+  hitMargin?: number
 }
 
 function launchVelocity (yaw: number, pitch: number, speed: number, shooterVelocity?: Vec3): Vec3 {
@@ -179,7 +233,19 @@ function heightAtDistance (start: Vec3, yaw: number, pitch: number, horizontal: 
   let d0 = 0
   const isWater = opts.world?.isWater
   const maxTicks = opts.maxTicks ?? 200
+  const physics = opts.physics ?? ARROW_PHYSICS
+  const vel = { x: vx, y: vy, z: vz }
+  const step = (): void => {
+    vel.x = vx
+    vel.y = vy
+    vel.z = vz
+    applyPhysics(vel, physics, isWater?.(new Vec3(x, y, z)) === true)
+    vx = vel.x
+    vy = vel.y
+    vz = vel.z
+  }
   for (let tick = 1; tick <= maxTicks; tick++) {
+    if (physics.gravityFirst) step()
     const nx = x + vx
     const ny = y + vy
     const nz = z + vz
@@ -193,10 +259,7 @@ function heightAtDistance (start: Vec3, yaw: number, pitch: number, horizontal: 
     y = ny
     z = nz
     d0 = d1
-    const inertia = isWater?.(new Vec3(x, y, z)) === true ? ARROW_WATER_INERTIA : ARROW_INERTIA
-    vx *= inertia
-    vy = vy * inertia - ARROW_GRAVITY
-    vz *= inertia
+    if (!physics.gravityFirst) step()
   }
   return null
 }
@@ -263,7 +326,7 @@ export function solveAim (start: Vec3, target: Vec3, opts: AimOptions = {}): Aim
 
 /** Whether an arrow shot along the solution enters the target box (inflated as vanilla does). */
 export function arrowHits (start: Vec3, yaw: number, pitch: number, box: Box, opts: AimOptions = {}): ArrowFlight {
-  return simulateArrow(start, launchVelocity(yaw, pitch, opts.speed ?? BOW_MAX_SPEED, opts.shooterVelocity), { target: box, world: opts.world, maxTicks: opts.maxTicks ?? 200 })
+  return simulateArrow(start, launchVelocity(yaw, pitch, opts.speed ?? BOW_MAX_SPEED, opts.shooterVelocity), { target: box, world: opts.world, maxTicks: opts.maxTicks ?? 200, physics: opts.physics, hitMargin: opts.hitMargin })
 }
 
 export { launchVelocity }
