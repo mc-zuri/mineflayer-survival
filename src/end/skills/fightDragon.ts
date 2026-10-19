@@ -510,7 +510,9 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       const danger = inDanger(me, dangers)
       if (danger != null) {
         stopDraw()
-        const to = safeSpot(get, me, dangers, guard, { home, homeRadius: homeRadius + 8 })
+        // not out of the breath along the dragon's neck: its head and neck as they are, kept clear on the way
+        const zones = dragon != null ? dragonZones({ position: dragon.position, yaw: vanillaYaw(dragon.yaw), ...tracker.flight() }, window.phase != null && isSitting(window.phase)).filter(z => z.hurts) : undefined
+        const to = safeSpot(get, me, dangers, guard, { home, homeRadius: homeRadius + 8, zones })
         if (to != null) steerToward(bot, to, { sprint: true })
         else bot.clearControlStates()
         await waitTicks(bot, 1, signal)

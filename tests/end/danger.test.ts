@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { DRAGON_PHASES } from '../../src/end/dragon'
+import { CONTACT_MARGIN, DRAGON_PHASES, breathZone, dragonZones, touchedZone } from '../../src/end/dragon'
+import { exitPortal } from '../../src/end/spikes'
 import { closestApproach, dragonDangers, fireballLanding, inDanger, safeSpot, underDragonWatch } from '../../src/end/skills/danger'
 import { VoidGuard } from '../../src/end/skills/world'
 import { motionTrackerOf } from '../../src/skills/motion'
@@ -90,4 +91,24 @@ test('underDragonWatch: work that runs into a cloud is cut off, the bot steps ou
   }
   assert.ok(TaskError.is(aborted) && aborted.code === 'PREEMPTED')
   assert.strictEqual(inDanger(bot.entity.position, dragonDangers(bot, 64), 2), null, `still in the cloud at ${bot.entity.position.toString()}`)
+})
+
+test('safeSpot out of the coming breath keeps off the perched dragon\'s head and neck, there and on the way (a 26.3 bot stepped out of the breath along the neck and was hit)', () => {
+  const blocks = endIsland([], 40)
+  // the ground a block up round the podium: no room under the zones
+  for (let x = -14; x <= 14; x++) for (let z = -14; z <= 14; z++) if (Math.abs(x) > 3 || Math.abs(z) > 3) blocks.set(`${x},62,${z}`, 'end_stone')
+  const get = world(blocks)
+  const perch = exitPortal(62).perch
+  // facing +z: the head over z 7, the breath's cloud 9 out
+  const view = { position: perch, yaw: 180 }
+  const zones = dragonZones(view).filter(z => z.hurts)
+  const b = breathZone(view)
+  const dangers = [{ center: b.center, y: 63, radius: b.radius, why: 'breath' as const }]
+  const from = new Vec3(perch.x - 2.5, 63, perch.z + 8.5)
+  const plain = safeSpot(get, from, dangers, null)
+  const kept = safeSpot(get, from, dangers, null, { zones })
+  assert.ok(plain != null && kept != null)
+  assert.equal(touchedZone(kept, zones, 0, CONTACT_MARGIN), null)
+  assert.equal(touchedZone(new Vec3((from.x + kept.x) / 2, 63, (from.z + kept.z) / 2), zones, 0, 0.1), null)
+  assert.equal(inDanger(kept, dangers), null)
 })

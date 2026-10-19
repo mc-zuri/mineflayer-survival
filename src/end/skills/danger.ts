@@ -5,7 +5,7 @@ import { motionTrackerOf } from '../../skills/motion'
 import { steerToward } from '../../skills/steer'
 import { eat, bestFoodInInventory } from '../../skills/eat'
 import { TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataIndex, metadataValue } from '../../skills/combatUtil'
-import { DRAGON_PHASE_METADATA, phaseName } from '../dragon'
+import { CONTACT_MARGIN, DRAGON_PHASE_METADATA, phaseName, touchedZone, type DragonZone } from '../dragon'
 import { countItems, groundY, isOpenAt, SCAFFOLD_ITEMS, towerUp, VoidGuard, type BlockGetter } from './world'
 
 // What the dragon throws at the ground, and getting out of it: the AreaEffectClouds of its breath (DragonSittingFlamingPhase)
@@ -86,7 +86,7 @@ export function dragonDangers (bot: Bot, ground: number, island = ground): Dange
  * The nearest standing spot out of every danger: rings of 16 headings at 2 to 10 blocks, ground at most 3 blocks
  * up or down, the body fitting, and no void near (the guard's margin).
  */
-export function safeSpot (get: BlockGetter, from: Vec3, dangers: Danger[], guard: VoidGuard | null, opts: { home?: Pos, homeRadius?: number } = {}): Vec3 | null {
+export function safeSpot (get: BlockGetter, from: Vec3, dangers: Danger[], guard: VoidGuard | null, opts: { home?: Pos, homeRadius?: number, zones?: DragonZone[] } = {}): Vec3 | null {
   for (let d = 2; d <= 10; d += 2) {
     let best: Vec3 | null = null
     let bestScore = Infinity
@@ -100,6 +100,9 @@ export function safeSpot (get: BlockGetter, from: Vec3, dangers: Danger[], guard
       if (!isOpenAt(get, p.floored()) || !isOpenAt(get, p.floored().offset(0, 1, 0))) continue
       if (inDanger(p, dangers, 2.5) != null) continue
       if (guard?.risky(p) === true) continue
+      // out from under the dragon's head and neck, there and halfway (a step out of the breath along its neck)
+      const half = new Vec3((from.x + x) / 2, Math.max(from.y, y), (from.z + z) / 2)
+      if (opts.zones != null && (touchedZone(p, opts.zones, 0, CONTACT_MARGIN) != null || touchedZone(half, opts.zones, 0, 0.1) != null)) continue
       const home = opts.home
       const off = home != null ? Math.hypot(x - home.x, z - home.z) : 0
       if (home != null && off > (opts.homeRadius ?? 30)) continue
