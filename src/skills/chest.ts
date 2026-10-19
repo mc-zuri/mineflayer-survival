@@ -5,7 +5,8 @@ import type { Item } from 'prismarine-item'
 import { Vec3 } from 'vec3'
 import { SkillError, throwIfAborted } from './errors'
 import { navigateToReach } from './navigate'
-import { blockAtOrThrow, countsDelta, itemMatcher, settleInventory, type ItemCounts, type ItemFilter } from './util'
+import { collectBlock } from './collectBlock'
+import { blockAtOrThrow, countsDelta, itemMatcher, settleInventory, trace, type Block, type ItemCounts, type ItemFilter } from './util'
 
 export interface ChestArgs {
   chest: Vec3
@@ -27,10 +28,67 @@ function countBy (items: Item[]): ItemCounts {
   return counts
 }
 
+/**
+ * Blocks with a full collision shape set never to conduct redstone (BlockBehaviour.Properties.isRedstoneConductor):
+ * the glass, the leaves, ice. (Any other full block is taken to conduct: a block broken that didn't keep the chest
+ * shut costs a dig, one left that did costs the chest)
+ */
+const NON_CONDUCTORS = /(glass$|glass_pane$|_leaves$|^ice$|^frosted_ice$)/
+
+/**
+ * Whether the block conducts redstone, as ChestBlock asks of the block over a chest: a block whose collision shape is
+ * a full cube (BlockStateBase.isCollisionShapeFullBlock, the Properties default), but the glass, leaves, ice and the
+ * other blocks set never to
+ */
+export function isRedstoneConductor (block: { name: string, boundingBox?: string, shapes?: number[][] } | null): boolean {
+  if (block == null || block.boundingBox !== 'block' || NON_CONDUCTORS.test(block.name)) return false
+  const shapes = block.shapes
+  if (shapes == null) return true
+  return shapes.length === 1 && shapes[0][0] <= 0 && shapes[0][1] <= 0 && shapes[0][2] <= 0 && shapes[0][3] >= 1 && shapes[0][4] >= 1 && shapes[0][5] >= 1
+}
+
+const CLOCKWISE: Record<string, [number, number]> = { north: [1, 0], east: [0, 1], south: [-1, 0], west: [0, -1] }
+
+/**
+ * The cells over a chest that keep it shut: its own and, for a double chest, its other half's (ChestBlock.
+ * getConnectedDirection: clockwise of the facing for the left half, counter-clockwise for the right)
+ */
+export function chestLids (block: { name: string, position: Vec3, getProperties?: () => Record<string, unknown> }): Vec3[] {
+  const cells = [block.position.offset(0, 1, 0)]
+  const props = block.getProperties?.() ?? {}
+  const facing = CLOCKWISE[String(props.facing)]
+  if (facing != null && (props.type === 'left' || props.type === 'right')) {
+    const [dx, dz] = props.type === 'left' ? facing : [-facing[0], -facing[1]]
+    cells.push(block.position.offset(dx, 1, dz))
+  }
+  return cells
+}
+
+/**
+ * A chest with a block that conducts redstone over it (or over its other half) doesn't open (ChestBlock.
+ * isChestBlockedAt, combined over both halves by DoubleBlockCombiner): the server sends no window, and mineflayer
+ * waits for one 20 s. The blocks over it are broken first (their drops left: the bag is full when it stores). A 26.3
+ * base's one chest stood under the stone of its wall, and every store there failed 'windowOpen did not fire', the bag
+ * full of cobblestone down the mine.
+ */
+async function unblockChest (bot: Bot, block: Block, signal?: AbortSignal): Promise<void> {
+  if (block.name !== 'chest' && block.name !== 'trapped_chest') return
+  for (const cell of chestLids(block as any)) {
+    const over = bot.blockAt(cell)
+    if (over == null || !isRedstoneConductor(over as any)) continue
+    trace('chest:', over.name, 'at', cell.toString(), 'keeps the chest at', block.position.toString(), 'shut: breaking it')
+    await collectBlock(bot, { positions: [cell], anyTool: true, pickup: false }, signal)
+  }
+}
+
 async function transfer (bot: Bot, args: ChestArgs, direction: 'store' | 'retrieve', signal?: AbortSignal): Promise<ChestResult> {
   throwIfAborted(signal)
-  const block = blockAtOrThrow(bot, args.chest.floored())
+  let block = blockAtOrThrow(bot, args.chest.floored())
   await navigateToReach(bot, block.position, signal)
+  if (chestLids(block as any).some(cell => isRedstoneConductor(bot.blockAt(cell) as any))) {
+    await unblockChest(bot, block, signal)
+    block = blockAtOrThrow(bot, args.chest.floored())
+  }
   const matches = itemMatcher(args.filter ?? (() => true))
   await settleInventory(bot, signal)
   const window = await bot.openContainer(block)
