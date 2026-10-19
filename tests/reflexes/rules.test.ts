@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { armorReflex, creeperReflex, drowningReflex, eatReflex, hazardReflex, hostilesReflex, nightReflex, totemReflex } from '../../src/reflexes/rules'
+import { armorReflex, creeperReflex, drowningReflex, eatReflex, emergencyEatReflex, hazardReflex, hostilesReflex, nightReflex, totemReflex } from '../../src/reflexes/rules'
 import { ReflexEngine } from '../../src/reflexes/engine'
 import { DEFAULT_REFLEX_CONFIG, type ReflexConfigInput } from '../../src/reflexes/config'
 import type { Reflex } from '../../src/reflexes/types'
@@ -273,4 +273,12 @@ test('hostiles reflex: a neutral animal that hurt the bot (a polar bear by its c
   // a cow is never fought, hurt or not (nothing hurts like that)
   const cow = entity({ name: 'cow', position: at(2) })
   assert.strictEqual(check(hostilesReflex, { entities: [cow], items: [item('stone_sword')] }, {}, hurtBy(cow)), null)
+})
+
+test('emergency eat: at 8 health or less a golden apple is eaten, two angry endermen hitting or not', () => {
+  const enderman = (x: number): any => entity({ name: 'enderman', position: at(x) })
+  assert.strictEqual(check(emergencyEatReflex, { health: 7, food: 20, items: [item('golden_apple', 2)], entities: [enderman(1), enderman(-1)] }), 'golden_apple')
+  assert.strictEqual(check(emergencyEatReflex, { health: 7, items: [item('golden_apple', 1), item('enchanted_golden_apple', 1)] }), 'enchanted_golden_apple')
+  assert.strictEqual(check(emergencyEatReflex, { health: 9, items: [item('golden_apple', 2)] }), null)
+  assert.strictEqual(check(emergencyEatReflex, { health: 4, items: [item('bread', 5)] }), null)
 })

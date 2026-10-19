@@ -230,6 +230,26 @@ export const eatReflex: Reflex = {
   }
 }
 
+/** the golden apples, best first: eaten whatever the food bar (Consumable, the ALWAYS_EDIBLE foods) */
+export const GOLDEN_APPLES = ['enchanted_golden_apple', 'golden_apple']
+
+/**
+ * Low on health in a fight with a golden apple held: eaten there and then, the fight or not (its absorption and
+ * regeneration outlast the 32 ticks of eating): the eat reflex waits for a fight to end, and in the End two angry
+ * endermen took a 1.21.11 bot from 16 health to 2 while it pillared to a crystal, then the dragon's breath killed it
+ */
+export const emergencyEatReflex: Reflex = {
+  name: 'emergency eat',
+  priority: 75,
+  check (ctx) {
+    const { bot, config } = ctx
+    if (!config.eat.enabled || bot.health > config.eat.emergencyHealth) return null
+    const apple = GOLDEN_APPLES.find(n => bot.inventory.items().some(i => i.name === n))
+    if (apple == null) return null
+    return { name: 'emergency eat', priority: 75, detail: apple, run: async (signal) => await eat(bot, { signal, food: apple }) }
+  }
+}
+
 /** Wear armor better than what's worn when some comes into the inventory, a fight or not (it's a few clicks). */
 export const armorReflex: Reflex = {
   name: 'armor',
@@ -328,4 +348,4 @@ export const nightReflex: Reflex = {
   }
 }
 
-export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fireballReflex, hazardReflex, drowningReflex, creeperReflex, hostilesReflex, eatReflex, nightReflex, armorReflex]
+export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fireballReflex, hazardReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, nightReflex, armorReflex]
