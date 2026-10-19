@@ -7,7 +7,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { navigate } from '../skills/navigate'
 import { pickupDrops, nearbyDrops } from '../skills/pickupDrops'
-import { countItems, findInventoryItem, settleInventory, trace, waitTicks } from '../skills/util'
+import { countItems, findInventoryItem, settleInventory, trace, waitTicks, waitUntil } from '../skills/util'
 import { fight } from '../skills/fight'
 import { collectDropsNear } from '../skills/hunt'
 import { type Entity, isAlive, metadataValue, yawPitchOf } from '../skills/combatUtil'
@@ -162,11 +162,14 @@ export interface HuntEndermenArgs {
   range?: number
   /** ticks to give up after (default 12000) */
   maxTicks?: number
+  /** anger one in sight by a stare and fight it where the bot stands, before walking up to it (default true) */
+  provoke?: boolean
 }
 
 /**
- * Ender pearls from endermen. Walks up to the nearest one looking at the ground before it (never at its eyes:
- * EnderMan.isLookingAtMe), and fights it aimed at its legs: the hits land on its box all the same, and a look along its
+ * Ender pearls from endermen. The nearest one in sight is angered by a stare from more than STARE_TELEPORT off, and
+ * comes; else the bot walks up to it looking at the ground before it (never at its eyes: EnderMan.isLookingAtMe), and
+ * fights it aimed at its legs: the hits land on its box all the same, and a look along its
  * body never meets its eyes until it's angry anyway. Endermen live in the warped forest, the end, and the overworld at
  * night.
  */
@@ -190,6 +193,14 @@ export async function huntEndermen (bot: Bot, args: HuntEndermenArgs = {}, signa
         if (kills === 0 && ticks > 200) throw new SkillError('NOT_FOUND', `no enderman within ${range} blocks`)
         await waitTicks(bot, 20, signal)
         continue
+      }
+      if (args.provoke !== false && !isAngryEnderman(bot, enderman) && enderman.position.distanceTo(bot.entity.position) > STARE_TELEPORT && eyesInSight(bot, enderman)) {
+        // a stare from where the bot stands: it comes (teleporting toward the bot from over 16 off), and the fight is
+        // on the bot's ground, not after it across the forest (run d's hunts on 26.3: 'still alive after 600 ticks'
+        // and NO_PATH, eight times over, the endermen on the huge fungi)
+        if (await provokeEnderman(bot, enderman, signal)) {
+          await waitUntil(bot, () => !isAlive(bot, enderman) || enderman.position.distanceTo(bot.entity.position) <= 4, 200, signal)
+        }
       }
       if (enderman.position.distanceTo(bot.entity.position) > 4) {
         // the walk with the eyes down: the pathfinder looks where it goes, which is along the ground
@@ -223,6 +234,46 @@ export async function huntEndermen (bot: Bot, args: HuntEndermenArgs = {}, signa
   } finally {
     bot.off('physicsTick', onTick)
   }
+}
+
+/** EnderMan.DATA_CREEPY: angry at a player and coming for it */
+export function isAngryEnderman (bot: Bot, e: Entity): boolean {
+  return metadataValue(bot, e, 'creepy') === true
+}
+
+/** a stare within this teleports the enderman away (EndermanLookForPlayerGoal.tick: distanceToSqr < 16) */
+export const STARE_TELEPORT = 4
+/** ticks a stare is held for an enderman to take it (EndermanLookForPlayerGoal's aggroTime is 5) */
+export const STARE_TICKS = 40
+
+/** its eyes with no block between them and the bot's (Player.hasLineOfSight, which isBeingStaredBy needs) */
+export function eyesInSight (bot: Bot, e: Entity): boolean {
+  const raycast = (bot.world as any)?.raycast
+  if (typeof raycast !== 'function') return true
+  const eye = bot.entity.position.offset(0, 1.62, 0)
+  const to = e.position.offset(0, ENDERMAN_EYE, 0).minus(eye)
+  const d = to.norm()
+  if (d < 1e-6) return true
+  return raycast.call(bot.world, eye, to.scaled(1 / d), d) == null
+}
+
+/** EnderMan's eye height */
+const ENDERMAN_EYE = 2.55
+
+/**
+ * Angers an enderman by looking at its eyes (EnderMan.isBeingStaredBy, which EndermanLookForPlayerGoal takes from up
+ * to 64 off), for STARE_TICKS at most; resolves whether it's angry (EnderMan.DATA_CREEPY)
+ */
+export async function provokeEnderman (bot: Bot, enderman: Entity, signal?: AbortSignal): Promise<boolean> {
+  for (let t = 0; t < STARE_TICKS && isAlive(bot, enderman) && !isAngryEnderman(bot, enderman); t++) {
+    throwIfAborted(signal)
+    if (enderman.position.distanceTo(bot.entity.position) <= STARE_TELEPORT) break
+    await bot.lookAt(enderman.position.offset(0, ENDERMAN_EYE, 0), true)
+    await waitTicks(bot, 1, signal)
+  }
+  const angry = isAngryEnderman(bot, enderman)
+  trace('huntEndermen: stared at enderman', enderman.id, angry ? 'angry' : 'not angry')
+  return angry
 }
 
 function viewVector (bot: Bot): Vec3 {
