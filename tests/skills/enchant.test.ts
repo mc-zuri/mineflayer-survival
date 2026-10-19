@@ -277,4 +277,6 @@ test('the enchanting milestone makes room in the bag, what the shelves take kept
   const room = calls.findIndex(c => /^room force/.test(c))
   assert.ok(room >= 0, calls.join(', '))
   assert.ok(room < calls.indexOf('obtain bookshelf'), calls.join(', '))
+  // and before the gear's, for the armor taken off
+  assert.equal(calls[calls.indexOf('enchant the gear') - 1], 'room force 0', calls.join(', '))
 })

@@ -382,7 +382,8 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
     await executor.task('back to the table', async (s) => await overland(bot, { target: tableAt, range: 3 }, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
   }
   // room in the bag to take the armor off for the table (a full bag kept it on: 'no unenchanted diamond_chestplate')
-  await executor.makeRoom?.({}, signal)
+  // (forced: the junk alone left the bag full, and the armor stayed on unenchanted again, 26.3)
+  await executor.makeRoom?.({ lapis_lazuli: 64, book: 64, leather: 64, paper: 64, iron_ingot: 64 }, signal, true)
   await executor.task('enchant the gear', async (s) => await enchantGear(bot, { executor, signal: s, bookshelves: shelves }), signal)
   await enchantBooksAndApply(bot, executor, signal, log)
 }
