@@ -476,3 +476,33 @@ test('an optional milestone that has had its ticks is left out before it fails f
   assert.equal(result.stoppedAt, 'nether')
   assert.ok(lines.some(l => /milestone enchanting left out after \d+ ticks/.test(l)), lines.join(' | '))
 })
+
+test('rekit gets to a dug-in base the long way (hops, a stair down) when the path search fails, then takes the kit', async () => {
+  const navModule = require('../../src/skills/navigate')
+  const strongholdModule = require('../../src/end/strongholdSkills')
+  const chestModule = require('../../src/skills/chest')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ cooked_beef: 2 })
+  bot.survival.memory.setBase({ x: -56, y: 60, z: -16 })
+  bot.survival.memory.addPoi('base_entrance', { x: -52, y: 60, z: -19 }, 'overworld')
+  bot.survival.memory.rememberChest({ x: -56, y: 60, z: -16 }, { diamond_pickaxe: 1, diamond_sword: 1 }, 'overworld')
+  const runner = new Runner(bot, { log: () => {} })
+  const calls: string[] = []
+  const realNav = navModule.navigate
+  const realOver = strongholdModule.overland
+  const realGet = chestModule.retrieveItems
+  navModule.navigate = async () => { calls.push('navigate'); throw new TaskError('NO_PATH', 'the last search ended: timeout') }
+  strongholdModule.overland = async (_b: unknown, a: any) => { calls.push(`overland ${a.target.toString()}`) }
+  chestModule.retrieveItems = async () => { calls.push('retrieve'); return { moved: { diamond_pickaxe: 1, diamond_sword: 1 } } }
+  runner.executor.task = (async (_name: string, fn: any) => await fn(new AbortController().signal)) as any
+  try {
+    const took = await runner.rekit()
+    assert.deepEqual(took, { diamond_pickaxe: 1, diamond_sword: 1 })
+  } finally {
+    navModule.navigate = realNav
+    strongholdModule.overland = realOver
+    chestModule.retrieveItems = realGet
+  }
+  assert.deepEqual(calls.slice(0, 2), ['navigate', `overland ${new Vec3(-52, 60, -19).toString()}`])
+  assert.ok(calls.includes('retrieve'))
+})

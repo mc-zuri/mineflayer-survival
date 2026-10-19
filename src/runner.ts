@@ -1127,7 +1127,12 @@ export class Runner {
     this.log('to the base for a kit')
     if (base.entrance != null) {
       const e = base.entrance
-      await this.executor.task('to the base', async (s) => await navigate(bot, { goal: new goals.GoalNear(e.x, e.y, e.z, 2) }, s), signal).catch(err => {
+      // (a search that timed out 10 blocks from the dug-in base left the bot with no kit at all, its diamond tools in
+      // the chest: the walk then, by hops and a stair down when the path doesn't come, 26.3)
+      await this.executor.task('to the base', async (s) => await navigate(bot, { goal: new goals.GoalNear(e.x, e.y, e.z, 2) }, s).catch(async err => {
+        if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+        await overland(bot, { target: new Vec3(e.x, e.y, e.z), range: 2, exactY: true }, s)
+      }), signal).catch(err => {
         if (TaskError.is(err, 'DIED')) throw err
       })
     }
@@ -1136,7 +1141,11 @@ export class Runner {
       const wanted = Object.keys(known?.items ?? {}).filter(name => (this.executor.options.keep(name, bot.registry) ?? 0) > 0)
       if (wanted.length === 0) continue
       try {
-        const res = await this.executor.task('kit', async (s) => await retrieveItems(bot, { chest: new Vec3(chest.x, chest.y, chest.z), filter: wanted }, s), signal)
+        const at = new Vec3(chest.x, chest.y, chest.z)
+        if (bot.entity.position.distanceTo(at) > 4) {
+          await this.executor.task('to the kit', async (s) => await overland(bot, { target: at, range: 2, exactY: true }, s), signal).catch(err => { if (TaskError.is(err, 'DIED')) throw err })
+        }
+        const res = await this.executor.task('kit', async (s) => await retrieveItems(bot, { chest: at, filter: wanted }, s), signal)
         const items = { ...(known?.items ?? {}) }
         for (const [name, n] of Object.entries(res.moved)) items[name] = Math.max(0, (items[name] ?? 0) - n)
         for (const [name, n] of Object.entries(res.moved)) took[name] = (took[name] ?? 0) + n
