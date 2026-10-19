@@ -51,3 +51,28 @@ test('tunnel steps: down a stair (head, feet, the cell under), or along at the f
   assert.deepStrictEqual(a.clear.map(c => c.toString()), ['(0, 65, -1)', '(0, 64, -1)'])
   assert.deepStrictEqual([a.stand.toString(), a.floor.toString()], ['(0, 64, -1)', '(0, 63, -1)'])
 })
+
+test('inDeepWater and swimToward: out at sea the bot swims at the surface toward the point, jump held, until it stands on ground', async () => {
+  const { inDeepWater, swimToward } = await import('../../src/skills/travel')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // the sea to x 10, a beach from x 10 on (sand at y 62)
+  const world = (p: Vec3): string => p.x >= 10 ? (p.y <= 62 ? 'sand' : 'air') : (p.y <= 50 ? 'sand' : p.y <= 62 ? 'water' : 'air')
+  const lookup = (p: Vec3) => ({ name: world(p.floored()) })
+  assert.strictEqual(inDeepWater(lookup, new Vec3(2.5, 61.6, 0.5)), true)
+  assert.strictEqual(inDeepWater(lookup, new Vec3(12.5, 63, 0.5)), false)
+  const bot = fakeBot({ position: new Vec3(0.5, 61.6, 0.5), world })
+  bot.entity.onGround = false
+  const timer = setInterval(() => {
+    // the fake's swim: a tenth of a block a tick with forward held, on the beach once past x 10
+    if (bot.controls.forward === true) bot.entity.position = bot.entity.position.offset(0.1, 0, 0)
+    if (bot.entity.position.x >= 10.5) { bot.entity.position = new Vec3(bot.entity.position.x, 63, 0.5); bot.entity.onGround = true }
+    bot.emit('physicsTick')
+  }, 0)
+  try {
+    await swimToward(bot, new Vec3(40.5, 61.6, 0.5), 48)
+  } finally {
+    clearInterval(timer)
+  }
+  assert.ok(bot.entity.position.x >= 10.5 && bot.entity.position.x < 12, `${bot.entity.position.x}`)
+  assert.deepStrictEqual(bot.controls, {})
+})

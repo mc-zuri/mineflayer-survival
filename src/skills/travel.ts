@@ -47,6 +47,41 @@ export function hopPoint (from: { x: number, z: number }, target: { x: number, z
 /** detours tried when a hop has no path: straight on, then turned 30°, 60° and 90° either way, and shorter */
 const DETOURS: Array<[number, number]> = [[0, 1], [Math.PI / 6, 1], [-Math.PI / 6, 1], [Math.PI / 3, 0.75], [-Math.PI / 3, 0.75], [Math.PI / 2, 0.5], [-Math.PI / 2, 0.5], [0, 0.4]]
 
+const WATER = new Set(['water', 'bubble_column', 'kelp', 'kelp_plant', 'seagrass', 'tall_seagrass'])
+
+/** in water with water under the feet too: the sea or a lake, too deep to wade */
+export function inDeepWater (lookup: (pos: Vec3) => { name: string } | null, pos: Vec3): boolean {
+  const feet = pos.floored()
+  return WATER.has(lookup(feet)?.name ?? '') && WATER.has(lookup(feet.offset(0, -1, 0))?.name ?? '')
+}
+
+/**
+ * Swims at the surface toward a point: the jump held (a player in water rises with it, LivingEntity.jumpInLiquid),
+ * facing the point level, until the bot stands on ground out of the deep water, has swum `range` blocks, or 20 ticks a
+ * block and 200 more have gone
+ */
+export async function swimToward (bot: Bot, point: Vec3, range: number, signal?: AbortSignal): Promise<void> {
+  const start = bot.entity.position.clone()
+  const maxTicks = Math.ceil(range * 20 + 200)
+  try {
+    for (let t = 0; t < maxTicks; t++) {
+      throwIfAborted(signal)
+      const pos = bot.entity.position
+      if (Math.hypot(point.x - pos.x, point.z - pos.z) < 1.5) break
+      if (Math.hypot(pos.x - start.x, pos.z - start.z) >= range) break
+      if (t > 10 && bot.entity.onGround && !inDeepWater(p => bot.blockAt(p) as any, pos)) break
+      const yaw = Math.atan2(-(point.x - pos.x), -(point.z - pos.z))
+      await bot.look(yaw, 0, true)
+      bot.setControlState('forward', true)
+      bot.setControlState('jump', true)
+      bot.setControlState('sprint', false)
+      await waitUntil(bot, () => false, 1, signal)
+    }
+  } finally {
+    bot.clearControlStates()
+  }
+}
+
 export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal): Promise<TravelResult> {
   throwIfAborted(signal)
   const range = args.range ?? 3
@@ -81,6 +116,16 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
       const left = Math.hypot(target.x - pos.x, target.z - pos.z)
       if (left <= range && (args.exactY !== true || Math.abs(target.y - pos.y) <= range)) return result()
       if (ticks > maxTicks) throw new SkillError('TIMEOUT', `${Math.round(left)} blocks short after ${ticks} ticks`, result())
+      // out at sea (deep water under the feet): swum at the surface toward the hop's point, not left to the
+      // pathfinder, whose moves in deep water sank the bot ("bot is too low") until the drowning reflex cut each
+      // hop off and the trip started over (1.21.11 seed 2, 8 minutes in one spot of the sea)
+      if (inDeepWater(p => bot.blockAt(p) as any, bot.entity.position)) {
+        const to = hopPoint(pos, target, hop)
+        await swimToward(bot, new Vec3(to.x, pos.y, to.z), hop, signal)
+        hops++
+        if (args.onHop != null && await args.onHop(bot.entity.position.clone())) return result(true)
+        continue
+      }
       // the chunks ahead come in as the bot moves; wait for the one under the next hop
       let moved = false
       let lastError: unknown = null
