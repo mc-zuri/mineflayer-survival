@@ -203,6 +203,33 @@ describe(`nether travel on a ${DEFAULT_VERSION} server (seed 4)`, { timeout: 20 
     for (const i of [2, 3]) assert.ok(passed[i] <= 7, `the trip went ${passed[i].toFixed(1)} from the trail's point ${arc[i].join(', ')}`)
   })
 
+  it('a task run by the executor in the nether has the nether\'s path settings: it walks round a magma floor, not across it', async () => {
+    // a room 24 long; a strip of magma 5 wide across its floor, netherrack either side of it to go round by
+    const [x0, y, z0] = [200, 100, 400]
+    const start = new Vec3(x0 + 0.5, y, z0 + 0.5)
+    await arrive(start)
+    await fill(`${x0 - 2} ${y - 2} ${z0 - 9} ${x0 + 24} ${y + 5} ${z0 + 9} netherrack`)
+    await fill(`${x0 - 1} ${y} ${z0 - 8} ${x0 + 23} ${y + 4} ${z0 + 8} air`)
+    await fill(`${x0 + 4} ${y - 1} ${z0 - 2} ${x0 + 16} ${y - 1} ${z0 + 2} magma_block`)
+    await nether(`tp ${USERNAME} ${start.x} ${y} ${start.z}`)
+    await run(`effect clear ${USERNAME} minecraft:slow_falling`)
+    await kit([['cooked_beef', 8]])
+    assert.ok(await waitUntil(bot, () => bot.entity.onGround && bot.entity.position.distanceTo(start) < 1.5, 200))
+    let onMagma = 0
+    const onTick = (): void => { if (bot.entity.onGround && bot.blockAt(bot.entity.position.offset(0, -0.5, 0))?.name === 'magma_block') onMagma++ }
+    bot.on('physicsTick', onTick)
+    try {
+      const executor = new Executor(bot, { log: () => {} })
+      await executor.task('across the room', async () => await bot.pathfinder.goto(new goals.GoalBlock(x0 + 20, y, z0)))
+    } finally {
+      bot.off('physicsTick', onTick)
+    }
+    console.log(`across the magma room in a task: at ${bot.entity.position.toString()}, ${onMagma} ticks on magma`)
+    assert.ok(bot.entity.position.floored().equals(new Vec3(x0 + 20, y, z0)), `ended at ${bot.entity.position.toString()}`)
+    // (a tick or two at a corner of the strip, cut by a diagonal round it; 13 with the plain settings)
+    assert.ok(onMagma <= 2, `the bot walked on the magma ${onMagma} ticks`)
+  })
+
   it('makes the trip kit a spare iron chestplate, leggings and shield from the iron it holds, golden boots from its gold, and leaves them in it', async () => {
     // on a stone floor in the overworld, the nether stage's kit: diamond armor and a shield worn, 16 iron
     await run(`effect give ${USERNAME} minecraft:slow_falling 60 0 true`)

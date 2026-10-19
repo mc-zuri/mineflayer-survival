@@ -87,3 +87,37 @@ test('netherMoveSettings: magma underfoot is no place to stand, and a ledge over
   assert.equal(s.edgeHazardCost, 16)
   assert.equal(netherMoveSettings(bot, { edgeCost: 10 }).edgeHazardCost, 10)
 })
+
+test('withNetherSafety lays the nether settings over once (nested, as it is), and the executor\'s tasks in the nether have them', async () => {
+  const { withNetherSafety, hasNetherSafety } = await import('../../src/nether/safety')
+  const { Executor } = await import('../../src/executor/executor')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { TaskRunner } = await import('../../src/core/taskRunner')
+  const bot = fakeBot()
+  const reg = bot.registry
+  bot.world = { getBlockStateId: (p: Vec3) => (p.y < 64 ? reg.blocksByName.netherrack.defaultState : reg.blocksByName.air.defaultState) }
+  bot.pathfinder = { defaultMoveSettings: { exclusionAreasStep: [], exclusionAreasBreak: [], exclusionAreasPlace: [], edgeHazardCost: 4 }, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+  const steps = (): number => bot.pathfinder.defaultMoveSettings.exclusionAreasStep.length
+  assert.equal(hasNetherSafety(bot), false)
+  await withNetherSafety(bot, async () => {
+    assert.equal(hasNetherSafety(bot), true)
+    assert.equal(steps(), 1)
+    assert.equal(bot.pathfinder.defaultMoveSettings.edgeHazardCost, 16)
+    await withNetherSafety(bot, async () => { assert.equal(steps(), 1) })
+  })
+  assert.equal(hasNetherSafety(bot), false)
+  assert.equal(bot.pathfinder.defaultMoveSettings.edgeHazardCost, 4)
+  // the executor's tasks: in the nether with them, in the overworld without
+  bot.survival = { memory: new WorldMemory(), tasks: new TaskRunner(bot) }
+  const ex = new Executor(bot, { log: () => {} })
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    bot.game.dimension = 'the_nether'
+    assert.equal(await ex.task('in the nether', async () => hasNetherSafety(bot)), true)
+    bot.game.dimension = 'overworld'
+    assert.equal(await ex.task('in the overworld', async () => hasNetherSafety(bot)), false)
+  } finally {
+    clearInterval(ticker)
+    bot.survival.tasks.destroy?.()
+  }
+})

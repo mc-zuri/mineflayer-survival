@@ -28,6 +28,7 @@ import { farmCells, grownPlots, knownFarms } from '../skills/farm'
 import { GROW_TICKS } from '../core/crops'
 import type { Diagnostics } from '../diagnostics'
 import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
+import { withNetherSafety } from '../nether/safety'
 
 /** ticks between the looks for a village about the bot */
 export const VILLAGE_CHECK_TICKS = 400
@@ -355,7 +356,12 @@ export class Executor {
    */
   async task<T> (name: string, fn: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, info?: { step?: PlanStep, desc?: string, args?: unknown }): Promise<T> {
     throwIfOwnerAborted(signal)
-    const handle = this.tasks.enqueue<T>({ name, onPreempt: 'resume' }, async (ctx) => await fn(ctx.signal))
+    // in the nether, every task's paths with the nether's settings (no lava edges or magma, ledges dear, the deaths
+    // kept away from): a mine step for warped stems after a death walked the bot into the lava (26.3)
+    const run = async (s: AbortSignal): Promise<T> => normalizeDimension(this.bot.game?.dimension) === 'the_nether'
+      ? await withNetherSafety(this.bot, async () => await fn(s))
+      : await fn(s)
+    const handle = this.tasks.enqueue<T>({ name, onPreempt: 'resume' }, async (ctx) => await run(ctx.signal))
     const onAbort = (): void => handle.cancel(`${name} was stopped`)
     signal?.addEventListener('abort', onAbort, { once: true })
     try {

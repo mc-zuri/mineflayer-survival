@@ -159,6 +159,8 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
   }
   const place = (block: BlockInfoLike): number => overLava(isLava, isAir, block.position) ? FORBID : 0
   // a drop ends on the ground: the nether's liquid is lava, no landing (MovementOptions.infiniteLiquidDropdownDistance)
+  // (marked: withNetherSafety lays them over the settings once, not again inside another)
+  for (const area of [step, breakArea, place]) (area as any).survivalNether = true
   return {
     infiniteLiquidDropdownDistance: false,
     edgeHazardCost: opts.edgeCost ?? 16,
@@ -173,8 +175,17 @@ function currentMoveSettings (bot: Bot): MovementOptions {
   return { ...(bot.pathfinder as any).defaultMoveSettings }
 }
 
-/** runs `fn` with the nether settings laid over the pathfinder's, and puts the old ones back */
+/** whether the pathfinder's settings have the nether's laid over them already (netherMoveSettings' areas) */
+export function hasNetherSafety (bot: Bot): boolean {
+  return ((bot.pathfinder as any)?.defaultMoveSettings?.exclusionAreasStep ?? []).some((area: any) => area?.survivalNether === true)
+}
+
+/**
+ * runs `fn` with the nether settings laid over the pathfinder's, and puts the old ones back; inside another's (the
+ * executor's tasks in the nether have them), as it is
+ */
 export async function withNetherSafety<T> (bot: Bot, fn: () => Promise<T>, opts: NetherSafetyOptions = {}): Promise<T> {
+  if (hasNetherSafety(bot)) return await fn()
   const before = currentMoveSettings(bot)
   const extra = netherMoveSettings(bot, opts)
   bot.pathfinder.setMoveOptions({
