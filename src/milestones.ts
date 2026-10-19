@@ -907,6 +907,21 @@ export async function recoverEndDrops (bot: Bot, executor: Executor, signal: Abo
 /** ticks a pumpkin and shears for the End's carved pumpkin may cost (the plan's estimate) */
 export const PUMPKIN_TICKS = 2000
 
+/**
+ * End stone to dig for blocks without digging a pit: the top layer's (the cell over it open) at the bot's ground level,
+ * 2 to 16 blocks round it, nearest first; up to `count`
+ */
+export function endStoneTopLayer (bot: Bot, count: number): Vec3[] {
+  const id = bot.registry.blocksByName.end_stone?.id
+  if (id == null || typeof bot.findBlocks !== 'function') return []
+  const feet = bot.entity.position.floored()
+  const open = (p: Vec3): boolean => bot.blockAt(p.offset(0, 1, 0))?.boundingBox === 'empty'
+  return bot.findBlocks({ matching: id, maxDistance: 16, count: 512 })
+    .filter(p => p.y === feet.y - 1 && open(p) && Math.hypot(p.x - feet.x, p.z - feet.z) >= 2)
+    .sort((a, b) => a.distanceTo(feet) - b.distanceTo(feet))
+    .slice(0, count)
+}
+
 /** blocks to have for the crystals' pillars (the caged ones are 76 to 103 high, the ground at 64) */
 export const END_BLOCKS = 64
 
@@ -968,7 +983,10 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
     // room for it (a full bag dug none, 'NO_SPACE', and the fights failed five times at once, 'short of blocks to
     // pillar up', 26.3)
     if ((bot.inventory.emptySlotCount?.() ?? 9) < 2) await executor.makeRoom?.({ end_stone: 64, arrow: 64, ender_pearl: 16 }, signal, true)
-    await executor.task('end stone', async (s) => await collectBlock(bot, { names: ['end_stone'], count: END_BLOCKS - blocks, maxDistance: 32 }, s), signal).catch(err => {
+    // the island's top layer only, round the bot and not under it: the nearest end stone dug a pit the bot stood in
+    // at y 49, every crystal's pillar spot out of the pathfinder's reach (26.3)
+    const top = endStoneTopLayer(bot, END_BLOCKS - blocks)
+    await executor.task('end stone', async (s) => await collectBlock(bot, top.length > 0 ? { positions: top } : { names: ['end_stone'], count: END_BLOCKS - blocks, maxDistance: 32 }, s), signal).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`End: end stone: ${(err as Error).message}`)
     })

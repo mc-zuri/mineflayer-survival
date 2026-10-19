@@ -94,3 +94,19 @@ test('in the End with few blocks and a full bag, room is made before the end sto
   await assert.rejects(endHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: { goals: () => [] } as any, state: null as any }), /stop here/)
   assert.ok(calls.indexOf('room true') >= 0 && calls.indexOf('room true') < calls.indexOf('end stone'), calls.join(', '))
 })
+
+test('endStoneTopLayer: the island\'s top layer round the bot, not under it nor below it', async () => {
+  const { endStoneTopLayer } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 60, 0.5), world: (p: any) => p.y < 60 ? 'end_stone' : 'air' })
+  const id = bot.registry.blocksByName.end_stone.id
+  bot.findBlocks = () => { const out: any[] = []; for (let x = -4; x <= 4; x++) for (let z = -4; z <= 4; z++) for (const y of [59, 58]) out.push(new Vec3(x, y, z)); return out } 
+  const top = endStoneTopLayer(bot, 10)
+  assert.equal(top.length, 10)
+  for (const p of top) {
+    assert.equal(p.y, 59)
+    assert.ok(Math.hypot(p.x, p.z) >= 2, p.toString())
+  }
+  assert.ok(id != null)
+})
