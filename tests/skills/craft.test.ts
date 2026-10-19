@@ -93,3 +93,36 @@ test('craft: a result with no room for it in a full bag is NO_SPACE, for the exe
     clearInterval(ticking)
   }
 })
+
+test('craft: the reflexes are held while bot.craft\'s clicks are on their way, in parts of CRAFTS_PER_HOLD crafts', async () => {
+  const { craft, CRAFTS_PER_HOLD } = require('../../src/skills/craft')
+  const bot = fakeCraftBot({ oak_log: 9 })
+  const held = new Map<string, number>()
+  bot.survival = {
+    reflexes: {
+      reflexes: [{ name: 'armor' }, { name: 'eat' }, { name: 'hostiles' }],
+      inhibit: (names: string[]) => {
+        for (const n of names) held.set(n, (held.get(n) ?? 0) + 1)
+        return () => { for (const n of names) held.set(n, (held.get(n) ?? 0) - 1) }
+      }
+    }
+  }
+  const calls: Array<{ count: number, held: string[] }> = []
+  bot.craft = async (_recipe: any, count: number) => {
+    calls.push({ count, held: [...held].filter(([, k]) => k > 0).map(([n]) => n).sort() })
+    bot.counts.set('oak_log', (bot.counts.get('oak_log') ?? 0) - count)
+    bot.counts.set('oak_planks', (bot.counts.get('oak_planks') ?? 0) + 4 * count)
+  }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 5)
+  try {
+    const res = await craft(bot, { item: 'oak_planks', count: 36 })
+    assert.strictEqual(res.crafted, 36)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.strictEqual(CRAFTS_PER_HOLD, 4)
+  assert.deepStrictEqual(calls.map(c => c.count), [4, 4, 1])
+  for (const c of calls) assert.deepStrictEqual(c.held, ['armor', 'eat', 'hostiles'])
+  // released after
+  assert.deepStrictEqual([...held.values()], [0, 0, 0])
+})

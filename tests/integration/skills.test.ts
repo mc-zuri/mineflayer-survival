@@ -171,6 +171,30 @@ describe(`gathering skills on a ${DEFAULT_VERSION} server`, { timeout: 15 * 60 *
     assert.strictEqual(resyncs, 1)
   })
 
+  it('crafts 64 planks while items come into the bag between its clicks', async () => {
+    // (26.3 enchant run u: "crafting oak_planks x18 failed: Error: missing ingredient" holding 61 logs: an item picked
+    // up as the clicks went made them behind the menu's state id, the server answered each with the whole menu, and the
+    // craft's next clicks went from that menu, with the logs on the cursor, not in the slot the craft took them from)
+    await give('oak_log', 20)
+    let going = true
+    const pickups = (async () => {
+      for (let i = 0; going && i < 400; i++) await run(`give ${USERNAME} dirt 1`)
+    })()
+    try {
+      const crafted = await craft(bot, { item: 'oak_planks', count: 64 })
+      assert.strictEqual(crafted.crafted, 64)
+    } finally {
+      going = false
+      await pickups
+    }
+    assert.strictEqual(countItems(bot, 'oak_planks'), 64)
+    assert.strictEqual(countItems(bot, 'oak_log'), 4)
+    // nothing left in the grid or on the cursor, nor made of planks (a button)
+    assert.deepStrictEqual(bot.inventory.slots.slice(0, 5).map(item => item?.name ?? null), [null, null, null, null, null])
+    assert.strictEqual(bot.inventory.selectedItem, null)
+    assert.strictEqual(countItems(bot, 'oak_button'), 0)
+  })
+
   it('takes lava up in a bucket, pours it back, and casts it to obsidian with water', async () => {
     const pit = at(3, -1, 0)
     await setblock(pit, 'lava')

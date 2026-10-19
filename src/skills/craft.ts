@@ -91,6 +91,31 @@ async function getTable (bot: Bot, args: CraftArgs, signal?: AbortSignal): Promi
   return { table, placed: true }
 }
 
+/** the crafts of one bot.craft, which a reflex waits for at most (a craft's clicks take 2 ticks or so: the grid's
+ * answer and the result's) */
+export const CRAFTS_PER_HOLD = 4
+
+/**
+ * bot.craft with the reflexes held back while its clicks are on their way, as a player in the inventory screen does
+ * nothing else: a reflex's equip clicked in the same menu between the craft's clicks and the craft took its ingredients
+ * from where they no longer were ('missing ingredient' right after the armor reflex fired, 1.21.11 seed 3). In parts
+ * of CRAFTS_PER_HOLD, the abort checked between them, so a reflex waits for a part at most.
+ */
+export async function craftHeld (bot: Bot, recipe: any, times: number, table: Block | undefined, signal?: AbortSignal): Promise<void> {
+  const engine = (bot as any).survival?.reflexes as { reflexes: Array<{ name: string }>, inhibit: (names: string[]) => () => void } | null | undefined
+  for (let done = 0; done < times;) {
+    throwIfAborted(signal)
+    const n = Math.min(CRAFTS_PER_HOLD, times - done)
+    const release = engine?.inhibit(engine.reflexes.map(r => r.name))
+    try {
+      await bot.craft(recipe, n, table)
+    } finally {
+      release?.()
+    }
+    done += n
+  }
+}
+
 export async function craft (bot: Bot, args: CraftArgs, signal?: AbortSignal): Promise<CraftResult> {
   throwIfAborted(signal)
   const count = args.count ?? 1
@@ -126,8 +151,9 @@ export async function craft (bot: Bot, args: CraftArgs, signal?: AbortSignal): P
     await settleInventory(bot, signal)
     const made = countItems(bot, resultName)
     try {
-      await bot.craft(recipe, step.recipeApplications, needsTable ? table ?? undefined : undefined)
+      await craftHeld(bot, recipe, step.recipeApplications, needsTable ? table ?? undefined : undefined, signal)
     } catch (err) {
+      if (signal?.aborted === true) throw err
       throw new SkillError('VERIFY_FAILED', `crafting ${resultName} x${step.recipeApplications} failed: ${(err as Error).message}`, result(), { cause: err })
     }
     const wanted = recipe.result.count * step.recipeApplications
