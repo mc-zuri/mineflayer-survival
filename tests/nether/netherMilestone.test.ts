@@ -41,6 +41,7 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
   const calls: string[] = []
   const executor: any = {
     memory: new WorldMemory(),
+    tasks: { tick: 0 },
     obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs.map(r => `${r.count} ${r.item}`).join(', ')}`) },
     task: async (name: string) => { calls.push(name); return { fortress: { center: { x: 0, y: 64, z: 0 } }, via: 'explore', ticks: 0 } }
   }
@@ -49,4 +50,21 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
   bot.findBlocks = () => []
   await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any })
   assert.deepStrictEqual(calls.slice(0, 5), ['down to the deep lava', 'obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
+})
+
+test('pearls in the nether: the endermen in sight hunted, else a leg on to find piglins or endermen, a few legs at most', async () => {
+  const { pearlsInTheNether } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const tasks: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (name: string) => { tasks.push(name) } }
+  const bot = fakeBot({ entities: [{ id: 7, name: 'enderman', position: new Vec3(10, 64, 0), metadata: [] }] })
+  bot.game.dimension = 'the_nether'
+  assert.equal(await pearlsInTheNether(bot, executor, 4, new AbortController().signal, () => {}), 0)
+  assert.deepEqual(tasks, ['endermen for pearls', 'endermen for pearls', 'endermen for pearls', 'endermen for pearls'])
+  tasks.length = 0
+  const alone = fakeBot()
+  alone.game.dimension = 'the_nether'
+  await pearlsInTheNether(alone, executor, 4, new AbortController().signal, () => {})
+  assert.deepEqual(tasks, ['a leg for pearls', 'a leg for pearls', 'a leg for pearls', 'a leg for pearls'])
 })

@@ -6,10 +6,12 @@
 import type { Bot } from 'mineflayer'
 import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
-import { blockGetter, buildPortal, castPortalAway, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
+import { barterForPearls, blockGetter, buildPortal, castPortalAway, collectBlazeRods, enterNether, findFortress, huntEndermen, isAdultPiglin, returnOverworld, withNetherSafety } from './nether/skills'
+import { travel } from './skills/travel'
+import { dayPhase } from './planner/schedule'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
 import { obsidianFromLava } from './nether/obsidian'
-import { descendTo, ensureSurface } from './executor/explore'
+import { descendTo, ensureSurface, spiralWaypoints } from './executor/explore'
 import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
 import { isAbort, isSkillError } from './skills/errors'
@@ -416,9 +418,102 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
   const pearls = netherNeeds({ count }).pearls
   if (pearls > 0) {
     log(`ender pearls: ${pearls} to get`)
-    await executor.task('ender pearls', async (s) => await obtainPearls(bot, { pearls: count('ender_pearl') + pearls }, s), signal)
+    await pearlsInTheNether(bot, executor, count('ender_pearl') + pearls, signal, log)
   }
   await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
+  // what the nether didn't give: the overworld's endermen by night
+  const still = netherNeeds({ count }).pearls
+  if (still > 0) {
+    log(`ender pearls: ${still} short: the endermen of the overworld's nights`)
+    await pearlsByNight(bot, executor, count('ender_pearl') + still, signal, log)
+  }
+}
+
+/** blocks a pearl search in the nether goes on each leg looking for piglins or endermen */
+export const PEARL_LEG = 96
+/** rounds of the overworld's night hunt at most (a hunt, a leg, a day's levels each) */
+export const PEARL_ROUNDS = 200
+/** game ticks the overworld's night hunt for endermen may take (3 days) */
+export const PEARL_NIGHTS_TICKS = 72000
+
+/**
+ * Pearls in the nether up to `want`: gold bartered with the adult piglins in sight, endermen hunted where they are
+ * (the warped forest, the soul sand valleys), the nether walked on in legs of PEARL_LEG blocks to find either, a few
+ * legs at most; resolves the pearls held (never throws for none found: the overworld's nights are next)
+ */
+export async function pearlsInTheNether (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const count = (name: string): number => countItems(bot, name)
+  for (let leg = 0; leg < 4 && count('ender_pearl') < want; leg++) {
+    if (signal.aborted) throw signal.reason
+    const piglin = Object.values(bot.entities).some(e => isAdultPiglin(bot, e) && e.position.distanceTo(bot.entity.position) <= 48)
+    const enderman = Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 48)
+    try {
+      if (piglin && count('gold_ingot') > 0) {
+        await executor.task('barter for pearls', async (s) => await barterForPearls(bot, { pearls: want, range: 48 }, s), signal)
+        continue
+      }
+      if (enderman) {
+        await executor.task('endermen for pearls', async (s) => await huntEndermen(bot, { pearls: want - count('ender_pearl'), range: 48, maxTicks: 6000 }, s), signal)
+        continue
+      }
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`ender pearls: ${(err as Error).message}`)
+    }
+    // on to find piglins or endermen: a leg along the next of the fortress search's walks
+    const route = fortressRoute(executor.memory, bot.entity.position)
+    const dir = route.axis === 'x' ? new Vec3(route.direction as number, 0, 0) : new Vec3(0, 0, route.direction as number)
+    const to = bot.entity.position.plus(dir.scaled(PEARL_LEG))
+    log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for piglins or endermen`)
+    await executor.task('a leg for pearls', async (s) => await withNetherSafety(bot, async () => await travel(bot, {
+      target: to,
+      range: 8,
+      onHop: () => Object.values(bot.entities).some(e => (e.name === 'enderman' || (isAdultPiglin(bot, e) && count('gold_ingot') > 0)) && e.position.distanceTo(bot.entity.position) <= 48)
+    }, s)), signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`ender pearls: the leg: ${(err as Error).message}`)
+    })
+  }
+  return count('ender_pearl')
+}
+
+/**
+ * Pearls from the overworld's endermen at night up to `want`, PEARL_NIGHTS_TICKS at most: each night on the surface
+ * the endermen in sight hunted, the bot walking a leg of the surface spiral round home when none is; the days spent
+ * on levels. Resolves the pearls held.
+ */
+export async function pearlsByNight (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const count = (name: string): number => countItems(bot, name)
+  const start = executor.tasks.tick
+  let leg = 0
+  for (let round = 0; round < PEARL_ROUNDS && count('ender_pearl') < want && executor.tasks.tick - start < PEARL_NIGHTS_TICKS; round++) {
+    if (signal.aborted) throw signal.reason
+    const night = dayPhase(bot.time?.timeOfDay ?? 0) !== 'day'
+    try {
+      if (!night) {
+        await executor.task('levels by day', async (s) => await gainLevels(bot, { level: 30, maxTicks: 3000 }, s), signal)
+          .catch(async () => { await executor.task('wait for the night', async (s) => { await waitTicks(bot, 1000, s) }, signal) })
+        continue
+      }
+      const enderman = Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 64)
+      if (enderman) {
+        await executor.task('endermen for pearls', async (s) => await huntEndermen(bot, { pearls: want - count('ender_pearl'), range: 64, maxTicks: 3000 }, s), signal)
+        continue
+      }
+      const center = executor.memory.base != null ? new Vec3(executor.memory.base.x, executor.memory.base.y, executor.memory.base.z) : bot.entity.position
+      const point = spiralWaypoints(center, 48, 240)[leg++ % 24]
+      await executor.task('a night leg for endermen', async (s) => await overland(bot, {
+        target: new Vec3(point.x, bot.entity.position.y, point.z),
+        range: 8,
+        onHop: () => Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 64)
+      }, s), signal)
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`ender pearls by night: ${(err as Error).message}`)
+    }
+  }
+  log(`ender pearls: ${count('ender_pearl')} of ${want} after ${executor.tasks.tick - start} ticks of the overworld's nights`)
+  return count('ender_pearl')
 }
 
 /** eyes kept for the throws still to come while the portal room isn't found */
