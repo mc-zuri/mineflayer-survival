@@ -91,3 +91,30 @@ test('the food plan goes to a grown farm when nothing is near; with none sown, a
   assert.deepEqual(sown.steps.map(s => s.kind), ['farm'])
   assert.equal((sown.steps[0] as any).plots, 8)
 })
+
+test('till selects the hoe afresh and tries again when the first use leaves grass', async () => {
+  const { till } = await import('../../src/skills/farm')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const cell = new Vec3(1, 63, 0)
+  let tilled = false
+  let uses = 0
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wooden_hoe', 1)], world: p => p.y < 64 ? 'grass_block' : 'air' })
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => (tilled && p.equals?.(cell)) ? { ...realAt(p), name: 'farmland' } : realAt(p)) as any
+  const slots: number[] = []
+  ;(bot as any).setQuickBarSlot = (n: number) => { slots.push(n); (bot as any).quickBarSlot = n }
+  ;(bot as any).quickBarSlot = 0
+  ;(bot as any).equip = async () => {}
+  ;(bot as any).heldItem = { name: 'wooden_hoe' }
+  ;(bot as any).activateBlock = async () => { uses++; if (uses === 2) tilled = true }
+  if ((bot as any)._client == null) (bot as any)._client = { on: () => {}, off: () => {} }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await till(bot, cell)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.equal(uses, 2)
+  assert.deepEqual(slots, [1])
+})

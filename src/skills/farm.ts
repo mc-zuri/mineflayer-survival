@@ -91,12 +91,22 @@ export async function till (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise
   const hoe = bot.inventory.items().filter(i => i.name.endsWith('_hoe')).sort((a, b) => b.type - a.type)[0]
   if (hoe == null) throw new SkillError('NO_TOOL', 'no hoe to till with')
   await navigateToReach(bot, cell, signal)
-  if (bot.heldItem?.name !== hoe.name) await bot.equip(hoe, 'hand')
-  const block = bot.blockAt(cell) as Block
-  await bot.activateBlock(block, new Vec3(0, 1, 0))
-  if (!(await waitUntil(bot, () => bot.blockAt(cell)?.name === 'farmland', 10, signal))) {
-    throw new SkillError('VERIFY_FAILED', `${bot.blockAt(cell)?.name ?? 'nothing'} at ${cell.toString()} after the hoe`)
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (bot.heldItem?.name !== hoe.name) await bot.equip(hoe, 'hand')
+    const block = bot.blockAt(cell) as Block
+    await bot.activateBlock(block, new Vec3(0, 1, 0))
+    if (await waitUntil(bot, () => bot.blockAt(cell)?.name === 'farmland', 10, signal)) return
+    // the hand the server holds may not be the one the bag shows (every cell of a 26.3 farm stayed grass after the
+    // hoe, crafted just before at a table put away): the inventory settled and the hoe selected afresh, once
+    trace('till: no farmland at', cell.toString(), 'holding', bot.heldItem?.name ?? 'nothing', 'slot', bot.quickBarSlot)
+    await settleInventory(bot, signal)
+    const other = (bot.quickBarSlot + 1) % 9
+    bot.setQuickBarSlot(other)
+    await waitUntil(bot, () => false, 2, signal)
+    const again = bot.inventory.items().filter(i => i.name === hoe.name)[0] ?? hoe
+    await bot.equip(again, 'hand')
   }
+  throw new SkillError('VERIFY_FAILED', `${bot.blockAt(cell)?.name ?? 'nothing'} at ${cell.toString()} after the hoe (holding ${bot.heldItem?.name ?? 'nothing'})`)
 }
 
 /** sows a seed item on farmland; resolves once the crop stands on it */
