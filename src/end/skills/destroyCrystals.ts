@@ -6,8 +6,8 @@ import { shoot } from '../../skills/shoot'
 import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, eyePosition, distanceToBox } from '../../skills/combatUtil'
 import { attackStrengthOf, bestMeleeWeapon } from '../../skills/weapons'
 import { wornArmor, armorPiece, damageAfterArmor } from '../../skills/armor'
-import { getSpikesForLevel, spikeCenters, type EndSpike } from '../spikes'
-import { CRYSTAL_EXPLOSION_POWER, planCrystals, type CrystalTarget, type ShootSpot } from '../crystals'
+import { getSpikesForLevel, spikeCenters, type Box, type EndSpike } from '../spikes'
+import { CRYSTAL_EXPLOSION_POWER, boxEntry, cellsOnLine, planCrystals, type CrystalTarget, type ShootSpot } from '../crystals'
 import { dragonDangers, eatIfHurt, evadeDangers, inDanger, underDragonWatch } from './danger'
 import { blockGetter, groundY, digDown, gotoBlock, holdOneOf, pillarUp, PICKAXES, VoidGuard, findPortalY, worldMinY, type BlockGetter } from './world'
 
@@ -132,6 +132,8 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
   const reasons = new Map<number, string>()
   /** caged spikes whose bars on the shooting line are broken: shot from there now */
   const opened = new Map<number, ShootSpot>()
+  /** shooting spots whose line the world's own blocks stop (x,z) */
+  const badSpots = new Set<string>()
   const ground = findPortalY(get) ?? 62
   const guard = new VoidGuard(get, 3, worldMinY(bot))
   let spikes = readSpikes(get, [], opts.seed)
@@ -165,16 +167,14 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
       }
       // the clouds on the ground now, with room for them to grow (a fireball's goes from 3 to 7 over 600 ticks)
       const clouds = dragonDangers(bot, ground).filter(d => d.why === 'cloud' || d.why === 'fireball').map(d => ({ ...d, radius: d.radius + 1.5 }))
-      const avoid = (x: number, z: number): boolean => inDanger({ x, y: ground, z }, clouds.map(d => ({ ...d, y: undefined })), 1) != null
+      const avoid = (x: number, z: number): boolean => badSpots.has(`${Math.floor(x)},${Math.floor(z)}`) || inDanger({ x, y: ground, z }, clouds.map(d => ({ ...d, y: undefined })), 1) != null
       const plan = planCrystals(spikes, {
         avoid,
         groundY: cachedGround(get),
         bow: hasBow(bot),
         from: { x: bot.entity.position.x, z: bot.entity.position.z },
         destroyed: spikes.map(s => s.index).filter(i => !todo.includes(i)),
-        brokenBars,
-        // the world's own blocks on the way too (the shot's arrowWorld clips on them; the cage's bars are the plan's)
-        solidAt: (x, y, z) => { const b = get(new Vec3(x, y, z)); return b != null && b.boundingBox === 'block' && b.name !== 'iron_bars' }
+        brokenBars
       })
       if (plan.length === 0) break
       // a pillar's column under a cloud is no place to go: the next crystal, or a wait out of the clouds when every one's
@@ -188,6 +188,15 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
       }
       const open = opened.get(target.spike.index)
       if (open != null) target = { ...target, method: 'shoot', shootFrom: open }
+      // the world's own blocks on the line from there (the shot's arrow world clips on them; the plan knows the spikes
+      // only): that spot left out, and planned again (five 'no arc reaches the target' from one spot left a caged
+      // crystal, and the dragon healed by it back to 200, 26.3)
+      if (target.shootFrom != null && shotLineBlocked(get, target.shootFrom, target.crystal.box)) {
+        badSpots.add(`${Math.floor(target.shootFrom.x)},${Math.floor(target.shootFrom.z)}`)
+        opened.delete(target.spike.index)
+        opts.log?.(`spike ${target.spike.index}: the line from ${target.shootFrom.x} ${target.shootFrom.y} ${target.shootFrom.z} is blocked: planned again`)
+        continue
+      }
       const crystal = left.get(target.spike.index) as Entity
       opts.log?.(`spike ${target.spike.index} (${target.spike.centerX}, ${target.spike.centerZ}, h ${target.spike.height}${target.spike.guarded ? ', caged' : ''}): ${target.method} from ${JSON.stringify(target.shootFrom != null ? { x: target.shootFrom.x, y: target.shootFrom.y, z: target.shootFrom.z, pillar: target.shootFrom.pillar } : null)}`)
       guard.update(bot.entity.position, bot.entity.onGround)
@@ -218,6 +227,15 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
     bot.clearControlStates()
   }
   return { destroyed, remaining: [...remaining().keys()], ticks }
+}
+
+/** a block of the world's (not a cage's bar) on the straight line from a shooting spot's eyes into the crystal's box */
+export function shotLineBlocked (get: BlockGetter, spot: ShootSpot, box: Box): boolean {
+  const eye = { x: spot.x, y: spot.y + 1.62, z: spot.z }
+  return cellsOnLine(eye, boxEntry(eye, spot.aim, box)).some(c => {
+    const b = get(new Vec3(c.x, c.y, c.z))
+    return b != null && b.boundingBox === 'block' && b.name !== 'iron_bars'
+  })
 }
 
 /** the target is a pillar job whose column is in ground to avoid (a cloud) */

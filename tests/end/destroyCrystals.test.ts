@@ -56,3 +56,17 @@ test('pillarUnderCloud: a caged crystal\'s pillar column in a cloud is passed ov
   assert.strictEqual(pillarUnderCloud(caged, () => false), false)
   assert.ok(plan.some(t => !pillarUnderCloud(t, avoid)))
 })
+
+test('shotLineBlocked: a block of the world on the line from the shooting spot stops it; the cage\'s bars (to be broken) don\'t', async () => {
+  const { shotLineBlocked } = await import('../../src/end/skills/destroyCrystals')
+  const box = { minX: 19, minY: 80, minZ: -1, maxX: 21, maxY: 82, maxZ: 1 }
+  const spot = { x: 0.5, y: 64, z: 0.5, distance: 20, pillar: 0, aim: { x: 20, y: 81, z: 0 }, shot: { yaw: 0, pitch: 0, ticks: 10 } }
+  const blocks = new Map<string, string>()
+  const get = world(blocks)
+  assert.strictEqual(shotLineBlocked(get, spot, box), false)
+  blocks.set('10,73,0', 'end_stone')
+  assert.strictEqual(shotLineBlocked(get, spot, box), true)
+  blocks.set('10,73,0', 'iron_bars')
+  const bars: BlockGetter = (p) => { const b = get(p); return b != null && b.name === 'iron_bars' ? { ...b, boundingBox: 'block' } : b }
+  assert.strictEqual(shotLineBlocked(bars, spot, box), false)
+})
