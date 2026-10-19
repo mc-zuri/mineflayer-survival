@@ -49,7 +49,12 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
   bot.game.dimension = 'overworld'
   bot.findBlocks = () => []
   await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any })
-  assert.deepStrictEqual(calls.slice(0, 5), ['down to the deep lava', 'obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
+  // (the legs for lava first: the fake bot never gets down to the deep lava)
+  const { PORTAL_LEGS } = await import('../../src/milestones')
+  const from = calls.indexOf('obtain 10 obsidian')
+  assert.equal(calls[0], 'down to the deep lava')
+  assert.equal(calls.slice(0, from).filter(c => c === 'a leg for lava').length, PORTAL_LEGS)
+  assert.deepStrictEqual(calls.slice(from, from + 4), ['obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
 })
 
 test('pearls in the nether: the endermen in sight hunted, else a leg on to find piglins or endermen, a few legs at most', async () => {
@@ -74,11 +79,28 @@ test('a portal\'s frame from the obsidian in sight first (the caves\' lava met b
   const { fakeBot } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
   const calls: string[] = []
-  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5) })
+  const { item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1)] })
   bot.game.dimension = 'overworld'
   const obsidian = bot.registry.blocksByName.obsidian.id
   bot.findBlocks = (opts: any) => opts.matching === obsidian ? Array.from({ length: 12 }, (_, i) => new Vec3(i, -52, 3)) : []
   const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async () => { calls.push('obtain') }, task: async (name: string) => { calls.push(name) } }
   await buildAPortal(bot, executor, new AbortController().signal, () => {})
   assert.equal(calls[0], 'mine the obsidian')
+})
+
+test('a portal with no bucket gets one first; with no lava near to try it walks legs for lava, not five instant failures', async () => {
+  const { buildAPortal, PORTAL_LEGS } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const calls: string[] = []
+  const bot = fakeBot({ position: new Vec3(0.5, -55, 0.5) })
+  bot.game.dimension = 'overworld'
+  bot.findBlocks = () => []
+  ;(bot as any).findBlock = () => null
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async (want: any[]) => { calls.push(`obtain ${want[0].item}`) }, task: async (name: string) => { calls.push(name) } }
+  await buildAPortal(bot, executor, new AbortController().signal, () => {})
+  assert.equal(calls[0], 'obtain bucket')
+  assert.equal(calls.filter(c => c === 'a leg for lava').length, PORTAL_LEGS)
+  assert.ok(calls.includes('obtain obsidian'))
 })

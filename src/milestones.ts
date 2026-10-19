@@ -10,7 +10,7 @@ import { barterForPearls, blockGetter, buildPortal, castPortalAway, collectBlaze
 import { travel } from './skills/travel'
 import { dayPhase } from './planner/schedule'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
-import { obsidianFromLava } from './nether/obsidian'
+import { obsidianFromLava, refillWater } from './nether/obsidian'
 import { descendTo, ensureSurface, spiralWaypoints } from './executor/explore'
 import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
@@ -332,11 +332,35 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
     await executor.task('build a nether portal', async (s) => await buildPortal(bot, { method: 'obsidian' }, s), signal)
   }
   if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
-  const tried = (p: { x: number, y: number, z: number }): boolean => executor.memory.getPois('lava_tried', { dimension: 'overworld' }).some(t => Math.hypot(t.x - p.x, t.z - p.z) < 16 && Math.abs(t.y - p.y) < 16)
-  for (let depth = 0; depth < 2; depth++) {
-    if (depth === 1) {
+  // a bucket and its water first (a death lost the kit's: every pool after was 'no water bucket to make obsidian with')
+  if (count('water_bucket') === 0 && count('bucket') === 0) {
+    await executor.obtain([{ item: 'bucket', count: 1 }], signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`a portal frame: a bucket: ${(err as Error).message}`)
+    })
+  }
+  await refillWater(bot, signal)
+  const tries = (p: { x: number, y: number, z: number }): number => {
+    const poi = executor.memory.getPois('lava_tried', { dimension: 'overworld' }).find(t => Math.hypot(t.x - p.x, t.z - p.z) < 16 && Math.abs(t.y - p.y) < 16)
+    return poi == null ? 0 : Number(/tries=(\d+)/.exec(poi.note ?? '')?.[1] ?? 1)
+  }
+  for (let depth = 0; depth < 2 + PORTAL_LEGS; depth++) {
+    if (depth >= 2) {
+      // no pool left within 96 blocks to try: a leg of PORTAL_LEG blocks along the next of the surface walks, then
+      // the pools there (the run stopped on five instant 'no lava found's after its pools were tried: 26.3 seed 2)
+      if (nearestLavaPools(bot).some(p => tries(p) < POOL_TRIES)) break
+      const route = fortressRoute(executor.memory, bot.entity.position)
+      const dir = route.axis === 'x' ? new Vec3(route.direction as number, 0, 0) : new Vec3(0, 0, route.direction as number)
+      const to = bot.entity.position.plus(dir.scaled(PORTAL_LEG))
+      log(`a portal frame: no lava left to try near: on to ${to.floored().toString()}`)
+      await executor.task('up to the surface', async (s) => await ensureSurface(bot, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+      await executor.task('a leg for lava', async (s) => await travel(bot, { target: to, range: 8 }, s), signal).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`a portal frame: the leg: ${(err as Error).message}`)
+      })
+    }
+    if ((depth === 1 || depth >= 2) && bot.entity.position.y >= DEEP_LAVA_Y + 10) {
       // the deep caves' lava next (the lava lakes under y -54 are everywhere, their floors a shore to pour on)
-      if (bot.entity.position.y < DEEP_LAVA_Y + 10) break
       log(`a portal frame: down to y ${DEEP_LAVA_Y} for the deep lava`)
       await executor.task('down to the deep lava', async (s) => await descendTo(bot, DEEP_LAVA_Y, {}, s), signal).catch(err => {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
@@ -357,10 +381,14 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
       log(`a portal frame: the obsidian: ${(err as Error).message}`)
     }
   }
-  for (const pool of nearestLavaPools(bot).filter(p => !tried(p)).slice(0, 4)) {
+  // the pools not tried first, then those tried once (after a death or with a bucket refilled the second goes)
+  const pools = nearestLavaPools(bot).map(p => ({ p, n: tries(p) })).filter(t => t.n < POOL_TRIES).sort((a, b) => a.n - b.n).map(t => t.p)
+  for (const pool of pools.slice(0, 4)) {
     const at = new Vec3(pool.x, pool.y, pool.z)
     log(`a portal frame: the lava pool at ${pool.x.toFixed(0)} ${pool.y.toFixed(0)} ${pool.z.toFixed(0)}`)
-    executor.memory.addPoi('lava_tried', at.floored(), 'overworld')
+    const before = executor.memory.getPois('lava_tried', { dimension: 'overworld' }).find(t => Math.hypot(t.x - at.x, t.z - at.z) < 16 && Math.abs(t.y - at.y) < 16)
+    if (before != null) executor.memory.removePoi('lava_tried', new Vec3(before.x, before.y, before.z))
+    executor.memory.addPoi('lava_tried', at.floored(), 'overworld', `tries=${tries(pool) + 1}`)
     try {
       await executor.task('to the lava', async (s) => await moveNear(bot, at, 5, s).catch(async err => {
         if (isAbort(err)) throw err
@@ -399,6 +427,13 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], signal)
   await placeFromObsidian()
 }
+
+/** a lava pool is tried this many times at most (a death or a lost bucket the first time) */
+export const POOL_TRIES = 2
+/** legs walked for lava when every pool near is tried */
+export const PORTAL_LEGS = 3
+/** a leg's length */
+export const PORTAL_LEG = 128
 
 /** the depth of the deep caves' lava lakes (the aquifers' lava level, y -54 and under) the portal's search goes down to */
 export const DEEP_LAVA_Y = -50
