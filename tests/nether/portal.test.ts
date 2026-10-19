@@ -147,3 +147,14 @@ test('a hillside behind the frame saves the mould blocks; too little lava gives 
   assert.equal(checkPortalFrame(get, plan.frame).valid, true)
   assert.equal(planLavaCast(get, findLavaSources(get, { x: 9, y: 63, z: 0 }, 6).slice(0, 9)), null)
 })
+
+test('lavaPools: lava sources within 2 blocks of each other are a pool, the ones of 10 or more nearest first', async () => {
+  const { lavaPools } = await import('../../src/nether/portal')
+  const lake = (x0: number, y: number, n: number) => Array.from({ length: n }, (_, i) => ({ x: x0 + (i % 4), y, z: Math.floor(i / 4) }))
+  const pools = lavaPools([...lake(100, -54, 12), ...lake(20, -40, 16), ...lake(0, 10, 3)], { x: 0, y: 64, z: 0 })
+  assert.equal(pools.length, 2)
+  assert.equal(pools[0].sources.length, 16)
+  assert.ok(Math.abs(pools[0].center.x - 21.5) < 0.01)
+  assert.equal(pools[1].sources.length, 12)
+  assert.deepEqual(lavaPools(lake(0, 10, 9), { x: 0, y: 0, z: 0 }), [])
+})

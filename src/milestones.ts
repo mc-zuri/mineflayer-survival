@@ -7,7 +7,10 @@ import type { Bot } from 'mineflayer'
 import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
 import { blockGetter, buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
-import { findLavaSources } from './nether/portal'
+import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
+import { moveNear } from './skills/gridWalk'
+import { tunnelTo } from './skills/tunnel'
+import { isAbort } from './skills/errors'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
 import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd, readPortalRoom, SCAFFOLD_ITEMS } from './end/skills'
@@ -200,6 +203,16 @@ export function fortressRoute (memory: WorldMemory, from: Vec3): ExploreOptions 
   return route
 }
 
+/** the nearest pool of PORTAL_LAVA lava sources or more in the loaded chunks (96 blocks round), its middle */
+export function nearestLavaPool (bot: Bot): { x: number, y: number, z: number } | null {
+  const id = bot.registry.blocksByName.lava?.id
+  if (id == null || typeof bot.findBlocks !== 'function') return null
+  const sources = bot.findBlocks({ matching: id, maxDistance: 96, count: 4096 })
+    .filter(p => isLavaSource({ name: 'lava', properties: (bot.blockAt(p) as any)?.getProperties?.() } as any))
+    .map(p => ({ x: p.x, y: p.y, z: p.z }))
+  return lavaPools(sources, bot.entity.position, PORTAL_LAVA)[0]?.center ?? null
+}
+
 /** a frame's obsidian, and the lava sources to cast one from */
 export const PORTAL_OBSIDIAN = 10
 export const PORTAL_LAVA = 10
@@ -211,7 +224,19 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
       // the frame's makings: 10 lava sources by the bot to cast it from, else 10 obsidian got (the planner's mine
       // step goes to the obsidian of lava met by water): buildPortal casts only from lava within 16 blocks, and the
       // bot that started the nether at the spawn had none near
-      const lava = findLavaSources(blockGetter(bot), bot.entity.position, 16).length
+      let lava = findLavaSources(blockGetter(bot), bot.entity.position, 16).length
+      if (lava < PORTAL_LAVA && count('obsidian') < PORTAL_OBSIDIAN) {
+        // a pool in the loaded chunks (the client has the caves' blocks too: the lava lakes deep down), gone to
+        const pool = nearestLavaPool(bot)
+        if (pool != null) {
+          log(`a portal frame: the lava pool at ${pool.x.toFixed(0)} ${pool.y.toFixed(0)} ${pool.z.toFixed(0)}`)
+          await executor.task('to the lava', async (s) => await moveNear(bot, new Vec3(pool.x, pool.y, pool.z), 5, s).catch(async err => {
+            if (isAbort(err)) throw err
+            await tunnelTo(bot, { target: new Vec3(pool.x, pool.y, pool.z), range: 5 }, s)
+          }), signal)
+          lava = findLavaSources(blockGetter(bot), bot.entity.position, 16).length
+        }
+      }
       if (lava < PORTAL_LAVA && count('obsidian') < PORTAL_OBSIDIAN) {
         log(`a portal frame: ${lava} lava sources near, ${count('obsidian')} obsidian: getting obsidian`)
         await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], signal)

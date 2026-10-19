@@ -140,6 +140,31 @@ export function findLavaSources (getBlock: BlockGetter, center: Pos, radius = 16
   return out
 }
 
+/**
+ * The lava pools among some lava source positions: sources within `gap` blocks of each other (chained) as one pool,
+ * the pools with `minSources` or more, nearest `from` first, each as its sources and their middle
+ */
+export function lavaPools (sources: readonly Pos[], from: Pos, minSources = 10, gap = 2): Array<{ center: Pos, sources: Pos[] }> {
+  const left = [...sources]
+  const pools: Array<{ center: Pos, sources: Pos[] }> = []
+  while (left.length > 0) {
+    const pool = [left.pop() as Pos]
+    for (let i = 0; i < pool.length; i++) {
+      for (let j = left.length - 1; j >= 0; j--) {
+        const a = pool[i]
+        const b = left[j]
+        if (Math.abs(a.x - b.x) <= gap && Math.abs(a.y - b.y) <= gap && Math.abs(a.z - b.z) <= gap) pool.push(...left.splice(j, 1))
+      }
+    }
+    if (pool.length < minSources) continue
+    const n = pool.length
+    const center = { x: pool.reduce((t, p) => t + p.x, 0) / n, y: pool.reduce((t, p) => t + p.y, 0) / n, z: pool.reduce((t, p) => t + p.z, 0) / n }
+    pools.push({ center, sources: pool })
+  }
+  const d = (p: Pos): number => Math.hypot(p.x - from.x, p.y - from.y, p.z - from.z)
+  return pools.sort((a, b) => d(a.center) - d(b.center))
+}
+
 export type CastStep =
   /** place a block of `item` at `pos`, against `against`'s `face` */
   | { kind: 'place_block', item: string, pos: Pos, against: Pos, face: Pos, why: string }
