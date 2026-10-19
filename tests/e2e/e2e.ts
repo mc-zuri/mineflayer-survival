@@ -78,10 +78,13 @@ export function formatWall (ms: number): string {
   return `${h > 0 ? `${h}h` : ''}${h > 0 ? String(m).padStart(2, '0') : m}m${String(s % 60).padStart(2, '0')}s`
 }
 
-/** the summary table: each milestone's tick and wall time, the ticks a wall second over the run */
-export function summary (reached: readonly MilestoneEvent[], totalTicks: number, wallMs: number): string[] {
+/**
+ * The summary table: each milestone's tick and wall time (the wall time of the run that reached it), the game's tick
+ * at the end, and the ticks a wall second of this run (runTicks, default totalTicks: a resumed run's own ticks only)
+ */
+export function summary (reached: readonly MilestoneEvent[], totalTicks: number, wallMs: number, runTicks = totalTicks): string[] {
   const lines = reached.map(r => `  ${r.id.padEnd(10)} tick ${String(r.tick).padStart(8)}  wall ${formatWall(r.wallMs).padStart(9)}`)
-  lines.push(`  total      tick ${String(totalTicks).padStart(8)}  wall ${formatWall(wallMs).padStart(9)}  ${(totalTicks / Math.max(1, wallMs / 1000)).toFixed(1)} ticks/s`)
+  lines.push(`  total      tick ${String(totalTicks).padStart(8)}  wall ${formatWall(wallMs).padStart(9)}  ${(runTicks / Math.max(1, wallMs / 1000)).toFixed(1)} ticks/s (${runTicks} ticks this run)`)
   return lines
 }
 
@@ -171,7 +174,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
     const wallMs = Date.now() - wall0
     log(`play stopped: ${result.reason}${result.stoppedAt != null ? ` at ${result.stoppedAt}` : ''}${result.error != null ? `: ${(result.error as Error).message}` : ''}`)
     log(`${where(b)}`)
-    for (const line of summary(result.reached, result.reached.length > 0 ? Math.max(ticks, result.reached[result.reached.length - 1].tick) : ticks, wallMs)) log(line)
+    for (const line of summary(result.reached, result.reached.length > 0 ? Math.max(ticks, result.reached[result.reached.length - 1].tick) : ticks, wallMs, ticks)) log(line)
     if (opts.until != null) {
       const ok = result.reason === 'until'
       log(ok ? `PASS: ${opts.until} reached` : `FAIL: ${opts.until} not reached`)

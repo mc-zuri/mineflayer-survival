@@ -32,6 +32,8 @@ describe('pnpm e2e', () => {
     assert.match(lines[0], /wood +tick +1200 +wall +0m04s/)
     assert.match(lines[1], /stone +tick +3000 +wall +0m10s/)
     assert.match(lines[2], /total +tick +6000 +wall +0m20s +300\.0 ticks\/s/)
+    // a resumed run: the rate of its own ticks
+    assert.match(summary([], 53716, 72000, 8900)[0], /total +tick +53716 +wall +1m12s +123\.6 ticks\/s \(8900 ticks this run\)/)
   })
 
   test('the advancement check passes on the console\'s "Test passed" only', () => {
