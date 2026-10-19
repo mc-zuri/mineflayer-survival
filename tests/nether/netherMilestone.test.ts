@@ -59,7 +59,7 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
 })
 
 test('pearls in the nether: the endermen in sight hunted, else a leg on to find piglins or endermen, a few legs at most', async () => {
-  const { pearlsInTheNether, PEARL_NETHER_LEGS } = await import('../../src/milestones')
+  const { pearlsInTheNether, PEARL_NETHER_LEGS, PEARL_NETHER_ROUNDS } = await import('../../src/milestones')
   const { fakeBot } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
   const tasks: string[] = []
@@ -67,7 +67,8 @@ test('pearls in the nether: the endermen in sight hunted, else a leg on to find 
   const bot = fakeBot({ entities: [{ id: 7, name: 'enderman', position: new Vec3(10, 64, 0), metadata: [] }] })
   bot.game.dimension = 'the_nether'
   assert.equal(await pearlsInTheNether(bot, executor, 4, new AbortController().signal, () => {}), 0)
-  assert.deepEqual(tasks, Array(PEARL_NETHER_LEGS).fill('endermen for pearls'))
+  // (the hunts aren't legs: as many as the rounds)
+  assert.deepEqual(tasks, Array(PEARL_NETHER_ROUNDS).fill('endermen for pearls'))
   tasks.length = 0
   const alone = fakeBot()
   alone.game.dimension = 'the_nether'
@@ -410,4 +411,41 @@ test('the blaze rods: a spawner there\'s no way to is left for another of the fo
     'find a fortress, not 870 143',
     'blaze rods at one found, not 870 143'
   ])
+})
+
+test('pearls in the nether with the seed: legs to its nearest warped forest, waits in it for the endermen, another spot in one when none came', async () => {
+  const { pearlsInTheNether, FOREST_IDLE, FOREST_WAIT } = await import('../../src/milestones')
+  const { NetherBiomeSource } = await import('../../src/worldgen/netherBiomes')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  // by seed 2's spawn portal, in the nether wastes
+  const bot = fakeBot({ position: new Vec3(2.5, 64, -1.5) })
+  bot.game.dimension = 'the_nether'
+  const lines: string[] = []
+  const tasks: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    task: async (name: string) => {
+      tasks.push(name)
+      if (name === 'wait for endermen') executor.tasks.tick += FOREST_WAIT
+      if (name === 'a leg for pearls') {
+        executor.tasks.tick += 2000
+        const m = /on to \((-?\d+), (-?\d+), (-?\d+)\)/.exec(lines[lines.length - 1]) as RegExpExecArray
+        bot.entity.position = new Vec3(Number(m[1]) + 0.5, Number(m[2]), Number(m[3]) + 0.5)
+      }
+    }
+  }
+  await pearlsInTheNether(bot, executor, 4, new AbortController().signal, l => lines.push(l), '2')
+  const legs = lines.filter(l => /on to/.test(l))
+  // seed 2's nearest warped forest from the portal: south-west, 420 off (the server's biome at -224, 352)
+  assert.match(legs[0], /on to \(-224, 64, 352\) for the seed's warped forest, 420 off/)
+  const biomes = new NetherBiomeSource(2)
+  // in it: waits till FOREST_IDLE has gone with no enderman, then another spot of a warped forest
+  assert.deepEqual(tasks.slice(1, 1 + FOREST_IDLE / FOREST_WAIT), Array(FOREST_IDLE / FOREST_WAIT).fill('wait for endermen'))
+  assert.equal(tasks[1 + FOREST_IDLE / FOREST_WAIT], 'a leg for pearls')
+  const points = legs.map(l => /on to \((-?\d+), -?\d+, (-?\d+)\)/.exec(l) as RegExpExecArray).map(m => ({ x: Number(m[1]), z: Number(m[2]) }))
+  assert.ok(points.length >= 2)
+  assert.equal(new Set(points.map(p => `${p.x},${p.z}`)).size, points.length, 'no spot twice')
+  for (const p of points) assert.equal(biomes.biomeAt(p.x, p.z), 'warped_forest')
 })

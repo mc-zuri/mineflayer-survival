@@ -5,6 +5,7 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { findBlocks } from '../core/findBlocks'
+import type { NetherBiome, NetherBiomeSource } from '../worldgen/netherBiomes'
 
 export type NetherGround = 'delta' | 'valley' | 'warped' | 'crimson'
 
@@ -81,4 +82,64 @@ export function pearlLeg (bot: Bot, from: Vec3, candidates: ReadonlyArray<{ x: n
   }
   if (best == null) throw new Error('no candidates for a pearl leg')
   return best
+}
+
+export interface BiomeSpot {
+  x: number
+  z: number
+  /** blocks from where the search was from */
+  distance: number
+}
+
+export interface BiomeSpotOptions {
+  /** how far out to look (default 1024) */
+  radius?: number
+  /** the grid's spacing (default 16) */
+  step?: number
+  /** grid steps all round a spot that must be the biome too: how deep in it the spot is (default 2: 32 blocks) */
+  depth?: number
+  /** spots not to go back to (a leg there that failed), and how near one counts (default 64) */
+  exclude?: ReadonlyArray<{ x: number, z: number }>
+  excludeRadius?: number
+}
+
+/**
+ * The nearest spot deep in `biome` round `from` by the seed's nether biomes (NetherBiomeSource): a grid point of the
+ * biome whose neighbours `depth` steps round are all of it too, so a leg there ends inside it, not on its edge; null
+ * when none is within `radius`
+ */
+export function nearestBiomeSpot (source: NetherBiomeSource, from: { x: number, z: number }, biome: NetherBiome, opts: BiomeSpotOptions = {}): BiomeSpot | null {
+  const radius = opts.radius ?? 1024
+  const step = opts.step ?? 16
+  const depth = opts.depth ?? 2
+  const exclude = opts.exclude ?? []
+  const excludeRadius = opts.excludeRadius ?? 64
+  const ox = Math.round(from.x / step) * step
+  const oz = Math.round(from.z / step) * step
+  const memo = new Map<string, boolean>()
+  const isBiome = (i: number, j: number): boolean => {
+    const key = `${i},${j}`
+    let v = memo.get(key)
+    if (v == null) { v = source.biomeAt(ox + i * step, oz + j * step) === biome; memo.set(key, v) }
+    return v
+  }
+  const n = Math.ceil(radius / step)
+  const cells: Array<{ i: number, j: number, d: number }> = []
+  for (let i = -n; i <= n; i++) {
+    for (let j = -n; j <= n; j++) {
+      const d = Math.hypot(ox + i * step - from.x, oz + j * step - from.z)
+      if (d <= radius) cells.push({ i, j, d })
+    }
+  }
+  cells.sort((a, b) => a.d - b.d)
+  for (const c of cells) {
+    if (!isBiome(c.i, c.j)) continue
+    const x = ox + c.i * step
+    const z = oz + c.j * step
+    if (exclude.some(e => Math.hypot(e.x - x, e.z - z) <= excludeRadius)) continue
+    let deep = true
+    for (let di = -depth; di <= depth && deep; di++) for (let dj = -depth; dj <= depth && deep; dj++) deep = isBiome(c.i + di, c.j + dj)
+    if (deep) return { x, z, distance: c.d }
+  }
+  return null
 }

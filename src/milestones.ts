@@ -38,8 +38,10 @@ import { findFarmSite, knownFarms, plantFarm, rememberFarm, SEED_OF } from './sk
 import { ownedInventory, type Executor } from './executor/executor'
 import { Vec3 } from 'vec3'
 import { findBlocks } from './core/findBlocks'
-import { pearlLeg } from './nether/ground'
-import { excludedSpawner, unreachableSpawners } from './nether/fortressSkills'
+import { nearestBiomeSpot, pearlLeg } from './nether/ground'
+import { NetherBiomeSource } from './worldgen/netherBiomes'
+import type { Seed } from './worldgen/random'
+import { excludedSpawner, levelSeed, unreachableSpawners } from './nether/fortressSkills'
 
 const inNether = (bot: Bot): boolean => normalizeDimension(bot.game?.dimension) === 'the_nether'
 
@@ -769,7 +771,7 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
   const pearls = netherNeeds({ count }).pearls
   if (pearls > 0) {
     log(`ender pearls: ${pearls} to get`)
-    await pearlsInTheNether(bot, executor, count('ender_pearl') + pearls, signal, log)
+    await pearlsInTheNether(bot, executor, count('ender_pearl') + pearls, signal, log, seed)
   }
   await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal).catch(async err => {
     if (signal.aborted || TaskError.is(err, 'DIED') || !inNether(bot)) throw err
@@ -863,21 +865,60 @@ export function pearlGround (bot: Bot, gold: boolean): { kind: 'warped forest' |
   return null
 }
 
+/** game ticks the nether's pearl search may take in all (its legs, hunts and waits) before the overworld's nights */
+export const PEARL_NETHER_TICKS = 48000
+/** rounds (a barter, a hunt, a wait or a leg each) the nether's pearl search takes at most, ticks or not */
+export const PEARL_NETHER_ROUNDS = 80
+/** a wait in a warped forest for its endermen to spawn round the bot */
+export const FOREST_WAIT = 300
+/** ticks with no enderman come to a spot in a warped forest before the search goes on to another spot in one */
+export const FOREST_IDLE = 1500
+/** how far round the bot the seed's warped forests are looked for */
+export const FOREST_SEARCH_RADIUS = 1536
+
 /**
  * Pearls in the nether up to `want`: gold bartered with the adult piglins in sight, endermen hunted where they are
  * (the warped forest, the soul sand valleys), the nether walked on in legs of PEARL_LEG blocks to find either, a few
- * legs at most; resolves the pearls held (never throws for none found: the overworld's nights are next)
+ * legs at most (PEARL_NETHER_LEGS), PEARL_NETHER_TICKS in all; resolves the pearls held (never throws for none found:
+ * the overworld's nights are next). With the seed the legs go to the nearest warped forest it puts (NetherBiomeSource:
+ * the only nether biome whose monsters are all endermen), and the bot waits in it for them.
  */
-export async function pearlsInTheNether (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+export async function pearlsInTheNether (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void, seed?: Seed): Promise<number> {
   const count = (name: string): number => countItems(bot, name)
+  const start = executor.tasks.tick
+  const elapsed = (): number => executor.tasks.tick - start
   let legs = PEARL_NETHER_LEGS
+  let legsWalked = 0
   const spiral = spiralWaypoints(bot.entity.position, PEARL_LEG, PEARL_LEG * PEARL_NETHER_LEGS)
   // the spiral's points walked to (by their index)
   const usedLegs = new Set<number>()
-  for (let leg = 0; leg < legs && count('ender_pearl') < want; leg++) {
+  // the seed's biomes, and the warped forest spots tried (a leg there failed, or no enderman came)
+  const biomes = seed != null ? new NetherBiomeSource(levelSeed(seed)) : null
+  const triedSpots: Array<{ x: number, z: number }> = []
+  let forestSpot: { x: number, z: number, distance: number } | null = null
+  let lastEnderman = executor.tasks.tick
+  const goLeg = async (to: Vec3, why: string): Promise<boolean> => {
+    legsWalked++
+    log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for ${why}`)
+    try {
+      await executor.task('a leg for pearls', async (s) => await withNetherSafety(bot, async () => await travel(bot, {
+        target: to,
+        range: 8,
+        onHop: () => Object.values(bot.entities).some(e => (e.name === 'enderman' || (isAdultPiglin(bot, e) && count('gold_ingot') > 0)) && e.position.distanceTo(bot.entity.position) <= 48)
+      }, s)), signal)
+      return true
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`ender pearls: the leg: ${(err as Error).message}`)
+      await upFromLowGround(bot, executor, signal, log)
+      return false
+    }
+  }
+  for (let round = 0; round < PEARL_NETHER_ROUNDS && legsWalked < legs && elapsed() < PEARL_NETHER_TICKS && count('ender_pearl') < want; round++) {
     if (signal.aborted) throw signal.reason
     const piglin = Object.values(bot.entities).some(e => isAdultPiglin(bot, e) && e.position.distanceTo(bot.entity.position) <= 48)
     const enderman = Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 48)
+    if (enderman) lastEnderman = executor.tasks.tick
     try {
       if (piglin && count('gold_ingot') > 0) {
         // room for what the piglins throw (a full bag ended the bartering at once: NO_SPACE, 26.3)
@@ -892,47 +933,57 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
     } catch (err) {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`ender pearls: ${(err as Error).message}`)
+      continue
+    }
+    if (biomes != null) {
+      const at = bot.entity.position.clone()
+      if (biomes.biomeAt(at.x, at.z) === 'warped_forest' && executor.tasks.tick - lastEnderman < FOREST_IDLE) {
+        // in it: its endermen spawn round the bot (the warped forest's monsters are all endermen)
+        await executor.task('wait for endermen', async (s) => { await waitTicks(bot, FOREST_WAIT, s) }, signal)
+        continue
+      }
+      // to the nearest warped forest the seed puts, deep in it; another spot once one's been waited at with no
+      // enderman come for FOREST_IDLE
+      if (forestSpot != null && Math.hypot(at.x - forestSpot.x, at.z - forestSpot.z) <= 32) triedSpots.push(forestSpot)
+      forestSpot = nearestBiomeSpot(biomes, at, 'warped_forest', { radius: FOREST_SEARCH_RADIUS, exclude: triedSpots }) ??
+        nearestBiomeSpot(biomes, at, 'warped_forest', { radius: FOREST_SEARCH_RADIUS, exclude: triedSpots, depth: 1 })
+      if (forestSpot != null) {
+        const ok = await goLeg(new Vec3(forestSpot.x + 0.5, Math.max(PEARL_LEG_Y, at.y), forestSpot.z + 0.5), `the seed's warped forest, ${Math.round(forestSpot.distance)} off`)
+        // the wait for the endermen from the arrival; a leg that got nowhere: that spot left for another
+        lastEnderman = executor.tasks.tick
+        if (!ok && bot.entity.position.distanceTo(at) < 16) triedSpots.push(forestSpot)
+        continue
+      }
     }
     // on to find piglins or endermen: to a warped forest in sight (its nylium: the endermen's biome), or a bastion's
     // blocks with gold held (its piglins), else a leg along the next of the fortress search's walks
     const seen = pearlGround(bot, count('gold_ingot') > 0)
-    let to: Vec3
     if (seen != null) {
-      to = seen.at
-      if (seen.kind === 'warped forest') legs = Math.max(legs, Math.min(leg + 3, 12))
-      if (to.distanceTo(bot.entity.position) <= 16) {
+      if (seen.kind === 'warped forest') legs = Math.max(legs, Math.min(legsWalked + 3, 12))
+      if (seen.at.distanceTo(bot.entity.position) <= 16) {
         // in it: the endermen spawn about (a warped forest's spawns are mostly theirs)
         await executor.task('wait for endermen', async (s) => { await waitTicks(bot, 400, s) }, signal)
         continue
       }
-    } else {
-      // a spiral out from where the search began (the fortress walks' legs went back and forth over the same 100
-      // blocks round the fortress, 10 legs and no new ground, 26.3), its next point the way taken unless the ground
-      // seen toward one of the few after it is better for the endermen and piglins, or that way is a basalt delta or
-      // a soul sand valley (pearlLeg; a leg into seed 2's delta east of the fortress ended in a magma cube swarm by
-      // the lava sea, 26.3); no point twice
-      if (usedLegs.size >= spiral.length) usedLegs.clear()
-      const next = spiral.map((p, i) => ({ p, i })).filter(c => !usedLegs.has(c.i)).slice(0, PEARL_LEG_CHOICES)
-      const leg = pearlLeg(bot, bot.entity.position, next.map(c => c.p), { gold: count('gold_ingot') > 0 })
-      usedLegs.add(next[leg.index].i)
-      const point = leg.point
-      if (leg.ground.delta + leg.ground.valley + leg.ground.warped + leg.ground.crimson > 0) {
-        log(`ender pearls: the ground that way: ${leg.ground.warped} warped, ${leg.ground.crimson} crimson, ${leg.ground.delta} delta, ${leg.ground.valley} soul sand valley`)
-      }
-      // at a height well over the lava sea (y 31): a leg at the bot's own height from its shore led it down to the
-      // sea's level, and into the lava (26.3)
-      to = new Vec3(point.x, Math.max(PEARL_LEG_Y, bot.entity.position.y), point.z)
+      await goLeg(seen.at, seen.kind)
+      continue
     }
-    log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for ${seen?.kind ?? 'piglins or endermen'}`)
-    await executor.task('a leg for pearls', async (s) => await withNetherSafety(bot, async () => await travel(bot, {
-      target: to,
-      range: 8,
-      onHop: () => Object.values(bot.entities).some(e => (e.name === 'enderman' || (isAdultPiglin(bot, e) && count('gold_ingot') > 0)) && e.position.distanceTo(bot.entity.position) <= 48)
-    }, s)), signal).catch(async err => {
-      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-      log(`ender pearls: the leg: ${(err as Error).message}`)
-      await upFromLowGround(bot, executor, signal, log)
-    })
+    // a spiral out from where the search began (the fortress walks' legs went back and forth over the same 100
+    // blocks round the fortress, 10 legs and no new ground, 26.3), its next point the way taken unless the ground
+    // seen toward one of the few after it is better for the endermen and piglins, or that way is a basalt delta or
+    // a soul sand valley (pearlLeg; a leg into seed 2's delta east of the fortress ended in a magma cube swarm by
+    // the lava sea, 26.3); no point twice
+    if (usedLegs.size >= spiral.length) usedLegs.clear()
+    const next = spiral.map((p, i) => ({ p, i })).filter(c => !usedLegs.has(c.i)).slice(0, PEARL_LEG_CHOICES)
+    const leg = pearlLeg(bot, bot.entity.position, next.map(c => c.p), { gold: count('gold_ingot') > 0 })
+    usedLegs.add(next[leg.index].i)
+    const point = leg.point
+    if (leg.ground.delta + leg.ground.valley + leg.ground.warped + leg.ground.crimson > 0) {
+      log(`ender pearls: the ground that way: ${leg.ground.warped} warped, ${leg.ground.crimson} crimson, ${leg.ground.delta} delta, ${leg.ground.valley} soul sand valley`)
+    }
+    // at a height well over the lava sea (y 31): a leg at the bot's own height from its shore led it down to the
+    // sea's level, and into the lava (26.3)
+    await goLeg(new Vec3(point.x, Math.max(PEARL_LEG_Y, bot.entity.position.y), point.z), 'piglins or endermen')
   }
   return count('ender_pearl')
 }

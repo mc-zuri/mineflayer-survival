@@ -59,3 +59,16 @@ test('pearlLeg from seed 2\'s fortress bridge east of the throne (26.3): the del
     rig.stopPassivePhysics()
   }
 })
+
+test('nearestBiomeSpot: the nearest point deep in a biome by the seed, past the spots excluded', async () => {
+  const { nearestBiomeSpot } = await import('../../src/nether/ground')
+  const { NetherBiomeSource } = await import('../../src/worldgen/netherBiomes')
+  const biomes = new NetherBiomeSource(2)
+  const spot = nearestBiomeSpot(biomes, { x: 2, z: -2 }, 'warped_forest')
+  assert.deepEqual(spot && { x: spot.x, z: spot.z }, { x: -224, z: 352 })
+  // its 5 x 5 grid round it all warped forest
+  for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) assert.equal(biomes.biomeAt(-224 + i * 16, 352 + j * 16), 'warped_forest')
+  const other = nearestBiomeSpot(biomes, { x: 2, z: -2 }, 'warped_forest', { exclude: [spot as any] })
+  assert.ok(other != null && Math.hypot(other.x + 224, other.z - 352) > 64)
+  assert.equal(nearestBiomeSpot(biomes, { x: 2, z: -2 }, 'warped_forest', { radius: 200 }), null)
+})
