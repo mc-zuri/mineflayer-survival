@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import minecraftData from 'minecraft-data'
-import { SCAN_TURN_SLACK, yawFacing, BREATH_LEAD_TICKS, CONTACT_MARGIN, DragonPhaseTracker, FLAME_DURATION, FLAME_WARMUP, SITTING_ATTACK_TICKS, JUMP_HEIGHT, SITTING_DAMAGE_LIMIT, TAKEOFF_HIT_MARGIN, TAKEOFF_WARNING_TICKS, headPosition, activityOf, breathZone, dragonZones, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, touchedZone, vanillaYaw } from '../../src/end/dragon'
+import { BODY_PUSH_RADIUS, SCAN_TURN_SLACK, yawFacing, BREATH_LEAD_TICKS, CONTACT_MARGIN, DragonPhaseTracker, FLAME_DURATION, FLAME_WARMUP, SITTING_ATTACK_TICKS, JUMP_HEIGHT, SITTING_DAMAGE_LIMIT, TAKEOFF_HIT_MARGIN, TAKEOFF_WARNING_TICKS, headPosition, activityOf, breathZone, dragonZones, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, touchedZone, vanillaYaw } from '../../src/end/dragon'
 import { exitPortal } from '../../src/end/spikes'
 
 test('phase ids are the EnderDragonPhase creation order', () => {
@@ -211,4 +211,14 @@ test('meleeSpots while it scans: each spot judged with the dragon turned to face
   assert.ok(!spots.some(s => Math.hypot(s.x - death.x, s.z - death.z) < 0.6))
   // not turning: judged as it faces now, the same spot is clear (the head points the other way)
   assert.equal(touchedZone(death, dragonZones(dragon), 0, CONTACT_MARGIN), null)
+})
+
+test('meleeSpots: none within BODY_PUSH_RADIUS of the dragon\'s middle (the portal\'s pit, under its body), where the wings\' push throws a body off the island', () => {
+  const perch = exitPortal(63).perch
+  const dragon = { position: perch, yaw: 90 }
+  for (const breath of [null, breathZone(dragon)]) {
+    for (const g of [63, 62]) {
+      for (const s of meleeSpots(dragon, g, breath, 0.8, true)) assert.ok(Math.hypot(s.x - perch.x, s.z - perch.z) >= BODY_PUSH_RADIUS, `${s.x} ${s.z}`)
+    }
+  }
 })

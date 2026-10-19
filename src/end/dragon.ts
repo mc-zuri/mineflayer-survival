@@ -259,6 +259,9 @@ export function yawFacing (from: Pos, to: Pos): number {
   return Math.atan2(to.x - from.x, -(to.z - from.z)) * 180 / Math.PI
 }
 
+/** no melee spot this close to the dragon's middle (horizontally) */
+export const BODY_PUSH_RADIUS = 5
+
 /**
  * how much wider than the player's box the dragon's zones are kept from: drift, rounding, and the head's yaw, which is
  * yRot less yRotA × 0.01 rad (the turn's leftover, kept once it stops turning): the server's head hit a 26.3 bot 0.06
@@ -289,6 +292,9 @@ export function meleeSpots (dragon: DragonView, groundY: number, breath: BreathZ
       const clearance = breath == null ? Infinity : Math.hypot(x - breath.center.x, z - breath.center.z) - breath.radius - margin
       if (clearance < 0) continue
       const feet = { x, y: groundY, z }
+      // by its body the wings' push is violent (EnderDragon.knockBack: 4 / the distance a tick): a jump or a step up there
+      // threw a 26.3 bot 77 blocks off the island from the portal's pit
+      if (Math.hypot(x - dragon.position.x, z - dragon.position.z) < BODY_PUSH_RADIUS) continue
       // turning (DragonSittingScanningPhase): the dragon as it will be, facing this spot to within SCAN_TURN_SLACK
       const facing = turning ? yawFacing(dragon.position, feet) : dragon.yaw
       const views = turning ? [-SCAN_TURN_SLACK, 0, SCAN_TURN_SLACK].map(t => ({ ...dragon, yaw: facing + t })) : [dragon]
