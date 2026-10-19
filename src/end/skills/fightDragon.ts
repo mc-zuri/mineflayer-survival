@@ -367,7 +367,9 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
     } catch (err) {
       // a crystal no way reached (its cage's bars, no arc over the spike's rim) is left: the dragon heals at it only
       // while it flies by, and the fight goes on (a 1.21.11 run's End milestone failed five times on one caged crystal)
-      if (!TaskError.is(err, 'NO_PATH')) throw err
+      // and so with no way to reach one left at all (out of arrows for a caged one, its blast too strong to hit it by
+      // hand: 'a bow is needed' failed the 26.3 stage five times in a tick)
+      if (!TaskError.is(err, 'NO_PATH') && !TaskError.is(err, 'MISSING_ITEMS')) throw err
       log(`crystals left: ${(err as Error).message}`)
     }
   }

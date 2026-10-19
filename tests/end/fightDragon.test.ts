@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
+import { TaskError } from '../../src/core/errors'
 import { exitPortal } from '../../src/end/spikes'
 import { breathZone, SCAN_TURN_SLACK, yawFacing, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
 import { ARROW_FLIGHT_TICKS, ARROW_RESERVE, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, escapeSpot, dragonPartId, fightDragon, foodToEat, hurtContext, hurtingContact, retreatSpot, safeToEat, takeoffStepBack, walkClear } from '../../src/end/skills/fightDragon'
@@ -327,4 +328,27 @@ test('fightDragon keeps ARROW_RESERVE arrows for the crystals left: no shot at t
   bot.deactivateItem = () => {}
   await assert.rejects(fightDragon(bot, { destroyCrystals: false, maxTicks: 20 }), /alive after 20 ticks/)
   assert.equal(drawn, 0)
+})
+
+test('fightDragon fights on when a crystal left can\'t be reached at all (destroyCrystals MISSING_ITEMS: no arrows for a caged one)', async () => {
+  const crystals = require('../../src/end/skills/destroyCrystals')
+  const real = crystals.destroyCrystals
+  crystals.destroyCrystals = async () => { throw new TaskError('MISSING_ITEMS', 'a bow is needed: the blast would deal 49') }
+  try {
+    const blocks = endIsland([], 30)
+    for (const p of exitPortal(62).portal) blocks.set(`${p.x},${p.y},${p.z}`, 'end_portal')
+    const get = world(blocks)
+    const crystal = entity({ name: 'end_crystal', position: new Vec3(42.5, 80, 0.5) })
+    const bot = fakeBot({ position: new Vec3(10.5, 62, 0.5), entities: [crystal] })
+    bot.game.dimension = 'the_end'
+    bot.game.minY = 0
+    bot.blockAt = (pos: Vec3) => { const b = get(pos.floored()); return b == null ? null : { ...b, position: pos.floored() } }
+    bot.waitForTicks = async () => { bot.emit('physicsTick') }
+    const lines: string[] = []
+    const result = await fightDragon(bot, { maxTicks: 50, log: l => lines.push(l) })
+    assert.ok(result.killed)
+    assert.ok(lines.some(l => /crystals left: a bow is needed/.test(l)))
+  } finally {
+    crystals.destroyCrystals = real
+  }
 })
