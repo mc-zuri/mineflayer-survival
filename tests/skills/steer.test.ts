@@ -63,3 +63,22 @@ test('steerToward with guard stops at a deadly edge (sneaking: the speed had doe
   bot.entity.position = new Vec3(-1.5, 64, 0.5)
   assert.strictEqual(edgeAhead(bot, -Math.PI / 2), false)
 })
+
+test('steerToward with guard and maxDrop 1 keeps a chase on its level: it stops at a step down of 2 or 3 (not deadly) and takes a step down of 1', () => {
+  // stone to y 63 west of x 1; a step down of 1 east of it along z < 0, of 3 along z >= 0
+  const world = (p: Vec3): string => p.x < 1 ? (p.y < 64 ? 'stone' : 'air') : (p.y < (p.z < 0 ? 63 : 61) ? 'stone' : 'air')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world })
+  assert.strictEqual(deadlyStep(bot, new Vec3(1, 64, 0)), false, 'a drop of 3')
+  assert.strictEqual(deadlyStep(bot, new Vec3(1, 64, 0), 1), true, 'a drop of 3, with 1 at most')
+  assert.strictEqual(deadlyStep(bot, new Vec3(1, 64, -1), 1), false, 'a drop of 1, with 1 at most')
+  assert.strictEqual(steerToward(bot, new Vec3(5, 64, 0.5), { guard: true }), true)
+  bot.clearControlStates()
+  assert.strictEqual(steerToward(bot, new Vec3(5, 64, 0.5), { guard: true, maxDrop: 1 }), false)
+  assert.strictEqual(bot.getControlState('forward'), false)
+  bot.entity.position = new Vec3(0.5, 64, -0.5)
+  assert.strictEqual(steerToward(bot, new Vec3(5, 64, -0.5), { guard: true, maxDrop: 1 }), true)
+  // a magma block's top is deadly at any drop (the hot floor)
+  const magma = (p: Vec3): string => p.x === 1 && p.y === 63 ? 'magma_block' : p.y < 64 ? 'stone' : 'air'
+  const onMagma = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: magma })
+  assert.strictEqual(edgeAhead(onMagma, -Math.PI / 2), true)
+})

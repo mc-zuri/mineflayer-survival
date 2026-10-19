@@ -11,6 +11,7 @@ import { holdOffBlazes } from '../nether/blazeFight'
 import { GHAST_FIREBALL, deadlyDropBeside, deflectFireball, fireballIncoming, keepFromGhast, nearestGhast } from '../nether/safety'
 import { isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
+import type { ReflexConfig } from './config'
 import { isBed } from '../core/items'
 import { breakFall, landingY, shouldBreakFall } from '../skills/fall'
 import { blockIdsNamed, findBlock } from '../core/findBlocks'
@@ -225,6 +226,24 @@ export function hostilesInRange (ctx: ReflexContext): Entity[] {
 }
 
 /** Fight the nearest hostile, or flee when hurt, outnumbered or (if so set) unarmed. Creepers are shot, fought with a shield up, or fled. */
+/**
+ * blocks a step down may drop while the hostiles reflex fights slimes and magma cubes (SWARMERS): they hop after the
+ * bot, so the fight keeps to its level. Chasing one down the 1 to 3 block steps of seed 2's basalt delta took a 26.3
+ * bot from a fortress bridge at y 61 down to the lava sea at 32, onto a magma block by the lava, where it died
+ */
+export const SWARM_MAX_DROP = 1
+
+/** the hostiles reflex's melee against `target` (fight's options) */
+export function meleeOptions (target: { name?: string }, config: ReflexConfig): { maxTicks: number, maxDistance: number, aimHeight?: number, maxDrop?: number } {
+  return {
+    maxTicks: config.hostiles.fightTicks,
+    maxDistance: config.combat.scanRange * 2,
+    // an enderman hit low: a look at its eyes (EnderMan.isLookingAtMe) is what angers the others
+    aimHeight: target.name === 'enderman' ? 0.3 : undefined,
+    maxDrop: SWARMERS.has(target.name ?? '') ? SWARM_MAX_DROP : undefined
+  }
+}
+
 export const hostilesReflex: Reflex = {
   name: 'hostiles',
   priority: 60,
@@ -279,8 +298,7 @@ export const hostilesReflex: Reflex = {
       detail: `${useBow ? 'shoot' : 'fight'} ${target.name ?? ''}`,
       run: async (signal) => useBow
         ? await shoot(bot, target, { signal, maxShots: 3 })
-        // an enderman hit low: a look at its eyes (EnderMan.isLookingAtMe) is what angers the others
-        : await fight(bot, target, { signal, maxTicks: config.hostiles.fightTicks, maxDistance: config.combat.scanRange * 2, aimHeight: target.name === 'enderman' ? 0.3 : undefined })
+        : await fight(bot, target, { signal, ...meleeOptions(target, config) })
     }
   }
 }

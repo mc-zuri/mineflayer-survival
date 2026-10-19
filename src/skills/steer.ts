@@ -45,14 +45,14 @@ export function stepCost (bot: Bot, feet: Vec3): number {
 
 /**
  * Whether a step into the column at `feet` is one to die of: lava, fire or another danger block at the feet or the
- * head, or a fall into one, or of more than 3 blocks with no water under (LivingEntity.causeFallDamage). A wall or a
- * step up is none (walking into it does no harm).
+ * head, or a fall into one, or of more than `maxDrop` blocks (default 3: LivingEntity.causeFallDamage) with no water
+ * under. A wall or a step up is none (walking into it does no harm).
  */
-export function deadlyStep (bot: Bot, feet: Vec3): boolean {
+export function deadlyStep (bot: Bot, feet: Vec3, maxDrop = 3): boolean {
   const f = feet.floored()
   if (isDangerBlock(blockName(bot, f)) || isDangerBlock(blockName(bot, f.offset(0, 1, 0)))) return true
   if (isSolid(bot, f)) return false
-  for (let d = 1; d <= 4; d++) {
+  for (let d = 1; d <= maxDrop + 1; d++) {
     const below = f.offset(0, -d, 0)
     const name = blockName(bot, below)
     if (name === 'water') return false
@@ -67,13 +67,13 @@ export function deadlyStep (bot: Bot, feet: Vec3): boolean {
  * (deadlyStep) within `reach` blocks of the bot's middle, at its feet's height: the edge of a ledge over the lava sea,
  * a basalt delta's lava pocket. Checked from the near side of the bot's box on (its half width, 0.3).
  */
-export function edgeAhead (bot: Bot, yaw: number, reach = 1.2): boolean {
+export function edgeAhead (bot: Bot, yaw: number, reach = 1.2, maxDrop = 3): boolean {
   const pos = bot.entity.position
   const dx = -Math.sin(yaw)
   const dz = -Math.cos(yaw)
   for (const k of [0.45, 0.8, reach]) {
     if (k > reach) continue
-    if (deadlyStep(bot, new Vec3(pos.x + dx * k, pos.y + 0.01, pos.z + dz * k))) return true
+    if (deadlyStep(bot, new Vec3(pos.x + dx * k, pos.y + 0.01, pos.z + dz * k), maxDrop)) return true
   }
   return false
 }
@@ -87,6 +87,11 @@ export interface SteerOptions {
    * lava (default false)
    */
   guard?: boolean
+  /**
+   * with `guard`, the most blocks a step down may drop (default 3, a fall that does no harm): less keeps a chase on its
+   * own level
+   */
+  maxDrop?: number
 }
 
 /**
@@ -97,7 +102,7 @@ export function steerToward (bot: Bot, point: Vec3, opts: SteerOptions = {}): bo
   const pos = bot.entity.position
   const yaw = Math.atan2(-(point.x - pos.x), -(point.z - pos.z))
   void bot.look(yaw, opts.lookPitch ?? 0, true)
-  if (opts.guard === true && edgeAhead(bot, yaw)) {
+  if (opts.guard === true && edgeAhead(bot, yaw, 1.2, opts.maxDrop ?? 3)) {
     bot.setControlState('forward', false)
     bot.setControlState('back', false)
     bot.setControlState('sprint', false)

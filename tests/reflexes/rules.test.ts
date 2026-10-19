@@ -219,6 +219,16 @@ test('hostiles reflex: an armed and armored bot is not outnumbered by the cubes 
   assert.strictEqual(check(hostilesReflex, { entities: [cube(2), zombie(3), zombie(4), zombie(5), zombie(6)], armor: diamond, items: sword }), 'flee')
 })
 
+test('hostiles reflex: the fight with slimes and magma cubes keeps to its level (SWARM_MAX_DROP), others step down as far as does no harm', async () => {
+  const { meleeOptions, SWARM_MAX_DROP } = await import('../../src/reflexes/rules')
+  const config = { ...DEFAULT_REFLEX_CONFIG }
+  assert.strictEqual(SWARM_MAX_DROP, 1)
+  assert.strictEqual(meleeOptions({ name: 'magma_cube' }, config).maxDrop, 1)
+  assert.strictEqual(meleeOptions({ name: 'slime' }, config).maxDrop, 1)
+  assert.strictEqual(meleeOptions({ name: 'zombie' }, config).maxDrop, undefined)
+  assert.strictEqual(meleeOptions({ name: 'enderman' }, config).aimHeight, 0.3)
+})
+
 test('hostiles reflex: a blaze in sight within 16 is held off where the bot stands when it has a shield (holdOffBlazes), fought without one', () => {
   const blaze = (x: number): any => entity({ name: 'blaze', position: at(x, 66), meta: { health: 20 } })
   const sword = [item('diamond_sword')]
