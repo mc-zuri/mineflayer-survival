@@ -260,6 +260,11 @@ export interface BridgeArgs {
   length: number
   /** the block to build with (default: cobblestone, netherrack or another filler the bot has most of) */
   item?: string
+  /**
+   * a rail block either side at the feet (default true); over the void there's nothing to put one against (the cell
+   * under it is air too), and the sneak alone keeps the bot on
+   */
+  rails?: boolean
 }
 
 /**
@@ -278,9 +283,10 @@ export async function bridgeOverLava (bot: Bot, args: BridgeArgs, signal?: Abort
       throwIfAborted(signal)
       const feet = bot.entity.position.floored()
       const floor = feet.plus(dir).offset(0, -1, 0)
-      const need = 1 + 2 + (bot.blockAt(floor)?.boundingBox === 'block' ? -1 : 0)
+      const rails = args.rails !== false
+      const need = 1 + (rails ? 2 : 0) + (bot.blockAt(floor)?.boundingBox === 'block' ? -1 : 0)
       if (countItems(bot, item) < need) throw new SkillError('MISSING_ITEMS', `out of ${item} after ${placed} bridge blocks`)
-      for (const pos of [floor, floor.plus(left).offset(0, 1, 0), floor.minus(left).offset(0, 1, 0)]) {
+      for (const pos of rails ? [floor, floor.plus(left).offset(0, 1, 0), floor.minus(left).offset(0, 1, 0)] : [floor]) {
         const b = bot.blockAt(pos)
         if (b == null || b.boundingBox === 'block') continue
         // the rails stand on lava or air: placed against the new floor's sides

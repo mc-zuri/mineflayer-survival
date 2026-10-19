@@ -1,6 +1,6 @@
 // crossToIsland: from the obsidian platform the End puts an arrival on (ServerLevel's END_SPAWN_POINT, 100 blocks out
-// on +x, EndPlatformFeature) over the void to the main island, a sneaking bridge with rails (bridgeOverLava, the
-// safe bridge) toward 0, 0, digging through the island's edge where the bridge runs into it.
+// on +x, EndPlatformFeature) over the void to the main island, a sneaking bridge (bridgeOverLava without its rails:
+// over the void there's nothing to put them against) toward 0, 0, digging through the island's edge where the bridge runs into it.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { TaskError, throwIfAborted, type SkillOptions } from '../../skills/combatUtil'
@@ -45,7 +45,7 @@ export function islandStep (get: BlockGetter, feet: Vec3, dir: Vec3): IslandStep
 
 /**
  * Over to the main island from the arrival platform (a no-op on the island): straight toward 0, 0, bridging the void
- * with rails, sneaking, and digging through the island's edge, until there is ground ahead for ISLAND_GROUND_AHEAD
+ * sneaking, and digging through the island's edge, until there is ground ahead for ISLAND_GROUND_AHEAD
  * cells. The dragon fight walked straight off the platform for the podium and the bot fell out of the world (26.3).
  */
 export async function crossToIsland (bot: Bot, opts: SkillOptions & { maxSteps?: number } = {}): Promise<{ steps: number, bridged: number }> {
@@ -73,7 +73,7 @@ export async function crossToIsland (bot: Bot, opts: SkillOptions & { maxSteps?:
       }
       if (step === 'bridge') {
         ground = 0
-        bridged += (await bridgeOverLava(bot, { direction: dir, length: 1 }, signal)).placed
+        bridged += (await bridgeOverLava(bot, { direction: dir, length: 1, rails: false }, signal)).placed
         continue
       }
       // a sneaking step onto the ground ahead

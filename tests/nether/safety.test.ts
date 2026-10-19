@@ -59,3 +59,17 @@ test('PIGLIN_GUARDED is #guarded_by_piglins: the copper chests of every age, wax
   for (const name of ['copper_chest', 'oxidized_copper_chest', 'waxed_weathered_copper_chest', 'chest', 'gold_block', 'red_shulker_box']) assert.ok(PIGLIN_GUARDED.has(name), name)
   assert.equal([...PIGLIN_GUARDED].filter(n => n.endsWith('copper_chest')).length, 8)
 })
+
+test('bridgeOverLava: a bridge with its rails takes 3 blocks a step, one without (over the void) 1', async () => {
+  const { bridgeOverLava } = await import('../../src/nether/safety')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const mk = () => {
+    const bot = fakeBot({ position: new Vec3(0.5, 49, 0.5), items: [item('cobblestone', 2)], world: (p: any) => p.y === 48 && p.x === 0 && p.z === 0 ? 'obsidian' : 'air' })
+    bot.lookAt = async () => {}
+    return bot
+  }
+  await assert.rejects(bridgeOverLava(mk(), { direction: new Vec3(-1, 0, 0), length: 1 }), /out of cobblestone/)
+  // without rails the 2 blocks do for the floor: it gets as far as placing it (the fake places nothing)
+  await assert.rejects(bridgeOverLava(mk(), { direction: new Vec3(-1, 0, 0), length: 1, rails: false }), (err: any) => !/out of cobblestone/.test(err.message))
+})
