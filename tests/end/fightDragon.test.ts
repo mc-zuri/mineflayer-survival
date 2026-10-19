@@ -40,6 +40,7 @@ test('fightDragon waits for the podium\'s chunk to find the exit portal, and is 
   const get = world(blocks)
   let ticks = 0
   const bot = fakeBot({ position: new Vec3(10.5, 62, 0.5) })
+  bot.game.dimension = 'the_end'
   bot.game.minY = 0
   // the column at 0, 0 unloaded for the first 30 ticks
   bot.blockAt = (pos: Vec3) => {

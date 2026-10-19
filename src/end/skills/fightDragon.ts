@@ -1,4 +1,5 @@
 import type { Bot } from 'mineflayer'
+import { normalizeDimension } from '../../core/memory'
 import { Vec3 } from 'vec3'
 import type { Seed } from '../../worldgen/random'
 import { solveAim, arrowHits, bowArrowSpeed, type AimSolution } from '../../skills/arrow'
@@ -98,6 +99,11 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   const maxTicks = opts.maxTicks ?? 48000
   const eatBelow = opts.eatBelowHealth ?? 12
   const homeRadius = opts.homeRadius ?? 24
+  // not in the End (resumed after the exit portal carried it out): won when the server says so
+  if (normalizeDimension(bot.game?.dimension) !== 'the_end') {
+    const won = bot.survival?.advancements?.has('end/kill_dragon') === true
+    return { killed: won, ticks: 0, meleeHits: 0, arrows: 0, perches: 0, health: won ? 0 : 200 }
+  }
   // the podium's chunk may still be on its way when the bot has just come to the island
   let foundY = findPortalY(get)
   for (let t = 0; t < 100 && foundY == null; t++) {
@@ -152,6 +158,16 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   try {
     for (;;) {
       throwIfAborted(signal)
+      // out of the End (carried through the exit portal when the dragon died over the podium): the fight's over, won
+      // when the server says so (minecraft:end/kill_dragon); a 26.3 bot so came out at the spawn and fought on in
+      // the overworld for 130000 ticks
+      if (normalizeDimension(bot.game?.dimension) !== 'the_end') {
+        stopDraw()
+        bot.clearControlStates()
+        const won = killed || bot.survival?.advancements?.has('end/kill_dragon') === true
+        log(`out of the End after ${tick} ticks: the dragon ${won ? 'dead' : 'alive'}`)
+        return { killed: won, ticks: tick, meleeHits, arrows, perches, health: won ? 0 : health }
+      }
       if (tick++ > maxTicks) throw new TaskError('TIMEOUT', `the dragon is alive after ${maxTicks} ticks (health ${health})`)
       const dragon = Object.values(bot.entities).find(e => e.name === 'ender_dragon') ?? null
       if (dragon != null) {

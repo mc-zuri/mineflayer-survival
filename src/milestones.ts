@@ -307,7 +307,7 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
   if (!fight.killed) return
   // the milestone's check: vanilla's end/kill_dragon advancement
   bot.survival.advancements.add('end/kill_dragon')
-  await executor.task('out of the End', async (s) => await leaveEnd(bot, { signal: s }), signal)
+  if (isInEnd(bot)) await executor.task('out of the End', async (s) => await leaveEnd(bot, { signal: s }), signal)
 }
 
 /** what a farm's start may cost (a hoe and the seeds from grass) before it is left for later */
