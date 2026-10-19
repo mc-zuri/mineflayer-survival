@@ -9,6 +9,7 @@ import { navigate, walkTo } from './navigate'
 import { trace } from './util'
 import { normalizeDimension } from '../core/memory'
 import { nearDeath } from '../nether/deaths'
+import { hazardLeft } from './hazardCells'
 import { runSliced, runToEnd, type SliceOptions } from '../core/slice'
 
 export interface GridCellView {
@@ -217,7 +218,8 @@ export function botGridView (bot: Bot): GridCellView {
   const deaths = nether ? (bot.survival?.memory?.getPois('nether_death', { dimension: 'the_nether' }) ?? []) : []
   return {
     free: p => { const b = blockOf(p); return b != null && b.boundingBox === 'empty' && !HARMFUL.has(b.name) },
-    floor: p => { const b = blockOf(p); return b != null && b.boundingBox === 'block' && b.name !== 'magma_block' },
+    // (and no cell the hazard reflex took the bot out of lately: hazardLeft)
+    floor: p => { const b = blockOf(p); return b != null && b.boundingBox === 'block' && b.name !== 'magma_block' && !hazardLeft(bot, p.offset(0, 1, 0)) },
     lava: isLava,
     edgeCost: nether ? GRID_EDGE_COST.the_nether : GRID_EDGE_COST.other,
     cellCost: deaths.length > 0 ? c => nearDeath(deaths, c) ? GRID_DEATH_COST : 0 : undefined

@@ -5,6 +5,7 @@ import { Vec3 } from 'vec3'
 import { creeperSwelling, lowerShield, raiseShield, SwellCounter } from './fight'
 import { isDangerBlock, steerAway, steerToward, fleeHeading } from './steer'
 import { type Entity, eyePosition, isAlive, type SkillOptions, TaskError, throwIfAborted, waitTicks, yawPitchOf } from './combatUtil'
+import { hotFloorCell, noteHazardLeft } from './hazardCells'
 
 // The escapes the reflexes run: out of lava and fire, up for air, away from a creeper or a crowd.
 
@@ -180,6 +181,9 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
     for (let t = 0; t < maxTicks; t++) {
       throwIfAborted(opts.signal)
       const here = bot.entity.position.floored()
+      // the magma block's cell is kept out of by the walks for a while (hazardCells): the walk handed back to took the
+      // bot straight back onto it
+      if (onHotFloor(bot)) noteHazardLeft(bot, hotFloorCell(bot))
       if (!inHazard(bot) && bot.entity.onGround && isSafeStand(bot, here)) {
         // out; still burning with water close: put it out (Entity.updateInWaterStateAndDoFluidPushing clears the fire)
         const waterRadius = opts.waterRadius ?? 6
