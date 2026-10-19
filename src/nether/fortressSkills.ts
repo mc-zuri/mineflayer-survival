@@ -153,6 +153,21 @@ export function campSpots (bot: Bot, spawner: Vec3, standOff = 5): Vec3[] {
   return out.sort((a, b) => a.d - b.d).map(c => c.cell)
 }
 
+/** puts out the fire blocks within `radius` of the bot's feet (a hit each, from where it stands); resolves how many */
+export async function putOutFiresNear (bot: Bot, radius: number, signal?: AbortSignal): Promise<number> {
+  const ids = ['fire', 'soul_fire'].map(n => bot.registry.blocksByName[n]?.id).filter((id): id is number => id != null)
+  const fires = bot.findBlocks({ matching: ids, maxDistance: radius + 1, count: 16 })
+    .filter(p => p.distanceTo(bot.entity.position) <= radius + 1)
+  let out = 0
+  for (const p of fires) {
+    throwIfAborted(signal)
+    const block = bot.blockAt(p)
+    if (block == null || !['fire', 'soul_fire'].includes(block.name)) continue
+    await bot.dig(block as any, true).then(() => { out++ }, () => {})
+  }
+  return out
+}
+
 /** ticks the blaze fight waits with blazes about and none in sight before it moves to another camp spot */
 export const BLIND_TICKS = 200
 
@@ -331,6 +346,9 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
           .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))
         // one the bot sees (its middle, from the eyes): through a wall neither the bow nor the sword reaches it
         const blaze = blazes.find(b => seesFrom(bot, eyePosition(bot), b.position.offset(0, 0.9, 0)) && ((noShot.get(b.id) ?? -1e9) < ticks - 60 || b.position.distanceTo(bot.entity.position) <= shootFrom))
+        // the fires the fireballs lit by the bot put out (netherrack burns for good; standing among them the bot
+        // 'went up in flames', 26.3)
+        await putOutFiresNear(bot, 2, signal)
         if (blaze == null) {
           // blazes about the spawner none of which the bot sees for a while (the bot on the room's roof, 3 over the
           // spawner, sat 24000 ticks five times with 8 blazes under it on 26.3): on to a camp spot that sees one

@@ -24,6 +24,13 @@ export function inHazard (bot: Bot): boolean {
   return (bot.entity as any).isInLava === true || bad(nameAt(bot, feet)) || bad(nameAt(bot, feet.offset(0, 1, 0)))
 }
 
+/** a fire block at the bot's feet or head, else null */
+export function fireToPutOut (bot: Bot): Vec3 | null {
+  const feet = bot.entity.position.floored()
+  for (const p of [feet, feet.offset(0, 1, 0)]) { const n = nameAt(bot, p); if (n === 'fire' || n === 'soul_fire') return p }
+  return null
+}
+
 /**
  * The powder snow the bot is in, head first then feet (dug out, the bot drops or steps free: a 26.3 bot sunk in it
  * on a snowy slope failed to pillar out, the block refused there, and froze to death)
@@ -112,6 +119,13 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
         steerToward(bot, water.offset(0.5, 0, 0.5), { sprint: true })
         await waitTicks(bot, 1, opts.signal)
         continue
+      }
+      // a fire the bot stands in (a blaze's fireball lights the netherrack, which burns for good: a 26.3 bot 'went up
+      // in flames' by a fortress's spawner) is put out with a hit, as a player does
+      const fire = fireToPutOut(bot)
+      if (fire != null) {
+        const block = bot.blockAt(fire)
+        if (block != null) await bot.dig(block as any, true).catch(() => {})
       }
       const snow = powderSnowToDig(bot)
       if (snow != null) {

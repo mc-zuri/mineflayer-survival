@@ -75,3 +75,10 @@ test('powder snow is a hazard: the cells the bot is in are dug, the head first',
   assert.strictEqual(inHazard(free), false)
   assert.strictEqual(powderSnowToDig(free), null)
 })
+
+test('fireToPutOut: the fire at the feet or head, none elsewhere', async () => {
+  const { fireToPutOut } = await import('../../src/skills/escape')
+  const fire = (p: Vec3): string => p.x === 0 && p.z === 0 && p.y === 64 ? 'fire' : p.y < 64 ? 'netherrack' : 'air'
+  assert.deepStrictEqual(fireToPutOut(fakeBot({ position: new Vec3(0.5, 64, 0.5), world: fire })), new Vec3(0, 64, 0))
+  assert.strictEqual(fireToPutOut(fakeBot({ position: new Vec3(3.5, 64, 0.5), world: fire })), null)
+})
