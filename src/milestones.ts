@@ -23,7 +23,7 @@ import { countBookshelves, enchant, enchantGear, findEnchantingTable } from './s
 import { applyBooks } from './skills/anvil'
 import { experience, gainLevels } from './skills/xp'
 import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from './skills/husbandry'
-import { plantSugarCane } from './skills/caneFarm'
+import { makeWaterHole, plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
 import { TRIP_KIT, stashTripKit } from './skills/tripKit'
 import { pickupDrops } from './skills/pickupDrops'
@@ -706,7 +706,12 @@ export async function startFarm (bot: Bot, executor: Executor, signal: AbortSign
   const dimension = normalizeDimension(bot.game?.dimension)
   if (dimension !== 'overworld' || knownFarms(executor.memory, dimension).length > 0) return false
   const home = executor.memory.base != null ? new Vec3(executor.memory.base.x, executor.memory.base.y, executor.memory.base.z) : bot.entity.position
-  const site = findFarmSite(pos => bot.blockAt(pos) as any, home, 24)
+  let site = findFarmSite(pos => bot.blockAt(pos) as any, home, 24)
+  // no water near: a hole dug and filled from the water bucket held (the herd's wheat farm on 26.3 had none)
+  if (site == null && countItems(bot, 'water_bucket') > 0) {
+    await executor.task('a water hole for the farm', async (s) => await makeWaterHole(bot, home, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+    site = findFarmSite(pos => bot.blockAt(pos) as any, home, 24)
+  }
   if (site == null) { log('no water with ground by it near: no farm yet'); return false }
   const plots = Math.min(FARM_PLOTS, site.cells.length)
   const requests = [{ item: '#hoes', count: 1 }, { item: 'wheat_seeds', count: plots }]

@@ -69,6 +69,29 @@ export function waterHoleSite (lookup: CaneLookup, center: Vec3, radius = 12): V
   return best?.p ?? null
 }
 
+/**
+ * A water hole dug where cane ground is about (waterHoleSite) and filled from a water bucket held: dug, then the water
+ * poured from beside it looking down at its floor (a bucket is used on what the look hits, BucketItem.use, the
+ * player's ray: from 3 blocks off it hit the hole's rim and the water went on top of the ground beside it, 26.3).
+ * Resolves the hole, null with no site or no bucket.
+ */
+export async function makeWaterHole (bot: Bot, center: Vec3, signal?: AbortSignal): Promise<Vec3 | null> {
+  const lookup: CaneLookup = p => bot.blockAt(p) as any
+  const hole = waterHoleSite(lookup, center)
+  if (hole == null || countItems(bot, 'water_bucket') === 0) return null
+  trace('makeWaterHole: at', hole.toString())
+  await collectBlock(bot, { positions: [hole], pickup: false }, signal)
+  const bucket = findInventoryItem(bot, 'water_bucket')
+  if (bucket == null) return null
+  await navigateNear(bot, hole, 1, signal).catch(err => { if (isAbort(err)) throw err })
+  await bot.equip(bucket, 'hand')
+  await bot.lookAt(hole.offset(0.5, 0.02, 0.5), true)
+  bot.activateItem()
+  await waitUntil(bot, () => bot.blockAt(hole)?.name === 'water', 20, signal)
+  if (bot.blockAt(hole)?.name !== 'water') throw new SkillError('VERIFY_FAILED', `no water in the hole at ${hole.toString()}`)
+  return hole
+}
+
 export interface CaneFarmResult {
   water: Vec3[]
   planted: Vec3[]
@@ -88,21 +111,8 @@ export async function plantSugarCane (bot: Bot, args: { count?: number, center?:
   // water where there's too little: a hole dug in level ground and a bucket poured in it (4 spots round each)
   while (caneSpots(lookup, center).length < count && countItems(bot, 'water_bucket') > 0) {
     throwIfAborted(signal)
-    const hole = waterHoleSite(lookup, center)
+    const hole = await makeWaterHole(bot, center, signal)
     if (hole == null) break
-    trace('plantSugarCane: a water hole at', hole.toString())
-    await collectBlock(bot, { positions: [hole], pickup: false }, signal)
-    const bucket = findInventoryItem(bot, 'water_bucket')
-    if (bucket == null) break
-    // beside the hole, looking down at its floor's top: a bucket is used on what the look hits (BucketItem.use, the
-    // player's ray), not on a block named; from 3 blocks off the ray hit the hole's rim and the water went on top of
-    // the ground beside it (26.3)
-    await navigateNear(bot, hole, 1, signal).catch(err => { if (isAbort(err)) throw err })
-    await bot.equip(bucket, 'hand')
-    await bot.lookAt(hole.offset(0.5, 0.02, 0.5), true)
-    bot.activateItem()
-    await waitUntil(bot, () => bot.blockAt(hole)?.name === 'water', 20, signal)
-    if (bot.blockAt(hole)?.name !== 'water') throw new SkillError('VERIFY_FAILED', `no water in the hole at ${hole.toString()}`)
     water.push(hole)
   }
   const planted: Vec3[] = []

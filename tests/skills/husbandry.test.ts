@@ -119,3 +119,15 @@ test('gatherHerd: nothing to do without the food or with the herd all by home', 
   assert.strictEqual(await gatherHerd(fakeBot({ entities: [cow(5, 30)] }), home), 0)
   assert.strictEqual(await gatherHerd(fakeBot({ items: [item('wheat', 10)], entities: [cow(5, 3), cow(6, -4)] }), home), 0)
 })
+
+test('startFarm with no water near and a water bucket held digs a water hole for the farm first', async () => {
+  const { startFarm } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const tasks: string[] = []
+  const executor: any = { memory: new WorldMemory(), task: async (name: string) => { tasks.push(name) } }
+  const bot = fakeBot({ items: [item('water_bucket', 1), item('wheat_seeds', 8)] })
+  bot.game.dimension = 'overworld'
+  assert.strictEqual(await startFarm(bot, executor, new AbortController().signal, () => {}), false)
+  assert.deepStrictEqual(tasks, ['a water hole for the farm'])
+})
