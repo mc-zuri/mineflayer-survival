@@ -1,12 +1,13 @@
 // gridWalk: a short walk planned on the block grid and walked from block middle to block middle, for the places the
 // pathfinder's executor catches on corners (fortress bridges, stronghold corridors): no digging, no placing, no jumps
-// but a step up; cells next to lava, and fire, left out.
+// but a step up; cells next to lava, and fire, left out; ledges over deadly falls walked only when there's no way round.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { SkillError, isSkillError, throwIfAborted } from './errors'
 import { navigate, walkTo } from './navigate'
 import { trace } from './util'
+import { normalizeDimension } from '../core/memory'
 
 export interface GridCellView {
   /** the cell holds nothing to collide with (air, plants, a portal), and no lava or fire */
@@ -15,6 +16,11 @@ export interface GridCellView {
   floor: (p: Vec3) => boolean
   /** lava in the cell */
   lava?: (p: Vec3) => boolean
+  /**
+   * cells' worth of walk charged on top for each side of a cell with a deadly fall beside it (deadlySides): a ledge
+   * over the nether's lava sea is walked only when there's no way round (default 0)
+   */
+  edgeCost?: number
 }
 
 /** blocks without a collision box that hurt or hold the bot: kept out of */
@@ -55,6 +61,27 @@ function nearLava (view: GridCellView, c: Vec3): boolean {
 }
 
 /**
+ * The sides of the cell with a deadly fall beside it: a free column there (the feet's level and down) with lava in
+ * the first 4 blocks under, or neither ground nor anything else in them (a fall of more than 3 blocks hurts:
+ * LivingEntity.causeFallDamage). A knockback or a step off the line goes over those.
+ */
+export function deadlySides (view: GridCellView, c: Vec3): number {
+  let n = 0
+  for (const s of STEPS) {
+    const q = c.plus(s)
+    if (!view.free(q)) continue
+    let deadly = true
+    for (let d = 1; d <= 4; d++) {
+      const below = q.offset(0, -d, 0)
+      if (view.lava?.(below) === true) break
+      if (!view.free(below)) { deadly = false; break }
+    }
+    if (deadly) n++
+  }
+  return n
+}
+
+/**
  * A* on the grid from `start` to the nearest cell where `isGoal` holds, within `maxNodes` cells looked at; the cells
  * to walk (start left out), or null.
  */
@@ -64,6 +91,7 @@ export function gridPath (view: GridCellView, start: Vec3, isGoal: (c: Vec3) => 
   const came = new Map<string, Vec3 | null>([[key(start), null]])
   const best = new Map<string, number>([[key(start), 0]])
   let seen = 0
+  const edgeCost = view.edgeCost ?? 0
   while (open.size > 0 && seen++ < maxNodes) {
     const { c, g } = open.pop()
     if (g > (best.get(key(c)) ?? Infinity)) continue
@@ -74,7 +102,7 @@ export function gridPath (view: GridCellView, start: Vec3, isGoal: (c: Vec3) => 
       return path
     }
     for (const n of gridNeighbours(view, c)) {
-      const cost = g + 1 + (n.y !== c.y ? 0.5 : 0)
+      const cost = g + 1 + (n.y !== c.y ? 0.5 : 0) + (edgeCost > 0 ? edgeCost * deadlySides(view, n) : 0)
       const k = key(n)
       if ((best.get(k) ?? Infinity) <= cost) continue
       best.set(k, cost)
@@ -124,13 +152,18 @@ class MinHeap<T> {
   }
 }
 
+/** cells' worth charged for each deadly side of a cell the grid walk goes by: in the nether, and elsewhere */
+export const GRID_EDGE_COST = { the_nether: 10, other: 2 }
+
 /** the bot's world as gridWalk sees it */
 export function botGridView (bot: Bot): GridCellView {
   const isLava = (p: Vec3): boolean => bot.blockAt(p)?.name === 'lava'
+  const nether = normalizeDimension(bot.game?.dimension) === 'the_nether'
   return {
     free: p => { const b = bot.blockAt(p); return b != null && b.boundingBox === 'empty' && !HARMFUL.has(b.name) },
     floor: p => { const b = bot.blockAt(p); return b != null && b.boundingBox === 'block' && b.name !== 'magma_block' },
-    lava: isLava
+    lava: isLava,
+    edgeCost: nether ? GRID_EDGE_COST.the_nether : GRID_EDGE_COST.other
   }
 }
 

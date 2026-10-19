@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { gridNeighbours, gridPath, type GridCellView } from '../../src/skills/gridWalk'
+import { deadlySides, gridNeighbours, gridPath, type GridCellView } from '../../src/skills/gridWalk'
 import { stepCells } from '../../src/skills/tunnel'
 import { hopPoint } from '../../src/skills/travel'
 
@@ -129,4 +129,28 @@ test('travel gives up after hops that leave the bot where it was, a tick each, n
   }
   assert.ok(grids <= TRAVEL_STILL_HOPS + 1, String(grids))
   assert.ok(ticks >= TRAVEL_STILL_HOPS, String(ticks))
+})
+
+test('gridPath: a ledge with a deadly fall either side is walked only with no edge cost; with one the way round is taken', () => {
+  // a ledge a block wide along x at z 0 from x 1 to 9 over the void (the lava sea), the ground round it wide at z 5 to 8
+  const solid = new Set<string>()
+  for (let x = -3; x <= 13; x++) {
+    for (let z = -3; z <= 8; z++) {
+      const ledge = z === 0
+      const ground = z >= 5 || x <= 0 || x >= 10
+      if (ledge || ground) solid.add(`${x},63,${z}`)
+    }
+  }
+  const lava = new Set<string>()
+  for (let x = 1; x <= 9; x++) for (const z of [-1, 1, 2, 3, 4]) lava.add(`${x},60,${z}`)
+  const goal = (c: Vec3): boolean => c.x === 10 && c.z === 0
+  const h = (c: Vec3): number => Math.abs(c.x - 10) + Math.abs(c.z)
+  const plain = view(solid, lava)
+  assert.strictEqual(deadlySides(plain, new Vec3(5, 64, 0)), 2)
+  assert.strictEqual(deadlySides(plain, new Vec3(-2, 64, 6)), 0)
+  const straight = gridPath(plain, new Vec3(0, 64, 0), goal, h)
+  assert.ok(straight != null && straight.every(c => c.z === 0), 'with no edge cost the ledge is the shortest')
+  const careful = gridPath({ ...plain, edgeCost: 10 }, new Vec3(0, 64, 0), goal, h)
+  assert.ok(careful != null)
+  assert.ok(careful.every(c => c.z !== 0 || c.x <= 0 || c.x >= 10), `the path walks the ledge: ${careful.map(c => c.toString()).join(' ')}`)
 })
