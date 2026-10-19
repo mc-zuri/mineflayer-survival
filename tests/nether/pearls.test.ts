@@ -58,7 +58,7 @@ test('provokeEnderman: a stare at its eyes from where the bot stands until it\'s
   assert.equal(eyesInSight(bot, man), true)
 })
 
-test('huntEndermen passes over an enderman it finds no way to (unless it comes), and says so', async () => {
+test('huntEndermen passes over an enderman it finds no way to (unless it comes to the bot), and says so', async () => {
   const { huntEndermen, huntable } = await import('../../src/nether/pearls')
   const bot = fakeBot({ position: new Vec3(0.5, 98, 0.5) })
   const below = entity({ name: 'enderman', position: new Vec3(2.5, 67, 3.5) })
@@ -68,7 +68,30 @@ test('huntEndermen passes over an enderman it finds no way to (unless it comes),
   await assert.rejects(huntEndermen(bot, { pearls: 1, range: 48, provoke: false, passOver }), /no enderman within 48 blocks the bot can get to/)
   assert.ok(passOver.has(below.id))
   assert.equal(huntable(bot, below, passOver), false)
-  // angry, it comes: hunted again
+  // angry, hunted again once it has come to the bot, not before
   below.metadata[bot.registry.entitiesByName.enderman.metadataKeys.indexOf('creepy')] = true
+  assert.equal(huntable(bot, below, passOver), false)
+  below.position = new Vec3(2.5, 98, 0.5)
   assert.equal(huntable(bot, below, passOver), true)
+})
+
+test('huntEndermen passes over an enderman its fight never got to (TIMEOUT: a stem between), not fought 600 ticks at a time over and over', async () => {
+  const { huntEndermen } = await import('../../src/nether/pearls')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_sword')] })
+  const man = entity({ name: 'enderman', position: new Vec3(3.5, 64, 0.5) })
+  bot.entities[man.id] = man
+  // a warped stem between: every look meets it
+  ;(bot as any).world = { raycast: (from: Vec3) => ({ position: from.floored().offset(1, 0, 0), name: 'warped_stem', boundingBox: 'block' }) }
+  ;(bot as any).raycastHitResult = () => ({ type: 'block' })
+  bot.lookAt = async () => {}
+  bot.equip = async (it: any) => { bot.heldItem = it }
+  bot.attack = () => {}
+  const passOver = new Set<number>()
+  const ticker = setInterval(() => bot.emit('physicsTick'), 0)
+  try {
+    await assert.rejects(huntEndermen(bot, { pearls: 1, range: 48, provoke: false, passOver, maxTicks: 3000 }), /can get to/)
+  } finally {
+    clearInterval(ticker)
+  }
+  assert.ok(passOver.has(man.id))
 })

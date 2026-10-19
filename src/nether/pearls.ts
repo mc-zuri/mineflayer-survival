@@ -168,9 +168,13 @@ export interface HuntEndermenArgs {
   passOver?: Set<number>
 }
 
-/** an enderman to hunt: alive, and not one passed over (no way to it) unless it's angry and coming */
+/** how near a passed-over enderman that's angry must come to be hunted again: at the bot, where the sword gets it */
+export const PASSED_OVER_NEAR = 3
+
+/** an enderman to hunt: alive, and not one passed over (no way to it, a fight that never got it) unless it's angry and come to the bot */
 export function huntable (bot: Bot, e: Entity, passOver?: ReadonlySet<number>): boolean {
-  return e.name === 'enderman' && isAlive(bot, e) && (passOver?.has(e.id) !== true || isAngryEnderman(bot, e))
+  if (e.name !== 'enderman' || !isAlive(bot, e)) return false
+  return passOver?.has(e.id) !== true || (isAngryEnderman(bot, e) && e.position.distanceTo(bot.entity.position) <= PASSED_OVER_NEAR)
 }
 
 /**
@@ -238,8 +242,10 @@ export async function huntEndermen (bot: Bot, args: HuntEndermenArgs = {}, signa
         }
       } catch (err) {
         if (isAbort(err)) throw err
-        // it teleported off
+        // it teleported off; a fight that ran out of ticks never got to it (a warped stem between, the sword's look
+        // on the stem 600 ticks at a time for 13000 ticks, 26.3 run n2-c): passed over
         trace('huntEndermen:', (err as Error).message)
+        if (/still alive/.test((err as Error).message)) passOver.add(enderman.id)
       }
     }
     return { pearls: countItems(bot, 'ender_pearl') - start, kills, ticks }
