@@ -58,10 +58,13 @@ export const HERD_CHORE_TICKS = 3000
  * still wanted, else breed (the cows, the wheat and the cooldown permitting) and wait for the calves to grow
  * (24000 ticks, AgeableMob.BABY_START_AGE)
  */
-export function herdChore (state: { leather: number, want: number, adults: number, calves: number, wheat: number }): 'done' | 'kill' | 'breed' {
+export function herdChore (state: { leather: number, want: number, adults: number, calves: number, wheat: number, timeUp?: boolean }): 'done' | 'kill' | 'breed' {
   const needed = state.want - state.leather
   if (needed <= 0) return 'done'
   if (state.adults - BREEDERS_KEPT >= needed) return 'kill'
+  // no more breeding (the wheat gone, the time up): the surplus the herd has is what there is
+  if ((state.wheat < 2 || state.timeUp === true) && state.adults > BREEDERS_KEPT) return 'kill'
+  if (state.wheat < 2 || state.timeUp === true) return 'done'
   return 'breed'
 }
 
@@ -87,11 +90,11 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
       })
     }
     const cows = Object.values(bot.entities).filter(e => (e.name === 'cow' || e.name === 'mooshroom') && near(e))
-    const state = { leather: countItems(bot, 'leather'), want, adults: cows.filter(e => isAdult(bot, e)).length, calves: cows.filter(e => !isAdult(bot, e)).length, wheat: countItems(bot, 'wheat') }
+    const state = { leather: countItems(bot, 'leather'), want, adults: cows.filter(e => isAdult(bot, e)).length, calves: cows.filter(e => !isAdult(bot, e)).length, wheat: countItems(bot, 'wheat'), timeUp: executor.tasks.tick - start > HERD_BUDGET_TICKS }
     const chore = herdChore(state)
     const line = `herd: ${chore} (${state.adults} cows, ${state.calves} calves, ${state.leather} of ${want} leather, ${state.wheat} wheat)`
     if (line !== lastLine) { log(line); lastLine = line }
-    if (chore === 'done' || executor.tasks.tick - start > HERD_BUDGET_TICKS) {
+    if (chore === 'done' || executor.tasks.tick - start > HERD_BUDGET_TICKS * 1.5) {
       log(`herd: ${state.leather} leather of ${want} (${state.adults} cows, ${state.calves} calves) after ${executor.tasks.tick - start} ticks`)
       return state.leather
     }
@@ -416,6 +419,8 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
       // bot that started the nether at the spawn had none near
       await buildAPortal(bot, executor, signal, log)
     }
+    // a spare kit by the portal and the respawn point by it (a blaze's death in the nether was the stage lost)
+    await leaveTripKit(bot, executor, signal, log)
     await executor.task('into the nether', async (s) => await enterNether(bot, { build: true }, s), signal)
   }
   const needs = netherNeeds({ count })
