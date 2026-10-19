@@ -409,3 +409,19 @@ test('the enchanting milestone failing five times is left out and play goes on t
   assert.equal(result.stoppedAt, 'nether')
   assert.ok(lines.some(l => /milestone enchanting left out after 5 failures/.test(l)), lines.join(' | '))
 })
+
+test('a trip across the world (the eyes\' stronghold search, the End) isn\'t stopped for a night down a mine', async () => {
+  const bot = fakeBot({ diamond_pickaxe: 1, diamond_sword: 1, torch: 2, cooked_beef: 8, ender_eye: 16 })
+  bot.time = { timeOfDay: 13000, day: 1 }
+  bot.findBlock = () => null
+  const runner = new Runner(bot, { log: () => {} })
+  for (const id of ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting', 'nether'] as const) runner.reached.push({ id, title: '', tick: 0, wallMs: 0 })
+  assert.equal(runner.nightDue(), null)
+  // the nether next (worked from home), the torches are the night's work as before
+  const bot2 = fakeBot({ diamond_pickaxe: 1, diamond_sword: 1, torch: 2, cooked_beef: 8 })
+  bot2.time = { timeOfDay: 13000, day: 1 }
+  bot2.findBlock = () => null
+  const home = new Runner(bot2, { log: () => {} })
+  for (const id of ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting'] as const) home.reached.push({ id, title: '', tick: 0, wallMs: 0 })
+  assert.notEqual(home.nightDue(), null)
+})

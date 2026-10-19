@@ -58,6 +58,9 @@ export const UNWIRED: readonly MilestoneId[] = []
  */
 export const OPTIONAL_MILESTONES: readonly MilestoneId[] = ['enchanting']
 
+/** milestones that are a trip across the world, not worked from home: the night's mining waits till they're done */
+export const TRIP_MILESTONES: readonly MilestoneId[] = ['eyes', 'end']
+
 export interface MilestoneEvent {
   id: MilestoneId
   title: string
@@ -717,6 +720,10 @@ export class Runner {
     const phase = dayPhase(bot.time.timeOfDay)
     if (phase === 'day') return null
     const reached = this.reached.map(r => r.id)
+    // a trip across the world (the stronghold search, the End) isn't stopped for a night down a mine: on 26.3 seed 2
+    // the bot dug down 1800 blocks short of the stronghold, mined gold all night, and set off again through the caves
+    const upNext = nextToWork(progressState(bot, this.memory), reached, new Set(this.options.skip ?? []))
+    if (upNext != null && TRIP_MILESTONES.includes(upNext.id)) return null
     const inv = ownedInventory(bot)
     const goals = nightGoals(inv, reached)
     const action = nightAction({
