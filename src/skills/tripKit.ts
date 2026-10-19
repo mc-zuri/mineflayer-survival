@@ -22,6 +22,7 @@ const FOODS = ['cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'cooked_chicke
 const BLOCKS = ['cobblestone', 'cobbled_deepslate', 'dirt', 'netherrack', 'end_stone', 'andesite', 'diorite', 'granite', 'stone']
 const WEAPONS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'netherite_axe', 'diamond_axe', 'iron_axe']
 const ARMOR = /_(helmet|chestplate|leggings|boots)$/
+const PICKAXES = ['netherite_pickaxe', 'diamond_pickaxe', 'iron_pickaxe', 'stone_pickaxe']
 
 /** the blocks of a portal: a chest or bed is kept 2 blocks off them (a bed put down in front of a nether portal in a
  * cave left the bot standing on it with 'no way to the portal', five times, 26.3) */
@@ -44,6 +45,10 @@ export function tripKitItems (items: readonly ItemCount[]): ItemCount[] {
   const weapons = WEAPONS.filter(w => count(w) > 0)
   // all of each weapon but one of the best
   weapons.forEach((w, i) => add(w, count(w) - (i === 0 ? 1 : 0)))
+  // a spare pickaxe: the pickaxes but the best (after a death in the nether the bot came back with an axe alone and
+  // stood 20000 ticks where the netherrack in its way couldn't be dug, 26.3)
+  const picks = PICKAXES.filter(p => count(p) > 0)
+  picks.forEach((p, i) => add(p, count(p) - (i === 0 ? 1 : 0)))
   if (count('bow') >= 2) add('bow', count('bow') - 1)
   if (count('arrow') >= 32) add('arrow', Math.floor(count('arrow') / 2))
   for (const f of FOODS) if (count(f) >= 8) add(f, Math.floor(count(f) / 2))

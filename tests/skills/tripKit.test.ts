@@ -107,3 +107,10 @@ test('withTickBudget: the work is aborted once its ticks are gone', async () => 
     clearInterval(ticking)
   }
 })
+
+test('tripKitItems: the pickaxes but the best go in (a respawn with no pickaxe digs no way)', async () => {
+  const { tripKitItems } = await import('../../src/skills/tripKit')
+  const by = Object.fromEntries(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 1 }]).map(k => [k.name, k.count]))
+  assert.deepStrictEqual(by, { iron_pickaxe: 1 })
+  assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }]), [])
+})
