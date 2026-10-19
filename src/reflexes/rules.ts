@@ -7,6 +7,7 @@ import { shoot } from '../skills/shoot'
 import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterToLeave, sleepThroughNight, type NightPlan } from '../skills/shelter'
 import { bestMeleeWeapon } from '../skills/weapons'
 import { hasLineOfSight, isAlive, type Entity } from '../skills/combatUtil'
+import { holdOffBlazes } from '../nether/blazeFight'
 import { GHAST_FIREBALL, deadlyDropBeside, deflectFireball, fireballIncoming, keepFromGhast, nearestGhast } from '../nether/safety'
 import { isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
@@ -206,8 +207,8 @@ export function provoked (ctx: ReflexContext, e: Entity): boolean {
  */
 export const SWARMERS = new Set(['slime', 'magma_cube'])
 
-/** the mobs that shoot (RangedBowAttackGoal's 15 blocks, RangedCrossbowAttackGoal's 8 and more, the witch's RangedAttackGoal 10) */
-export const RANGED_HOSTILES = new Set(['skeleton', 'stray', 'bogged', 'parched', 'pillager', 'witch'])
+/** the mobs that shoot (BlazeAttackGoal's 48 blocks, RangedBowAttackGoal's 15, RangedCrossbowAttackGoal's 8 and more, the witch's RangedAttackGoal 10) */
+export const RANGED_HOSTILES = new Set(['skeleton', 'stray', 'bogged', 'parched', 'pillager', 'witch', 'blaze'])
 
 /**
  * The hostiles within the reflex's range that the bot can see, nearest first (the ignored ones left out): within
@@ -262,6 +263,16 @@ export const hostilesReflex: Reflex = {
       }
     }
     const useBow = target.name === 'creeper' && hasBowAndArrows(bot) && distance(bot, target) >= config.hostiles.shootCreepersFrom
+    // a blaze, with a shield: held off where the bot stands (holdOffBlazes: the shield up before its shots, the bow
+    // between), not closed in on: fight() chased them over a fortress's throne under the others' fireballs
+    if (target.name === 'blaze' && hasShield(bot)) {
+      return {
+        name: 'hostiles',
+        priority: config.hostiles.priority,
+        detail: 'hold off blaze',
+        run: async (signal) => await holdOffBlazes(bot, { signal, maxTicks: config.hostiles.fightTicks })
+      }
+    }
     return {
       name: 'hostiles',
       priority: config.hostiles.priority,

@@ -696,3 +696,127 @@ export async function openNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal)
     await dig(bot, b as any, { signal }).catch(err => { if (isAbort(err)) throw err; trace('fightFromNook: open:', (err as Error).message) })
   }
 }
+
+export interface HoldOffOptions {
+  signal?: AbortSignal
+  /** give up after this many ticks (default 600) */
+  maxTicks?: number
+  /** done once no blaze has seen the bot for this many ticks (default 40) */
+  quietTicks?: number
+  /** blazes further than this aren't shot (default 24) */
+  shootRange?: number
+}
+
+/**
+ * The blazes that see the bot met where it stands, out of a nook (the hostiles reflex's way with them): the shield up,
+ * the sword in hand, faced at the danger while one is about to shoot (BlazeVolleys); the sword at one come into reach,
+ * the shield up between the swings; else the bow at the nearest it has an arc to, the draw loosed early when a danger
+ * comes; else the shield up toward the nearest. It never chases one: closing in on a blaze over a fortress's throne
+ * took the bots under the others' fireballs (fight: every blaze death of the 26.3 runs as to av, and one more on the
+ * way out of the fortress with the rods). Resolves the kills once none has seen the bot for `quietTicks`.
+ */
+export async function holdOffBlazes (bot: Bot, opts: HoldOffOptions = {}): Promise<{ kills: number, ticks: number }> {
+  const signal = opts.signal
+  const maxTicks = opts.maxTicks ?? 600
+  const quietTicks = opts.quietTicks ?? 40
+  const shootRange = opts.shootRange ?? 24
+  const volleys = new BlazeVolleys()
+  const world = arrowWorld(bot)
+  const tracker = motionTrackerOf(bot)
+  const strength = attackStrengthOf(bot)
+  const tracked = new Set<number>()
+  let kills = 0
+  let tick = 0
+  let lastSeen = 0
+  let drawn = 0
+  let drawTarget: Entity | null = null
+  let blocking = false
+  const onDead = (e: Entity): void => { if (e.name === 'blaze') kills++ }
+  bot.on('entityDead', onDead)
+  const hold = async (item: any): Promise<void> => { if (item != null && bot.heldItem?.type !== item.type) await bot.equip(item, 'hand') }
+  const release = (): void => { if (drawn > 0) bot.deactivateItem(); drawn = 0; drawTarget = null }
+  const block = async (at: Vec3): Promise<void> => {
+    release()
+    if (!blocking || (bot as any).usingHeldItem !== true) {
+      await hold(bestMeleeWeapon(bot, 'blaze'))
+      blocking = await raiseShield(bot).catch(() => false)
+    }
+    await bot.lookAt(at, true)
+  }
+  const unblock = (): void => { if (blocking) lowerShield(bot); blocking = false }
+  try {
+    bot.clearControlStates()
+    for (; tick < maxTicks; tick++) {
+      throwIfAborted(signal)
+      if (bot.health <= 0) break
+      const me = bot.entity.position
+      const blazes = Object.values(bot.entities).filter(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(me) <= 48)
+      for (const b of blazes) if (!tracked.has(b.id)) { tracked.add(b.id); tracker.track(b) }
+      volleys.update(blazes.map(b => ({ id: b.id, charged: blazeCharged(bot, b) })), tick)
+      const near = (a: Entity, b: Entity): number => a.position.distanceTo(me) - b.position.distanceTo(me)
+      const seeing = blazes.filter(b => blazeSeesBot(bot, b)).sort(near)
+      if (seeing.length > 0) lastSeen = tick
+      else if (tick - lastSeen >= quietTicks) break
+      const danger = seeing.filter(b => volleys.dangerous(b.id, tick))
+      const fireball = Object.values(bot.entities).find(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 24))
+      if (danger.length > 0 || fireball != null) {
+        if (drawn >= MIN_DRAW && drawTarget != null && isAlive(bot, drawTarget)) {
+          const s = aim(bot, drawTarget, { leadTicks: 1, world })
+          if (s != null) await bot.look(s.yaw, s.pitch, true)
+          await waitTicks(bot, 1, signal)
+          release()
+        }
+        await block(danger[0] != null ? blazeEye(danger[0]) : (fireball as Entity).position)
+        await waitTicks(bot, 1, signal)
+        continue
+      }
+      const eye = eyePosition(bot)
+      const close = seeing.find(b => distanceToBox(eye, entityBox(b)) <= 2.9)
+      if (close != null) {
+        release()
+        await hold(bestMeleeWeapon(bot, 'blaze'))
+        if (strength.ticksToFull() <= 0) {
+          unblock()
+          await bot.lookAt(meleeAimPoint(bot, close), true)
+          strength.attack(close)
+        } else if (strength.ticksToFull() > 1) {
+          await block(blazeEye(close))
+        }
+        await waitTicks(bot, 1, signal)
+        continue
+      }
+      const bow = bot.inventory.items().find(i => i.name === 'bow')
+      if (bow != null && countItems(bot, ARROWS) > 0) {
+        if (drawTarget != null && (!isAlive(bot, drawTarget) || !seeing.includes(drawTarget))) release()
+        const target: Entity | null = drawTarget ?? seeing.filter(b => b.position.distanceTo(me) <= shootRange).find(b => aim(bot, b, { leadTicks: FULL_DRAW, world }) != null) ?? null
+        if (target != null) {
+          if (drawn === 0) {
+            unblock()
+            await hold(bow)
+            bot.activateItem()
+            drawTarget = target
+          }
+          drawn++
+          const s = aim(bot, target, { leadTicks: Math.max(1, FULL_DRAW - drawn + 1), world })
+          if (s != null) await bot.look(s.yaw, s.pitch, true)
+          if ((drawn >= FULL_DRAW && s != null) || drawn > 3 * FULL_DRAW) {
+            await waitTicks(bot, 1, signal)
+            release()
+            continue
+          }
+          await waitTicks(bot, 1, signal)
+          continue
+        }
+      }
+      release()
+      if (seeing[0] != null) await block(blazeEye(seeing[0]))
+      await waitTicks(bot, 1, signal)
+    }
+  } finally {
+    bot.off('entityDead', onDead)
+    for (const id of tracked) { const e = bot.entities[id]; if (e != null) tracker.untrack(e) }
+    release()
+    unblock()
+  }
+  return { kills, ticks: tick }
+}

@@ -219,6 +219,14 @@ test('hostiles reflex: an armed and armored bot is not outnumbered by the cubes 
   assert.strictEqual(check(hostilesReflex, { entities: [cube(2), zombie(3), zombie(4), zombie(5), zombie(6)], armor: diamond, items: sword }), 'flee')
 })
 
+test('hostiles reflex: a blaze in sight within 16 is held off where the bot stands when it has a shield (holdOffBlazes), fought without one', () => {
+  const blaze = (x: number): any => entity({ name: 'blaze', position: at(x, 66), meta: { health: 20 } })
+  const sword = [item('diamond_sword')]
+  assert.strictEqual(check(hostilesReflex, { entities: [blaze(12)], items: sword, offhand: item('shield') }), 'hold off blaze')
+  assert.strictEqual(check(hostilesReflex, { entities: [blaze(5)], items: sword }), 'fight blaze')
+  assert.strictEqual(check(hostilesReflex, { entities: [blaze(20)], items: sword, offhand: item('shield') }), null)
+})
+
 test('night reflex: by day, a bot still down its shelter\'s column (cut off climbing out) is got out; out of it, nothing', () => {
   const bot = fakeBot({ position: new Vec3(0.5, 62, 0.5), items: [item('stone_sword'), item('dirt', 3)] })
   bot.time = { timeOfDay: 1000 }

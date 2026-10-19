@@ -339,3 +339,30 @@ test('fightFromNook without a shield shuts the front when a blaze in sight is ab
     placeModule.placeBlock = realPlace
   }
 })
+
+test('holdOffBlazes: the shield up toward a blaze in sight about to shoot, the bow at it while it rests, never a step toward it; done once none sees the bot', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { holdOffBlazes } = await import('../../src/nether/blazeFight')
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 66, -9.5), meta: { health: 20, flags: 0 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_sword'), item('bow'), item('arrow', 32)], offhand: item('shield'), entities: [blaze] })
+  bot.world = { raycast: () => null }
+  const log: string[] = []
+  bot.equip = async (it: any) => { bot.heldItem = it }
+  bot.activateItem = (off = false) => { bot.usingHeldItem = true; log.push(off ? 'shield' : `use ${bot.heldItem?.name as string}`) }
+  bot.deactivateItem = () => { bot.usingHeldItem = false; log.push('release') }
+  bot.lookAt = async () => {}
+  const ac = new AbortController()
+  const done = holdOffBlazes(bot, { signal: ac.signal, quietTicks: 10 })
+  const tick = async (n: number): Promise<void> => { for (let i = 0; i < n; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) } }
+  await tick(25)
+  assert.ok(log.includes('use bow'), log.join(' '))
+  blaze.metadata[16] = 1
+  log.length = 0
+  await tick(70)
+  assert.ok(log.includes('shield'), log.join(' '))
+  assert.ok(!Object.values(bot.controls).some(v => v === true), JSON.stringify(bot.controls))
+  delete bot.entities[blaze.id]
+  await tick(15)
+  const r = await done
+  assert.ok(r.ticks < 200, String(r.ticks))
+})
