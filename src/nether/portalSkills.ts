@@ -16,7 +16,7 @@ import { findPlacement } from '../skills/placement'
 import { countItems, findInventoryItem, settleInventory, trace, waitTicks, waitUntil, withinReach } from '../skills/util'
 import {
   type Axis, type BlockGetter, type CastStep, type LavaCastOptions, type LavaCastPlan, type PortalFrame,
-  checkPortalFrame, findLavaSources, frameCell, isAir, isSolid, planLavaCast, portalFrame
+  checkPortalFrame, chooseFrameSite, findLavaSources, frameCell, isAir, isSolid, planLavaCast, portalFrame
 } from './portal'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
@@ -367,4 +367,28 @@ export async function retryMoves<T> (bot: Bot, fn: () => Promise<T>, signal?: Ab
       await waitTicks(bot, 10, signal)
     }
   }
+}
+
+/**
+ * A portal cast on the surface from a pool's lava carried up in buckets, where the pool has no room for the cast's
+ * mould by it (a cave's lake): a site on flat open ground by the bot (chooseFrameSite about the bot, the lava's
+ * clearance left out: the pool is far below), the cast's lava fetched from `lava` `lavaBuckets` at a time
+ * (planLavaCast's trips), lit and remembered as buildPortal's are
+ */
+export async function castPortalAway (bot: Bot, lava: readonly Vec3[], lavaBuckets: number, signal?: AbortSignal): Promise<BuildPortalResult> {
+  throwIfAborted(signal)
+  const startTick = tickCounter(bot)
+  const getBlock = blockGetter(bot)
+  const here = bot.entity.position.floored()
+  const site = chooseFrameSite(getBlock, [{ x: here.x, y: here.y - 1, z: here.z }], { lavaClearance: 0, siteRadius: 12 })
+  if (site == null) throw new SkillError('CANNOT_PLACE', `no open flat ground for a cast frame near ${here.toString()}`)
+  const scaffoldItem = fillerItem(bot, 1) ?? 'cobblestone'
+  const plan = planLavaCast(getBlock, lava.map(v3), { origin: site.origin, axis: site.axis, lavaBuckets, scaffoldItem })
+  if (plan == null) throw new SkillError('CANNOT_PLACE', `no cast at ${JSON.stringify(site.origin)} from the ${lava.length} lava sources`)
+  trace('castPortalAway: a frame at', site.origin, 'from lava', lava.length, 'carried', lavaBuckets, 'a trip')
+  await castFrame(bot, plan, signal)
+  const portal = await lightPortal(bot, plan.frame, signal)
+  const entrance = portalEntrance(plan.frame)
+  if (portal.length > 0) bot.survival?.memory.addPoi('nether_portal', entrance, normalizeDimension(bot.game.dimension), 'built')
+  return { frame: plan.frame, method: 'cast', portal, entrance, ticks: tickCounter(bot) - startTick }
 }

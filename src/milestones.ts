@@ -6,7 +6,7 @@
 import type { Bot } from 'mineflayer'
 import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
-import { blockGetter, buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
+import { blockGetter, buildPortal, castPortalAway, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
 import { obsidianFromLava } from './nether/obsidian'
 import { ensureSurface } from './executor/explore'
@@ -325,8 +325,22 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
         if (signal.aborted || TaskError.is(err, 'DIED') || !isSkillError(err, 'CANNOT_PLACE')) throw err
         log(`a portal frame: ${(err as Error).message}: obsidian from the lava's shore`)
       }
-      await executor.task('obsidian from the lava', async (s) => await obsidianFromLava(bot, PORTAL_OBSIDIAN, s), signal)
-      return await placeFromObsidian()
+      try {
+        await executor.task('obsidian from the lava', async (s) => await obsidianFromLava(bot, PORTAL_OBSIDIAN, s), signal)
+        return await placeFromObsidian()
+      } catch (err) {
+        if (signal.aborted || TaskError.is(err, 'DIED') || !isSkillError(err, 'NOT_FOUND')) throw err
+        log(`a portal frame: ${(err as Error).message}: the lava carried up to a cast on the surface`)
+      }
+      // no shore either: the pool's lava carried up in buckets (more made from the iron) to a cast on flat ground
+      const lava = findLavaSources(blockGetter(bot), bot.entity.position, 16).map(p => new Vec3(p.x, p.y, p.z))
+      await executor.obtain([{ item: 'bucket', count: LAVA_BUCKETS }], signal).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`buckets: ${(err as Error).message}`)
+      })
+      await executor.task('up to the surface', async (s) => await ensureSurface(bot, s), signal)
+      await executor.task('cast a portal', async (s) => await castPortalAway(bot, lava, Math.max(1, countItems(bot, 'bucket')), s), signal)
+      return
     } catch (err) {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`a portal frame at that pool: ${(err as Error).message}`)
@@ -336,6 +350,9 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], signal)
   await placeFromObsidian()
 }
+
+/** the empty buckets a cast carried up from far lava takes its lava in, a trip */
+export const LAVA_BUCKETS = 5
 
 /** a frame's obsidian, and the lava sources to cast one from */
 export const PORTAL_OBSIDIAN = 10

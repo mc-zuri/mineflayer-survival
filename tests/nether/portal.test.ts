@@ -158,3 +158,21 @@ test('lavaPools: lava sources within 2 blocks of each other are a pool, the ones
   assert.equal(pools[1].sources.length, 12)
   assert.deepEqual(lavaPools(lake(0, 10, 9), { x: 0, y: 0, z: 0 }), [])
 })
+
+test('a cast on the surface from a cave lake\'s lava far below: a site about the bot, the lava fetched 5 buckets a trip', async () => {
+  const { chooseFrameSite, planLavaCast } = await import('../../src/nether/portal')
+  // flat grass at y 63 with air over it; a lake of 12 lava sources at y 47 under the ground
+  const lake = new Set<string>()
+  for (let x = -30; x < -26; x++) for (let z = -42; z < -39; z++) lake.add(`${x},47,${z}`)
+  const world = (p: any) => {
+    if (lake.has(`${p.x},${p.y},${p.z}`)) return { name: 'lava', properties: { level: 0 } }
+    return { name: p.y <= 63 ? (p.y === 63 ? 'grass_block' : 'stone') : 'air' }
+  }
+  const lava = [...lake].map(k => { const [x, y, z] = k.split(',').map(Number); return { x, y, z } })
+  const site = chooseFrameSite(world, [{ x: -36, y: 63, z: 7 }], { lavaClearance: 0, siteRadius: 12 })
+  assert.ok(site != null)
+  const plan = planLavaCast(world, lava, { origin: site.origin, axis: site.axis, lavaBuckets: 5 })
+  assert.ok(plan != null)
+  assert.equal(plan.lavaBuckets, 5)
+  assert.equal(plan.steps.filter(st => st.kind === 'fill_lava').length, 10)
+})
