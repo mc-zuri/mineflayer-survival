@@ -334,3 +334,29 @@ test('levelsToward builds the xp farm first at a zombie spawner it knows, when m
   await levelsToward(bot, plain, 30, new AbortController().signal, () => {})
   assert.equal(tasks[0], 'levels')
 })
+
+test('the enchanting milestone makes its table\'s obsidian from lava when it has no table nor obsidian', async () => {
+  const { enchantingHandler } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1), item('diamond', 2), item('book', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.findBlock = () => null
+  const lava = bot.registry.blocksByName.lava.id
+  bot.findBlocks = (opts: any) => opts.matching === lava ? Array.from({ length: 12 }, (_, i) => new Vec3(5 + (i % 4), -55, Math.floor(i / 4))) : []
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => (p.y === -55 && p.x >= 5 && p.x < 9 && p.z >= 0 && p.z < 3) ? { ...realAt(p), name: 'lava', getProperties: () => ({ level: 0 }) } : realAt(p)) as any
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    plan: () => ({ ok: false }),
+    makeRoom: async () => {},
+    obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs.map(r => r.item).join(',')}`); throw new Error('stop here') },
+    task: async (name: string) => { calls.push(name) }
+  }
+  await assert.rejects(enchantingHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: { goals: () => [{ item: 'enchanting_table', count: 1 }] } as any, state: null as any }), /stop here/)
+  assert.ok(calls.includes('obsidian from the lava'), calls.join(', '))
+  assert.ok(calls.indexOf('obsidian from the lava') < calls.findIndex(c => c.startsWith('obtain enchanting_table')), calls.join(', '))
+})

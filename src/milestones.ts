@@ -392,6 +392,11 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   await keepFarms(bot, executor, signal, log)
   // the wheat farm the herd is fed from (seeds held, water near)
   await startFarm(bot, executor, signal, log).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+  // the table's 4 obsidian made from lava with the water bucket when there's no table yet (the planner only mines
+  // obsidian that's there: a 26.3 whole-game run explored for some for 200000 ticks)
+  if (countItems(bot, 'enchanting_table') === 0 && findEnchantingTable(bot, { memory: executor.memory }) == null && countItems(bot, 'obsidian') < TABLE_OBSIDIAN) {
+    await obsidianFromPools(bot, executor, TABLE_OBSIDIAN, signal, log)
+  }
   await executor.obtain(milestone.goals(state), signal)
   // the herd grown for the 15 shelves' books (45, a leather each) and the anvil's book, when the bot keeps cows
   const herd = executor.memory.getPois(HERD, { dimension: 'overworld', near: bot.entity.position })[0]
@@ -761,6 +766,43 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
  * forest on 26.3 seed 2, and three overworld nights found no enderman either)
  */
 export const PEARL_NETHER_LEGS = 10
+
+/** an enchanting table's obsidian */
+export const TABLE_OBSIDIAN = 4
+
+/**
+ * `count` obsidian made from the lava about (the portal's way: obsidianFromLava at the nearest pools not tried, then
+ * the deep lakes), a bucket, its water and a diamond pickaxe got first; resolves whether they're held
+ */
+export async function obsidianFromPools (bot: Bot, executor: Executor, count: number, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
+  const have = (): number => countItems(bot, 'obsidian')
+  if (have() >= count) return true
+  const quiet = (err: unknown): void => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err }
+  if (countItems(bot, ['water_bucket', 'bucket']) === 0) await executor.obtain([{ item: 'bucket', count: 1 }], signal).catch(quiet)
+  await refillWater(bot, signal)
+  if (countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) await executor.obtain([{ item: 'diamond_pickaxe', count: 1 }], signal).catch(quiet)
+  for (let depth = 0; depth < 2 && have() < count; depth++) {
+    if (depth === 1 && bot.entity.position.y >= DEEP_LAVA_Y + 10) {
+      await executor.task('down to the deep lava', async (s) => await descendTo(bot, DEEP_LAVA_Y, {}, s), signal).catch(quiet)
+    }
+    for (const pool of nearestLavaPools(bot).slice(0, 3)) {
+      if (have() >= count) break
+      const at = new Vec3(pool.x, pool.y, pool.z)
+      log(`obsidian: from the lava at ${at.floored().toString()}`)
+      try {
+        await executor.task('to the lava', async (s) => await moveNear(bot, at, 5, s).catch(async err => {
+          if (isAbort(err)) throw err
+          await tunnelTo(bot, { target: at, range: 5 }, s).catch(e => { if (isAbort(e) || bot.entity.position.distanceTo(at) > 8) throw e })
+        }), signal)
+        await executor.task('obsidian from the lava', async (s) => await obsidianFromLava(bot, count, s), signal)
+      } catch (err) {
+        quiet(err)
+        log(`obsidian: ${(err as Error).message}`)
+      }
+    }
+  }
+  return have() >= count
+}
 
 /** the lowest height a nether pearl leg aims at (the lava sea is at 31) */
 export const PEARL_LEG_Y = 64
