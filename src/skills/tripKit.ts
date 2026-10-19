@@ -11,6 +11,7 @@ import { SkillError, isAbort, throwIfAborted } from './errors'
 import { placeBlock } from './placeBlock'
 import { bedRoomToDig, findBedPlacementNear, findPlacement } from './placement'
 import { dig } from '../core/actions'
+import { steerToward } from './steer'
 import { navigate } from './navigate'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { retrieveItems, storeItems } from './chest'
@@ -54,6 +55,15 @@ export async function placeSpawnBed (bot: Bot, near: Vec3, item: string, signal?
     if (tool != null && bot.heldItem?.type !== tool.type) await bot.equip(tool, 'hand')
     await dig(bot, block as any, { signal })
   }
+  // in the middle of the cell behind the foot: a body over the foot's cell keeps the bed out ('the block is still air',
+  // 1.21.11 by the stronghold)
+  const centre = spot.stand.offset(0.5, 0, 0.5)
+  for (let t = 0; t < 40 && Math.hypot(bot.entity.position.x - centre.x, bot.entity.position.z - centre.z) > 0.15; t++) {
+    steerToward(bot, centre, { sprint: false })
+    await waitTicks(bot, 1, signal)
+  }
+  bot.clearControlStates()
+  await waitTicks(bot, 2, signal)
   await bot.lookAt(spot.head.offset(0.5, 0, 0.5), true)
   await placeBlock(bot, { pos: spot.foot, item, against: spot.foot.offset(0, -1, 0) }, signal)
   const block = bot.blockAt(spot.foot)
