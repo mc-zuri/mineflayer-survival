@@ -873,6 +873,20 @@ export async function upFromLowGround (bot: Bot, executor: Executor, signal: Abo
   })
 }
 
+/** the spiral's legs a night's hunt walks round home (48 apart out to 240: 16 of them) */
+export const NIGHT_LEG_STEP = 48
+export const NIGHT_LEG_RADIUS = 240
+
+/**
+ * The point of a night hunt's leg `leg` round `center`: the spiral's points in turn, again from the first after the
+ * last (the hunt took the spiral's 24th of 16: 'Cannot read properties of undefined', each leg after the 16th failing
+ * at once)
+ */
+export function nightLeg (center: { x: number, z: number }, leg: number): { x: number, z: number } {
+  const points = spiralWaypoints(center, NIGHT_LEG_STEP, NIGHT_LEG_RADIUS)
+  return points[leg % points.length]
+}
+
 /**
  * Pearls from the overworld's endermen at night up to `want`, PEARL_NIGHTS_TICKS at most: each night on the surface
  * the endermen in sight hunted, the bot walking a leg of the surface spiral round home when none is; the days spent
@@ -903,7 +917,7 @@ export async function pearlsByNight (bot: Bot, executor: Executor, want: number,
           continue
         }
         const center = executor.memory.base != null ? new Vec3(executor.memory.base.x, executor.memory.base.y, executor.memory.base.z) : bot.entity.position
-        const point = spiralWaypoints(center, 48, 240)[leg++ % 24]
+        const point = nightLeg(center, leg++)
         await executor.task('a night leg for endermen', async (s) => await overland(bot, {
           target: new Vec3(point.x, bot.entity.position.y, point.z),
           range: 8,

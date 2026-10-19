@@ -355,3 +355,13 @@ test('recoverNetherDrops: back to a nether death\'s drops off the lava sea, once
   await recoverNetherDrops(bot, executor, new AbortController().signal, () => {})
   assert.deepEqual(calls, ['the nether drops'])
 })
+
+test('a night hunt\'s legs go round the spiral\'s points in turn, again from the first after the last', async () => {
+  const { nightLeg } = await import('../../src/milestones')
+  const legs = Array.from({ length: 40 }, (_, i) => nightLeg({ x: 100, z: -50 }, i))
+  assert.ok(legs.every(p => p != null && Number.isFinite(p.x) && Number.isFinite(p.z)), 'a leg with no point')
+  const distinct = new Set(legs.map(p => `${p.x},${p.z}`)).size
+  assert.ok(distinct >= 12 && distinct < 24, `${distinct} points`)
+  assert.deepEqual(legs[distinct], legs[0])
+  assert.ok(legs.every(p => Math.max(Math.abs(p.x - 100), Math.abs(p.z + 50)) <= 240))
+})
