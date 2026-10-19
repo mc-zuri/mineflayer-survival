@@ -146,12 +146,12 @@ export function tossYaw (bot: Bot): number {
 
 /**
  * Throws `count` of an item away and remembers the item entities that came of it (markThrown), so no pickup goes back
- * for them: along a look given (a throw into lava, explore.ts lavaThrow); into the pit `into` (a cell beside the bot a
- * block under its floor, explore.ts dumpPit), aimed at its far side (Player.drop throws along the look at 0.3 a tick,
- * give or take 0.1 up or down) where the bot walking by doesn't touch it; else level, the way with the most room
- * (tossYaw), some 3 blocks off. Resolves the count thrown.
+ * for them: along a look given (a throw into lava, explore.ts lavaThrow; into a pit, `pit` set, explore.ts pitThrow);
+ * into the pit `into` (a cell beside the bot under its floor, explore.ts dumpPit), aimed at its far side (Player.drop
+ * throws along the look at 0.3 a tick, give or take 0.1 up or down) where the bot walking by doesn't touch it; else
+ * level, the way with the most room (tossYaw), some 3 blocks off. Resolves the count thrown.
  */
-export async function tossAway (bot: Bot, name: string, count: number, signal?: AbortSignal, into?: Vec3 | { yaw: number, pitch: number }): Promise<number> {
+export async function tossAway (bot: Bot, name: string, count: number, signal?: AbortSignal, into?: Vec3 | { yaw: number, pitch: number, pit?: Vec3 }): Promise<number> {
   const id = bot.registry.itemsByName[name]?.id
   if (id == null || count <= 0) return 0
   const before = itemEntityIds(bot)
@@ -173,9 +173,11 @@ export async function tossAway (bot: Bot, name: string, count: number, signal?: 
   const ours = (): Entity[] => Object.values(bot.entities).filter(e => !before.has(e.id) && isItemEntity(e) && e.position.distanceTo(bot.entity.position) <= 6 && droppedName(e) === name)
   await waitUntil(bot, () => ours().length > 0, 10, signal)
   // (into lava: it burns, Entity.lavaHurt)
-  for (const e of ours()) markThrown(bot, e, name, into != null && !(into instanceof Vec3))
+  const burns = into != null && !(into instanceof Vec3) && into.pit == null
+  for (const e of ours()) markThrown(bot, e, name, burns)
   const thrown = Math.max(0, had - countItems(bot, name))
-  trace('tossAway:', thrown, name, into instanceof Vec3 ? `into ${into.toString()}` : into != null ? 'into the lava' : 'behind', 'from', bot.entity.position.toString())
+  const where = into instanceof Vec3 ? `into ${into.toString()}` : into?.pit != null ? `into ${into.pit.toString()} along a look` : into != null ? 'into the lava' : 'behind'
+  trace('tossAway:', thrown, name, where, 'from', bot.entity.position.toString())
   return thrown
 }
 

@@ -389,6 +389,66 @@ test('dumpPitCells: a side of the facing opened from head height to a block unde
   assert.equal(dumpPitCells(world({ '0,20,0': 'air' }, 'air'), feet, new Vec3(1, 0, 0)), null)
 })
 
+test('dumpPitFor: by a staircase\'s next step, a pit at its side 2 under the floor that the next steps down never touch; behind a trip; none by a staircase with no side to dig', async () => {
+  // (26.3 run full-f: the staircase to the deep lava threw 19 dirt, 5 sand and 2 gravel into a pit at its side a block
+  // under the floor, picked them up with the next step a block lower, and threw them again, 30 steps running)
+  const { dumpPitFor, staircaseStep } = await import('../../src/executor/explore')
+  const { touches } = await import('../../src/skills/pickupDrops')
+  const feet = new Vec3(0, 20, 0)
+  const dir = new Vec3(1, 0, 0)
+  // the staircase dug so far, down along +x to the bot's feet
+  const cells: Record<string, string> = {}
+  for (let i = -3; i <= 0; i++) for (const dy of [0, 1, 2]) cells[`${i},${20 - i + dy},0`] = 'air'
+  const lookup = world(cells)
+  const pos = new Vec3(0.5, 20, 0.5)
+  const next = staircaseStep(feet, dir).next
+  const pit = dumpPitFor(lookup, feet, -Math.PI / 2, next.offset(0.5, 0, 0.5))
+  assert.ok(pit != null && pit.side.x === 0 && Math.abs(pit.side.z) === 1, String(pit?.side))
+  assert.deepEqual(pit.bottom.toArray(), [0, 18, pit.side.z])
+  assert.deepEqual(pit.open.map(c => c.y), [21, 20, 19, 18])
+  // what lies on its floor is out of reach of the steps down from here, and of the step back up
+  const item = new Vec3(pit.bottom.x + 0.5, pit.bottom.y, pit.bottom.z + 0.5)
+  const steps = [feet]
+  for (let i = 0; i < 4; i++) steps.push(staircaseStep(steps[steps.length - 1], dir).next)
+  for (const s of steps) assert.equal(touches(s.offset(0.5, 0, 0.5), item), false, s.toString())
+  assert.equal(touches(feet.offset(-0.5, 1, 0.5), item), false)
+  // a block under the floor, as before, is in the next step's reach
+  assert.equal(touches(steps[1].offset(0.5, 0, 0.5), item.offset(0, 1, 0)), true)
+  // a tunnel's next step: a side, 2 under the floor as well
+  const level = dumpPitFor(world({ '0,20,0': 'air', '0,21,0': 'air', '-1,20,0': 'air', '-1,21,0': 'air' }), feet, 0, new Vec3(1.5, 20, 0.5))
+  assert.ok(level != null && level.side.x === 0 && level.bottom.y === 18, String(level?.side))
+  // a trip's goal far off: behind the bot
+  const trip = dumpPitFor(world({}), feet, 0, new Vec3(40.5, 20, 0.5))
+  assert.deepEqual(trip?.side.toArray(), [-1, 20, 0])
+  // no side by a staircase (water at both): none, not the way back or the way on
+  assert.equal(dumpPitFor(world({ ...cells, '0,20,2': 'water', '0,20,-2': 'water' }), feet, 0, next.offset(0.5, 0, 0.5)), null)
+})
+
+test('pitThrow: a look whose stack comes to rest in the bottom of a pit 2 deep beside a staircase for every lift, where one aimed at the bottom stops on the edge of the bot\'s floor', async () => {
+  const { dumpPitFor, itemFlight, pitThrow, staircaseStep } = await import('../../src/executor/explore')
+  const cells: Record<string, string> = {}
+  for (let i = -3; i <= 0; i++) for (const dy of [0, 1, 2]) cells[`${i},${20 - i + dy},0`] = 'air'
+  const feet = new Vec3(0, 20, 0)
+  const pos = new Vec3(0.5, 20, 0.5)
+  const pit = dumpPitFor(world(cells), feet, 0, staircaseStep(feet, new Vec3(1, 0, 0)).next.offset(0.5, 0, 0.5))
+  assert.ok(pit != null)
+  for (const c of pit.open) cells[`${c.x},${c.y},${c.z}`] = 'air'
+  const lookup = world(cells)
+  const eye = pos.offset(0, 1.62, 0)
+  // (tossAway's aim at the bottom's far half: a stack on the floor's edge, at the bot's feet)
+  const aim = new Vec3(pit.bottom.x + 0.5, pit.bottom.y + 0.1, pit.bottom.z + 0.5 + 0.35 * Math.sign(pit.bottom.z)).minus(eye)
+  const edge = itemFlight(lookup, eye, Math.atan2(-aim.x, -aim.z), Math.atan2(aim.y, Math.hypot(aim.x, aim.z)), 0.1)
+  assert.ok(edge instanceof Vec3 && edge.y === 20, String(edge))
+  const look = pitThrow(lookup, pos, pit.bottom)
+  assert.ok(look != null)
+  for (const lift of [0, 0.1, 0.2]) {
+    const at = itemFlight(lookup, eye, look.yaw, look.pitch, lift)
+    assert.ok(at instanceof Vec3 && at.floored().equals(pit.bottom), `${lift}: ${String(at)}`)
+  }
+  // no pit open: no look into it
+  assert.equal(pitThrow(world({ '0,20,0': 'air', '0,21,0': 'air' }), pos, pit.bottom), null)
+})
+
 test('itemFlight: a stack thrown level flies some 2 blocks before it lands (Player.drop at 0.3 a tick along the look, 0.1 up; ItemEntity.tick)', async () => {
   const { itemFlight } = await import('../../src/executor/explore')
   // open ground: stone under y 64

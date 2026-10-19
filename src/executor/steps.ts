@@ -52,9 +52,9 @@ export interface StepContext {
   unwanted?: (name: string) => boolean
   /**
    * Makes room in the bag when it's short, on the way (Executor.makeRoomDuringStep): before each block a mine step
-   * breaks and each step of a staircase or tunnel it digs
+   * breaks and each step of a staircase or tunnel it digs, `toward` where the bot goes next
    */
-  room?: () => Promise<void>
+  room?: (toward?: Vec3) => Promise<void>
 }
 
 export interface StepOutcome {

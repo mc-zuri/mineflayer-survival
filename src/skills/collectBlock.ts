@@ -59,9 +59,9 @@ export interface CollectBlockArgs {
   /**
    * Makes room in the bag when it's short (the executor's: the junk and the route's stone thrown behind, the rest in a
    * depot): before each block, and before the pickup of a block's drops with no slot free (default: the bag's
-   * keeper's, skills/bag.ts keepRoom)
+   * keeper's, skills/bag.ts keepRoom), `toward` the block to break
    */
-  room?: () => Promise<void>
+  room?: (toward?: Vec3) => Promise<void>
 }
 
 const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, 1, 0), new Vec3(0, -1, 0)]
@@ -185,7 +185,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
   }
   // the bag kept from filling as the blocks come in (the keeper's room and its no to the route's stone), the drops of
   // the blocks asked for by name always wanted
-  const room = async (toward?: Vec3): Promise<void> => { if (args.room != null) await args.room(); else await keepRoom(bot, signal, toward) }
+  const room = async (toward?: Vec3): Promise<void> => { if (args.room != null) await args.room(toward); else await keepRoom(bot, signal, toward) }
   const unwanted = args.unwanted ?? ((name: string): boolean => !dropNames.has(name) && unwantedDrop(bot, name))
   const gainedDrops = (): number => dropNames.size === 0 ? 0 : sumPositive(countsDelta(before, inventoryCounts(bot)), name => dropNames.has(name))
   const enough = (): boolean => positions.length >= count || gainedDrops() >= count
@@ -196,7 +196,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     if (block == null) break
     const pos = block.position
     // the room made toward the block (the pit for what's thrown dug off the way to it), and the block there still
-    await room(pos)
+    await room(pos.offset(0.5, 0.5, 0.5))
     if (!sameBlock(bot, pos, block.type)) continue
 
     const harvestable = harvestToolFor(block, inventoryItems(bot)) !== null

@@ -230,6 +230,7 @@ describe(`the bag down a mine on a ${DEFAULT_VERSION} server`, { timeout: 20 * 6
     assert.strictEqual(recollected, 0, 'thrown items picked up again')
   })
 
+
   /** a stone mound 40 long along +x and `height` high, the air over it cleared, the bot on top facing +x (a staircase goes along the facing) */
   async function mound (height: number): Promise<void> {
     await run(`fill ${xyz(at(-4, 0, -4))} ${xyz(at(36, height - 1, 4))} stone`)
@@ -276,5 +277,45 @@ describe(`the bag down a mine on a ${DEFAULT_VERSION} server`, { timeout: 20 * 6
     assert.ok(broken.length <= 3 * steps, `${broken.length} blocks broken for ${steps} steps`)
     assert.deepStrictEqual(floors.filter(f => bot.blockAt(f)?.boundingBox !== 'block').map(f => f.toString()), [])
     assert.ok(floors.length >= steps, `${floors.length} floors stood on`)
+  })
+
+  it('digs a staircase down a stone mound with a bag nearly full of the route\'s stone and junk: what it throws goes into pits beside the stairs under the next steps\' reach, none picked up again, no throw twice, the steps left whole', async (t) => {
+    // (26.3 run full-f: the staircase to the deep lava threw 19 dirt, 5 sand and 2 gravel into a pit at its side a
+    // block under the floor and picked them up with its next step, a block lower, 30 steps running)
+    const height = 30
+    await mound(height)
+    await run(`clear ${USERNAME}`)
+    // 34 slots: the pickaxe, the food, the junk and the route's stone, 2 free; a stack of cobblestone 4 short of full
+    for (const [item, n] of [['diamond_pickaxe', 1], ['bread', 16], ['dirt', 19], ['sand', 5], ['gravel', 2], ['granite', 12], ['andesite', 29], ['diorite', 40], ['cobblestone', 26 * 64 - 4]] as const) await give(item, n)
+    assert.strictEqual(emptySlots(bot), 2)
+    const lines: string[] = []
+    let recollected = 0
+    const onCollect = (collector: any, collected: any): void => {
+      if (collector === bot.entity && isThrownDrop(bot, collected)) {
+        recollected++
+        t.diagnostic(`picked up again: ${collected.id} at ${collected.position.toString()}, the bot at ${bot.entity.position.toString()}`)
+      }
+    }
+    bot.on('playerCollect', onCollect)
+    const executor = new Executor(bot, { log: line => { lines.push(line); t.diagnostic(line) } })
+    const start = bot.survival.tasks.tick
+    let steps
+    try {
+      steps = await watchSteps(async () => await executor.task('down the staircase', async (s) => await descendTo(bot, origin.y + 3, {}, s)))
+    } finally {
+      bot.off('playerCollect', onCollect)
+    }
+    const throws = lines.filter(l => /throwing away/.test(l))
+    t.diagnostic(`down to ${bot.entity.position.floored().toString()} in ${bot.survival.tasks.tick - start} ticks, ${throws.length} throws, ${emptySlots(bot)} slots free`)
+    assert.strictEqual(steps.result, true, lines.join(' | '))
+    assert.ok(throws.length >= 1, 'no room made')
+    assert.strictEqual(recollected, 0, 'thrown items picked up again')
+    // each stack thrown once: none came back to be thrown again
+    const stacks = throws.flatMap(l => l.replace(/^.*throwing away /, '').split(', ')).filter(s => !/^64 /.test(s))
+    assert.deepStrictEqual(stacks.filter((s, i) => stacks.indexOf(s) !== i), [], throws.join(' | '))
+    assert.ok(!lines.some(l => /making room loops/.test(l)), lines.join(' | '))
+    // the way back up whole: the pits beside it, not in it
+    assert.deepStrictEqual(steps.floors.filter(f => bot.blockAt(f)?.boundingBox !== 'block').map(f => f.toString()), [])
+    assert.ok(emptySlots(bot) >= 2, `${emptySlots(bot)} slots free`)
   })
 })

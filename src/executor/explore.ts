@@ -175,20 +175,30 @@ export async function digDepotNook (bot: Bot, signal?: AbortSignal): Promise<Vec
 }
 
 /**
- * A pit beside the bot's feet to throw what it doesn't want into: the column of the side cell `side` (feet level),
- * opened from head height down to a block under the floor, `bottom` the cell the items lie in. An item there is out of
- * the bot's reach as it walks by (Player.aiStep touches what its box, inflated by 0.5 vertically, meets: the item's top
- * is 0.75 under the floor), and the pit is off the way (a side of the bot's facing first, then behind it, ahead
- * last; with `behindFirst`, behind it, then its sides, never ahead: the way the bot goes next is `facing`, and a pit at
- * its side was beside the steps down it took after, the stone picked up again). Rock under the bottom, no liquid
- * against the cells, nothing that doesn't break; null when no side will do.
+ * Which cells round the bot a pit may go in, of the way `facing` it goes next: 'any', a side first, then behind, ahead
+ * last; 'behind', behind it, then its sides, never ahead (a trip's: the bot walks away from it); 'sides', its sides
+ * only (a dug route's next step: behind is the way back, ahead the way on)
  */
-export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3, behindFirst = false): { side: Vec3, bottom: Vec3, open: Vec3[] } | null {
+export type PitWays = 'any' | 'behind' | 'sides'
+
+/**
+ * A pit beside the bot's feet to throw what it doesn't want into: the column of the side cell `side` (feet level),
+ * opened from head height down to `depth` blocks under the floor, `bottom` the cell the items lie in. An item there is
+ * out of the bot's reach as it walks by (Player.aiStep touches what its box, inflated by 0.5 vertically, meets: the
+ * item's top is 0.75 under the floor at a depth of 1), and the pit is off the way (`ways`, of the way `facing` the bot
+ * goes next). A staircase's next step is a block lower, its box down to 0.5 over the floor of a pit 1 deep beside
+ * it: its pit goes 2 down (a 26.3 staircase to the deep lava threw its dirt into the pit at its side and picked it up
+ * with the next step, 30 steps running). Rock under the bottom, no liquid against the cells, nothing that doesn't
+ * break; null when no side will do.
+ */
+export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3, ways: PitWays = 'any', depth = 1): { side: Vec3, bottom: Vec3, open: Vec3[] } | null {
   const left = new Vec3(-facing.z, 0, facing.x)
-  for (const d of behindFirst ? [facing.scaled(-1), left, left.scaled(-1)] : [left, left.scaled(-1), facing.scaled(-1), facing]) {
+  const order = ways === 'sides' ? [left, left.scaled(-1)] : ways === 'behind' ? [facing.scaled(-1), left, left.scaled(-1)] : [left, left.scaled(-1), facing.scaled(-1), facing]
+  for (const d of order) {
     const side = feet.plus(d)
-    const bottom = side.offset(0, -1, 0)
-    const cells = [side.offset(0, 1, 0), side, bottom]
+    const bottom = side.offset(0, -depth, 0)
+    const cells = [side.offset(0, 1, 0), side]
+    for (let dy = 1; dy <= depth; dy++) cells.push(side.offset(0, -dy, 0))
     if (lookup(bottom.offset(0, -1, 0))?.boundingBox !== 'block') continue
     if (cells.some(c => { const b = lookup(c); return b == null || UNBREAKABLE.has(b.name) || /(chest|furnace|table|barrel|bed|door|torch|portal)/.test(b.name) || liquidAround(lookup, c) != null })) continue
     return { side, bottom, open: cells }
@@ -196,17 +206,37 @@ export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3, behindFi
   return null
 }
 
+/** how far off a `toward` is a dug route's next step (the cell beside the bot it walks into), not a trip's goal */
+const ROUTE_STEP_RANGE = 2
+
 /**
- * Digs a pit beside the bot (dumpPitCells) to throw things into, or finds the one dug before beside it still open;
- * the cell the items are to land in, or null. `toward`: where the bot goes next (the pit behind it, off its way)
+ * Where a pit goes for a bot at `feet` (its look `yaw`) that goes to `toward` next: by a dug route's next step or the
+ * block it breaks next (a cell within ROUTE_STEP_RANGE), to its sides, 2 under the floor (a step a block down and one
+ * more); behind a trip's way (farther off); else (`toward` over or under the feet, or none) by the facing
+ * (dumpPitCells)
+ */
+export function dumpPitFor (lookup: Lookup, feet: Vec3, yaw: number, toward?: Vec3): ReturnType<typeof dumpPitCells> {
+  // from the feet's cell to the cell of `toward` (a goal's block, a block, a point): a GoalBlock's corner seen from the
+  // bot off its cell's middle pointed along the route, the pit dug in the next step's floor
+  const dx = toward != null ? Math.floor(toward.x) - feet.x : 0
+  const dz = toward != null ? Math.floor(toward.z) - feet.z : 0
+  const dist = Math.hypot(dx, dz)
+  if (toward != null && dist >= 1) {
+    const way = facingDir(Math.atan2(-dx, -dz))
+    if (dist <= ROUTE_STEP_RANGE) return dumpPitCells(lookup, feet, way, 'sides', 2 + Math.min(1, Math.max(0, feet.y - Math.floor(toward.y) - 1)))
+    const behind = dumpPitCells(lookup, feet, way, 'behind')
+    if (behind != null) return behind
+  }
+  return dumpPitCells(lookup, feet, facingDir(yaw))
+}
+
+/**
+ * Digs a pit beside the bot (dumpPitFor) to throw things into, or finds the one dug before beside it still open;
+ * the cell the items are to land in, or null. `toward`: where the bot goes next (the pit off its way: beside a dug
+ * route's next step and under its reach, behind a trip)
  */
 export async function dumpPit (bot: Bot, signal?: AbortSignal, toward?: Vec3): Promise<Vec3 | null> {
-  const lookup = lookupOf(bot)
-  const feet = feetOf(bot)
-  const away = toward != null && Math.hypot(toward.x - bot.entity.position.x, toward.z - bot.entity.position.z) >= 1
-    ? facingDir(Math.atan2(-(toward.x - bot.entity.position.x), -(toward.z - bot.entity.position.z)))
-    : null
-  const cells = (away != null ? dumpPitCells(lookup, feet, away, true) : null) ?? dumpPitCells(lookup, feet, facingDir(bot.entity.yaw))
+  const cells = dumpPitFor(lookupOf(bot), feetOf(bot), bot.entity.yaw, toward)
   if (cells == null) return null
   if (cells.open.every(c => isOpen(bot, c))) return cells.bottom
   trace('explore: digging a pit to throw into at', cells.side.toString())
@@ -307,6 +337,29 @@ export function lavaThrow (lookup: Lookup, feet: Vec3, eyeHeight = 1.62): { yaw:
       const lands = [-THROW_LIFT_SPREAD, 0, THROW_LIFT_SPREAD].every(spread => itemFlight(lookup, eye, yaw, pitch, THROW_LIFT + spread) === 'lava')
       if (lands) return { yaw, pitch, lava: p }
     }
+  }
+  return null
+}
+
+/**
+ * A throw into the pit `bottom` (dumpPitCells) from a bot at `pos`: the look (yaw, pitch) whose flight (itemFlight)
+ * comes to rest in the pit's bottom cell with Player.drop's lift at both ends of its spread and between, the steepest
+ * first; null when none does. Aimed at the bottom's middle, a pit 2 deep beside a one-wide staircase took a look so
+ * steep that the stack came down on the edge of the bot's own floor (an item's box is 0.25 wide) and was picked up there.
+ */
+export function pitThrow (lookup: Lookup, pos: Vec3, bottom: Vec3, eyeHeight = 1.62): { yaw: number, pitch: number } | null {
+  const eye = pos.offset(0, eyeHeight, 0)
+  const yaw = Math.atan2(-(bottom.x + 0.5 - eye.x), -(bottom.z + 0.5 - eye.z))
+  const inPit = (at: Vec3): boolean => Math.floor(at.y) === bottom.y &&
+    Math.floor(at.x - ITEM_HALF) === bottom.x && Math.floor(at.x + ITEM_HALF) === bottom.x &&
+    Math.floor(at.z - ITEM_HALF) === bottom.z && Math.floor(at.z + ITEM_HALF) === bottom.z
+  for (let deg = -80; deg <= 30; deg += 5) {
+    const pitch = deg * Math.PI / 180
+    const lands = [-THROW_LIFT_SPREAD, 0, THROW_LIFT_SPREAD].every(spread => {
+      const at = itemFlight(lookup, eye, yaw, pitch, THROW_LIFT + spread)
+      return at instanceof Vec3 && inPit(at)
+    })
+    if (lands) return { yaw, pitch }
   }
   return null
 }
@@ -531,7 +584,7 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
     throwIfAborted(signal)
     const feet = feetOf(bot)
     if (onSurface(lookup, feet, inOverworld(bot))) return true
-    await routeRoom(bot, args, signal)
+    await routeRoom(bot, args, signal, staircaseUpStep(feet, dir).next)
     const turns = [dir, new Vec3(-dir.z, 0, dir.x), new Vec3(dir.z, 0, -dir.x), dir.scaled(-1)]
     let stepped = false
     for (const d of turns) {
@@ -791,19 +844,23 @@ export interface DigRouteArgs {
   /** stop early once this holds (checked every step) */
   found?: () => boolean
   /**
-   * Makes room in the bag when it's short, every step (the executor's: the route's stone over the stock thrown behind,
-   * the rest put in a depot): the route's cells' drops come in as the bot walks into them (default: the bag's keeper's,
-   * skills/bag.ts keepRoom)
+   * Makes room in the bag when it's short, every step (the executor's: the route's stone over the stock thrown into a
+   * pit beside the way, the rest put in a depot), `toward` the step's next cell: the route's cells' drops come in as
+   * the bot walks into them (default: the bag's keeper's, skills/bag.ts keepRoom)
    */
-  room?: () => Promise<void>
+  room?: (toward?: Vec3) => Promise<void>
   /** most steps (default 160) */
   maxSteps?: number
 }
 
-/** room in the bag before a step of a dug route: the route's own room maker, else the bag's keeper's */
-async function routeRoom (bot: Bot, args: DigRouteArgs, signal?: AbortSignal): Promise<void> {
-  if (args.room != null) await args.room()
-  else await keepRoom(bot, signal)
+/**
+ * Room in the bag before a step of a dug route: the route's own room maker, else the bag's keeper's, `next` the cell
+ * the step walks into (what's thrown goes into a pit beside the route, under that step's reach: dumpPitFor)
+ */
+async function routeRoom (bot: Bot, args: DigRouteArgs, signal?: AbortSignal, next?: Vec3): Promise<void> {
+  const toward = next?.offset(0.5, 0, 0.5)
+  if (args.room != null) await args.room(toward)
+  else await keepRoom(bot, signal, toward)
 }
 
 /**
@@ -821,7 +878,7 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
     if (args.found?.() === true) return true
     const feet = feetOf(bot)
     if (feet.y <= y) return true
-    await routeRoom(bot, args, signal)
+    await routeRoom(bot, args, signal, staircaseStep(feet, dir).next)
     const turns = [dir, new Vec3(-dir.z, 0, dir.x), new Vec3(dir.z, 0, -dir.x), dir.scaled(-1)]
     let stepped = false
     for (const d of turns) {
@@ -904,7 +961,7 @@ export async function tunnel (bot: Bot, args: DigRouteArgs & { length?: number, 
     for (let i = 0; i < length; i++) {
       throwIfAborted(signal)
       if (args.found?.() === true) return true
-      await routeRoom(bot, args, signal)
+      await routeRoom(bot, args, signal, tunnelStep(feetOf(bot), dir).next)
       const feet = feetOf(bot)
       const step = tunnelStep(feet, dir)
       const why = unsafeStep(lookup, step)
@@ -942,7 +999,7 @@ export interface ExploreForBlocksArgs {
   /** the surface spiral's legs walked so far (ExploreArgs.progress) */
   progress?: { leg: number }
   /** room made in the bag down the staircase and the tunnels (DigRouteArgs.room) */
-  room?: () => Promise<void>
+  room?: (toward?: Vec3) => Promise<void>
 }
 
 /** the nearest block of the names in the loaded chunks, within `radius` */

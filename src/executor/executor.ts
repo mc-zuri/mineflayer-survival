@@ -29,7 +29,7 @@ import { defaultKeep, JUNK, junkToToss, ROUTE_STONE, splitInventory, type KeepRu
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { noteVillage } from '../skills/village'
-import { digDepotNook, dumpPit, lavaThrow, rememberAround } from './explore'
+import { digDepotNook, dumpPit, lavaThrow, pitThrow, rememberAround } from './explore'
 import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
 import { farmCells, grownPlots, knownFarms } from '../skills/farm'
 import { GROW_TICKS } from '../core/crops'
@@ -615,7 +615,7 @@ export class Executor {
         // 30 times and the milestone failed (seed 5)
         replacingTools: this.replacing,
         unwanted: name => this.unwantedDrop(name),
-        room: async () => await this.makeRoomDuringStep(taskSignal)
+        room: async (toward) => await this.makeRoomDuringStep(taskSignal, toward)
       }
       return await runner(step, stepCtx)
     }, signal, { step, desc: describeStep(step) })
@@ -743,7 +743,11 @@ export class Executor {
         // was picked up again 40 ticks on (Player.drop's pickup delay)
         let pit: Vec3 | null | undefined
         for (const t of toss) {
-          const into = lava() ?? (pit !== undefined ? pit : (pit = await dumpPit(this.bot, s, toward)))
+          const burn = lava()
+          if (burn == null && pit === undefined) pit = await dumpPit(this.bot, s, toward)
+          // into the pit along a look whose flight ends there (pitThrow), else aimed at it
+          const look = burn == null && pit != null ? pitThrow(p => this.bot.blockAt(p) as any, this.bot.entity.position, pit, (this.bot.entity as any).eyeHeight ?? 1.62) : null
+          const into = burn ?? (look != null && pit != null ? { ...look, pit } : pit)
           await tossAway(this.bot, t.name, t.count, s, into ?? undefined).catch(err => { if (isAbort(err)) throw err })
         }
       })
