@@ -19,6 +19,8 @@ export interface PlaceBlockArgs {
    * furnace faces back at the player). The bot looks that way, down at the face, instead of at the face's middle.
    */
   facing?: Vec3
+  /** the block goes into water or lava there, which it replaces (a pedestal in a lava lake; default false) */
+  intoFluid?: boolean
 }
 
 /** mineflayer's yaw for a horizontal direction (0 looks to -z, pi/2 to -x) */
@@ -61,7 +63,7 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
   const wanted = placedBlockNames(args.item)
   const current = blockAtOrThrow(bot, pos)
   if (wanted.includes(current.name)) return { pos, block: current.name, placed: false }
-  if (!isFree(current)) {
+  if (!isFree(current) && !(args.intoFluid === true && (current.name === 'water' || current.name === 'lava'))) {
     throw new SkillError('CANNOT_PLACE', `${current.name} is at ${pos.toString()}`)
   }
   if (findInventoryItem(bot, args.item) == null) throw new SkillError('MISSING_ITEMS', `no ${args.item} in the inventory`)

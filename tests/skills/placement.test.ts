@@ -86,3 +86,13 @@ test('REPLACEABLE_BLOCKS is vanilla #replaceable: bubble columns, and 26.3\'s re
   for (const name of ['air', 'water', 'short_grass', 'bubble_column', 'red_shrub', 'leaf_litter']) assert.ok(REPLACEABLE_BLOCKS.has(name), name)
   assert.ok(!REPLACEABLE_BLOCKS.has('stone'))
 })
+
+test('placeBlock into lava only when asked (intoFluid): a pedestal in a lava lake', async () => {
+  const { placeBlock } = await import('../../src/skills/placeBlock')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 48, 2.5), items: [item('cobblestone', 4)], world: (p: any) => p.y < 47 ? 'stone' : (p.y === 47 && p.z === 0 ? 'lava' : 'air') })
+  await assert.rejects(placeBlock(bot, { pos: new Vec3(0, 47, 0), item: 'cobblestone' }), /lava is at/)
+  // asked to: it gets past the check to the inventory and the place (the fake has no hands for it)
+  await assert.rejects(placeBlock(bot, { pos: new Vec3(0, 47, 0), item: 'cobblestone', against: new Vec3(0, 46, 0), intoFluid: true }), (err: any) => !/lava is at/.test(err.message))
+})

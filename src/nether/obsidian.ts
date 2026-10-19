@@ -92,7 +92,7 @@ export async function obsidianFromLava (bot: Bot, count: number, signal?: AbortS
       const filler = PEDESTAL_BLOCKS.find(n => countItems(bot, n) > 0)
       if (open != null && filler != null) {
         await navigateNear(bot, open, 3, signal).catch(err => { if (isAbort(err)) throw err })
-        await placeBlock(bot, { pos: open, item: filler, against: open.offset(0, -1, 0) }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the pedestal:', (err as Error).message) })
+        await placeBlock(bot, { pos: open, item: filler, against: open.offset(0, -1, 0), intoFluid: true }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the pedestal:', (err as Error).message) })
         if (bot.blockAt(open)?.boundingBox === 'block') target = { source: open, spot: open.offset(0, 1, 0), side: false }
       }
     }
