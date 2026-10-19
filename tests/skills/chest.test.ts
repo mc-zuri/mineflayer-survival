@@ -54,6 +54,9 @@ test('storeItems breaks the block over a chest before opening it: a chest under 
     // the server sends no window for a chest that's blocked
     if (blocks.get(`${block.position.x},${block.position.y + 1},${block.position.z}`) !== 'air') throw new Error('Event windowOpen did not fire within timeout of 20000ms')
     return {
+      slots: new Array(63).fill(null),
+      inventoryStart: 27,
+      inventoryEnd: 63,
       items: () => bot.inventory.items(),
       containerItems: () => chestItems,
       deposit: async (type: number, _meta: unknown, count: number) => {
@@ -73,4 +76,19 @@ test('storeItems breaks the block over a chest before opening it: a chest under 
     clearInterval(ticker)
   }
   assert.deepStrictEqual(dug, ['(2, 65, 0)'])
+})
+
+test('roomFor: a store takes no more than the chest\'s empty slots and its stacks of the item lack (28 stacks into 27 slots moved 1792 out, 1728 in)', () => {
+  const { roomFor } = require('../../src/skills/chest')
+  const iron = registry.itemsByName.raw_iron.id
+  const slots: any[] = new Array(63).fill(null)
+  slots[0] = { type: iron, count: 60 }
+  slots[1] = { type: registry.itemsByName.cobblestone.id, count: 64 }
+  for (let i = 2; i < 27; i++) slots[i] = { type: iron, count: 64 }
+  const window = { slots, inventoryStart: 27, inventoryEnd: 63 }
+  assert.strictEqual(roomFor(window, iron, 64, true), 4)
+  slots[5] = null
+  assert.strictEqual(roomFor(window, iron, 64, true), 68)
+  // the inventory's side: 36 empty slots
+  assert.strictEqual(roomFor(window, iron, 64, false), 36 * 64)
 })

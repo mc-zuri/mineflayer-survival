@@ -81,6 +81,21 @@ async function unblockChest (bot: Bot, block: Block, signal?: AbortSignal): Prom
   }
 }
 
+/**
+ * How many of an item the container's slots (`intoContainer`) or the inventory's slots of the window take: the empty
+ * slots' stacks and what the stacks of it lack (AbstractContainerMenu.moveItemStackTo fills those)
+ */
+export function roomFor (window: { slots: Array<{ type: number, count: number } | null>, inventoryStart: number, inventoryEnd: number }, type: number, stackSize: number, intoContainer: boolean): number {
+  const [start, end] = intoContainer ? [0, window.inventoryStart] : [window.inventoryStart, window.inventoryEnd]
+  let room = 0
+  for (let i = start; i < end; i++) {
+    const it = window.slots[i]
+    if (it == null) room += stackSize
+    else if (it.type === type) room += Math.max(0, stackSize - it.count)
+  }
+  return room
+}
+
 async function transfer (bot: Bot, args: ChestArgs, direction: 'store' | 'retrieve', signal?: AbortSignal): Promise<ChestResult> {
   throwIfAborted(signal)
   let block = blockAtOrThrow(bot, args.chest.floored())
@@ -103,8 +118,13 @@ async function transfer (bot: Bot, args: ChestArgs, direction: 'store' | 'retrie
     const wanted = countBy(source.filter(matches))
     for (const [name, total] of Object.entries(wanted)) {
       throwIfAborted(signal, { chest: block.position, moved: countsDelta(before, countBy(window.items())) })
-      const count = Math.min(total, args.count ?? total)
       const type = bot.registry.itemsByName[name].id
+      // no more than the other side has room for: a deposit of 28 stacks into a chest of 27 slots moved 1792 raw
+      // iron out of the inventory's slots and 1728 into the chest (the last stack held on the cursor)
+      const room = roomFor(window, type, bot.registry.items[type]?.stackSize ?? 64, direction === 'store')
+      const count = Math.min(total, args.count ?? total, room)
+      if (count < Math.min(total, args.count ?? total)) full = true
+      if (count <= 0) continue
       try {
         if (direction === 'store') await window.deposit(type, null, count)
         else await window.withdraw(type, null, count)
