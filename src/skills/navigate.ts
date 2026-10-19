@@ -6,6 +6,8 @@ import { SkillError, abortError, isAbort, isSkillError, throwIfAborted } from '.
 import { keepRoom } from './bag'
 import { eyeHeight, trace, waitUntil } from './util'
 import type { ReportKind } from '../diagnostics/report'
+import { baseWayIn } from '../base/pois'
+import { normalizeDimension } from '../core/memory'
 
 type Goal = goals.Goal
 
@@ -319,5 +321,15 @@ export class GoalReachBlock extends goals.Goal {
 export async function navigateToReach (bot: Bot, pos: Vec3, signal?: AbortSignal, opts: { reach?: number, outside?: boolean } = {}): Promise<NavigateResult> {
   const goal = new GoalReachBlock(pos.floored(), opts.reach ?? 4, eyeHeight(bot), opts.outside ?? true)
   if (goalReached(bot, goal)) return { position: bot.entity.position.clone(), ticks: 0 }
+  // a block in the base (its chests, table, furnace) got to by its door from outside
+  const memory = (bot as any).survival?.memory
+  const door = memory != null ? baseWayIn(memory, pos, bot.entity.position, normalizeDimension(bot.game?.dimension)) : null
+  if (door != null) {
+    trace('navigateToReach: into the base by its entrance at', door)
+    await navigate(bot, { goal: new goals.GoalNear(door.x, door.y, door.z, 1) }, signal).catch(err => {
+      if (isAbort(err)) throw err
+      trace('navigateToReach: not to the entrance:', (err as Error).message)
+    })
+  }
   return await navigate(bot, { goal }, signal)
 }

@@ -53,3 +53,22 @@ export function baseRecord (memory: WorldMemory): BaseRecord | null {
     bounds
   }
 }
+
+/**
+ * The base's entrance to go by to get to `target` from `from`: when the target is in the base's box and `from` isn't
+ * (a dug-in base's roof under the hill is no way in: a 26.3 bot dug down onto it from above, every search for the
+ * chest or the table in it timing out). Null when there's no need, no entrance or no box, or another dimension.
+ */
+export function baseWayIn (memory: WorldMemory, target: Pos, from: Pos, dimension: string): Pos | null {
+  const base = baseRecord(memory)
+  if (base == null || base.bounds == null || base.entrance == null || (memory.base?.dimension ?? 'overworld') !== dimension) return null
+  const { min, max } = base.bounds
+  const inside = (p: Pos): boolean => {
+    const x = Math.floor(p.x)
+    const y = Math.floor(p.y)
+    const z = Math.floor(p.z)
+    return x >= min.x && y >= min.y && z >= min.z && x < max.x && y < max.y && z < max.z
+  }
+  if (!inside(target) || inside(from)) return null
+  return base.entrance
+}

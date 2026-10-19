@@ -487,6 +487,46 @@ test('the loot step walks to a chest out of the loaded chunks before it opens it
   assert.deepEqual(calls, [`travel ${new Vec3(-56, 60, -16).toString()}`, 'retrieve'])
 })
 
+test('the loot step walks to a dug-in base by its entrance, not down onto its roof over the chest', async () => {
+  const travelModule = require('../../src/skills/travel')
+  const chestModule = require('../../src/skills/chest')
+  const { runLoot } = await import('../../src/executor/steps')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(66.5, -40, -185.5) })
+  const memory = new WorldMemory()
+  memory.setBase({ x: -56, y: 60, z: -16 })
+  memory.addPoi('base_entrance', { x: -51, y: 60, z: -20 }, 'overworld')
+  memory.addPoi('base_bounds', { x: -57, y: 59, z: -19 }, 'overworld', '-49,63,-12')
+  const calls: string[] = []
+  const realTravel = travelModule.travel
+  const realRetrieve = chestModule.retrieveItems
+  travelModule.travel = async (_b: unknown, a: any) => { calls.push(`travel ${a.target.toString()} ${a.range}`) }
+  chestModule.retrieveItems = async () => { calls.push('retrieve'); return { moved: {} } }
+  try {
+    await runLoot({ kind: 'loot', item: 'diamond_pickaxe', count: 1, from: { x: -56, y: 60, z: -16, dimension: 'overworld' } } as any, { bot, signal: new AbortController().signal, log: () => {}, state: {}, memory } as any)
+  } finally {
+    travelModule.travel = realTravel
+    chestModule.retrieveItems = realRetrieve
+  }
+  assert.deepEqual(calls, [`travel ${new Vec3(-51, 60, -20).toString()} 1`, 'retrieve'])
+})
+
+test('baseWayIn: the entrance for a target in the base box from outside it, none from inside, for one outside, or elsewhere', async () => {
+  const { baseWayIn } = await import('../../src/base/pois')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const memory = new WorldMemory()
+  memory.setBase({ x: -56, y: 60, z: -16 })
+  memory.addPoi('base_entrance', { x: -51, y: 60, z: -20 }, 'overworld')
+  assert.equal(baseWayIn(memory, { x: -56, y: 60, z: -16 }, { x: -54.5, y: 68, z: -13.5 }, 'overworld'), null, 'no box recorded')
+  memory.addPoi('base_bounds', { x: -57, y: 59, z: -19 }, 'overworld', '-49,63,-12')
+  assert.deepEqual(baseWayIn(memory, { x: -56, y: 60, z: -16 }, { x: -54.5, y: 68, z: -13.5 }, 'overworld'), { x: -51, y: 60, z: -20 })
+  assert.equal(baseWayIn(memory, { x: -56, y: 60, z: -16 }, { x: -53.5, y: 60, z: -15.5 }, 'overworld'), null)
+  assert.equal(baseWayIn(memory, { x: -40, y: 60, z: -16 }, { x: -54.5, y: 68, z: -13.5 }, 'overworld'), null)
+  assert.equal(baseWayIn(memory, { x: -56, y: 60, z: -16 }, { x: -54.5, y: 68, z: -13.5 }, 'the_nether'), null)
+})
+
 /**
  * a bot whose bag holds a worn iron pickaxe (uses left as given) beside what fakeBot's counts give, the best pickaxe
  * held, the one with the most uses of the best tier (as the dig's tool choice: bestHarvestingTool)

@@ -1,6 +1,7 @@
 // One runner per kind of plan step, each over the skills: mine → collectBlock (finding or exploring for the block
 // first), craft, smelt, kill → hunt, loot → retrieveItems, fill → fillBucket; barter waits for the nether skills.
 // A runner keeps its starting count in the task's state, so a step a reflex preempted picks up where it was.
+import { baseWayIn } from '../base/pois'
 import { travel } from '../skills/travel'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
@@ -438,7 +439,10 @@ export const runLoot: StepRunner<LootStep> = async (step, ctx) => {
     // a chest out of the loaded chunks (the base's, from 160 blocks off down a mine) walked to first: 'the chunk
     // isn't loaded' three times and the step failed (26.3)
     if (bot.blockAt(chest) == null || bot.entity.position.distanceTo(chest) > 48) {
-      await travel(bot, { target: chest, range: 3, exactY: true }, signal).catch(err => { if (isAbort(err)) throw err })
+      // (the base's by its entrance: travel's stair down from over a dug-in base ends on its roof)
+      const door = baseWayIn(ctx.memory, chest, bot.entity.position, step.from.dimension)
+      const target = door != null ? new Vec3(door.x, door.y, door.z) : chest
+      await travel(bot, { target, range: door != null ? 1 : 3, exactY: true }, signal).catch(err => { if (isAbort(err)) throw err })
     }
     const res = await retrieveItems(bot, { chest, filter: step.item, count: want }, signal)
     const known = ctx.memory.chestAt(chest, step.from.dimension)
