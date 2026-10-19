@@ -17,15 +17,16 @@ const registry = require('minecraft-data')('1.21.11')
 const TIP_UP = { stateId: registry.blocksByName.pointed_dripstone.minStateId + 5 }
 
 /**
- * The fake rig on a flat floor (the bot's feet at 64) with a platform a block up (x -2 to 2, z 0 to 2) and stalagmites'
- * tips along its -z edge but at x 2; the pathfinder loaded, no digging or placing, the step rule with `rule`. The ticks
- * the bot stood on a tip (on the ground 0.6875 up in a dripstone cell) are kept.
+ * The fake rig on a flat floor (the bot's feet at 64) with a platform two blocks up (x -2 to 2, z 0 to 2) and
+ * stalagmites' tips in the two rows along its -z edge but at x 2; the pathfinder loaded, no digging or placing, the step
+ * rule with `rule`. The ticks the bot stood on a tip (on the ground 0.6875 up in a dripstone cell) are kept.
  */
 async function platformRig (rule: boolean): Promise<{ bot: any, onTip: () => string[], stop: () => void }> {
-  const { rig } = setup.createCacheWorld('1.21.11', 64, new Vec3(0.5, 65, 1.5))
+  const { rig } = setup.createCacheWorld('1.21.11', 64, new Vec3(0.5, 66, 1.5))
   const bot = rig.bot
-  for (let x = -2; x <= 2; x++) for (let z = 0; z <= 2; z++) bot.world.setBlock(new Vec3(x, 64, z), 'stone')
-  for (let x = -2; x <= 1; x++) bot.world.setBlock(new Vec3(x, 64, -1), TIP_UP)
+  for (let x = -2; x <= 2; x++) for (let z = 0; z <= 2; z++) for (const y of [64, 65]) bot.world.setBlock(new Vec3(x, y, z), 'stone')
+  // two rows of them: the walk off the edge of a platform two high comes down a block and more out from it
+  for (let x = -2; x <= 1; x++) for (const z of [-1, -2]) bot.world.setBlock(new Vec3(x, 64, z), TIP_UP)
   bot.loadPlugin(pf.createPlugin({ pathfinderSettings: { partialPathProducer: false, searchTimeoutMs: 8000 } }))
   bot.pathfinder.setMoveOptions({ ...bot.pathfinder.defaultMoveSettings, canDig: false, canPlace: false })
   if (rule) keepOffDripstone(bot)
