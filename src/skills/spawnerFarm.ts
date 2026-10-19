@@ -3,13 +3,15 @@
 // within 4 blocks across of it and a block up or down, where it's dark (Monster.isDarkEnoughToSpawn: no block light).
 // The room is sealed where caves cut through its walls (MonsterRoomFeature leaves 1 - 5 such holes), so what spawns
 // stays in, and the bot stands in a booth dug two blocks into a wall: between it and the room the wall's block at the
-// floor is kept and the one over it dug, a slit a block high. A zombie (1.95 high) can't get through the slit, and its
-// attack reaches only 0.83 blocks out of its box across (Mob.getAttackBoundingBox), short of the bot a block further
-// in, jumping or not; the bot's reach (3) goes through the slit to the zombie pressed against the wall after it. A
-// pillar two blocks up doesn't do: a zombie jumping at its foot (1.25 up) reaches the bot's feet (26.3, health lost
-// and the bot knocked off). No water and no drop: the bot's reach does the killing; the orbs fly in to it
-// (ExperienceOrb follows a player within 8 blocks). A baby zombie (0.98 high) fits through the slit: it is fought in
-// the booth. Same in 1.21.11 and 26.3.
+// floor is a bottom slab and the one over it dug, a slit a block and a half high. A zombie (1.95 high) can't get
+// through it, and its attack reaches only 0.83 blocks out of its box across (Mob.getAttackBoundingBox), short of the
+// bot a block further in, jumping or not; the bot's reach (3) goes through the slit to the zombie pressed against the
+// wall after it, and the orbs (ExperienceOrb flies at a player within 8 blocks, at half its eyes' height) over the slab
+// to the bot: over a full block they stuck against it, two kills in three lost (26.3). A pillar two blocks up doesn't
+// do: a zombie jumping at its foot (1.25 up) reaches the bot's feet (26.3, health lost and the bot knocked off). No
+// water and no drop: the bot's reach does the killing. A baby zombie (0.98 high) fits through the slit: it is fought
+// in the booth. The pathfinder is kept out of the room for good (keepOutOfFarm), so the bot comes and goes by a way of
+// its own. Same in 1.21.11 and 26.3.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { SkillError, isAbort, throwIfAborted } from './errors'
@@ -217,9 +219,9 @@ function buildingBlock (bot: Bot): string | null {
   return SCAFFOLD_ITEMS.find(n => countItems(bot, n) > 0) ?? null
 }
 
-/** blocks the farm takes at most: the seals and the barrier put back */
+/** blocks the farm takes at most: the seals (the barrier is a slab of its own) */
 export function blocksFor (plan: SpawnerFarmPlan): number {
-  return plan.seal.length + plan.boothSeal.length + 1
+  return plan.seal.length + plan.boothSeal.length
 }
 
 /** the light sources in the room that would stop the spawns (a torch the bot or a mineshaft put there) */
@@ -261,6 +263,7 @@ export async function buildSpawnerFarm (bot: Bot, spawner: Vec3, signal?: AbortS
   const plan = planSpawnerFarm(pos => bot.blockAt(pos) as any, spawner)
   if (plan == null) throw new SkillError('NOT_FOUND', `no wall for a booth by the spawner at ${spawner.toString()}`)
   if (countItems(bot, SCAFFOLD_ITEMS) < blocksFor(plan)) throw new SkillError('MISSING_ITEMS', `${blocksFor(plan)} blocks to build the farm with, ${countItems(bot, SCAFFOLD_ITEMS)} held`)
+  if (slabItem(bot) == null) throw new SkillError('MISSING_ITEMS', "no slab for the booth's barrier")
   trace('spawnerFarm: sealing', plan.seal.length, 'holes, the booth at', plan.stand.toString(), 'its slit at', plan.slit.toString())
   await fill(bot, plan.seal, signal)
   // the room dark again (BaseSpawner's mob needs block light 0)
@@ -278,6 +281,7 @@ export async function buildSpawnerFarm (bot: Bot, spawner: Vec3, signal?: AbortS
   await enterBooth(bot, farm, signal)
   const missed = await fill(bot, plan.boothSeal, signal)
   if (missed > 0) throw new SkillError('CANNOT_PLACE', `${missed} of the booth's open sides not filled`)
+  keepOutOfFarm(bot, farm)
   return farm
 }
 
@@ -287,22 +291,80 @@ export function onStand (bot: Bot, stand: Vec3): boolean {
   return Math.abs(p.x - (stand.x + 0.5)) < 0.5 && Math.abs(p.z - (stand.z + 0.5)) < 0.5 && Math.abs(p.y - stand.y) < 0.6
 }
 
+/** a slab the bag has (the booth's barrier), or null */
+function slabItem (bot: Bot): string | null {
+  return bot.inventory.items().find(i => i.name.endsWith('_slab'))?.name ?? null
+}
+
+/** the barrier is the booth's: a bottom slab (any block that stops a zombie will do for the slit, not for the orbs) */
+function barrierUp (bot: Bot, barrier: Vec3): boolean {
+  return solid(bot.blockAt(barrier) as any)
+}
+
+/** the booth's open sides (not toward the room) at its feet and head, and over its head */
+export function boothSides (farm: Pick<XpFarm, 'stand' | 'barrier'>): Vec3[] {
+  const toRoom = farm.barrier.minus(farm.stand)
+  const out: Vec3[] = [farm.stand.offset(0, 2, 0)]
+  for (const e of CARDINALS) {
+    if (e.equals(toRoom)) continue
+    for (const dy of [0, 1]) out.push(farm.stand.plus(e).offset(0, dy, 0))
+  }
+  return out
+}
+
 /**
- * Into the booth: the barrier and the slit dug, the booth's two cells too (the first time), the bot walked in, and the
- * barrier put back from inside (against the floor under it)
+ * Into the booth. The first time (the barrier still the wall's block, the bot in the room): the slit, the barrier
+ * and the booth's two cells dug, the bot walked in, and the barrier put back from inside as a bottom slab against the
+ * floor under it. After (the slab there): the way in is dug from wherever the bot is, round the room (keepOutOfFarm:
+ * the pathfinder never steps in it), and the booth's open sides filled behind it.
  */
 export async function enterBooth (bot: Bot, farm: Pick<XpFarm, 'stand' | 'barrier'>, signal?: AbortSignal): Promise<void> {
-  if (onStand(bot, farm.stand) && solid(bot.blockAt(farm.barrier) as any)) return
+  if (onStand(bot, farm.stand) && barrierUp(bot, farm.barrier)) return
+  if (barrierUp(bot, farm.barrier) && bot.blockAt(farm.barrier)?.name.endsWith('_slab') === true) {
+    await navigate(bot, { goal: new goals.GoalBlock(farm.stand.x, farm.stand.y, farm.stand.z) }, signal)
+    await waitUntil(bot, () => bot.entity.onGround && onStand(bot, farm.stand), 20, signal)
+    if (!onStand(bot, farm.stand)) throw new SkillError('VERIFY_FAILED', `the bot is at ${bot.entity.position.toString()}, not in the booth at ${farm.stand.toString()}`)
+    const missed = await fill(bot, boothSides(farm), signal)
+    if (missed > 0) throw new SkillError('CANNOT_PLACE', `${missed} of the booth's open sides not filled`)
+    return
+  }
+  const slab = slabItem(bot)
+  if (slab == null) throw new SkillError('MISSING_ITEMS', "no slab for the booth's barrier")
   const cells = [farm.barrier.offset(0, 1, 0), farm.barrier, farm.stand.offset(0, 1, 0), farm.stand]
   const toDig = cells.filter(p => !passable(bot.blockAt(p) as any))
   if (toDig.length > 0) await collectBlock(bot, { positions: toDig, pickup: false }, signal)
   if (!onStand(bot, farm.stand)) await navigate(bot, { goal: new goals.GoalBlock(farm.stand.x, farm.stand.y, farm.stand.z) }, signal)
   await waitUntil(bot, () => bot.entity.onGround && onStand(bot, farm.stand), 20, signal)
   if (!onStand(bot, farm.stand)) throw new SkillError('VERIFY_FAILED', `the bot is at ${bot.entity.position.toString()}, not in the booth at ${farm.stand.toString()}`)
-  const item = buildingBlock(bot)
-  if (item == null) throw new SkillError('MISSING_ITEMS', 'no block to shut the booth with')
-  await placeBlock(bot, { pos: farm.barrier, item, against: farm.barrier.offset(0, -1, 0) }, signal)
-  if (!solid(bot.blockAt(farm.barrier) as any)) throw new SkillError('VERIFY_FAILED', `the booth's barrier at ${farm.barrier.toString()} isn't back`)
+  await placeBlock(bot, { pos: farm.barrier, item: slab, against: farm.barrier.offset(0, -1, 0) }, signal)
+  if (!barrierUp(bot, farm.barrier)) throw new SkillError('VERIFY_FAILED', `the booth's barrier at ${farm.barrier.toString()} isn't up`)
+}
+
+/**
+ * The pathfinder kept out of the farm's room for good (its step exclusion: the cells SPAWN_RANGE across of the
+ * spawner, from its floor to 3 over, the booth left out) and off its barrier and the wall over the slit (its break
+ * exclusion): a way to or from the booth goes round, not through the zombies (a 26.3 bot leaving the booth for the
+ * fishing walked into the room and was killed there, the spawner going on as long as it was near)
+ */
+export function keepOutOfFarm (bot: Bot, farm: Pick<XpFarm, 'spawner' | 'stand' | 'barrier'>): void {
+  const pathfinder: any = (bot as any).pathfinder
+  const settings = pathfinder?.defaultMoveSettings
+  if (settings?.exclusionAreasStep == null || typeof pathfinder.setMoveOptions !== 'function') return
+  const key = `${farm.spawner.x},${farm.spawner.y},${farm.spawner.z}`
+  const tagged = (f: any): boolean => f.survivalFarm === key
+  if ((settings.exclusionAreasStep as any[]).some(tagged)) return
+  const S = farm.spawner
+  const booth = [farm.stand.offset(0, -1, 0), farm.stand, farm.stand.offset(0, 1, 0)].map(p => p.toString())
+  const step = (block: any): number => {
+    const p = block.position
+    if (Math.abs(p.x - S.x) > SPAWN_RANGE || Math.abs(p.z - S.z) > SPAWN_RANGE || p.y < S.y - 1 || p.y > S.y + 3) return 0
+    return booth.includes(new Vec3(p.x, p.y, p.z).toString()) ? 0 : 1e9
+  }
+  const kept = [farm.barrier, farm.barrier.offset(0, 2, 0)].map(p => p.toString())
+  const brk = (block: any): number => kept.includes(new Vec3(block.position.x, block.position.y, block.position.z).toString()) ? 1e9 : 0
+  ;(step as any).survivalFarm = key
+  ;(brk as any).survivalFarm = key
+  pathfinder.setMoveOptions({ ...settings, exclusionAreasStep: [...settings.exclusionAreasStep, step], exclusionAreasBreak: [...settings.exclusionAreasBreak, brk] })
 }
 
 export interface UseFarmArgs {
@@ -354,6 +416,7 @@ export async function useSpawnerFarm (bot: Bot, farm: XpFarm, args: UseFarmArgs 
   const result = (): UseFarmResult => ({ level: experience(bot).level, points: experience(bot).points - start, kills, ticks })
   const done = (): boolean => (args.level != null && experience(bot).level >= args.level) || (args.kills != null && kills >= args.kills)
   try {
+    keepOutOfFarm(bot, farm)
     await enterBooth(bot, farm, signal)
     let lastLevel = experience(bot).level
     while (!done()) {

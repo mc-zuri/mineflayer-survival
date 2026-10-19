@@ -2,7 +2,7 @@
 // commands on a superflat (dug out of a block of stone, 7 x 7 and 4 high inside, dark), a zombie spawner set in its middle
 // with short delays (MinSpawnDelay 20, MaxSpawnDelay 40: the farm, not the wait, is what's tested), a chest by a wall
 // and a hole through the east wall to a dark cave. The bot, noting the spawner, builds the farm (the hole sealed, the
-// booth dug into a wall) and stands in it killing zombies through its slit until level 30, its health untouched.
+// booth dug into a wall behind a slab) and stands in it killing zombies through its slit until level 30, its health untouched.
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
@@ -59,7 +59,7 @@ describe(`a spawner experience farm on a ${DEFAULT_VERSION} server`, { timeout: 
     const nbt = '{SpawnData:{entity:{id:"minecraft:zombie"}},Delay:200,MinSpawnDelay:20,MaxSpawnDelay:40}'
     console.log(`setblock: ${await run(`setblock ${xyz(spawner)} spawner${nbt}`)}`)
     await run(`clear ${USERNAME}`)
-    for (const [item, n] of [['diamond_sword[enchantments={sharpness:5}]', 1], ['cobblestone', 64], ['diamond_pickaxe', 1], ['cooked_beef', 16]] as const) await run(`give ${USERNAME} ${item} ${n}`)
+    for (const [item, n] of [['diamond_sword[enchantments={sharpness:5}]', 1], ['cobblestone', 64], ['cobblestone_slab', 2], ['diamond_pickaxe', 1], ['cooked_beef', 16]] as const) await run(`give ${USERNAME} ${item} ${n}`)
     for (const [slot, item] of [['armor.head', 'diamond_helmet'], ['armor.chest', 'diamond_chestplate'], ['armor.legs', 'diamond_leggings'], ['armor.feet', 'diamond_boots']]) await run(`item replace entity ${USERNAME} ${slot} with ${item}`)
     await run(`xp set ${USERNAME} 0 levels`)
     await run(`xp set ${USERNAME} 0 points`)
