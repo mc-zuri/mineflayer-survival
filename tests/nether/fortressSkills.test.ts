@@ -117,3 +117,13 @@ test('the blaze fight is cut off when the health falls to the retreat, 12 among 
   }
   assert.ok(cut)
 })
+
+test('the blaze fight camps 9 off the spawner by default, out of its swarm', async () => {
+  const { BLAZE_STAND_OFF } = await import('../../src/nether/fortressSkills')
+  assert.ok(BLAZE_STAND_OFF >= 8)
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+  bot.world = { raycast: () => null }
+  const spots = campSpots(bot, new Vec3(0, 64, 0), BLAZE_STAND_OFF)
+  assert.ok(spots.length > 0)
+  assert.ok(Math.hypot(spots[0].x, spots[0].z) >= BLAZE_STAND_OFF - 1, spots[0].toString())
+})

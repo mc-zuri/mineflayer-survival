@@ -172,6 +172,9 @@ export async function putOutFiresNear (bot: Bot, radius: number, signal?: AbortS
 /** health the blaze fight backs off at to heal, and how many times a fight does */
 export const BLAZE_RETREAT_HEALTH = 8
 export const BLAZE_RETREATS = 6
+/** how far from a spawner the blaze fight camps */
+export const BLAZE_STAND_OFF = 9
+
 /** the health the blaze fight backs off at: higher among 3 blazes or more (their fireballs come together) */
 export function retreatHealth (blazes: number, set?: number): number {
   return set ?? (blazes >= 3 ? 12 : BLAZE_RETREAT_HEALTH)
@@ -317,7 +320,9 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
   const run = async (): Promise<BlazeRodsResult> => {
     if (countItems(bot, 'blaze_rod') >= count) return { rods: countItems(bot, 'blaze_rod'), kills, ticks }
     const spawner = args.spawner != null ? v3(args.spawner) : v3(await findBlazeSpawner(bot, { safety: false }, signal))
-    const standOff = args.standOff ?? 5
+    // (from 9 off, out of the swarm the spawner keeps about it, the blazes come one or two at a time and are shot:
+    // camped 5 off, among 6 of them, a diamond-armored 26.3 bot burned to death five times at one spawner)
+    const standOff = args.standOff ?? BLAZE_STAND_OFF
     const spots = campSpots(bot, spawner, standOff)
     const camp = async (): Promise<void> => {
       if (bot.entity.position.distanceTo(spawner) <= standOff + 3 && seesFrom(bot, eyePosition(bot), spawner.offset(0.5, 0.5, 0.5), spawner)) return
