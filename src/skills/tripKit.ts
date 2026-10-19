@@ -162,6 +162,8 @@ export interface TripKitResult {
   stored: Record<string, number>
   /** a bed put down by it set the respawn point there */
   bed: Vec3 | null
+  /** why no bed was put down by it, when none is */
+  noBed?: string
 }
 
 /**
@@ -198,20 +200,24 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
   memory.addPoi(TRIP_KIT, pos, 'overworld', 'spare kit')
   // the respawn point by the kit
   let bed: Vec3 | null = null
+  let noBed: string | undefined
   const held = bot.inventory.items().find(i => isBed(i.name))
+  if (held == null) noBed = 'no bed held'
   const bedThere = memory.getPois('spawn_bed', { dimension: 'overworld', near: pos }).find(b => new Vec3(b.x, b.y, b.z).distanceTo(pos) <= 4 && isBed(bot.blockAt(new Vec3(b.x, b.y, b.z))?.name ?? ''))
   if (bedThere != null) bed = new Vec3(bedThere.x, bedThere.y, bedThere.z)
   if (held != null && bedThere == null) {
     try {
       bed = await placeSpawnBed(bot, pos, held.name, signal)
       if (bed != null) memory.addPoi('spawn_bed', bed, 'overworld', 'by the trip kit')
+      else noBed = `no room for a bed by ${pos.toString()} (the bot at ${bot.entity.position.floored().toString()})`
     } catch (err) {
       if (isAbort(err)) throw err
-      trace('stashTripKit: the bed:', (err as Error).message)
+      noBed = (err as Error).message
+      trace('stashTripKit: the bed:', noBed)
     }
   }
   trace('stashTripKit: at', pos.toString(), JSON.stringify(stored), bed != null ? `bed at ${bed.toString()}` : 'no bed')
-  return { chest: pos, stored, bed }
+  return { chest: pos, stored, bed, noBed }
 }
 
 /** takes everything out of the trip kit's chest (the bot by it); resolves what came out */

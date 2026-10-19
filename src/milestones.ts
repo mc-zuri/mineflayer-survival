@@ -924,7 +924,7 @@ export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortS
     }
     await makeKitSpares(bot, executor, signal, log)
     const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s), signal)
-    log(`trip kit at ${kit.chest.toString()}: ${Object.entries(kit.stored).map(([n, c]) => `${c} ${n}`).join(', ')}${kit.bed != null ? ', the respawn point by it' : ''}`)
+    log(`trip kit at ${kit.chest.toString()}: ${Object.entries(kit.stored).map(([n, c]) => `${c} ${n}`).join(', ')}${kit.bed != null ? ', the respawn point by it' : `; no respawn point by it: ${kit.noBed ?? '?'}`}`)
   } catch (err) {
     if (signal.aborted || TaskError.is(err, 'DIED')) throw err
     log(`no trip kit: ${(err as Error).message}`)
