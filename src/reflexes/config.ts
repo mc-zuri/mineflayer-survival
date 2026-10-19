@@ -18,6 +18,8 @@ export interface ReflexConfig {
     regenFood: number
     /** at or below this health a golden apple is eaten, a fight or not (the emergency eat reflex; default 8) */
     emergencyHealth: number
+    /** at or below this food level the bot eats a fight or not (default 6) */
+    starving: number
     /** the reflex's priority (default 50) */
     priority: number
   }
@@ -129,7 +131,7 @@ export interface ReflexConfig {
 
 export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
   combat: { scanRange: 16, range: 8, hurtTicks: 60 },
-  eat: { enabled: true, food: 14, health: 10, regenFood: 18, emergencyHealth: 8, priority: 50 },
+  eat: { enabled: true, food: 14, health: 10, regenFood: 18, emergencyHealth: 8, starving: 6, priority: 50 },
   hostiles: {
     enabled: true,
     range: 8,

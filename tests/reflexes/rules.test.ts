@@ -282,3 +282,10 @@ test('emergency eat: at 8 health or less a golden apple is eaten, two angry ende
   assert.strictEqual(check(emergencyEatReflex, { health: 9, items: [item('golden_apple', 2)] }), null)
   assert.strictEqual(check(emergencyEatReflex, { health: 4, items: [item('bread', 5)] }), null)
 })
+
+test('eat reflex: starving (food 6 or less) the bot eats with a zombie in range too', () => {
+  const zombie = entity({ name: 'zombie', position: at(5) })
+  assert.strictEqual(check(eatReflex, { food: 6, items: [item('bread', 16)], entities: [zombie] }), 'eat')
+  assert.strictEqual(check(eatReflex, { food: 0, health: 1, items: [item('bread', 16)], entities: [zombie] }), 'eat')
+  assert.strictEqual(check(eatReflex, { food: 7, items: [item('bread', 16)], entities: [zombie] }), null)
+})

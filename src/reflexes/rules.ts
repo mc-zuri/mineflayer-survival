@@ -225,7 +225,10 @@ export const eatReflex: Reflex = {
     const hungry = bot.food <= config.eat.food && !ctx.inCombat
     const hurt = bot.health <= config.eat.health && hostilesInRange(ctx).length === 0
     const regen = bot.health < 20 && bot.food < config.eat.regenFood && !ctx.inCombat
-    if (!hungry && !hurt && !regen) return null
+    // starving: eaten in a fight too (a hostile kept in range by a wall kept a 26.3 bot out of its 16 bread until it
+    // starved to 1 health, at food 0, for 30000 ticks)
+    const starving = bot.food <= config.eat.starving
+    if (!hungry && !hurt && !regen && !starving) return null
     if (bestFoodInInventory(bot) == null) return null
     return { name: 'eat', priority: config.eat.priority, run: async (signal) => await eat(bot, { signal }) }
   }
