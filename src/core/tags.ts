@@ -4,7 +4,7 @@ import { cachedPerRegistry, type RegistryLike } from './registry'
 /**
  * Item groups, written `#name` wherever an item name is accepted. Most mirror vanilla item
  * tags (minecraft-data has none), built from the registry's item names so that every
- * variant of the version is in: #logs, #logs_that_burn, #planks, #wooden_slabs, #coals,
+ * variant of the version is in: #logs, #logs_that_burn, #planks, #wooden_slabs, #wooden_fences, #fence_gates, #coals,
  * #wool, #saplings, #leaves, #stone_crafting_materials, #stone_tool_materials, #pickaxes,
  * #axes, #shovels, #hoes, #swords, #<wood>_logs (#crimson_stems, #warped_stems,
  * #bamboo_blocks), #<metal>_ores, #smelts_to_glass. Added here: #fuel (anything a furnace
@@ -43,6 +43,9 @@ export class ItemTags {
     add('logs_that_burn', logs.filter(n => burnTicks(n) > 0))
     add('planks', names.filter(n => n.endsWith('_planks')))
     add('wooden_slabs', WOOD_TYPES.map(w => `${w}_slab`))
+    // (vanilla's #wooden_fences and #fence_gates: a pen's fence and its gate, any wood)
+    add('wooden_fences', names.filter(n => n.endsWith('_fence') && n !== 'nether_brick_fence'))
+    add('fence_gates', names.filter(n => n.endsWith('_fence_gate')))
     add('coals', ['coal', 'charcoal'])
     add('wool', names.filter(n => n.endsWith('_wool')))
     add('saplings', [...names.filter(n => n.endsWith('_sapling')), 'mangrove_propagule', 'azalea', 'flowering_azalea'])
