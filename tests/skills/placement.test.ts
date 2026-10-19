@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { botCells, findBedPlacement, findPlacement, type BlockView } from '../../src/skills/placement'
+import { botCells, findBedPlacement, findBedPlacementNear, findPlacement, type BlockView } from '../../src/skills/placement'
 import { placedBlockNames } from '../../src/skills/placeBlock'
 
 // a superflat world: grass at y = -61 and below, air above; `extra` sets blocks by "x,y,z"
@@ -95,4 +95,26 @@ test('placeBlock into lava only when asked (intoFluid): a pedestal in a lava lak
   await assert.rejects(placeBlock(bot, { pos: new Vec3(0, 47, 0), item: 'cobblestone' }), /lava is at/)
   // asked to: it gets past the check to the inventory and the place (the fake has no hands for it)
   await assert.rejects(placeBlock(bot, { pos: new Vec3(0, 47, 0), item: 'cobblestone', against: new Vec3(0, 46, 0), intoFluid: true }), (err: any) => !/lava is at/.test(err.message))
+})
+
+test('findBedPlacementNear: foot, head and a cell behind the foot to face along it from, all on ground, off the cells to avoid', () => {
+  // a corridor 1 wide along x at z 0 (walls at z -1 and 1), open from x -2 to 8: the bed lies along it
+  const extra: Record<string, string> = {}
+  for (let x = -6; x <= 12; x++) for (const z of [-1, 1]) for (const y of [-60, -59]) extra[`${x},${y},${z}`] = 'stone'
+  for (const y of [-60, -59]) { extra[`-3,${y},0`] = 'stone'; extra[`9,${y},0`] = 'stone' }
+  const world = flat(extra)
+  const near = new Vec3(0, -60, 0)
+  const spot = findBedPlacementNear(world, near, 5)
+  assert.ok(spot != null)
+  assert.strictEqual(spot.facing.z, 0)
+  for (const p of [spot.foot, spot.head, spot.stand]) assert.strictEqual(p.z, 0)
+  assert.deepStrictEqual(spot.head.minus(spot.foot), spot.facing)
+  assert.deepStrictEqual(spot.foot.minus(spot.stand), spot.facing)
+  // the cells by the start kept off (a portal there): the bed further along
+  const away = findBedPlacementNear(world, near, 5, p => p.x < 3)
+  assert.ok(away != null && [away.foot, away.head, away.stand].every(p => p.x >= 3))
+  // a single free cell (findPlacement's pick) is no room for one
+  const closed: Record<string, string> = {}
+  for (let x = -6; x <= 6; x++) for (let z = -6; z <= 6; z++) for (const y of [-60, -59]) if (x !== 0 || z !== 0) closed[`${x},${y},${z}`] = 'stone'
+  assert.strictEqual(findBedPlacementNear(flat(closed), near, 5), null)
 })

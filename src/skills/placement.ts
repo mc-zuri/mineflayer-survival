@@ -104,3 +104,35 @@ export function findBedPlacement (lookup: BlockLookup, botPosition: Vec3): BedPl
   }
   return null
 }
+
+/**
+ * A bed's two cells within `radius` of `near` (feet level, a block down or up), both free with solid ground under, and
+ * a cell behind the foot for the bot to stand in and face along the bed from (BedItem puts the head the way the
+ * player faces; with only the foot's cell picked, a bed put down facing a wall or the drop beside it fails); none of
+ * the three where `avoid` says; the nearest to `near` first
+ */
+export function findBedPlacementNear (lookup: BlockLookup, near: Vec3, radius = 5, avoid?: (pos: Vec3) => boolean): (BedPlacement & { stand: Vec3 }) | null {
+  const start = near.floored()
+  let best: (BedPlacement & { stand: Vec3 }) | null = null
+  let bestScore = Infinity
+  const ground = (pos: Vec3): boolean => isFree(lookup(pos)) && isSolid(lookup(pos.offset(0, -1, 0))) && avoid?.(pos) !== true
+  for (const dy of [0, -1, 1]) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        const score = Math.hypot(dx, dz) + Math.abs(dy) * 1.5
+        if (score >= bestScore) continue
+        const foot = start.offset(dx, dy, dz)
+        if (!ground(foot)) continue
+        for (const facing of CARDINALS) {
+          const head = foot.plus(facing)
+          const stand = foot.minus(facing)
+          if (!ground(head) || !ground(stand) || !isFree(lookup(stand.offset(0, 1, 0)))) continue
+          best = { foot, head, facing, stand }
+          bestScore = score
+          break
+        }
+      }
+    }
+  }
+  return best
+}

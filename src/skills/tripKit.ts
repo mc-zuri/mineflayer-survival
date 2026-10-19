@@ -9,7 +9,9 @@ import type { WorldMemory } from '../core/memory'
 import { isBed } from '../core/items'
 import { SkillError, isAbort, throwIfAborted } from './errors'
 import { placeBlock } from './placeBlock'
-import { findPlacement } from './placement'
+import { findBedPlacementNear, findPlacement } from './placement'
+import { navigate } from './navigate'
+import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { retrieveItems, storeItems } from './chest'
 import { trace, waitTicks } from './util'
 
@@ -27,6 +29,27 @@ const PICKAXES = ['netherite_pickaxe', 'diamond_pickaxe', 'iron_pickaxe', 'stone
 /** the blocks of a portal: a chest or bed is kept 2 blocks off them (a bed put down in front of a nether portal in a
  * cave left the bot standing on it with 'no way to the portal', five times, 26.3) */
 const PORTAL_BLOCKS = new Set(['nether_portal', 'obsidian', 'end_portal', 'end_portal_frame'])
+
+/**
+ * A bed put down within 5 blocks of `near` (findBedPlacementNear, off the portal's blocks), from the cell behind its
+ * foot facing along it, and used to set the respawn point (BedBlock.useWithoutItem: ServerPlayer.setRespawnPosition, by
+ * day too); its foot, or null with no room for one. A bed put down from where the bot stood, the way it happened to
+ * face, failed by a 26.3 stronghold's portal room, and a death in the End was a respawn at the world's spawn, 2400
+ * blocks off, and a walk back through two nights.
+ */
+export async function placeSpawnBed (bot: Bot, near: Vec3, item: string, signal?: AbortSignal): Promise<Vec3 | null> {
+  const lookup = (p: Vec3): any => bot.blockAt(p)
+  const spot = findBedPlacementNear(lookup, near, 5, p => nearPortal(lookup, p))
+  if (spot == null) return null
+  await navigate(bot, { goal: new goals.GoalBlock(spot.stand.x, spot.stand.y, spot.stand.z) }, signal)
+  await bot.lookAt(spot.head.offset(0.5, 0, 0.5), true)
+  await placeBlock(bot, { pos: spot.foot, item, against: spot.foot.offset(0, -1, 0) }, signal)
+  const block = bot.blockAt(spot.foot)
+  if (block == null || !isBed(block.name)) return null
+  await bot.activateBlock(block as any)
+  await waitTicks(bot, 10, signal)
+  return spot.foot
+}
 
 export function nearPortal (lookup: (p: Vec3) => any, pos: Vec3): boolean {
   for (let dx = -2; dx <= 2; dx++) for (let dy = -1; dy <= 3; dy++) for (let dz = -2; dz <= 2; dz++) if (PORTAL_BLOCKS.has(lookup(pos.offset(dx, dy, dz))?.name)) return true
@@ -138,21 +161,12 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
   const bedThere = memory.getPois('spawn_bed', { dimension: 'overworld', near: pos }).find(b => new Vec3(b.x, b.y, b.z).distanceTo(pos) <= 4 && isBed(bot.blockAt(new Vec3(b.x, b.y, b.z))?.name ?? ''))
   if (bedThere != null) bed = new Vec3(bedThere.x, bedThere.y, bedThere.z)
   if (held != null && bedThere == null) {
-    const at = findPlacement(lookup, pos, { radius: 3, avoid: p => nearPortal(lookup, p) })
-    if (at != null) {
-      try {
-        await placeBlock(bot, { pos: at, item: held.name, facing: new Vec3(1, 0, 0) }, signal)
-        const block = bot.blockAt(at)
-        if (block != null && isBed(block.name)) {
-          await bot.activateBlock(block as any)
-          await waitTicks(bot, 10, signal)
-          bed = at
-          memory.addPoi('spawn_bed', at, 'overworld', 'by the trip kit')
-        }
-      } catch (err) {
-        if (isAbort(err)) throw err
-        trace('stashTripKit: the bed:', (err as Error).message)
-      }
+    try {
+      bed = await placeSpawnBed(bot, pos, held.name, signal)
+      if (bed != null) memory.addPoi('spawn_bed', bed, 'overworld', 'by the trip kit')
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('stashTripKit: the bed:', (err as Error).message)
     }
   }
   trace('stashTripKit: at', pos.toString(), JSON.stringify(stored), bed != null ? `bed at ${bed.toString()}` : 'no bed')
