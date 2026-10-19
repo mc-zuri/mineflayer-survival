@@ -88,6 +88,17 @@ test('netherMoveSettings: magma underfoot is no place to stand, and a ledge over
   assert.equal(netherMoveSettings(bot, { edgeCost: 10 }).edgeHazardCost, 10)
 })
 
+test('netherMoveSettings: a cell up in the rock under the nether roof (over y 100) costs 12 more, one at 100 or under none', async () => {
+  const { NETHER_HIGH_Y } = await import('../../src/nether/safety')
+  const bot = fakeBot()
+  const reg = bot.registry
+  bot.world = { getBlockStateId: (p: Vec3) => (p.y % 2 === 0 ? reg.blocksByName.air.defaultState : reg.blocksByName.netherrack.defaultState) }
+  const step = netherMoveSettings(bot).exclusionAreasStep?.[0] as any
+  assert.equal(step({ position: new Vec3(0, NETHER_HIGH_Y, 0), type: 0 }), 0)
+  assert.equal(step({ position: new Vec3(0, NETHER_HIGH_Y + 2, 0), type: 0 }), 12)
+  assert.equal((netherMoveSettings(bot, { highCost: 0 }).exclusionAreasStep?.[0] as any)({ position: new Vec3(0, NETHER_HIGH_Y + 2, 0), type: 0 }), 0)
+})
+
 test('withNetherSafety lays the nether settings over once (nested, as it is), and the executor\'s tasks in the nether have them', async () => {
   const { withNetherSafety, hasNetherSafety } = await import('../../src/nether/safety')
   const { Executor } = await import('../../src/executor/executor')

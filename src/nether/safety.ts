@@ -49,7 +49,16 @@ export interface NetherSafetyOptions {
   edgeCost?: number
   /** a higher cost near the nether's deaths remembered (rememberNetherDeath) (default true) */
   avoidDeaths?: boolean
+  /**
+   * ticks on top for each cell a path stands in over NETHER_HIGH_Y (default 12): up in the rock under the nether's
+   * roof, where the deadly edges are none, a path tunnels along well, and the way back down to anything (a fortress's
+   * decks at 48 to 70, the portal) is a drop into the caverns under it
+   */
+  highCost?: number
 }
+
+/** the height over which a nether path's cells cost more (highCost): the rock under the roof (bedrock from 123) */
+export const NETHER_HIGH_Y = 100
 
 interface BlockInfoLike { position: Vec3, type: number }
 
@@ -98,6 +107,7 @@ export function overLava (isLava: (pos: Vec3) => boolean, isAir: (pos: Vec3) => 
 export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): Partial<MovementOptions> {
   const gap = opts.lavaGap ?? 1
   const nearCost = opts.nearLavaCost ?? 40
+  const highCost = opts.highCost ?? 12
   // the A* asks about every cell it considers, many times: the answers are kept, and dropped every 100 ticks (lava
   // flows slowly, a bucket's lava or a broken block shows up then)
   const lavaStates = stateRange(bot, 'lava')
@@ -148,6 +158,7 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
     if (isLava(p) || isLava(p.offset(0, 1, 0)) || isLava(p.offset(0, -1, 0)) || lavaBeside(isLava, p, gap) || isMagma(p.offset(0, -1, 0))) cost = FORBID
     else if (nearCost > 0 && lavaBeside(isLava, p, gap + 1)) cost = nearCost
     if (cost < FORBID && deaths.length > 0 && nearDeath(deaths, p)) cost += NETHER_DEATH_COST
+    if (cost < FORBID && p.y > NETHER_HIGH_Y) cost += highCost
     stepCache.set(key, cost)
     return cost
   }
