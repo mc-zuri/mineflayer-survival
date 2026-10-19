@@ -85,3 +85,25 @@ test('the farm and the spawners are kept in the memory', () => {
   assert.equal(nearestXpFarm(memory, new Vec3(1000, 60, 50)), null)
   assert.equal(nearestXpFarm(memory, new Vec3(10, 20, 10), 'the_nether'), null)
 })
+
+test('the pathfinder is kept out of the farm\'s room (the booth left in) and off its barrier, once a farm', async () => {
+  const { boothSides, keepOutOfFarm } = await import('../../src/skills/spawnerFarm')
+  const settings: any = { exclusionAreasStep: [], exclusionAreasBreak: [] }
+  const bot: any = { pathfinder: { defaultMoveSettings: settings, setMoveOptions: (s: any) => { bot.pathfinder.defaultMoveSettings = s } } }
+  const farm = { spawner: new Vec3(0, 20, 0), stand: new Vec3(5, 20, 0), barrier: new Vec3(4, 20, 0) }
+  keepOutOfFarm(bot, farm)
+  keepOutOfFarm(bot, farm)
+  const s = bot.pathfinder.defaultMoveSettings
+  assert.equal(s.exclusionAreasStep.length, 1)
+  const step = (p: Vec3): number => s.exclusionAreasStep[0]({ position: p })
+  const brk = (p: Vec3): number => s.exclusionAreasBreak[0]({ position: p })
+  assert.ok(step(new Vec3(2, 20, 1)) >= 1e9 && step(new Vec3(-3, 19, 3)) >= 1e9)
+  assert.equal(step(new Vec3(5, 20, 0)), 0)
+  assert.equal(step(new Vec3(4, 21, 7)), 0)
+  assert.ok(brk(new Vec3(4, 20, 0)) >= 1e9 && brk(new Vec3(4, 22, 0)) >= 1e9)
+  assert.equal(brk(new Vec3(4, 21, 0)), 0)
+  // the booth's sides to fill: not the slit's way, the head's cell over it
+  const sides = boothSides(farm).map(p => p.toString())
+  assert.equal(sides.length, 7)
+  assert.ok(!sides.includes(new Vec3(4, 20, 0).toString()) && sides.includes(new Vec3(6, 21, 0).toString()) && sides.includes(new Vec3(5, 22, 0).toString()))
+})
