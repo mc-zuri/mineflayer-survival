@@ -965,6 +965,9 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
   const blocks = countItems(bot, SCAFFOLD_ITEMS)
   if (blocks < END_BLOCKS) {
     log(`End: ${blocks} blocks to pillar with: digging end stone`)
+    // room for it (a full bag dug none, 'NO_SPACE', and the fights failed five times at once, 'short of blocks to
+    // pillar up', 26.3)
+    if ((bot.inventory.emptySlotCount?.() ?? 9) < 2) await executor.makeRoom?.({ end_stone: 64, arrow: 64, ender_pearl: 16 }, signal, true)
     await executor.task('end stone', async (s) => await collectBlock(bot, { names: ['end_stone'], count: END_BLOCKS - blocks, maxDistance: 32 }, s), signal).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`End: end stone: ${(err as Error).message}`)

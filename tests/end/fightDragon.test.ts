@@ -75,3 +75,22 @@ test('the end milestone gets a bow and arrows before the End, not optional: no b
   assert.deepStrictEqual(calls, ['bow?', 'bow,arrow'])
   assert.ok(END_ARROWS > 0)
 })
+
+test('in the End with few blocks and a full bag, room is made before the end stone is dug', async () => {
+  const { endHandler } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('bow', 1), item('arrow', 64), item('cobblestone', 15)] })
+  bot.game.dimension = 'the_end'
+  ;(bot.inventory as any).emptySlotCount = () => 0
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    makeRoom: async (_n: unknown, _s: unknown, force: boolean) => { calls.push(`room ${String(force)}`) },
+    obtain: async () => {},
+    task: async (name: string) => { calls.push(name); if (name === 'fight the dragon') throw new Error('stop here') }
+  }
+  await assert.rejects(endHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: { goals: () => [] } as any, state: null as any }), /stop here/)
+  assert.ok(calls.indexOf('room true') >= 0 && calls.indexOf('room true') < calls.indexOf('end stone'), calls.join(', '))
+})
