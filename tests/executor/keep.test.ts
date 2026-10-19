@@ -92,6 +92,17 @@ test('spare kit: a second pickaxe, sword and axe at the carried tier, and 20 foo
   assert.deepEqual(spareKitGoals(new Inventory(registry, { wooden_pickaxe: 1 }), { bread: 4 }), [])
 })
 
+test('spare kit: a bucket too once one is carried, none when the chests hold one (of water or lava too)', async () => {
+  const { spareKitGoals } = await import('../../src/executor/keep')
+  const { Inventory } = await import('../../src/core/inventory')
+  const registry = require('minecraft-data')('1.21.11')
+  const carried = new Inventory(registry, { water_bucket: 1, bucket: 1, bread: 10 })
+  const goals = spareKitGoals(carried, { bread: 10 })
+  assert.deepEqual(goals, [{ item: ['bucket'], count: 2 }])
+  assert.deepEqual(spareKitGoals(carried, { bread: 10, water_bucket: 1 }), [])
+  assert.deepEqual(spareKitGoals(new Inventory(registry, { bread: 10 }), { bread: 10 }), [])
+})
+
 test('junkToToss: after the junk, what surplus names may go beyond its kept count (the stock with no base), never below it', async () => {
   const registry = minecraftData('1.21.11')
   const { StockPolicy } = await import('../../src/planner/stock')

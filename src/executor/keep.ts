@@ -307,6 +307,9 @@ export function spareKitGoals (carried: Inventory, stored: Readonly<Record<strin
     if (alts.some(a => (stored[a] ?? 0) > 0)) continue
     goals.push({ item: alts, count: carried.countAny(alts) + 1 })
   }
+  // a bucket too once one is carried (a bot back from a death with none had no water for a cast frame nor a fall)
+  const buckets = ['bucket', 'water_bucket', 'lava_bucket']
+  if (carried.countAny(buckets) > 0 && !buckets.some(b => (stored[b] ?? 0) > 0)) goals.push({ item: ['bucket'], count: carried.count('bucket') + 1 })
   const storedPoints = Object.entries(stored).reduce((n, [name, c]) => n + c * unitValue({ unit: 'nutrition' }, name, carried.registry), 0)
   if (storedPoints < SPARE_FOOD_POINTS) {
     goals.push({ item: FOOD_GOAL, count: heldFor(carried, FOOD_GOAL, { unit: 'nutrition' }) + SPARE_FOOD_POINTS - storedPoints, unit: 'nutrition' })
