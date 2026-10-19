@@ -162,3 +162,13 @@ test('dropLanding: a short drop onto ground is a step; a long one, or onto lava 
   assert.strictEqual(dropLanding(room(55), new Vec3(0, 64, 0), 4), null)
   assert.strictEqual(dropLanding(room(60, 'lava'), new Vec3(0, 64, 0), 4), null)
 })
+
+test('GoalNearXZBand: near on x and z with the feet within the band of the height; its heuristic counts the height past the band', async () => {
+  const { GoalNearXZBand } = await import('../../src/skills/travel')
+  const goal = new GoalNearXZBand(100, 0, 6, 64, 20)
+  assert.strictEqual(goal.isEnd({ x: 104, y: 80, z: 3 }), true)
+  assert.strictEqual(goal.isEnd({ x: 104, y: 110, z: 3 }), false, 'up in the rock under the roof')
+  assert.strictEqual(goal.isEnd({ x: 90, y: 64, z: 0 }), false)
+  assert.strictEqual(goal.distHeuristic({ x: 100, y: 110, z: 0 }), 26)
+  assert.strictEqual(goal.distHeuristic({ x: 97, y: 70, z: 4 }), 5)
+})

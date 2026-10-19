@@ -10,6 +10,39 @@ import { trace, waitTicks, waitUntil } from './util'
 import { normalizeDimension } from '../core/memory'
 import { trailRoute } from '../nether/trail'
 
+/** the heuristic's ticks a block of the pathfinder's goals (COST_HEURISTIC: 20 / 4.317, a sprint's) */
+const HEURISTIC_PER_BLOCK = 20 / 4.317
+
+/**
+ * Near a point on x and z (as GoalNearXZ), with the feet within `band` blocks of a height: a nether hop's goal. On x
+ * and z alone, the path ended where it was cheapest, and with the nether's ledges dear that was up in the rock under
+ * the roof, 40 blocks over the fortress's decks and no way down to them (26.3)
+ */
+export class GoalNearXZBand extends goals.Goal {
+  constructor (readonly x: number, readonly z: number, readonly distance: number, readonly y: number, readonly band: number) {
+    super()
+  }
+
+  isEnd (node: { x: number, y: number, z: number }): boolean {
+    return Math.abs(node.x - this.x) <= this.distance && Math.abs(node.z - this.z) <= this.distance && Math.abs(node.y - this.y) <= this.band
+  }
+
+  private off (node: { x: number, y: number, z: number }): number {
+    return Math.hypot(this.x - node.x, this.z - node.z) + Math.max(0, Math.abs(node.y - this.y) - this.band)
+  }
+
+  heuristic (node: any): number {
+    return this.off(node) * HEURISTIC_PER_BLOCK
+  }
+
+  distHeuristic (node: any): number {
+    return this.off(node)
+  }
+}
+
+/** how far over or under the target's height a nether hop may end (GoalNearXZBand) */
+export const NETHER_HOP_BAND = 20
+
 /** hops in a row that leave the bot where it was before a trip is given up */
 export const TRAVEL_STILL_HOPS = 8
 
@@ -182,9 +215,14 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
         const p = hopPoint(pos, target, hop * scale, turn)
         const loaded = await waitUntil(bot, () => bot.world.getColumnAt?.(new Vec3(p.x, 0, p.z)) != null || (bot.world as any).getColumn?.(Math.floor(p.x) >> 4, Math.floor(p.z) >> 4) != null, 100, signal)
         if (!loaded && !p.last) continue
+        // in the nether, the hops end within NETHER_HOP_BAND of the target's height
+        const nether = normalizeDimension(bot.game?.dimension) === 'the_nether'
+        const near = (x: number, z: number, d: number): goals.Goal => nether
+          ? new GoalNearXZBand(Math.floor(x), Math.floor(z), d, Math.floor(target.y), NETHER_HOP_BAND)
+          : new goals.GoalNearXZ(Math.floor(x), Math.floor(z), d)
         const goal = p.last
-          ? (args.exactY === true ? new goals.GoalNear(Math.floor(target.x), Math.floor(target.y), Math.floor(target.z), range) : new goals.GoalNearXZ(Math.floor(target.x), Math.floor(target.z), range))
-          : new goals.GoalNearXZ(Math.floor(p.x), Math.floor(p.z), Math.max(4, Math.round(hop * scale / 6)))
+          ? (args.exactY === true ? new goals.GoalNear(Math.floor(target.x), Math.floor(target.y), Math.floor(target.z), range) : near(target.x, target.z, range))
+          : near(p.x, p.z, Math.max(4, Math.round(hop * scale / 6)))
         const before = bot.entity.position.clone()
         // the grid walk first, over walkable ground (it walks block middle to block middle, where the pathfinder's
         // executor catches on corners), then the pathfinder, which also swims, digs and builds
