@@ -45,7 +45,7 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
     obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs.map(r => `${r.count} ${r.item}`).join(', ')}`) },
     task: async (name: string) => { calls.push(name); return { fortress: { center: { x: 0, y: 64, z: 0 } }, via: 'explore', ticks: 0 } }
   }
-  const bot = fakeBot({ items: [item('water_bucket', 1), item('bucket', 2), item('diamond_pickaxe', 1)] })
+  const bot = fakeBot({ items: [item('water_bucket', 1), item('bucket', 2), item('diamond_pickaxe', 1), ...NETHER_GEAR()] })
   bot.game.dimension = 'overworld'
   bot.findBlocks = () => []
   await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any })
@@ -235,21 +235,58 @@ test('a pool the tunnel stops short of, within 8 blocks, is worked from there', 
   assert.equal(calls[calls.indexOf('to the lava') + 1], 'build a nether portal', calls.join(', '))
 })
 
+/** puts items in a fake bot's first empty bag slots */
+function giveTo (bot: any, items: any[]): void {
+  for (const it of items) {
+    const slot = bot.inventory.slots.findIndex((s: any, i: number) => i >= 9 && i < 45 && s == null)
+    bot.inventory.slots[slot] = it
+  }
+}
+
+/** what netherGearNeeds asks for, so a test bot goes in */
+function NETHER_GEAR (): any[] {
+  const { item } = require('../reflexes/fakeBot')
+  return [item('diamond_sword', 1), item('iron_chestplate', 1), item('golden_boots', 1), item('cooked_beef', 8)]
+}
+
+test('netherKit: the bot does not go in without a sword, armor, gold and food: got, else the milestone fails', async () => {
+  const { netherKit, netherGearNeeds } = await import('../../src/milestones')
+  const { ownedInventory } = await import('../../src/executor/executor')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bare = fakeBot({ items: [item('dirt', 3)] })
+  assert.deepStrictEqual(netherGearNeeds(ownedInventory(bare)).map(r => r.unit === 'nutrition' ? 'food' : r.item), ['stone_sword', 'iron_chestplate', 'golden_boots', 'food'])
+  assert.deepStrictEqual(netherGearNeeds(ownedInventory(fakeBot({ items: NETHER_GEAR() }))), [])
+  // 4 ingots do for the boots (made by the kit)
+  assert.deepStrictEqual(netherGearNeeds(ownedInventory(fakeBot({ items: [item('iron_sword', 1), item('iron_chestplate', 1), item('gold_ingot', 4), item('bread', 6)] }))), [])
+  // nothing comes of the gathering: no going in
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async () => {}, task: async () => {} }
+  await assert.rejects(netherKit(bare, executor, new AbortController().signal, () => {}), /not going into the nether without/)
+  // the gathering gets it: in it goes
+  const got = fakeBot({ items: [item('dirt', 3)] })
+  executor.obtain = async (reqs: any[]) => { if (reqs.some(r => r.item === 'golden_boots')) giveTo(got, NETHER_GEAR()) }
+  await netherKit(got, executor, new AbortController().signal, () => {})
+})
+
 test('netherKit: a sword (stone at least), a chestplate and a shield got when missing, and golden boots made, before the nether', async () => {
   const { netherKit } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ items: [item('stone_pickaxe', 1), item('gold_ingot', 8)] })
+  const bot = fakeBot({ items: [item('stone_pickaxe', 1), item('gold_ingot', 8), item('cooked_beef', 8)] })
   const calls: string[] = []
   const executor: any = {
     memory: new WorldMemory(),
     tasks: { tick: 0 },
-    obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs.map(r => r.item).join(',')}`) },
+    obtain: async (reqs: any[]) => {
+      calls.push(`obtain ${reqs.map(r => r.item).join(',')}`)
+      if (reqs.some(r => r.item === 'iron_chestplate')) giveTo(bot, [item('iron_chestplate', 1)])
+      if (reqs.some(r => r.item === 'stone_sword')) giveTo(bot, [item('stone_sword', 1)])
+      if (reqs.some(r => r.item === 'golden_boots')) giveTo(bot, [item('golden_boots', 1)])
+    },
     task: async (name: string) => { calls.push(name) }
   }
   await netherKit(bot, executor, new AbortController().signal, () => {})
   assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate,shield', 'obtain stone_sword', 'obtain golden_boots'])
   calls.length = 0
-  const armed = fakeBot({ items: [item('diamond_sword', 1), item('diamond_chestplate', 1), item('shield', 1)] })
+  const armed = fakeBot({ items: [item('diamond_sword', 1), item('diamond_chestplate', 1), item('shield', 1), item('golden_boots', 1), item('bread', 8)] })
   await netherKit(armed, executor, new AbortController().signal, () => {})
   assert.deepStrictEqual(calls, [])
 })
@@ -285,7 +322,7 @@ test('the nether pearl legs spiral out from where the search began, no point twi
 test('a way in through the remembered portal that fails makes another the milestone\'s way, then goes in', async () => {
   const { netherHandler } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ items: [item('obsidian', 10), item('diamond_sword', 1), item('iron_chestplate', 1)] })
+  const bot = fakeBot({ items: [item('obsidian', 10), ...NETHER_GEAR()] })
   bot.game.dimension = 'overworld'
   const memory = new WorldMemory()
   memory.addPoi('nether_portal', { x: 3, y: 64, z: 0 }, 'overworld', 'built')

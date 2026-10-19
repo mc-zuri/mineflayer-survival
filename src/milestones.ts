@@ -4,7 +4,7 @@
 // through, the dragon fought, out by the exit portal). Each skill runs as one foreground task, so the reflexes still
 // preempt it (it starts over after).
 import type { Bot } from 'mineflayer'
-import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, eyesForPortal } from './planner/progression'
+import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, FOOD_GOAL, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
 import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, huntable, isAdultPiglin, returnOverworld, wearGold, wearingGold, withNetherSafety } from './nether/skills'
 import { travel } from './skills/travel'
@@ -14,7 +14,7 @@ import { obsidianFromLava, refillWater } from './nether/obsidian'
 import { descendTo, ensureSurface, spiralWaypoints } from './executor/explore'
 import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
-import { isAbort, isSkillError } from './skills/errors'
+import { SkillError, isAbort, isSkillError } from './skills/errors'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, overland, strongholdToPortalRoom } from './end/strongholdSkills'
 import { crossToIsland, enterEnd, fightDragon, gotoNear, isInEnd, leaveEnd, readPortalRoom, rememberGateways, SCAFFOLD_ITEMS, visibleGateways } from './end/skills'
@@ -35,7 +35,9 @@ import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
 import { findFarmSite, knownFarms, plantFarm, rememberFarm, SEED_OF } from './skills/farm'
-import { ownedInventory, type Executor } from './executor/executor'
+import { describeRequest, ownedInventory, type Executor } from './executor/executor'
+import { heldFor, type ObtainRequest } from './planner/obtain'
+import type { Inventory } from './core/inventory'
 import { Vec3 } from 'vec3'
 import { findBlocks } from './core/findBlocks'
 import { nearestBiomeSpot, pearlLeg } from './nether/ground'
@@ -661,10 +663,42 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
       log(`nether kit: no golden boots: ${(err as Error).message}`)
     })
   }
+  // what the bot doesn't go in without, gathered (the gold mined, the armor's iron, food) within NETHER_GEAR_TICKS;
+  // still short, the milestone fails and is tried again rather than going in bare
+  if (inNether(bot)) return
+  const missing = netherGearNeeds(ownedInventory(bot))
+  if (missing.length === 0) return
+  log(`nether kit: getting ${missing.map(describeRequest).join(', ')} before going in`)
+  await withTickBudget(bot, NETHER_GEAR_TICKS, signal, async (s) => await executor.obtain(missing, s)).catch(err => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`nether kit: ${(err as Error).message}`)
+  })
+  const still = netherGearNeeds(ownedInventory(bot))
+  if (still.length > 0) throw new SkillError('MISSING_ITEMS', `not going into the nether without ${still.map(describeRequest).join(', ')}`)
 }
 
 const GOLD_PIECES = ['golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots']
 const SWORDS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'golden_sword', 'wooden_sword']
+
+/** the food points the bot goes into the nether with at the least */
+export const NETHER_FOOD_POINTS = 30
+/** the ticks the gear for the nether may take to get, when it's missing */
+export const NETHER_GEAR_TICKS = 48000
+
+/**
+ * What the bot doesn't go into the nether without (worn or carried): a sword, an iron chestplate or better, a golden
+ * piece (or the 4 ingots for boots) for the piglins, and NETHER_FOOD_POINTS of food. After a death the bot went back
+ * in bare, no gold and no armor, and died to the piglins, the blazes or the lava again (26.3).
+ */
+export function netherGearNeeds (inv: Inventory): ObtainRequest[] {
+  const out: ObtainRequest[] = []
+  if (inv.countAny(SWORDS.filter(s => s !== 'wooden_sword' && s !== 'golden_sword')) === 0) out.push({ item: 'stone_sword', count: 1 })
+  if (inv.countAny(['iron_chestplate', 'diamond_chestplate', 'netherite_chestplate']) === 0) out.push({ item: 'iron_chestplate', count: 1 })
+  if (inv.countAny(GOLD_PIECES) === 0 && inv.count('gold_ingot') < 4) out.push({ item: 'golden_boots', count: 1 })
+  const food = heldFor(inv, FOOD_GOAL, { unit: 'nutrition' })
+  if (food < NETHER_FOOD_POINTS) out.push({ item: FOOD_GOAL, count: NETHER_FOOD_POINTS, unit: 'nutrition' })
+  return out
+}
 
 /** the golden piece put on in the nether, when one is held or can be made (the piglins leave such a player alone) */
 export async function goldOnInTheNether (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
