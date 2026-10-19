@@ -1,4 +1,7 @@
-// Reads a stretch of seed 2's nether from a 26.3 server's chunks into a snapshot for the unit tests' fake world// (tests/fixtures/nether-seed2-delta.json.gz, tests/nether/netherSnapshot.ts)://   node -r ts-node/register/transpile-only tests/e2e/netherSnapshot.ts <out.json.gz> x0 z0 x1 z1 y0 y1// (the fixture: 240 -64 495 127 24 119)
+// Reads a stretch of seed 2's nether from a 26.3 server's chunks into a snapshot for the unit tests' fake world
+// (tests/fixtures/nether-seed2-delta.json.gz, tests/nether/netherSnapshot.ts):
+//   node -r ts-node/register/transpile-only tests/e2e/netherSnapshot.ts <out.json.gz> x0 z0 x1 z1 y0 y1
+// (the fixture: 240 -64 495 127 24 119)
 import * as fs from 'node:fs'
 import * as zlib from 'node:zlib'
 import { Vec3 } from 'vec3'
