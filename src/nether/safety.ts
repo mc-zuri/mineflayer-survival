@@ -104,6 +104,91 @@ export function overLava (isLava: (pos: Vec3) => boolean, isAir: (pos: Vec3) => 
   return false
 }
 
+/** a cell's kind for the nether's rules (NetherCellKinds) */
+export const CELL_LAVA = 1
+export const CELL_MAGMA = 2
+export const CELL_AIR = 4
+const CELL_UNREAD = 0x80
+
+/** a cell's key: x and z to 20 bits (wrapped), y to 12 */
+function cellKey (x: number, y: number, z: number): number {
+  return ((x & 0xfffff) * 0x100000 + (z & 0xfffff)) * 0x1000 + ((y + 2048) & 0xfff)
+}
+
+/**
+ * The cells' kinds (lava, magma, air) for the nether's rules, kept by 16³ section and each cell read once from its
+ * column's state id until clear(): the A* asks about each cell many times (a step's lava round it is 50 cells, its
+ * neighbours' the same cells again). A cell where the world has no column is none of them, and not kept.
+ */
+export class NetherCellKinds {
+  private readonly kindByState: Uint8Array
+  private readonly sections = new Map<number, { cells: Uint8Array, column: any }>()
+  private lastKey = NaN
+  private last: { cells: Uint8Array, column: any } | undefined
+  private readonly local = new Vec3(0, 0, 0)
+
+  constructor (private readonly bot: Bot) {
+    let max = 0
+    for (const b of bot.registry.blocksArray as any[]) if (typeof b.maxStateId === 'number') max = Math.max(max, b.maxStateId)
+    this.kindByState = new Uint8Array(max + 1)
+    const mark = (name: string, kind: number): void => {
+      const [a, b] = stateRange(bot, name)
+      if (a >= 0) this.kindByState.fill(kind, a, b + 1)
+    }
+    mark('lava', CELL_LAVA)
+    mark('magma_block', CELL_MAGMA)
+    for (const n of ['air', 'cave_air', 'void_air']) mark(n, CELL_AIR)
+  }
+
+  clear (): void {
+    this.sections.clear()
+    this.lastKey = NaN
+    this.last = undefined
+  }
+
+  kindAt (x: number, y: number, z: number): number {
+    const world = this.bot.world as any
+    if (typeof world?.getColumnAt !== 'function') {
+      // (a world without columns, the unit tests' fake ones)
+      const s = world?.getBlockStateId?.(new Vec3(x, y, z))
+      return s == null ? 0 : this.kindByState[s] ?? 0
+    }
+    const key = (((x >> 4) & 0xfffff) * 0x100000 + ((z >> 4) & 0xfffff)) * 0x100 + (((y >> 4) + 128) & 0xff)
+    let section = key === this.lastKey ? this.last : this.sections.get(key)
+    if (section == null) {
+      const column = world.getColumnAt(this.local.set(x, y, z))
+      if (column == null) return 0
+      section = { cells: new Uint8Array(4096).fill(CELL_UNREAD), column }
+      this.sections.set(key, section)
+    }
+    this.lastKey = key
+    this.last = section
+    const i = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15)
+    let kind = section.cells[i]
+    if (kind === CELL_UNREAD) {
+      kind = this.kindByState[section.column.getBlockStateId(this.local.set(x & 15, y, z & 15))] ?? 0
+      section.cells[i] = kind
+    }
+    return kind
+  }
+
+  isLava (x: number, y: number, z: number): boolean {
+    return this.kindAt(x, y, z) === CELL_LAVA
+  }
+
+  /** lavaBeside, by the kinds kept */
+  lavaBeside (x: number, y: number, z: number, r: number): boolean {
+    for (let dy = 0; dy <= 1; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
+        for (let dz = -r; dz <= r; dz++) {
+          if ((dx !== 0 || dz !== 0) && this.kindAt(x + dx, y + dy, z + dz) === CELL_LAVA) return true
+        }
+      }
+    }
+    return false
+  }
+}
+
 /**
  * The pathfinder's movement settings for the nether: exclusion areas (the pathfinder's own hook) that forbid
  * standing next to lava or on magma, breaking a block lava rests against, placing a block over lava (the
@@ -118,31 +203,17 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
   const lavaBelow = opts.lavaBelow ?? 0
   // the A* asks about every cell it considers, many times: the answers are kept, and dropped every 100 ticks (lava
   // flows slowly, a bucket's lava or a broken block shows up then)
-  const lavaStates = stateRange(bot, 'lava')
-  const airStates = ['air', 'cave_air', 'void_air'].map(n => stateRange(bot, n))
-  const stateAt = (p: Vec3): number | null => (bot.world as any).getBlockStateId?.(p) ?? null
-  const lavaCache = new Map<string, boolean>()
-  const stepCache = new Map<string, number>()
+  const cells = new NetherCellKinds(bot)
+  const stepCache = new Map<number, number>()
   let cachedAt = -1
   const fresh = (): void => {
     const tick = (bot as any).lockstep?.ticks ?? Math.floor(Date.now() / 50)
-    if (tick - cachedAt > 100 || tick < cachedAt) { lavaCache.clear(); stepCache.clear(); cachedAt = tick }
+    if (tick - cachedAt > 100 || tick < cachedAt) { cells.clear(); stepCache.clear(); cachedAt = tick }
   }
-  const isLava = (p: Vec3): boolean => {
-    const key = `${p.x},${p.y},${p.z}`
-    let v = lavaCache.get(key)
-    if (v == null) {
-      const s = stateAt(p)
-      v = s != null && s >= lavaStates[0] && s <= lavaStates[1]
-      lavaCache.set(key, v)
-    }
-    return v
-  }
+  const isLava = (p: Vec3): boolean => cells.isLava(p.x, p.y, p.z)
+  const isAir = (p: Vec3): boolean => cells.kindAt(p.x, p.y, p.z) === CELL_AIR
   // where the bot died in the nether: kept away from (rememberNetherDeath)
   const deaths: Pos[] = opts.avoidDeaths === false ? [] : (bot.survival?.memory?.getPois('nether_death', { dimension: 'the_nether' }) ?? [])
-  const magmaStates = stateRange(bot, 'magma_block')
-  const isMagma = (p: Vec3): boolean => { const s = stateAt(p); return s != null && s >= magmaStates[0] && s <= magmaStates[1] }
-  const isAir = (p: Vec3): boolean => { const s = stateAt(p); return s != null && airStates.some(([a, b]) => s >= a && s <= b) }
   const guarded = new Set([...PIGLIN_GUARDED].map(n => bot.registry.blocksByName[n]?.id).filter((n): n is number => n != null))
   let piglinCheckTick = -1
   let piglinNear = false
@@ -156,18 +227,18 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
   }
   const step = (block: BlockInfoLike): number => {
     fresh()
-    const p = block.position
-    const key = `${p.x},${p.y},${p.z}`
+    const { x, y, z } = block.position
+    const key = cellKey(x, y, z)
     const known = stepCache.get(key)
     if (known != null) return known
     let cost = 0
     // (a magma block hurts a player standing on it who isn't sneaking, MagmaBlock.stepOn, and lies round the basalt
     // deltas' lava pockets)
-    if (isLava(p) || isLava(p.offset(0, 1, 0)) || isLava(p.offset(0, -1, 0)) || lavaBeside(isLava, p, gap) || isMagma(p.offset(0, -1, 0))) cost = FORBID
-    else if (lavaBelow > 0 && Array.from({ length: lavaBelow }, (_, i) => p.offset(0, -2 - i, 0)).some(isLava)) cost = FORBID
-    else if (nearCost > 0 && lavaBeside(isLava, p, gap + 1)) cost = nearCost
-    if (cost < FORBID && deaths.length > 0 && nearDeath(deaths, p)) cost += NETHER_DEATH_COST
-    if (cost < FORBID && p.y > NETHER_HIGH_Y) cost += highCost
+    if (cells.isLava(x, y, z) || cells.isLava(x, y + 1, z) || cells.isLava(x, y - 1, z) || cells.lavaBeside(x, y, z, gap) || cells.kindAt(x, y - 1, z) === CELL_MAGMA) cost = FORBID
+    else if (lavaBelow > 0 && Array.from({ length: lavaBelow }, (_, i) => y - 2 - i).some(ly => cells.isLava(x, ly, z))) cost = FORBID
+    else if (nearCost > 0 && cells.lavaBeside(x, y, z, gap + 1)) cost = nearCost
+    if (cost < FORBID && deaths.length > 0 && nearDeath(deaths, block.position)) cost += NETHER_DEATH_COST
+    if (cost < FORBID && y > NETHER_HIGH_Y) cost += highCost
     stepCache.set(key, cost)
     return cost
   }
@@ -177,7 +248,7 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
     if (opts.piglins !== false && guarded.has(block.type) && piglinsAbout()) return FORBID
     return 0
   }
-  const place = (block: BlockInfoLike): number => overLava(isLava, isAir, block.position) ? FORBID : 0
+  const place = (block: BlockInfoLike): number => { fresh(); return overLava(isLava, isAir, block.position) ? FORBID : 0 }
   // a drop ends on the ground: the nether's liquid is lava, no landing (MovementOptions.infiniteLiquidDropdownDistance)
   // (marked: withNetherSafety lays them over the settings once, not again inside another)
   for (const area of [step, breakArea, place]) (area as any).survivalNether = true
