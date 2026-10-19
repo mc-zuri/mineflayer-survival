@@ -198,6 +198,14 @@ export function provoked (ctx: ReflexContext, e: Entity): boolean {
   return at != null && ctx.tick - at <= config.hostiles.retaliateTicks
 }
 
+/**
+ * The mobs that come many at a time, slow and melee alone: a slime or magma cube splits into 2 to 4 smaller ones as it
+ * dies (Slime.remove), down to the smallest. They don't count toward the hostiles reflex's outnumbering of a bot with
+ * the armor and a weapon to fight them: fleeing them about a basalt delta (they hop as fast as the bot runs) took two
+ * 1.21.11 bots in diamond onto its magma blocks, hit all the way, and they died there (tests/integration/blaze, seed 2)
+ */
+export const SWARMERS = new Set(['slime', 'magma_cube'])
+
 /** the mobs that shoot (RangedBowAttackGoal's 15 blocks, RangedCrossbowAttackGoal's 8 and more, the witch's RangedAttackGoal 10) */
 export const RANGED_HOSTILES = new Set(['skeleton', 'stray', 'bogged', 'parched', 'pillager', 'witch'])
 
@@ -224,8 +232,11 @@ export const hostilesReflex: Reflex = {
     if (!config.hostiles.enabled) return null
     const near = hostilesInRange(ctx)
     if (near.length === 0) return null
-    const fightOn = near.length === 1 && armorPoints(bot) >= config.hostiles.fightOnArmor && bestMeleeWeapon(bot) != null
-    const flee = (bot.health <= config.hostiles.fleeHealth && !fightOn) || near.length > config.hostiles.maxFight ||
+    const armed = armorPoints(bot) >= config.hostiles.fightOnArmor && bestMeleeWeapon(bot) != null
+    const fightOn = near.length === 1 && armed
+    // (an armed and armored bot isn't outnumbered by the cubes of a split slime or magma cube: SWARMERS)
+    const outnumbered = (armed ? near.filter(e => !SWARMERS.has(e.name ?? '')) : near).length > config.hostiles.maxFight
+    const flee = (bot.health <= config.hostiles.fleeHealth && !fightOn) || outnumbered ||
       (config.hostiles.fleeUnarmed && bestMeleeWeapon(bot) == null)
     if (flee) {
       return {

@@ -206,6 +206,19 @@ test('hostiles reflex: at low health an armored bot with a weapon fights on agai
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(4)], health: 5, armor: iron, items: [item('iron_sword')] }, { hostiles: { fightOnArmor: 21 } }), 'flee')
 })
 
+test('hostiles reflex: an armed and armored bot is not outnumbered by the cubes of a split magma cube or slime: it fights them; unarmored, or among other mobs, it flees', () => {
+  const cube = (x: number, name = 'magma_cube'): any => entity({ name, position: at(x), meta: { health: 4 } })
+  const zombie = (x: number): any => entity({ name: 'zombie', position: at(x) })
+  const diamond = { head: item('diamond_helmet'), torso: item('diamond_chestplate'), legs: item('diamond_leggings'), feet: item('diamond_boots') }
+  const sword = [item('diamond_sword')]
+  const cubes = [cube(2), cube(3), cube(4), cube(5), cube(6)]
+  assert.strictEqual(check(hostilesReflex, { entities: cubes, armor: diamond, items: sword }), 'fight magma_cube')
+  assert.strictEqual(check(hostilesReflex, { entities: [cube(2, 'slime'), cube(3, 'slime'), cube(4, 'slime'), cube(5, 'slime')], armor: diamond, items: sword }), 'fight slime')
+  assert.strictEqual(check(hostilesReflex, { entities: cubes, items: sword }), 'flee')
+  assert.strictEqual(check(hostilesReflex, { entities: cubes, armor: diamond }), 'flee')
+  assert.strictEqual(check(hostilesReflex, { entities: [cube(2), zombie(3), zombie(4), zombie(5), zombie(6)], armor: diamond, items: sword }), 'flee')
+})
+
 test('night reflex: by day, a bot still down its shelter\'s column (cut off climbing out) is got out; out of it, nothing', () => {
   const bot = fakeBot({ position: new Vec3(0.5, 62, 0.5), items: [item('stone_sword'), item('dirt', 3)] })
   bot.time = { timeOfDay: 1000 }
