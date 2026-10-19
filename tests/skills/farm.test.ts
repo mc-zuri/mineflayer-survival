@@ -108,7 +108,8 @@ test('till selects the hoe afresh and tries again when the first use leaves gras
   ;(bot as any).equip = async () => {}
   ;(bot as any).heldItem = { name: 'wooden_hoe' }
   ;(bot as any).activateBlock = async () => { uses++; if (uses === 2) tilled = true }
-  if ((bot as any)._client == null) (bot as any)._client = { on: () => {}, off: () => {} }
+  if ((bot as any)._client == null) (bot as any)._client = { on: () => {}, off: () => {}, write: () => {} }
+  ;(bot as any).supportFeature = () => false
   const ticking = setInterval(() => bot.emit('physicsTick'), 1)
   try {
     await till(bot, cell)

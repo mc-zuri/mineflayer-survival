@@ -8,7 +8,7 @@ import { SkillError, isAbort, throwIfAborted } from './errors'
 import { collectBlock } from './collectBlock'
 import { navigateToReach } from './navigate'
 import { pickupDrops } from './pickupDrops'
-import { countItems, findInventoryItem, settleInventory, trace, waitUntil, type Block } from './util'
+import { countItems, findInventoryItem, resyncInventory, settleInventory, trace, waitUntil, type Block } from './util'
 
 /** what each crop is sown from (vanilla's seed items: CropBlock.getBaseSeedId) */
 export const SEED_OF: Readonly<Record<string, string>> = {
@@ -98,13 +98,29 @@ export async function till (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise
     if (await waitUntil(bot, () => bot.blockAt(cell)?.name === 'farmland', 10, signal)) return
     // the hand the server holds may not be the one the bag shows (every cell of a 26.3 farm stayed grass after the
     // hoe, crafted just before at a table put away): the inventory settled and the hoe selected afresh, once
-    trace('till: no farmland at', cell.toString(), 'holding', bot.heldItem?.name ?? 'nothing', 'slot', bot.quickBarSlot)
+    trace('till: no farmland at', cell.toString(), 'holding', bot.heldItem?.name ?? 'nothing', 'slot', bot.quickBarSlot, 'above', bot.blockAt(cell.offset(0, 1, 0))?.name ?? '?')
     await settleInventory(bot, signal)
+    // the server's own inventory sent again (a craft's output put in a near-full bag may sit elsewhere than the
+    // client shows), then the hoe found in it
+    await resyncInventory(bot, signal).catch(() => false)
     const other = (bot.quickBarSlot + 1) % 9
     bot.setQuickBarSlot(other)
     await waitUntil(bot, () => false, 2, signal)
     const again = bot.inventory.items().filter(i => i.name === hoe.name)[0] ?? hoe
     await bot.equip(again, 'hand')
+    // the off hand emptied for the retry: with a shield there a 26.3 server tills nothing (1.21.11 does), and it is
+    // worn again after
+    const off = bot.inventory.slots[45]
+    if (off != null && bot.inventory.emptySlotCount() > 0) {
+      await bot.unequip('off-hand').catch(() => {})
+      try {
+        await bot.activateBlock(bot.blockAt(cell) as Block, new Vec3(0, 1, 0))
+        if (await waitUntil(bot, () => bot.blockAt(cell)?.name === 'farmland', 10, signal)) return
+      } finally {
+        const back = bot.inventory.items().find(i => i.name === off.name)
+        if (back != null && bot.inventory.slots[45] == null) await bot.equip(back, 'off-hand').catch(() => {})
+      }
+    }
   }
   throw new SkillError('VERIFY_FAILED', `${bot.blockAt(cell)?.name ?? 'nothing'} at ${cell.toString()} after the hoe (holding ${bot.heldItem?.name ?? 'nothing'})`)
 }

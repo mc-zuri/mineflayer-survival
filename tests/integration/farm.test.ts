@@ -37,6 +37,8 @@ describe(`a wheat farm on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 * 100
     await run(`setblock ${xyz(3, 0, 4)} sugar_cane`)
     await run(`clear ${USERNAME}`)
     for (const [item, n] of [['wooden_hoe', 1], ['wheat_seeds', 16]] as const) await run(`give ${USERNAME} ${item} ${n}`)
+    // a shield in the off hand, as a run's kit has (every till failed with one on 26.3)
+    await run(`item replace entity ${USERNAME} weapon.offhand with shield`)
     await run(`tp ${USERNAME} ${o.x + 0.5} ${o.y} ${o.z + 0.5}`)
     assert.ok(await waitUntil(bot, () => countItems(bot, 'wheat_seeds') > 0 && bot.blockAt(o.offset(3, -1, 3))?.name === 'water', 200))
     const res = await plantFarm(bot, { seed: 'wheat_seeds', center: bot.entity.position, plots: 8 })
