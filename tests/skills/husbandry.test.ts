@@ -64,3 +64,15 @@ test('keepFarms: eggs held let out, a pair of cows near bred with the wheat held
   await keepFarms(fakeBot({ items: [item('sugar_cane', 64)] }), executor, new AbortController().signal, () => {})
   assert.deepStrictEqual(tasks, [])
 })
+
+test('shelvesForLeather: the shelves the leather at hand makes books for, two cows kept to breed', async () => {
+  const { shelvesForLeather } = await import('../../src/milestones')
+  const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
+  // 8 cows let out: 6 to kill, 6 books, 2 shelves (the table's book made already)
+  assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1 }), 8), 2)
+  // the table still to make takes a book first
+  assert.strictEqual(shelvesForLeather(inv({}), 8), 1)
+  assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1, leather: 10, book: 3, bookshelf: 1 }), 2), 5)
+  assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1, leather: 64 }), 0, 4), 15)
+  assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1 }), 1), 0)
+})

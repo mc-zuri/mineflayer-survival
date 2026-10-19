@@ -13,7 +13,7 @@ import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd } from './end/s
 import { countBookshelves, enchant, enchantGear, findEnchantingTable } from './skills/enchant'
 import { applyBooks } from './skills/anvil'
 import { experience } from './skills/xp'
-import { BREEDING_FOOD, breedAnimals, releaseAnimals } from './skills/husbandry'
+import { BREEDING_FOOD, breedAnimals, isAdult, releaseAnimals } from './skills/husbandry'
 import { plantSugarCane } from './skills/caneFarm'
 import { countItems } from './skills/util'
 import { normalizeDimension, type WorldMemory } from './core/memory'
@@ -31,6 +31,19 @@ export function netherNeeds (inv: { count: (name: string) => number }): { rods: 
   const powder = inv.count('blaze_powder') + 2 * inv.count('blaze_rod')
   const wanted = Math.max(0, EYES_TARGET - eyes)
   return { rods: Math.max(0, Math.ceil((wanted - powder) / 2)), pearls: Math.max(0, wanted - inv.count('ender_pearl')) }
+}
+
+/** adult cows kept to breed when the rest are killed for leather */
+export const BREEDERS_KEPT = 2
+
+/**
+ * The shelves the leather at hand makes books for (3 books a shelf, a book a leather; the table's book first): the
+ * leather, books and shelves held, and an adult cow's leather each beyond BREEDERS_KEPT, plus the shelves round the
+ * table already; at most BOOKSHELVES
+ */
+export function shelvesForLeather (inv: { count: (name: string) => number }, adultCows: number, around = 0): number {
+  const books = inv.count('book') + inv.count('leather') + Math.max(0, adultCows - BREEDERS_KEPT) - (inv.count('enchanting_table') > 0 || around > 0 ? 0 : 1)
+  return Math.min(BOOKSHELVES, around + inv.count('bookshelf') + Math.max(0, Math.floor(books / 3)))
 }
 
 /** ticks the enchanting milestone's bookshelves may cost (the plan's estimate): a day's work */
@@ -126,13 +139,17 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   await executor.obtain(milestone.goals(state), signal)
   const table = findEnchantingTable(bot, { memory: executor.memory, maxDistance: 16 })
   const around = table != null ? countBookshelves(pos => bot.blockAt(pos) as any, table.position) : 0
+  // as many shelves as the leather at hand makes books for: what's held and the adult cows about (two kept to breed);
+  // the plan's estimate for 44 cows sent the bot exploring for cows and pigs 100 blocks out for 20000 ticks (26.3)
+  const cows = Object.values(bot.entities).filter(e => (e.name === 'cow' || e.name === 'mooshroom') && isAdult(bot, e) && e.position.distanceTo(bot.entity.position) <= 32).length
+  const cap = shelvesForLeather({ count: (n: string) => countItems(bot, n) }, cows, around)
   for (let attempt = 0; attempt < 2; attempt++) {
     const held = countItems(bot, 'bookshelf')
     const want = shelvesWithin(n => {
       if (n <= held + around) return 0
       const plan = executor.plan([{ item: 'bookshelf', count: n - around }])
       return plan.ok ? plan.cost : null
-    }, SHELF_BUDGET_TICKS, BOOKSHELVES)
+    }, SHELF_BUDGET_TICKS, cap)
     if (want <= held + around) break
     log(`enchanting: ${want} bookshelves (${held + around} so far)`)
     try {
