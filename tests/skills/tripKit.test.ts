@@ -217,3 +217,17 @@ test('stashTripKit puts the chest where there is room over it (a chest under a b
   }
   assert.equal(placed[0], new Vec3(2, 64, 0).toString())
 })
+
+test('keepUnbroken: the kit\'s chest and the spawn bed are never broken by a path (the walk to the portal dug the bed, 1.21.11)', async () => {
+  const { keepUnbroken } = await import('../../src/skills/tripKit')
+  const { Vec3 } = await import('vec3')
+  let settings: any = { exclusionAreasBreak: [() => 0], other: 1 }
+  const bot: any = { pathfinder: { get defaultMoveSettings () { return settings }, setMoveOptions: (s: any) => { settings = s } } }
+  keepUnbroken(bot, [new Vec3(2358, -24, 1015)])
+  keepUnbroken(bot, [new Vec3(2359, -24, 1014), new Vec3(2359, -24, 1013)])
+  const cost = (x: number, y: number, z: number): number => settings.exclusionAreasBreak.reduce((n: number, f: any) => n + f({ position: new Vec3(x, y, z) }), 0)
+  assert.strictEqual(settings.exclusionAreasBreak.length, 2)
+  assert.strictEqual(settings.other, 1)
+  for (const p of [[2358, -24, 1015], [2359, -24, 1014], [2359, -24, 1013]]) assert.ok(cost(p[0], p[1], p[2]) >= 1e9, p.join(','))
+  assert.strictEqual(cost(2360, -24, 1014), 0)
+})

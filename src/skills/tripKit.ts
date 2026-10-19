@@ -15,7 +15,7 @@ import { steerToward } from './steer'
 import { navigate } from './navigate'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { retrieveItems, storeItems } from './chest'
-import { resyncInventory, trace, waitTicks } from './util'
+import { resyncInventory, trace, waitTicks, waitUntil } from './util'
 
 export type ItemCount = { name: string, count: number }
 
@@ -68,10 +68,27 @@ export async function placeSpawnBed (bot: Bot, near: Vec3, item: string, signal?
   await placeBlock(bot, { pos: spot.foot, item, against: spot.foot.offset(0, -1, 0) }, signal)
   const block = bot.blockAt(spot.foot)
   if (block == null || !isBed(block.name)) return null
-  await bot.activateBlock(block as any)
-  await waitTicks(bot, 10, signal)
-  return spot.foot
+  // the respawn point is set when the server says so (ServerPlayer.setRespawnPosition: 'block.minecraft.set_spawn');
+  // a bed too far, obstructed or not safe says that instead (ServerPlayer.startSleepInBed's problems), and a respawn
+  // by it was taken for granted: a 1.21.11 bot that died in the End came back at the world's spawn, 2596 blocks off
+  const said: string[] = []
+  const onMessage = (msg: any): void => { said.push(String(msg?.translate ?? msg?.json?.translate ?? msg?.toString?.() ?? '')) }
+  bot.on('message' as any, onMessage)
+  try {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await bot.activateBlock(bot.blockAt(spot.foot) as any)
+      if (await waitUntil(bot, () => said.some(k => k === SET_SPAWN), 20, signal)) return spot.foot
+      trace('placeSpawnBed: no respawn point set by', spot.foot.toString(), 'from', bot.entity.position.toString(), 'the server said', JSON.stringify(said))
+    }
+  } finally {
+    bot.off('message' as any, onMessage)
+  }
+  // no word of it: the bed is there and was used (a server that says nothing of it, the message missed)
+  return said.length === 0 ? spot.foot : null
 }
+
+/** the server's message for a respawn point set (ServerPlayer.setRespawnPosition) */
+export const SET_SPAWN = 'block.minecraft.set_spawn'
 
 /**
  * bedRoomToDig from where the bot stands, else from a cell to stand in within 2 of `near` (feet and head free, solid
@@ -243,8 +260,32 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
       await resyncInventory(bot, signal).catch(() => {})
     }
   }
+  // neither broken by a path from here on: the walk to the portal room dug through the bed (and picked it up), and a
+  // 1.21.11 bot that died in the End came back at the world's spawn, 2596 blocks off
+  const kept = [pos]
+  if (bed != null) {
+    kept.push(bed)
+    for (const d of [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1)]) if (isBed(bot.blockAt(bed.plus(d))?.name ?? '')) kept.push(bed.plus(d))
+  }
+  keepUnbroken(bot, kept)
   trace('stashTripKit: at', pos.toString(), JSON.stringify(stored), bed != null ? `bed at ${bed.toString()}` : 'no bed')
   return { chest: pos, stored, bed, noBed }
+}
+
+/**
+ * Blocks the pathfinder never breaks from now on (its break exclusion, 1e9 a block): the trip kit's chest and the bed
+ * of the respawn point. Added to the ones kept before.
+ */
+export function keepUnbroken (bot: Bot, cells: Vec3[]): void {
+  const pathfinder: any = (bot as any).pathfinder
+  const settings = pathfinder?.defaultMoveSettings
+  if (settings?.exclusionAreasBreak == null || typeof pathfinder.setMoveOptions !== 'function') return
+  const old = (settings.exclusionAreasBreak as any[]).find(f => f.survivalKept != null)
+  const keys = new Set<string>(old?.survivalKept ?? [])
+  for (const c of cells) keys.add(`${Math.floor(c.x)},${Math.floor(c.y)},${Math.floor(c.z)}`)
+  const keep = (block: any): number => keys.has(`${block.position.x},${block.position.y},${block.position.z}`) ? 1e9 : 0
+  ;(keep as any).survivalKept = keys
+  pathfinder.setMoveOptions({ ...settings, exclusionAreasBreak: [...(settings.exclusionAreasBreak as any[]).filter(f => f.survivalKept == null), keep] })
 }
 
 /** takes everything out of the trip kit's chest (the bot by it); resolves what came out */

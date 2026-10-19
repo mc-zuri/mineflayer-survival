@@ -444,3 +444,16 @@ test('a death while recovering from one is recovered from in turn, not thrown ou
   assert.equal(calls, 1)
   assert.ok(lines.some(l => /recovery: no way to the kit/.test(l)), lines.join(' | '))
 })
+
+test('a resumed run keeps the trip kit\'s chest and the spawn bed (its foot and the cells round it) from the paths', async () => {
+  const bot: any = fakeBot()
+  let settings: any = { exclusionAreasBreak: [] }
+  bot.pathfinder = { get defaultMoveSettings () { return settings }, setMoveOptions: (s: any) => { settings = s } }
+  const memory = { version: 1, blocks: [], chests: [], base: null, pois: [{ kind: 'trip_kit', x: 2358, y: -24, z: 1015, dimension: 'overworld', seen: 1 }, { kind: 'spawn_bed', x: 2359, y: -24, z: 1014, dimension: 'overworld', seen: 1 }], death: null }
+  const store = { name: 'mem', read: () => JSON.stringify({ version: 1, memory, reached: [], ticks: 0 }), write: () => {} }
+  const runner = new Runner(bot, { saveStore: store, log: () => {} })
+  runner.load()
+  const cost = (x: number, y: number, z: number): number => settings.exclusionAreasBreak.reduce((n: number, f: any) => n + f({ position: { x, y, z } }), 0)
+  for (const p of [[2358, -24, 1015], [2359, -24, 1014], [2359, -24, 1013]]) assert.ok(cost(p[0], p[1], p[2]) >= 1e9, p.join(','))
+  assert.strictEqual(cost(2365, -24, 1014), 0)
+})

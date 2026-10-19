@@ -29,7 +29,7 @@ import { pickupDrops } from './skills/pickupDrops'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
 import { MILESTONE_HANDLERS, harvestGrownFarms } from './milestones'
-import { TRIP_KIT, takeTripKit } from './skills/tripKit'
+import { TRIP_KIT, keepUnbroken, takeTripKit } from './skills/tripKit'
 import { armorPoints, shelter, sleepThroughNight } from './skills/shelter'
 import { overland } from './end/strongholdSkills'
 import { unstick } from './executor/explore'
@@ -356,6 +356,15 @@ export class Runner {
     const data: SaveFile = JSON.parse(json)
     if (data.version !== 1) throw new Error(`unknown save file version ${String(data.version)}`)
     this.memory.restore(data.memory)
+    // the trip kit's chest and the spawn bed by it kept from the paths again (keepUnbroken: the bed's other half is
+    // one of the cells round its foot)
+    const kept: Vec3[] = []
+    for (const p of this.memory.getPois(TRIP_KIT, { dimension: 'overworld' })) kept.push(new Vec3(p.x, p.y, p.z))
+    for (const p of this.memory.getPois('spawn_bed', { dimension: 'overworld' })) {
+      const foot = new Vec3(p.x, p.y, p.z)
+      kept.push(foot, foot.offset(1, 0, 0), foot.offset(-1, 0, 0), foot.offset(0, 0, 1), foot.offset(0, 0, -1))
+    }
+    if (kept.length > 0) keepUnbroken(this.bot, kept)
     this.reached.push(...data.reached)
     this.ticksBefore = data.ticks
     if (Array.isArray(data.reports)) this.diagnostics?.restoreHistory(data.reports)
