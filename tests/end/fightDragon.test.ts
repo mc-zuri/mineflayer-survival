@@ -1,8 +1,8 @@
 import { test } from 'node:test'
-import assert from 'node:assert'
+import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
-import { breathZone, DragonPhaseTracker, DRAGON_PHASES, headPosition } from '../../src/end/dragon'
+import { breathZone, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
 import { chooseMeleeSpot, dragonPartId, fightDragon } from '../../src/end/skills/fightDragon'
 import { fakeBot } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
@@ -32,6 +32,26 @@ test('chooseMeleeSpot: a standing spot within reach of the perched dragon\'s hea
   assert.ok(flaming != null)
   const breath = breathZone(view)
   assert.ok(Math.hypot(flaming.spot.x - breath.center.x, flaming.spot.z - breath.center.z) > breath.radius)
+})
+
+test('chooseMeleeSpot: never a bump a block over the ground under the head (its zone reaches 2 under the perched dragon), and a crit only where the jump clears the zones', () => {
+  const blocks = endIsland([], 40)
+  const perch = exitPortal(62).perch
+  // facing +x, sat a little high (it lands within a block of the perch): the head over (7, 65, 0)
+  const view = { position: new Vec3(perch.x, perch.y + 0.6, perch.z), yaw: 90 }
+  // end stone a block over the ground all round under the head and neck: x 4 to 10, z -3 to 3
+  for (let x = 4; x <= 10; x++) for (let z = -3; z <= 3; z++) blocks.set(`${x},62,${z}`, 'end_stone')
+  const get = world(blocks)
+  const tracker = new DragonPhaseTracker(perch)
+  tracker.update({ tick: 0, phase: DRAGON_PHASES.indexOf('sitting_scanning'), position: view.position, yaw: 90 })
+  const zones = dragonZones(view)
+  // the bump right under the head: in the head's zone
+  assert.ok(touchedZone({ x: 7.5, y: 63, z: 0.5 }, zones) != null)
+  const choice = chooseMeleeSpot(get, view, 62, tracker.window(5), [], null, true, { x: 7.5, y: 63, z: 0.5 })
+  assert.ok(choice != null)
+  assert.equal(touchedZone(choice.spot, zones, 0, CONTACT_MARGIN), null)
+  if (choice.crit) assert.equal(touchedZone(choice.spot, zones, JUMP_HEIGHT, CONTACT_MARGIN), null)
+  assert.notEqual(choice.target, 'body')
 })
 
 test('fightDragon waits for the podium\'s chunk to find the exit portal, and is done at once when the portal is open and no dragon is left', async () => {

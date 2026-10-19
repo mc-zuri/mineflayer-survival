@@ -117,11 +117,91 @@ export function neckPosition (dragon: DragonView, sitting = true): Pos {
 }
 
 /** a perched dragon's part boxes (EnderDragonPart sizes: head 1 × 1, neck 3 × 3, body 5 × 3 half a block forward) */
-export function partBox (dragon: DragonView, part: 'head' | 'neck' | 'body'): { min: Pos, max: Pos } {
+export function partBox (dragon: DragonView, part: 'head' | 'neck' | 'body', sitting = true): { min: Pos, max: Pos } {
   const d = headDirection(dragon.yaw)
   const body = { x: dragon.position.x + d.x * 0.5, y: dragon.position.y, z: dragon.position.z + d.z * 0.5 }
-  const [at, w, h] = part === 'head' ? [headPosition(dragon), 1, 1] : part === 'neck' ? [neckPosition(dragon), 3, 3] : [body, 5, 3]
+  const [at, w, h] = part === 'head' ? [headPosition(dragon, sitting), 1, 1] : part === 'neck' ? [neckPosition(dragon, sitting), 3, 3] : [body, 5, 3]
   return { min: { x: at.x - w / 2, y: at.y, z: at.z - w / 2 }, max: { x: at.x + w / 2, y: at.y + h, z: at.z + w / 2 } }
+}
+
+export interface PartBox { min: Pos, max: Pos }
+
+/** EnderDragon.aiStep: the head and neck boxes inflated by this hurt a living entity touching them (EnderDragon.hurt) */
+export const CONTACT_INFLATE = 1
+/** EnderDragon.hurt(List): what a touch of the head or neck does (mobAttack), every time the dragon isn't wasHurtRecently */
+export const CONTACT_DAMAGE = 10
+/** EnderDragon.knockBack: what the wings do to a body under them when the dragon isn't sitting, besides the push */
+export const WING_DAMAGE = 5
+/** the player's box (Player's standing EntityDimensions 0.6 × 1.8) */
+export const PLAYER_WIDTH = 0.6
+export const PLAYER_HEIGHT = 1.8
+/** a jump's peak over the ground (jumpPower 0.42, gravity 0.08, drag 0.98: 1.2522) */
+export const JUMP_HEIGHT = 1.2522
+
+export function playerBox (feet: Pos, lift = 0): PartBox {
+  const w = PLAYER_WIDTH / 2
+  return { min: { x: feet.x - w, y: feet.y, z: feet.z - w }, max: { x: feet.x + w, y: feet.y + PLAYER_HEIGHT + lift, z: feet.z + w } }
+}
+
+export function inflate (box: PartBox, x: number, y = x, z = x): PartBox {
+  return { min: { x: box.min.x - x, y: box.min.y - y, z: box.min.z - z }, max: { x: box.max.x + x, y: box.max.y + y, z: box.max.z + z } }
+}
+
+/** AABB.intersects: overlapping on every axis (touching faces don't) */
+export function boxesIntersect (a: PartBox, b: PartBox): boolean {
+  return a.min.x < b.max.x && a.max.x > b.min.x && a.min.y < b.max.y && a.max.y > b.min.y && a.min.z < b.max.z && a.max.z > b.min.z
+}
+
+export interface DragonZone {
+  box: PartBox
+  /**
+   * head, neck: CONTACT_DAMAGE to what touches them; wing: pushed away from the body (EnderDragon.knockBack, xd / dd * 4),
+   * and WING_DAMAGE too when the dragon isn't sitting
+   */
+  part: 'head' | 'neck' | 'wing'
+  /** what a touch does: the head and neck always hurt, the wings only when the dragon isn't sitting */
+  hurts: boolean
+}
+
+/**
+ * The boxes that hurt or throw a body touching them, as EnderDragon.aiStep checks them each tick while the dragon
+ * isn't wasHurtRecently (its hurtTime, 10 ticks after a hit): the head (1 × 1) and neck (3 × 3) inflated by 1, and each
+ * wing (4 × 2, 4.5 to the side and 2 up: tickPart(wing, cos yRot * 4.5, 2, sin yRot * 4.5)) inflated by (4, 2, 4) and
+ * moved down 2. The same in 1.21.11 and 26.3. A sitting dragon's head and neck are a block under its body
+ * (getHeadYOffset), so all three reach down to 2 under its feet: on a perch at portalY + 4, the ground round the
+ * podium (feet at portalY, the top of the body 1.8 over it) is under every one of them, and a jump, the rim or a bump of
+ * end stone is not.
+ */
+export function dragonZones (dragon: DragonView, sitting = true): DragonZone[] {
+  const r = dragon.yaw * Math.PI / 180
+  const zones: DragonZone[] = [
+    { box: inflate(partBox(dragon, 'head', sitting), CONTACT_INFLATE), part: 'head', hurts: true },
+    { box: inflate(partBox(dragon, 'neck', sitting), CONTACT_INFLATE), part: 'neck', hurts: true }
+  ]
+  for (const side of [1, -1]) {
+    const cx = dragon.position.x + Math.cos(r) * 4.5 * side
+    const cz = dragon.position.z + Math.sin(r) * 4.5 * side
+    const wing = { min: { x: cx - 2, y: dragon.position.y + 2, z: cz - 2 }, max: { x: cx + 2, y: dragon.position.y + 4, z: cz + 2 } }
+    const box = inflate(wing, 4, 2, 4)
+    zones.push({ box: { min: { ...box.min, y: box.min.y - 2 }, max: { ...box.max, y: box.max.y - 2 } }, part: 'wing', hurts: !sitting })
+  }
+  return zones
+}
+
+/**
+ * The zone a player with its feet at `feet` touches (its box `lift` taller, for a jump; `margin` wider for drift and the
+ * dragon turning, and up to 0.1 higher: the ground round the podium is 0.2 under a perch's zones), the hurting ones
+ * first; null when it touches none
+ */
+export function touchedZone (feet: Pos, zones: DragonZone[], lift = 0, margin = 0): DragonZone | null {
+  const body = inflate(playerBox(feet, lift), margin, Math.min(margin, 0.1), margin)
+  let pushed: DragonZone | null = null
+  for (const z of zones) {
+    if (!boxesIntersect(body, z.box)) continue
+    if (z.hurts) return z
+    pushed = pushed ?? z
+  }
+  return pushed
 }
 
 export interface BreathZone {
@@ -147,7 +227,12 @@ export interface MeleeSpot extends Pos {
   reach: number
   /** horizontal distance from the breath cloud's edge, less the margin (Infinity with no breath) */
   breathClearance: number
+  /** a jump here keeps clear of the dragon's zones too (dragonZones): a crit's fall is safe */
+  crit: boolean
 }
+
+/** how much wider than the player's box the dragon's zones are kept from (drift, the dragon turning, rounding) */
+export const CONTACT_MARGIN = 0.3
 
 /**
  * Standing spots on the ground (feet at groundY) around a perched dragon from which a part
@@ -155,20 +240,26 @@ export interface MeleeSpot extends Pos {
  * cloud is out, or about to be: the tracker's window gives it) the spots inside it, with
  * `margin` for the player's width and drift, are left out; the head is then out of reach,
  * since the cloud lands just past it, and the spots under the body by the pillar remain.
+ * Spots where the body touches one of the dragon's zones (dragonZones: the head and neck
+ * hurt 10 a touch, the wings throw) are left out too, and a jump (a crit) is allowed only
+ * where the jumping body stays clear of them as well.
  */
-export function meleeSpots (dragon: DragonView, groundY: number, breath: BreathZone | null = null, margin = 0.8, neckFullDamage = false): MeleeSpot[] {
+export function meleeSpots (dragon: DragonView, groundY: number, breath: BreathZone | null = null, margin = 0.8, neckFullDamage = false, zones: DragonZone[] = dragonZones(dragon)): MeleeSpot[] {
   const head = headPosition(dragon)
   const neck = partBox(dragon, 'neck')
   const d = headDirection(dragon.yaw)
   const out: MeleeSpot[] = []
   const cx = Math.floor(dragon.position.x)
   const cz = Math.floor(dragon.position.z)
-  for (let dx = -8; dx <= 8; dx++) {
-    for (let dz = -8; dz <= 8; dz++) {
+  for (let dx = -10; dx <= 10; dx++) {
+    for (let dz = -10; dz <= 10; dz++) {
       const x = cx + dx + 0.5
       const z = cz + dz + 0.5
       const clearance = breath == null ? Infinity : Math.hypot(x - breath.center.x, z - breath.center.z) - breath.radius - margin
       if (clearance < 0) continue
+      const feet = { x, y: groundY, z }
+      if (touchedZone(feet, zones, 0, CONTACT_MARGIN) != null) continue
+      const crit = touchedZone(feet, zones, JUMP_HEIGHT, CONTACT_MARGIN) == null
       // the 1×1 head box; the player's eyes are 1.62 above its feet
       const hx = Math.max(Math.abs(x - head.x) - 0.5, 0)
       const hz = Math.max(Math.abs(z - head.z) - 0.5, 0)
@@ -180,16 +271,17 @@ export function meleeSpots (dragon: DragonView, groundY: number, breath: BreathZ
       const bz = dragon.position.z + d.z * 0.5
       const toBody = Math.hypot(Math.max(Math.abs(x - bx) - 2.5, 0), Math.max(dragon.position.y - eyeY, eyeY - (dragon.position.y + 3), 0), Math.max(Math.abs(z - bz) - 2.5, 0))
       const toNeck = Math.hypot(Math.max(neck.min.x - x, x - neck.max.x, 0), Math.max(neck.min.y - eyeY, eyeY - neck.max.y, 0), Math.max(neck.min.z - z, z - neck.max.z, 0))
-      if (toHead <= MELEE_REACH) out.push({ x, y: groundY, z, target: 'head', reach: toHead, breathClearance: clearance })
-      else if (neckFullDamage && toNeck <= MELEE_REACH) out.push({ x, y: groundY, z, target: 'neck', reach: toNeck, breathClearance: clearance })
-      else if (toBody <= MELEE_REACH) out.push({ x, y: groundY, z, target: 'body', reach: toBody, breathClearance: clearance })
+      if (toHead <= MELEE_REACH) out.push({ x, y: groundY, z, target: 'head', reach: toHead, breathClearance: clearance, crit })
+      else if (neckFullDamage && toNeck <= MELEE_REACH) out.push({ x, y: groundY, z, target: 'neck', reach: toNeck, breathClearance: clearance, crit })
+      else if (toBody <= MELEE_REACH) out.push({ x, y: groundY, z, target: 'body', reach: toBody, breathClearance: clearance, crit })
     }
   }
-  // head first, then a neck that takes full damage; then up to 2 blocks of clearance from the cloud is worth more than
-  // reach; then the closest
+  // head first, then a neck that takes full damage; then a spot a crit can be jumped at (Player.attack: × 1.5); then up
+  // to 2 blocks of clearance from the cloud is worth more than reach; then the closest
   const rank = (s: MeleeSpot): number => s.target === 'head' ? 0 : s.target === 'neck' ? 1 : 2
   out.sort((a, b) => {
     if (rank(a) !== rank(b)) return rank(a) - rank(b)
+    if (a.crit !== b.crit) return a.crit ? -1 : 1
     const clear = Math.min(b.breathClearance, 2) - Math.min(a.breathClearance, 2)
     return clear !== 0 ? clear : a.reach - b.reach
   })

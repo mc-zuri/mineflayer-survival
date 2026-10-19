@@ -1,5 +1,5 @@
 import type { Bot } from 'mineflayer'
-import { normalizeDimension } from '../../core/memory'
+import { normalizeDimension, type Pos } from '../../core/memory'
 import { Vec3 } from 'vec3'
 import type { Seed } from '../../worldgen/random'
 import { solveAim, arrowHits, bowArrowSpeed, type AimSolution } from '../../skills/arrow'
@@ -9,7 +9,7 @@ import { attackStrengthOf } from '../../skills/weapons'
 import { bestFoodInInventory } from '../../skills/eat'
 import { steerToward } from '../../skills/steer'
 import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataIndex, metadataValue, eyePosition, yawPitchOf, distanceToBox } from '../../skills/combatUtil'
-import { DragonPhaseTracker, headPosition, meleeSpots, neckTakesFullDamage, partBox, vanillaYaw, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
+import { DragonPhaseTracker, dragonZones, meleeSpots, neckTakesFullDamage, partBox, touchedZone, vanillaYaw, CONTACT_MARGIN, JUMP_HEIGHT, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
 import { exitPortal } from '../spikes'
 import { destroyCrystals } from './destroyCrystals'
 import { blockGetter, groundY, isOpenAt, VoidGuard, findPortalY, exitPortalOpen, worldMinY, type BlockGetter } from './world'
@@ -28,29 +28,38 @@ export function dragonPartId (dragon: { id: number }, part: 'head' | 'neck' | 'b
 export interface MeleeChoice {
   spot: Vec3
   target: 'head' | 'neck' | 'body'
+  /** a jump here (a crit) keeps clear of the dragon's zones, with the headroom for it */
+  crit: boolean
 }
 
 /**
  * The melee spot to stand at: meleeSpots for the ground levels round the podium (the end stone, and the bedrock rim
- * a block up), kept to the ones a body can actually stand at, out of every danger and the void's margin. A spot a
- * little short of full reach is preferred over the closest (the head and neck hurt what touches them: EnderDragon's
- * hurt(head box inflated 1)).
+ * a block up), kept to the ones a body can actually stand at, out of every danger and the void's margin. The spots
+ * where the body touches the dragon's head, neck or wings (dragonZones: 10 a touch from the head and neck, while it
+ * isn't hurt recently) are out: on the perch they reach 2 under its feet, so the rim and the bumps a block over the
+ * ground are mostly out, and a crit is jumped only where the jump clears them too (a 26.3 bot hitting the head from a
+ * bump of end stone took 9 touches of it, 10 each, and died). A spot that allows a crit is worth a little more reach,
+ * and one near `from` (the bot) a little less walking.
  */
-export function chooseMeleeSpot (get: BlockGetter, view: DragonView, portalY: number, window: MeleeWindow, dangers: Danger[], guard: VoidGuard | null, neckFullDamage = false): MeleeChoice | null {
-  const spots: Array<{ spot: Vec3, target: MeleeChoice['target'], score: number }> = []
+export function chooseMeleeSpot (get: BlockGetter, view: DragonView, portalY: number, window: MeleeWindow, dangers: Danger[], guard: VoidGuard | null, neckFullDamage = false, from: Pos | null = null): MeleeChoice | null {
+  const spots: Array<MeleeChoice & { score: number }> = []
+  const zones = dragonZones(view, true)
   for (const g of [portalY, portalY + 1, portalY - 1]) {
-    for (const s of meleeSpots(view, g, window.breath, undefined, neckFullDamage)) {
+    for (const s of meleeSpots(view, g, window.breath, undefined, neckFullDamage, zones)) {
       const cell = new Vec3(Math.floor(s.x), g, Math.floor(s.z))
       if (groundY(get, s.x, s.z, g + 2, g - 2) !== g) continue
       if (!isOpenAt(get, cell) || !isOpenAt(get, cell.offset(0, 1, 0))) continue
       if (inDanger(s, dangers, 1) != null) continue
       if (guard?.risky(s) === true) continue
-      const score = (s.target === 'head' ? 0 : s.target === 'neck' ? 1 : 10) + Math.abs(s.reach - 2.2)
-      spots.push({ spot: new Vec3(s.x, g, s.z), target: s.target, score })
+      const crit = s.crit && isOpenAt(get, cell.offset(0, 2, 0))
+      const walk = from != null ? Math.hypot(s.x - from.x, s.z - from.z) * 0.05 : 0
+      const score = (s.target === 'head' ? 0 : s.target === 'neck' ? 1 : 10) + Math.abs(s.reach - 2.2) + (crit ? 0 : 0.8) + walk
+      spots.push({ spot: new Vec3(s.x, g, s.z), target: s.target, crit, score })
     }
   }
   spots.sort((a, b) => a.score - b.score)
-  return spots[0] ?? null
+  const best = spots[0]
+  return best == null ? null : { spot: best.spot, target: best.target, crit: best.crit }
 }
 
 export interface FightDragonOptions extends SkillOptions {
@@ -137,6 +146,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   bot.on('entityGone', onGone)
   let tick = 0
   let meleeHits = 0
+  let crits = 0
   let arrows = 0
   let perches = 0
   let wasOpen = false
@@ -194,7 +204,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         if (foundY == null) portal = exitPortal(findPortalY(get) ?? portalY)
         for (let t = 0; t < 600 && !exitPortalOpen(get, portal); t++) await waitTicks(bot, 1, signal)
         if (!exitPortalOpen(get, portal)) throw new TaskError('TIMEOUT', 'the dragon died but the exit portal stayed shut')
-        log(`dragon dead after ${tick} ticks: ${meleeHits} hits, ${arrows} arrows, ${perches} perches`)
+        log(`dragon dead after ${tick} ticks: ${meleeHits} hits (${crits} crits), ${arrows} arrows, ${perches} perches`)
         return { killed: true, ticks: tick, meleeHits, arrows, perches, health: 0 }
       }
 
@@ -257,42 +267,61 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
       if (window.open && dragon != null) {
         stopDraw()
         const view = { position: dragon.position, yaw: vanillaYaw(dragon.yaw) }
-        const choice = chooseMeleeSpot(get, view, portalY, window, dangers, guard, neckTakesFullDamage(bot.registry.version as any))
+        const zones = dragonZones(view, true)
+        const neckFull = neckTakesFullDamage(bot.registry.version as any)
+        const choice = chooseMeleeSpot(get, view, portalY, window, dangers, guard, neckFull, me)
         const weapon = sword()
         if (weapon != null) await hold(weapon)
-        const head = headPosition(view)
-        const headBox = { min: new Vec3(head.x - 0.5, head.y, head.z - 0.5), max: new Vec3(head.x + 0.5, head.y + 1, head.z + 0.5) }
-        const reach = distanceToBox(eyePosition(bot), headBox)
-        const at = choice != null && Math.hypot(me.x - choice.spot.x, me.z - choice.spot.z) < 0.6
-        if (choice != null && !at && reach > MELEE_REACH - 0.2) {
-          steerToward(bot, choice.spot, { sprint: Math.hypot(me.x - choice.spot.x, me.z - choice.spot.z) > 4 })
+        const eye = eyePosition(bot)
+        const reachTo = (part: 'head' | 'neck' | 'body'): number => {
+          const b = partBox(view, part)
+          return distanceToBox(eye, { min: new Vec3(b.min.x, b.min.y, b.min.z), max: new Vec3(b.max.x, b.max.y, b.max.z) })
+        }
+        // the part to hit from here: the head, the neck where it takes full damage (26.3), else the body
+        const target = reachTo('head') <= MELEE_REACH ? 'head' : neckFull && reachTo('neck') <= MELEE_REACH ? 'neck' : reachTo('body') <= MELEE_REACH ? 'body' : null
+        const touching = touchedZone(me, zones, 0, CONTACT_MARGIN)
+        const at = choice != null && Math.hypot(me.x - choice.spot.x, me.z - choice.spot.z) < 0.6 && Math.abs(me.y - choice.spot.y) < 0.5
+        // where it stands will do: on the ground clear of the zones, and a full-damage part in reach (or the body, when
+        // no spot has better)
+        const here = bot.entity.onGround && touching == null && target != null && (target !== 'body' || choice?.target === 'body')
+        if (!at && !here) {
+          if (choice != null) {
+            steerToward(bot, choice.spot, { sprint: Math.hypot(me.x - choice.spot.x, me.z - choice.spot.z) > 4 })
+          } else if (touching != null) {
+            // nowhere clear to hit from: out from under its head, neck and wings at least
+            steerToward(bot, me.plus(new Vec3(me.x - dragon.position.x, 0, me.z - dragon.position.z).normalize().scaled(4)), { sprint: true })
+          } else {
+            bot.clearControlStates()
+          }
           await waitTicks(bot, 1, signal)
           continue
         }
         bot.setControlState('forward', false)
         bot.setControlState('sprint', false)
-        const target = choice != null && choice.target !== 'head' && reach > MELEE_REACH ? choice.target : 'head'
+        if (target == null) {
+          bot.setControlState('jump', false)
+          await waitTicks(bot, 1, signal)
+          continue
+        }
         const box = partBox(view, target)
         const aimAt = target === 'body' ? dragon.position.offset(0, 1.5, 0) : new Vec3((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2)
-        const { yaw, pitch } = yawPitchOf(aimAt.minus(eyePosition(bot)))
+        const { yaw, pitch } = yawPitchOf(aimAt.minus(eye))
         await bot.look(yaw, pitch, true)
+        // a crit only where the jump stays clear of the head, neck and wings (a jump under the head touches it)
+        const critOk = at && choice != null ? choice.crit : touchedZone(me, zones, JUMP_HEIGHT, CONTACT_MARGIN) == null
         const airborne = tick - jumpedAt <= 14 && !bot.entity.onGround
         const falling = !bot.entity.onGround && bot.entity.velocity.y < 0
-        if (bot.entity.onGround && !airborne && strength.ticksToFull() <= 5 && strength.ticksToFull() > 0) {
+        if (critOk && bot.entity.onGround && !airborne && strength.ticksToFull() <= 5 && strength.ticksToFull() > 0) {
           // a jump peaks after about 6 ticks: the fall comes with a full swing (Player.attack's crit)
           bot.setControlState('jump', true)
           jumpedAt = tick
         } else {
           bot.setControlState('jump', false)
         }
-        const inReach = target === 'head'
-          ? reach <= MELEE_REACH
-          : target === 'neck'
-            ? distanceToBox(eyePosition(bot), { min: new Vec3(box.min.x, box.min.y, box.min.z), max: new Vec3(box.max.x, box.max.y, box.max.z) }) <= MELEE_REACH
-            : distanceToBox(eyePosition(bot), { min: dragon.position.offset(-2.5, 0, -2.5), max: dragon.position.offset(2.5, 3, 2.5) }) <= MELEE_REACH
-        if (inReach && strength.scale(0.5) >= 1 && (falling || (bot.entity.onGround && tick - jumpedAt > 14))) {
+        if (strength.scale(0.5) >= 1 && (falling || (bot.entity.onGround && tick - jumpedAt > 14))) {
           strength.attack({ id: dragonPartId(dragon, target) } as any)
           meleeHits++
+          if (falling) crits++
         }
         await waitTicks(bot, 1, signal)
         continue

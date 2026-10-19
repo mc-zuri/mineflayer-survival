@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import minecraftData from 'minecraft-data'
-import { DragonPhaseTracker, activityOf, breathZone, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, vanillaYaw } from '../../src/end/dragon'
+import { CONTACT_MARGIN, DragonPhaseTracker, JUMP_HEIGHT, activityOf, breathZone, dragonZones, headDirection, meleeSpots, neckTakesFullDamage, partBox, phaseName, touchedZone, vanillaYaw } from '../../src/end/dragon'
 import { exitPortal } from '../../src/end/spikes'
 
 test('phase ids are the EnderDragonPhase creation order', () => {
@@ -96,6 +96,52 @@ test('the sitting damage carries over to the next perch unless it passed 50 (End
   assert.equal(t.window(901).open, true)
   t.updateHealth(149)
   assert.equal(t.window(902).open, false)
+})
+
+test('dragonZones: the head and neck inflated by 1 and the wings reach 2 under a sitting dragon\'s feet; the ground round the podium is under them all', () => {
+  const portalY = 63
+  const perch = exitPortal(portalY).perch
+  const dragon = { position: perch, yaw: 0 } // head towards -z
+  const zones = dragonZones(dragon)
+  assert.deepEqual(zones.map(z => z.part), ['head', 'neck', 'wing', 'wing'])
+  const head = zones[0].box
+  // the head part (1 × 1 at 6.5 out, a block under the body) inflated by 1
+  assert.deepEqual([head.min.x, head.max.x, head.min.y, head.max.y, head.min.z, head.max.z], [perch.x - 1.5, perch.x + 1.5, perch.y - 2, perch.y + 1, perch.z - 8, perch.z - 5])
+  // the wings (4.5 to each side, 2 up) inflated by (4, 2, 4) and down 2: from 2 under the feet, 6 out from each wing
+  const wing = zones[2].box
+  assert.deepEqual([wing.min.y, wing.max.y], [perch.y - 2, perch.y + 4])
+  assert.deepEqual([wing.min.x, wing.max.x], [perch.x + 4.5 - 6, perch.x + 4.5 + 6])
+  // a sitting dragon's wings only push; the head and neck always hurt
+  assert.deepEqual(zones.map(z => z.hurts), [true, true, false, false])
+  assert.ok(dragonZones(dragon, false).every(z => z.hurts))
+  // right under the head on the ground: clear of them all; a jump there touches the head
+  const under = { x: perch.x, y: portalY, z: perch.z - 6.5 }
+  assert.equal(touchedZone(under, zones, 0, CONTACT_MARGIN), null)
+  assert.equal(touchedZone(under, zones, JUMP_HEIGHT)?.part, 'head')
+  // a block up (the rim's height, a bump of end stone) the body touches the head
+  assert.equal(touchedZone({ ...under, y: portalY + 1 }, zones)?.part, 'head')
+})
+
+test('meleeSpots leaves out the spots where the body touches the dragon (a 26.3 bot died to its head on a bump a block over the ground, 9 hits of 10)', () => {
+  // the death: the dragon perched at 68.6 over a portal at 64, the bot hitting it from the end stone at 65
+  // facing the bot (DragonSittingScanningPhase turns it to the player): (sin yRot, -cos yRot) along the way to it
+  const dragon = { position: { x: 0.25, y: 68.6, z: 0.06 }, yaw: Math.atan2(-6.12 - 0.25, -(3.44 - 0.06)) * 180 / Math.PI }
+  const zones = dragonZones(dragon)
+  assert.equal(touchedZone({ x: -6.12, y: 65, z: 3.44 }, zones)?.part, 'head')
+  for (const g of [64, 65]) {
+    for (const s of meleeSpots(dragon, g)) assert.equal(touchedZone(s, zones, 0, CONTACT_MARGIN), null, `${s.x} ${s.y} ${s.z}`)
+  }
+  // the head is still in reach from the ground at 64, under it
+  const low = meleeSpots(dragon, 64)
+  assert.equal(low[0].target, 'head')
+  // crits only where a jump clears the zones too
+  const perch = exitPortal(63).perch
+  const facing = { position: perch, yaw: 0 }
+  const spots = meleeSpots(facing, 63)
+  assert.ok(spots.some(s => s.crit) && spots.some(s => !s.crit))
+  for (const s of spots.filter(s => s.crit)) assert.equal(touchedZone(s, dragonZones(facing), JUMP_HEIGHT, CONTACT_MARGIN), null)
+  // a crit is preferred among the head's spots
+  assert.equal(spots[0].crit, true)
 })
 
 test('without metadata the perch is told by position', () => {
