@@ -58,3 +58,18 @@ describe('pnpm e2e', () => {
     fs.rmSync(root, { recursive: true, force: true })
   })
 })
+
+test('watchTicks: tells once of no tick for the time given, again only after ticks ran', async () => {
+  const { watchTicks } = await import('../e2e/e2e')
+  let ticks = 0
+  const stalls: number[] = []
+  const timer = watchTicks(() => ticks, 0.05, s => stalls.push(s), 10)
+  await new Promise(resolve => setTimeout(resolve, 150))
+  assert.equal(stalls.length, 1)
+  ticks++
+  await new Promise(resolve => setTimeout(resolve, 30))
+  ticks++
+  await new Promise(resolve => setTimeout(resolve, 150))
+  clearInterval(timer)
+  assert.equal(stalls.length, 2)
+})

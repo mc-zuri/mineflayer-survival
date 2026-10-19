@@ -91,12 +91,42 @@ test('travel to a height under the bot (exactY): the level grid walk leaves the 
   const realNav = navModule.navigate
   gridModule.gridWalk = async () => { grids++; if (grids > 20) throw new Error('looping'); return { cells: 0 } }
   navModule.navigate = async () => { navs++; bot.entity.position = new Vec3(0.5, 50, 0.5) }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
   try {
     await travel(bot, { target: new Vec3(0, 50, 0), range: 2, exactY: true })
   } finally {
+    clearInterval(ticking)
     gridModule.gridWalk = realGrid
     navModule.navigate = realNav
   }
   assert.equal(navs, 1)
   assert.ok(grids <= 2)
+})
+
+test('travel gives up after hops that leave the bot where it was, a tick each, not spinning', async () => {
+  const gridModule = require('../../src/skills/gridWalk')
+  const navModule = require('../../src/skills/navigate')
+  const { travel, TRAVEL_STILL_HOPS } = await import('../../src/skills/travel')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ position: new Vec3(0.5, 63, 0.5) })
+  ;(bot as any).pathfinder = { pathfinderSettings: {}, defaultMoveSettings: {}, setOptions: () => {}, setMoveOptions: () => {} }
+  ;(bot as any).world = { getColumnAt: () => ({}) }
+  let ticks = 0
+  bot.on('physicsTick', () => { ticks++ })
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  const realGrid = gridModule.gridWalk
+  const realNav = navModule.navigate
+  let grids = 0
+  // the grid walk 'succeeds' at once, 0 cells, the bot never moving
+  gridModule.gridWalk = async () => { grids++; return { cells: 0 } }
+  navModule.navigate = async () => {}
+  try {
+    await assert.rejects(travel(bot, { target: new Vec3(200, 63, 0), range: 2 }), /NO_PATH|no way on/)
+  } finally {
+    clearInterval(ticking)
+    gridModule.gridWalk = realGrid
+    navModule.navigate = realNav
+  }
+  assert.ok(grids <= TRAVEL_STILL_HOPS + 1, String(grids))
+  assert.ok(ticks >= TRAVEL_STILL_HOPS, String(ticks))
 })

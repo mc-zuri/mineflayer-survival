@@ -6,7 +6,10 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { SkillError, isAbort, throwIfAborted } from './errors'
 import { navigate } from './navigate'
 import { gridWalk } from './gridWalk'
-import { trace, waitUntil } from './util'
+import { trace, waitTicks, waitUntil } from './util'
+
+/** hops in a row that leave the bot where it was before a trip is given up */
+export const TRAVEL_STILL_HOPS = 8
 
 export interface TravelArgs {
   /** where to go (y is used only for the last hop when `exactY`) */
@@ -108,6 +111,10 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
   const moveSettings = { ...(bot.pathfinder as any).defaultMoveSettings }
   bot.pathfinder.setMoveOptions({ ...moveSettings, infiniteLiquidDropdownDistance: false })
   const result = (stopped = false): TravelResult => ({ position: bot.entity.position.clone(), ticks, hops, stopped })
+  // hops that left the bot where it was: a trip that makes none is given up, not spun (a grid walk of 0 cells over
+  // and over kept a CPU core busy for 10 minutes with no game tick run, 26.3)
+  let still = 0
+  let lastPos: Vec3 | null = null
   try {
     for (;;) {
       throwIfAborted(signal, result())
@@ -115,6 +122,12 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
       const pos = bot.entity.position
       const left = Math.hypot(target.x - pos.x, target.z - pos.z)
       if (left <= range && (args.exactY !== true || Math.abs(target.y - pos.y) <= range)) return result()
+      // a tick each round at least (the hops may all return at once)
+      if (lastPos != null) await waitTicks(bot, 1, signal)
+      if (lastPos != null && bot.entity.position.distanceTo(lastPos) < 1) {
+        if (++still >= TRAVEL_STILL_HOPS) throw new SkillError('NO_PATH', `no way on toward ${target.toString()}: ${still} hops left the bot at ${bot.entity.position.floored().toString()}`, result())
+      } else still = 0
+      lastPos = bot.entity.position.clone()
       if (ticks > maxTicks) throw new SkillError('TIMEOUT', `${Math.round(left)} blocks short after ${ticks} ticks`, result())
       // out at sea (deep water under the feet): swum at the surface toward the hop's point, not left to the
       // pathfinder, whose moves in deep water sank the bot ("bot is too low") until the drowning reflex cut each

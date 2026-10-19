@@ -89,6 +89,25 @@ export function summary (reached: readonly MilestoneEvent[], totalTicks: number,
 }
 
 /** the console's `execute if entity` answer: "Test passed" (with a count from some versions) */
+/**
+ * A wall-clock watch on the game's ticks: `onStall` with the seconds gone when no tick has run for `seconds` (once a
+ * stall, again after ticks run again). The stall watchdog in the plugin counts ticks, so a loop that runs none (a hop
+ * that returned at once, spun for 10 minutes on 26.3) or a server that stopped answering goes unseen by it.
+ */
+export function watchTicks (getTicks: () => number, seconds: number, onStall: (seconds: number) => void, everyMs = 5000): NodeJS.Timeout {
+  let last = getTicks()
+  let since = Date.now()
+  let told = false
+  const timer = setInterval(() => {
+    const k = getTicks()
+    const now = Date.now()
+    if (k !== last) { last = k; since = now; told = false; return }
+    if (!told && now - since >= seconds * 1000) { told = true; onStall(Math.round((now - since) / 1000)) }
+  }, everyMs)
+  timer.unref()
+  return timer
+}
+
 export function testPassed (lines: readonly string[]): boolean {
   return lines.some(l => /^Test passed/.test(l))
 }
@@ -123,6 +142,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
   let bot: Bot | null = null
   const wall0 = Date.now()
   let status: NodeJS.Timeout | null = null
+  let noTicks: NodeJS.Timeout | null = null
   try {
     bot = await connectLockstepBot(server, { username: opts.username, op: false, timeoutMs: 120000 })
     const b = bot
@@ -147,6 +167,17 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
       lastWall = now
     }, opts.statusMs)
     status.unref()
+    // no tick for a minute: what the bot was at, in the log and a report by the stuck reports
+    noTicks = watchTicks(() => b.lockstep.ticks, 60, seconds => {
+      const tasks = (b as any).survival?.tasks
+      const current = tasks?.current?.name ?? tasks?.currentTask?.name ?? null
+      log(`no game tick for ${seconds} s: ${where(b)}; task ${String(current)}`)
+      try {
+        const dir = process.env.SURVIVAL_STUCK_DIR as string
+        fs.mkdirSync(dir, { recursive: true })
+        fs.writeFileSync(path.join(dir, `${new Date().toISOString().replace(/[:.]/g, '-')}-${opts.username}-no_ticks.json`), JSON.stringify({ kind: 'no_ticks', seconds, ticks: b.lockstep.ticks, where: where(b), task: current }, null, 2))
+      } catch {}
+    })
     let checkpointSeq = 0
     let checkpointing: Promise<void> = Promise.resolve()
     const reached: MilestoneEvent[] = []
@@ -185,6 +216,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
     return killed
   } finally {
     if (status != null) clearInterval(status)
+    if (noTicks != null) clearInterval(noTicks)
     if (bot != null) {
       bot.survival?.reflexes?.stop()
       await quitBot(bot)
