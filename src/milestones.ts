@@ -6,7 +6,7 @@
 import type { Bot } from 'mineflayer'
 import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
-import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, isAdultPiglin, returnOverworld, withNetherSafety } from './nether/skills'
+import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, isAdultPiglin, returnOverworld, wearGold, wearingGold, withNetherSafety } from './nether/skills'
 import { travel } from './skills/travel'
 import { dayPhase } from './planner/schedule'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
@@ -576,6 +576,30 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   await placeFromObsidian()
 }
 
+/**
+ * What the nether isn't gone into without (after deaths the bot went in with a stone pickaxe and nothing on, and the
+ * piglins killed it by the portal, 26.3): a sword and a chestplate (iron at least, got when missing, as can be), and a
+ * golden piece worn (the piglins leave a player with gold on alone: PiglinAi.isWearingGold), crafted from the ingots
+ */
+export async function netherKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  const worn = (slot: 'torso'): string | undefined => bot.inventory.slots[bot.getEquipmentDestSlot(slot)]?.name
+  const want: Array<{ item: string | string[], count: number, optional?: boolean }> = []
+  if (countItems(bot, ['diamond_sword', 'iron_sword', 'netherite_sword']) === 0) want.push({ item: 'iron_sword', count: 1, optional: true })
+  if (!/(iron|diamond|netherite)_chestplate/.test(worn('torso') ?? '') && countItems(bot, ['iron_chestplate', 'diamond_chestplate', 'netherite_chestplate']) === 0) want.push({ item: 'iron_chestplate', count: 1, optional: true })
+  if (want.length > 0) {
+    await executor.obtain(want as any, signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`nether kit: ${(err as Error).message}`)
+    })
+  }
+  if (!wearingGold(bot) && (countItems(bot, 'gold_ingot') >= 4 || bot.inventory.items().some(i => i.name.startsWith('golden_') && /_(helmet|chestplate|leggings|boots)$/.test(i.name)))) {
+    await executor.task('gold on for the piglins', async (s) => await wearGold(bot, s), signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`nether kit: no gold on: ${(err as Error).message}`)
+    })
+  }
+}
+
 /** blocks carried for the nether's bridges and pillars (netherrack mined when fewer than half are held) */
 export const NETHER_BLOCKS = 64
 
@@ -607,6 +631,7 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     }
     // a spare kit by the portal and the respawn point by it (a blaze's death in the nether was the stage lost)
     await leaveTripKit(bot, executor, signal, log)
+    await netherKit(bot, executor, signal, log)
     await executor.task('into the nether', async (s) => await enterNether(bot, { build: true }, s), signal)
   }
   const needs = netherNeeds({ count })

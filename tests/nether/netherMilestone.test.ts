@@ -54,7 +54,8 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
   const from = calls.indexOf('obtain 10 obsidian')
   assert.equal(calls[0], 'down to the deep lava')
   assert.equal(calls.slice(0, from).filter(c => c === 'a leg for lava').length, PORTAL_LEGS)
-  assert.deepStrictEqual(calls.slice(from, from + 4), ['obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
+  // (the nether's kit got before the way in)
+  assert.deepStrictEqual(calls.slice(from).filter(c => !/iron_sword/.test(c)).slice(0, 4), ['obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
 })
 
 test('pearls in the nether: the endermen in sight hunted, else a leg on to find piglins or endermen, a few legs at most', async () => {
@@ -231,4 +232,23 @@ test('a pool the tunnel stops short of, within 8 blocks, is worked from there', 
     tunnelModule.tunnelTo = realTunnel
   }
   assert.equal(calls[calls.indexOf('to the lava') + 1], 'build a nether portal', calls.join(', '))
+})
+
+test('netherKit: a sword and a chestplate got when missing, and the gold put on, before the nether', async () => {
+  const { netherKit } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('stone_pickaxe', 1), item('gold_ingot', 8)] })
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs.map(r => r.item).join(',')}`) },
+    task: async (name: string) => { calls.push(name) }
+  }
+  await netherKit(bot, executor, new AbortController().signal, () => {})
+  assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate', 'gold on for the piglins'])
+  calls.length = 0
+  const armed = fakeBot({ items: [item('diamond_sword', 1), item('diamond_chestplate', 1)] })
+  await netherKit(armed, executor, new AbortController().signal, () => {})
+  assert.deepStrictEqual(calls, [])
 })
