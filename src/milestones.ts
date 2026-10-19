@@ -6,7 +6,8 @@
 import type { Bot } from 'mineflayer'
 import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
-import { buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
+import { blockGetter, buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
+import { findLavaSources } from './nether/portal'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
 import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd, readPortalRoom, SCAFFOLD_ITEMS } from './end/skills'
@@ -199,10 +200,22 @@ export function fortressRoute (memory: WorldMemory, from: Vec3): ExploreOptions 
   return route
 }
 
+/** a frame's obsidian, and the lava sources to cast one from */
+export const PORTAL_OBSIDIAN = 10
+export const PORTAL_LAVA = 10
+
 export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, log }) => {
   const count = (name: string): number => countItems(bot, name)
   if (!inNether(bot)) {
     if (executor.memory.getPois('nether_portal', { dimension: 'overworld' }).length === 0) {
+      // the frame's makings: 10 lava sources by the bot to cast it from, else 10 obsidian got (the planner's mine
+      // step goes to the obsidian of lava met by water): buildPortal casts only from lava within 16 blocks, and the
+      // bot that started the nether at the spawn had none near
+      const lava = findLavaSources(blockGetter(bot), bot.entity.position, 16).length
+      if (lava < PORTAL_LAVA && count('obsidian') < PORTAL_OBSIDIAN) {
+        log(`a portal frame: ${lava} lava sources near, ${count('obsidian')} obsidian: getting obsidian`)
+        await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], signal)
+      }
       log('building a nether portal')
       await executor.task('build a nether portal', async (s) => await buildPortal(bot, {}, s), signal)
     }

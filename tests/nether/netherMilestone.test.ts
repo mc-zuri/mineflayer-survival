@@ -34,3 +34,19 @@ test('eyesShort: out of eyes on the search or in the portal room is a trip back 
   assert.equal(eyesShort(inv({ ender_eye: 9 }), memory), 2)
   assert.equal(eyesShort(inv({ ender_eye: 11 }), memory), 0)
 })
+
+test('the nether milestone with no lava near and no obsidian gets the frame\'s 10 obsidian first, then builds the portal', async () => {
+  const { netherHandler } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs.map(r => `${r.count} ${r.item}`).join(', ')}`) },
+    task: async (name: string) => { calls.push(name); return { fortress: { center: { x: 0, y: 64, z: 0 } }, via: 'explore', ticks: 0 } }
+  }
+  const bot = fakeBot({ items: [item('water_bucket', 1), item('bucket', 2)] })
+  bot.game.dimension = 'overworld'
+  bot.findBlocks = () => []
+  await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any })
+  assert.deepStrictEqual(calls.slice(0, 3), ['obtain 10 obsidian', 'build a nether portal', 'into the nether'])
+})
