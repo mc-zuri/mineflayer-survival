@@ -12,6 +12,7 @@ import { navigate, walkTo } from './navigate'
 import { chooseFuel, smelt } from './smelt'
 import { blockIds, countItems, inventoryItems, trace, waitUntil } from './util'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
+import { useSpawnerFarm, type XpFarm } from './spawnerFarm'
 import type { TaskError } from '../core/errors'
 import { findBlocks } from '../core/findBlocks'
 
@@ -73,7 +74,7 @@ export const SMELT_XP: Record<string, number> = {
 /** mobs worth killing for their points (Monster.getBaseExperienceReward: 5), creepers left out (they blow up) */
 export const XP_MOBS = ['zombie', 'husk', 'drowned', 'skeleton', 'stray', 'bogged', 'spider', 'cave_spider', 'zombie_villager', 'witch', 'slime', 'silverfish']
 
-export type XpSource = 'ore' | 'smelt' | 'kill'
+export type XpSource = 'farm' | 'ore' | 'smelt' | 'kill'
 
 /** the bot's experience as the server last sent it (ClientboundSetExperiencePacket) */
 export function experience (bot: Bot): { level: number, points: number, progress: number } {
@@ -141,8 +142,10 @@ export async function collectOrbs (bot: Bot, args: CollectOrbsArgs = {}, signal?
 export interface GainLevelsArgs {
   /** the level to reach */
   level: number
-  /** the ways to get points, tried in this order (default ore, smelt, kill) */
+  /** the ways to get points, tried in this order (default farm, ore, smelt, kill; the farm only with `farm`) */
   sources?: XpSource[]
+  /** an experience farm the bot built (spawnerFarm): the first source while it works */
+  farm?: XpFarm
   /** how far to look for ores and mobs (default 32) */
   range?: number
   /** give up after this many ticks (default 24000, 20 minutes of game time) */
@@ -161,13 +164,13 @@ export interface GainLevelsResult {
 }
 
 /**
- * Gains experience until the bot's level is `level`: mines the experience ores it finds within range (coal, redstone,
- * lapis, quartz, diamond, emerald), smelts its raw ores and meat and takes the output
+ * Gains experience until the bot's level is `level`: stands in its experience farm's booth when it has one (args.farm),
+ * mines the experience ores it finds within range (coal, redstone, lapis, quartz, diamond, emerald), smelts its raw ores and meat and takes the output
  * (AbstractFurnaceBlockEntity.awardUsedRecipesAndPopExperience), kills hostile mobs, and picks the orbs up after each.
  * Tracks bot.experience; throws NOT_FOUND when nothing is left to gain points from, TIMEOUT after maxTicks.
  */
 export async function gainLevels (bot: Bot, args: GainLevelsArgs, signal?: AbortSignal): Promise<GainLevelsResult> {
-  const sources = args.sources ?? ['ore', 'smelt', 'kill']
+  const sources = args.sources ?? ['farm', 'ore', 'smelt', 'kill']
   const range = args.range ?? 32
   const maxTicks = args.maxTicks ?? 24000
   const start = experience(bot).points
@@ -225,6 +228,22 @@ export async function gainLevels (bot: Bot, args: GainLevelsArgs, signal?: Abort
     return true
   }
 
+  // the farm's booth (useSpawnerFarm) until the level, the ticks left, or it fails (then the other sources)
+  const useFarm = async (): Promise<boolean> => {
+    const farm = args.farm
+    if (farm == null || skipped.has('farm')) return false
+    trace('gainLevels: the farm at', farm.spawner.toString())
+    try {
+      killed += (await useSpawnerFarm(bot, farm, { level: args.level, maxTicks: Math.max(1, maxTicks - ticks) }, signal)).kills
+    } catch (err) {
+      if (isAbort(err)) throw err
+      killed += ((err as TaskError).partial as { kills?: number } | undefined)?.kills ?? 0
+      skipped.add('farm')
+      trace('gainLevels: the farm failed:', (err as Error).message)
+    }
+    return true
+  }
+
   const killMob = async (): Promise<boolean> => {
     const target = Object.values(bot.entities)
       .filter(e => e !== bot.entity && XP_MOBS.includes(e.name ?? '') && !skipped.has(`mob:${e.id}`) && e.position.distanceTo(bot.entity.position) <= range)
@@ -248,7 +267,7 @@ export async function gainLevels (bot: Bot, args: GainLevelsArgs, signal?: Abort
       if (ticks >= maxTicks) throw new SkillError('TIMEOUT', `level ${experience(bot).level} of ${args.level} after ${ticks} ticks`, result())
       let did = false
       for (const source of sources) {
-        did = source === 'ore' ? await mineOre() : source === 'smelt' ? await smeltSome() : await killMob()
+        did = source === 'farm' ? await useFarm() : source === 'ore' ? await mineOre() : source === 'smelt' ? await smeltSome() : await killMob()
         if (did) break
       }
       if (!did) {

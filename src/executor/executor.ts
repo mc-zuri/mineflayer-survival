@@ -26,6 +26,7 @@ import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, type StepC
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { noteVillage } from '../skills/village'
 import { rememberAround } from './explore'
+import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
 import { farmCells, grownPlots, knownFarms } from '../skills/farm'
 import { GROW_TICKS } from '../core/crops'
 import type { Diagnostics } from '../diagnostics'
@@ -174,6 +175,8 @@ export class Executor {
       const before = this.memory.getPois('village').length
       const at = noteVillage(bot, this.memory, names => rememberAround(bot, this.memory, names, 64))
       if (at != null && this.memory.getPois('village').length > before) this.log(`a village at ${at.toString()}: its crops and hay noted`)
+      // a dungeon's spawner passed by (a cave, the mine): the epochs' experience farm is built round one
+      if (noteSpawners(bot, this.memory, 32) > 0) this.log(`a spawner noted: ${this.memory.getPois(SPAWNER_POI).slice(-1).map(p => `${p.note ?? '?'} at ${p.x} ${p.y} ${p.z}`).join('')}`)
     })
   }
 

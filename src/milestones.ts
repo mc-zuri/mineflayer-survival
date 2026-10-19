@@ -23,6 +23,7 @@ import { collectBlock } from './skills/collectBlock'
 import { countBookshelves, enchant, enchantGear, findEnchantingTable, offerCostRange } from './skills/enchant'
 import { applyBooks } from './skills/anvil'
 import { experience, gainLevels } from './skills/xp'
+import { nearestXpFarm } from './skills/spawnerFarm'
 import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from './skills/husbandry'
 import { makeWaterHole, plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
@@ -336,9 +337,9 @@ export const LEVELS_LEG = 48
 export const LEVELS_DEPTH = -30
 
 /**
- * Levels up to `level` within LEVELS_BUDGET_TICKS: gainLevels (the ores, the smelting, the mobs within 48 blocks),
- * and when none is left near, down to LEVELS_DEPTH for the deep ores, then tunnel legs of LEVELS_LEG blocks along
- * the axes in turn to more; resolves the level got
+ * Levels up to `level` within LEVELS_BUDGET_TICKS: gainLevels (the experience farm, the ores, the smelting, the mobs
+ * within 48 blocks), and when none is left near, down to LEVELS_DEPTH for the deep ores, then tunnel legs of
+ * LEVELS_LEG blocks along the axes in turn to more; resolves the level got
  */
 export async function levelsToward (bot: Bot, executor: Executor, level: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
   const start = executor.tasks.tick
@@ -347,7 +348,9 @@ export async function levelsToward (bot: Bot, executor: Executor, level: number,
     if (signal.aborted) throw signal.reason
     const before = experience(bot).level
     try {
-      await executor.task('levels', async (s) => await gainLevels(bot, { level, range: 48, maxTicks: 12000 }, s), signal)
+      // (the experience farm first, when the bot has built one: the epochs' xp farm)
+      const farm = nearestXpFarm(executor.memory, bot.entity.position, normalizeDimension(bot.game?.dimension)) ?? undefined
+      await executor.task('levels', async (s) => await gainLevels(bot, { level, range: 48, maxTicks: 12000, farm }, s), signal)
       // (done with no level gained: nothing more to have from it)
       if (experience(bot).level <= before) break
     } catch (err) {
