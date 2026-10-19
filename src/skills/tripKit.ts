@@ -67,7 +67,7 @@ export async function placeSpawnBed (bot: Bot, near: Vec3, item: string, signal?
  * bedRoomToDig from where the bot stands, else from a cell to stand in within 2 of `near` (feet and head free, solid
  * under), the nearest first: the bot by its chest in a tunnel may stand where the chest takes the one way out
  */
-function roomToDigNear (lookup: (p: Vec3) => any, from: Vec3, near: Vec3, avoid: (p: Vec3) => boolean): ReturnType<typeof bedRoomToDig> {
+export function roomToDigNear (lookup: (p: Vec3) => any, from: Vec3, near: Vec3, avoid: (p: Vec3) => boolean): ReturnType<typeof bedRoomToDig> {
   const here = bedRoomToDig(lookup, from, avoid)
   if (here != null) return here
   const stands: Vec3[] = []

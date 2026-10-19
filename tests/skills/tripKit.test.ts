@@ -145,3 +145,21 @@ test('a respawn far from the trip kit at night with no armor waits the night out
   await runner.tripRekit()
   assert.deepStrictEqual(tasks, ['wait out the night', 'to the trip kit', 'the trip kit'])
 })
+
+test('roomToDigNear: the bot walled in by its chest in a 1-wide tunnel digs the bed\'s room from a cell on the chest\'s other side', async () => {
+  const { roomToDigNear } = await import('../../src/skills/tripKit')
+  const { Vec3 } = await import('vec3')
+  // stone all round; a tunnel along z at x 0, y 64-65, z -1 to 1; the chest at z 0, the bot at z 1 with bedrock round it
+  const lookup = (p: any): any => {
+    const k = `${p.x},${p.y},${p.z}`
+    const name = k === '0,64,0' ? 'chest'
+      : p.x === 0 && (p.y === 64 || p.y === 65) && p.z >= -1 && p.z <= 1 ? 'air'
+        : ['1,64,1', '-1,64,1', '0,64,2'].includes(k) ? 'bedrock' : 'stone'
+    return { name, boundingBox: name === 'air' ? 'empty' : 'block' }
+  }
+  const room = roomToDigNear(lookup, new Vec3(0.5, 64, 1.5), new Vec3(0, 64, 0), () => false)
+  assert.ok(room != null)
+  assert.deepStrictEqual(room.stand, new Vec3(0, 64, -1))
+  assert.strictEqual(room.dig.length, 2)
+  assert.ok(room.dig.every((c: any) => lookup(c).name === 'stone'))
+})
