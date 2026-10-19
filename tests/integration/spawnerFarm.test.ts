@@ -76,6 +76,9 @@ describe(`a spawner experience farm on a ${DEFAULT_VERSION} server`, { timeout: 
     const farm = await buildSpawnerFarm(bot, spawner)
     console.log(`built: the bot in the booth at ${farm.stand.toString()} in ${ticks - k0} ticks (${((Date.now() - t0) / 1000).toFixed(1)} s)`)
     assert.ok(bot.blockAt(c.offset(4, 0, 0))?.boundingBox === 'block' && bot.blockAt(c.offset(4, 1, 0))?.boundingBox === 'block', 'the hole to the cave isn\'t sealed')
+    // a chicken jockey in the room as well (a baby zombie on a chicken: one went through the slit and, the client
+    // leaving it where it mounted, hit the bot to death unseen, 26.3)
+    console.log(`jockey: ${await run(`summon chicken ${spawner.x + 0.5} ${spawner.y} ${spawner.z + 2.5} {Passengers:[{id:"minecraft:zombie",IsBaby:1b}]}`)}`)
     rememberXpFarm(bot.survival.memory, farm)
     assert.strictEqual(knownXpFarms(bot.survival.memory).length, 1)
 

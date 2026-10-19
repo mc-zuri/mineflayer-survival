@@ -107,3 +107,13 @@ test('the pathfinder is kept out of the farm\'s room (the booth left in) and off
   assert.equal(sides.length, 7)
   assert.ok(!sides.includes(new Vec3(4, 20, 0).toString()) && sides.includes(new Vec3(6, 21, 0).toString()) && sides.includes(new Vec3(5, 22, 0).toString()))
 })
+
+test('a rider is where its mount is (the client moves no rider with its mount)', async () => {
+  const { ridingBox } = await import('../../src/skills/spawnerFarm')
+  const chicken: any = { position: new Vec3(3.5, 20, 3.5), height: 0.7, width: 0.4 }
+  const baby: any = { position: new Vec3(-2, 20, 9), height: 0.975, width: 0.6, vehicle: chicken }
+  const box = ridingBox(baby)
+  assert.ok(Math.abs(box.min.x - 3.2) < 1e-9 && Math.abs(box.min.y - 20.7) < 1e-9 && Math.abs(box.max.y - 21.675) < 1e-9)
+  const plain = ridingBox({ position: new Vec3(1, 20, 1), height: 1.95, width: 0.6 } as any)
+  assert.ok(Math.abs(plain.max.y - 21.95) < 1e-9)
+})

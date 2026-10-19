@@ -389,6 +389,19 @@ export const FARM_EAT_AT = 16
 /** the hostile mobs the bot in the booth hits: the farm's mob and any other that came in */
 const HITTABLE = new Set([...BOOTH_MOBS, 'skeleton', 'spider', 'cave_spider', 'creeper', 'silverfish', 'drowned', 'stray', 'bogged'])
 
+/** a hostile mob, or a mount one rides (a chicken jockey's chicken) */
+function hittable (e: Entity): boolean {
+  if (HITTABLE.has(e.name ?? '')) return true
+  return ((e as any).passengers ?? []).some((p: Entity) => HITTABLE.has(p.name ?? ''))
+}
+
+/** a mob's box, a rider's on its mount where the client leaves it behind (it moves no rider with its mount) */
+export function ridingBox (e: Entity): { min: Vec3, max: Vec3 } {
+  const vehicle: Entity | undefined = (e as any).vehicle
+  if (vehicle == null) return entityBox(e)
+  return entityBox({ position: vehicle.position.offset(0, (vehicle.height ?? 0.7), 0), width: e.width, height: e.height })
+}
+
 /**
  * Stands in the farm's booth killing what comes to the slit (the mobs within the player's reach of the eyes and in the
  * crosshair, the nearest first, each swing at full strength: Player.getAttackStrengthScale) until the level or the
@@ -402,10 +415,13 @@ export async function useSpawnerFarm (bot: Bot, farm: XpFarm, args: UseFarmArgs 
   const onTick = (): void => { ticks++ }
   const hit = new Set<number>()
   const onDead = (e: Entity): void => { if (hit.has(e.id)) { kills++; hit.delete(e.id) } }
-  const onHurt = (e: Entity): void => {
+  // the last mob to hit the bot (the damage event's source) and when
+  let attacker = null as { id: number, tick: number } | null
+  const onHurt = (e: Entity, source?: Entity): void => {
     if (e !== bot.entity) return
+    if (source != null && source !== bot.entity) attacker = { id: source.id, tick: ticks }
     const near = Object.values(bot.entities).filter(m => m !== bot.entity && HITTABLE.has(m.name ?? '')).sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
-    trace('spawnerFarm: hurt, health', bot.health, 'the nearest', near?.name, near != null && metadataValue(bot, near, 'baby') === true ? '(baby)' : '', near?.position.toString())
+    trace('spawnerFarm: hurt, health', bot.health, 'by', source?.name, (source as any)?.vehicle?.name ?? '', 'the nearest', near?.name, near != null && metadataValue(bot, near, 'baby') === true ? '(baby)' : '', near?.position.toString())
   }
   bot.on('physicsTick', onTick)
   bot.on('entityDead', onDead)
@@ -429,17 +445,29 @@ export async function useSpawnerFarm (bot: Bot, farm: XpFarm, args: UseFarmArgs 
       if (experience(bot).level !== lastLevel) { lastLevel = experience(bot).level; trace('spawnerFarm: level', lastLevel, 'kills', kills, 'ticks', ticks, 'health', bot.health) }
       const eye = eyePosition(bot)
       const target = Object.values(bot.entities)
-        .filter(e => e !== bot.entity && HITTABLE.has(e.name ?? '') && isAlive(bot, e) && distanceToBox(eye, entityBox(e)) <= 2.9)
-        .sort((a, b) => distanceToBox(eye, entityBox(a)) - distanceToBox(eye, entityBox(b)))[0]
+        .filter(e => e !== bot.entity && hittable(e) && isAlive(bot, e) && distanceToBox(eye, ridingBox(e)) <= 2.9)
+        .sort((a, b) => distanceToBox(eye, ridingBox(a)) - distanceToBox(eye, ridingBox(b)))[0]
+      // a mob hitting the bot that the client sees elsewhere (a baby zombie on a chicken: mineflayer doesn't move a
+      // mob's rider with it, and one came through the slit and hit the bot to death from 'six blocks off', 26.3): hit
+      // back at it, the server knowing where it is
+      const hitter = attacker != null && ticks - attacker.tick <= 40 ? bot.entities[attacker.id] : null
       if (target != null) {
         const weapon = bestMeleeWeapon(bot, target.name)
         if (weapon != null && bot.heldItem?.type !== weapon.type) await bot.equip(weapon, 'hand')
         // at what shows of it through the slit: its body at the slit's middle height
-        const box = entityBox(target)
+        const box = ridingBox(target)
         const y = Math.max(box.min.y + 0.1, Math.min(box.max.y - 0.1, farm.barrier.y + 1.5))
-        const { yaw, pitch } = yawPitchOf(new Vec3(target.position.x, y, target.position.z).minus(eye))
+        const at = box.min.plus(box.max).scaled(0.5)
+        const { yaw, pitch } = yawPitchOf(new Vec3(at.x, y, at.z).minus(eye))
         await bot.look(yaw, pitch, true)
         if (strength.scale(0.5) >= 1 && strength.attack(target)) hit.add(target.id)
+      } else if (hitter != null && isAlive(bot, hitter)) {
+        if (strength.scale(0.5) >= 1) {
+          trace('spawnerFarm: hitting back at', hitter.name, hitter.id, 'seen at', hitter.position.toString())
+          bot.attack(hitter)
+          hit.add(hitter.id)
+          strength.ticker = 0
+        }
       } else if (bot.food <= FARM_EAT_AT) {
         // fed between the zombies (the swings tire: Player.attack's exhaustion), so the health comes back
         await eat(bot, { signal }).catch(err => { if (isAbort(err)) throw err; trace('spawnerFarm: no meal:', (err as Error).message) })
