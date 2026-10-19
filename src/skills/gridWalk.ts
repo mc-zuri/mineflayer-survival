@@ -176,15 +176,48 @@ export const GRID_EDGE_COST = { the_nether: 3, other: 1 }
 /** cells' worth charged for a cell near where the bot died in the nether (nearDeath) */
 export const GRID_DEATH_COST = 5
 
+interface GridBlock { name: string, boundingBox: string }
+
+/** a cell's key: x and z to 20 bits (wrapped), y to 12 */
+function cellKey (p: Vec3): number {
+  return ((p.x & 0xfffff) * 0x100000 + (p.z & 0xfffff)) * 0x1000 + ((p.y + 2048) & 0xfff)
+}
+
+/**
+ * The block of a cell for one grid search: its registry entry by the world's state id (the name and the collision
+ * box a prismarine Block takes from it, Block.fromStateId), each cell read once; null where the world has no column.
+ * bot.blockAt made a Block for each of a search's lookups, its block entity, biome and light read too: 90% of a
+ * nether grid search.
+ */
+export function gridBlockLookup (bot: Bot): (p: Vec3) => GridBlock | null {
+  const world = bot.world as any
+  if (typeof world?.getColumnAt !== 'function') return p => bot.blockAt(p)
+  const byState = bot.registry.blocksByStateId as Record<number, GridBlock | undefined>
+  const seen = new Map<number, GridBlock | null>()
+  const local = new Vec3(0, 0, 0)
+  return p => {
+    const k = cellKey(p)
+    let b = seen.get(k)
+    if (b === undefined) {
+      // (the world's getBlockStateId is air where no column is loaded: blockAt's null is kept)
+      const column = world.getColumnAt(p)
+      b = column == null ? null : byState[column.getBlockStateId(local.set(p.x & 15, p.y, p.z & 15))] ?? null
+      seen.set(k, b)
+    }
+    return b
+  }
+}
+
 /** the bot's world as gridWalk sees it */
 export function botGridView (bot: Bot): GridCellView {
-  const isLava = (p: Vec3): boolean => bot.blockAt(p)?.name === 'lava'
+  const blockOf = gridBlockLookup(bot)
+  const isLava = (p: Vec3): boolean => blockOf(p)?.name === 'lava'
   const nether = normalizeDimension(bot.game?.dimension) === 'the_nether'
   // where the bot died in the nether: kept away from, as the pathfinder's nether settings do
   const deaths = nether ? (bot.survival?.memory?.getPois('nether_death', { dimension: 'the_nether' }) ?? []) : []
   return {
-    free: p => { const b = bot.blockAt(p); return b != null && b.boundingBox === 'empty' && !HARMFUL.has(b.name) },
-    floor: p => { const b = bot.blockAt(p); return b != null && b.boundingBox === 'block' && b.name !== 'magma_block' },
+    free: p => { const b = blockOf(p); return b != null && b.boundingBox === 'empty' && !HARMFUL.has(b.name) },
+    floor: p => { const b = blockOf(p); return b != null && b.boundingBox === 'block' && b.name !== 'magma_block' },
     lava: isLava,
     edgeCost: nether ? GRID_EDGE_COST.the_nether : GRID_EDGE_COST.other,
     cellCost: deaths.length > 0 ? c => nearDeath(deaths, c) ? GRID_DEATH_COST : 0 : undefined
