@@ -23,7 +23,7 @@ import { collectBlock } from './skills/collectBlock'
 import { countBookshelves, enchant, enchantGear, findEnchantingTable, offerCostRange } from './skills/enchant'
 import { applyBooks } from './skills/anvil'
 import { experience, gainLevels } from './skills/xp'
-import { nearestXpFarm } from './skills/spawnerFarm'
+import { knownFarmableSpawners, nearestXpFarm } from './skills/spawnerFarm'
 import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from './skills/husbandry'
 import { makeWaterHole, plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
@@ -329,6 +329,11 @@ export async function enchantBooksAndApply (bot: Bot, executor: Executor, signal
   }
 }
 
+/** levels to go from which the enchanting builds an experience farm at a spawner it knows */
+export const XP_FARM_WORTH = 10
+/** how far off a spawner may be for that */
+export const XP_FARM_TRIP = 256
+
 /** ticks the enchanting may spend on the top offer's levels (lockstep: days of game time) */
 export const LEVELS_BUDGET_TICKS = 72000
 /** a tunnel leg's length for the levels' ores when none is near */
@@ -344,6 +349,18 @@ export const LEVELS_DEPTH = -30
 export async function levelsToward (bot: Bot, executor: Executor, level: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
   const start = executor.tasks.tick
   let leg = 0
+  // many levels to go and a zombie spawner known with no farm yet: the experience farm built first (the epochs'),
+  // its levels a tenth of the ores' ticks (121000 ticks of ore mining for 13 of 24 levels, 26.3)
+  const dimension = normalizeDimension(bot.game?.dimension)
+  if (level - experience(bot).level >= XP_FARM_WORTH && nearestXpFarm(executor.memory, bot.entity.position, dimension) == null &&
+    knownFarmableSpawners(executor.memory, bot.entity.position, dimension).some(sp => sp.pos.distanceTo(bot.entity.position) <= XP_FARM_TRIP)) {
+    log(`levels: ${experience(bot).level} of ${level}: an xp farm at the spawner first`)
+    const { xpFarmEpochHandler } = await import('./epochs')
+    await xpFarmEpochHandler({ bot, executor, signal, log, milestone: null as any, state: null as any }).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`levels: no xp farm: ${(err as Error).message}`)
+    })
+  }
   while (experience(bot).level < level && executor.tasks.tick - start < LEVELS_BUDGET_TICKS) {
     if (signal.aborted) throw signal.reason
     const before = experience(bot).level

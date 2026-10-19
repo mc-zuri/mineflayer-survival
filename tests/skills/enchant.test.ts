@@ -306,3 +306,31 @@ test('the enchanting goes on when no room can be made in the bag (INVENTORY_FULL
   }
   await assert.rejects(enchantingHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: { goals: () => [] } as any, state: null as any }), /stop here/)
 })
+
+test('levelsToward builds the xp farm first at a zombie spawner it knows, when many levels are to go', async () => {
+  const { levelsToward } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  bot.game.dimension = 'overworld'
+  ;(bot as any).experience = { level: 2, points: 0, progress: 0 }
+  const memory = new WorldMemory()
+  memory.addPoi('spawner', { x: 40, y: 20, z: 10 }, 'overworld', 'zombie')
+  let tick = 0
+  const tasks: string[] = []
+  const executor: any = {
+    memory,
+    tasks: { get tick () { return tick } },
+    obtain: async () => {},
+    task: async (name: string) => { tasks.push(name); tick += 100000 }
+  }
+  await levelsToward(bot, executor, 30, new AbortController().signal, () => {})
+  assert.equal(tasks[0], 'to the spawner')
+  // none known: the ores as before
+  tasks.length = 0
+  tick = 0
+  const plain: any = { ...executor, memory: new WorldMemory() }
+  await levelsToward(bot, plain, 30, new AbortController().signal, () => {})
+  assert.equal(tasks[0], 'levels')
+})
