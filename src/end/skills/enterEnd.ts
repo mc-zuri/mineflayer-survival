@@ -5,7 +5,7 @@ import { TaskError, type SkillOptions, throwIfAborted, waitTicks, waitUntil, eye
 import { analyzePortalRoom, FACING_STEP, findPortalFrames, readPortalFrame, type PortalRoom } from '../portalRoom'
 import { steerToward } from '../../skills/steer'
 import { trace } from '../../skills/util'
-import { blockGetter, gotoBlock, gotoNear, groundY } from './world'
+import { blockGetter, gotoBlock, gotoNear, groundY, type BlockGetter } from './world'
 
 // enterEnd: the eyes the portal room's frames are missing put in (EnderEyeItem.useOn on each frame's top), then into
 // the end_portal the 12th eye opens (EndPortalBlock.entityInside), and the arrival in the End awaited.
@@ -57,6 +57,26 @@ function framePos (p: { x: number, y: number, z: number }): Vec3 {
  * fill the 3×3 inside, and walks into it. Resolves once the bot is in the End and on the ground. Throws NOT_FOUND
  * without a whole frame around, MISSING_ITEMS short of eyes.
  */
+/**
+ * Where to stand to put an eye in a frame: outside the ring 1 or 2 blocks out from it (FACING points into the room), or
+ * a block to the side of that, on ground at the frame's level or over it (the platform, where its top face is in
+ * sight); else 2 out on whatever ground is there
+ */
+export function frameStandSpot (get: BlockGetter, pos: Vec3, out: { x: number, z: number }): { x: number, y: number, z: number } {
+  const side = { x: out.z, z: out.x }
+  for (const d of [2, 1]) {
+    for (const s of [0, 1, -1]) {
+      const x = pos.x - out.x * d + side.x * s
+      const z = pos.z - out.z * d + side.z * s
+      const y = groundY(get, x, z, pos.y + 3, pos.y - 4)
+      if (y != null && y >= pos.y && y <= pos.y + 1) return { x, y, z }
+    }
+  }
+  const x = pos.x - out.x * 2
+  const z = pos.z - out.z * 2
+  return { x, y: groundY(get, x, z, pos.y + 3, pos.y - 4) ?? pos.y, z }
+}
+
 export async function enterEnd (bot: Bot, opts: EnterEndOptions = {}): Promise<EnterEndResult> {
   const signal = opts.signal
   if (isInEnd(bot)) return { eyesPlaced: 0, arrival: bot.entity.position.clone() }
@@ -75,12 +95,12 @@ export async function enterEnd (bot: Bot, opts: EnterEndOptions = {}): Promise<E
     const pos = framePos(frame.pos)
     // the top face's middle, within reach of the eyes
     const top = pos.offset(0.5, 13 / 16, 0.5)
-    if (eyePosition(bot).distanceTo(top) > BLOCK_REACH - 0.5) {
+    // or from below it (down by the room's lava, its top face out of sight: the eye never went in, 1.21.11 seed 2)
+    if (eyePosition(bot).distanceTo(top) > BLOCK_REACH - 0.5 || eyePosition(bot).y < top.y) {
       // from outside the ring, two blocks out from the frame (FACING points into the room)
       const out = FACING_STEP[frame.facing]
-      const spot = pos.offset(-out.x * 2, 0, -out.z * 2)
-      const y = groundY(blockGetter(bot), spot.x, spot.z, spot.y + 3, spot.y - 4) ?? spot.y
-      await gotoBlock(bot, { x: spot.x, y, z: spot.z }, { signal })
+      const spot = frameStandSpot(blockGetter(bot), pos, out)
+      await gotoBlock(bot, spot, { signal })
     }
     const block = bot.blockAt(pos)
     if (block == null || readPortalFrame(block as any, pos) == null) throw new TaskError('NOT_FOUND', `the frame at ${pos.toString()} is gone`)

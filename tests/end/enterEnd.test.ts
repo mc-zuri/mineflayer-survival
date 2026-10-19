@@ -87,3 +87,19 @@ test('portalRoomNear: the room\'s 12 frames in reach; 26 blocks off (mining gold
   assert.strictEqual(portalRoomNear(mk(new Vec3(2351.5, -22, 1016.5))), true)
   assert.strictEqual(portalRoomNear(mk(new Vec3(2377.5, -27, 1017.5))), false)
 })
+
+test('frameStandSpot: outside the ring on the frames\' level (the platform), not down by the room\'s floor where the top face is out of sight', async () => {
+  const { frameStandSpot } = await import('../../src/end/skills/enterEnd')
+  const { world } = await import('./endWorld')
+  // a frame at (10, 64, 10) facing south (+z into the room); the platform at its level is 1 out only, then a step down
+  const blocks = new Map<string, string>()
+  for (let x = 5; x <= 15; x++) for (let z = 0; z <= 12; z++) blocks.set(`${x},61,${z}`, 'obsidian')
+  for (let x = 5; x <= 15; x++) blocks.set(`${x},63,9`, 'obsidian')
+  blocks.set('10,64,10', 'obsidian')
+  const spot = frameStandSpot(world(blocks), new Vec3(10, 64, 10), { x: 0, z: 1 })
+  assert.deepStrictEqual(spot, { x: 10, y: 64, z: 9 })
+  // no platform: 2 out on the ground there
+  const low = new Map<string, string>()
+  for (let x = 5; x <= 15; x++) for (let z = 0; z <= 12; z++) low.set(`${x},61,${z}`, 'obsidian')
+  assert.deepStrictEqual(frameStandSpot(world(low), new Vec3(10, 64, 10), { x: 0, z: 1 }), { x: 10, y: 62, z: 8 })
+})
