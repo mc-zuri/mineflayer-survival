@@ -8,7 +8,7 @@ import { normalizeDimension, type Poi, type WorldMemory } from '../core/memory'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { craft } from '../skills/craft'
 import { nearbyDrops, pickupDrops } from '../skills/pickupDrops'
-import { travel } from '../skills/travel'
+import { travel, type TravelArgs } from '../skills/travel'
 import { moveNear } from '../skills/gridWalk'
 import { tunnelTo } from '../skills/tunnel'
 import { countItems, findInventoryItem, settleInventory, trace, waitTicks, waitUntil } from '../skills/util'
@@ -279,7 +279,7 @@ export async function locateStronghold (bot: Bot, args: LocateStrongholdArgs = {
     }
     const side = secondThrowPoint(firstRay, args.sideways ?? 500)
     trace('locateStronghold: second throw from', side)
-    await onTheSurface(bot, async () => await travel(bot, { target: new Vec3(side.x, bot.entity.position.y, side.z), range: 8, hop: args.hop }, signal))
+    await overland(bot, { target: new Vec3(side.x, bot.entity.position.y, side.z), range: 8, hop: args.hop }, signal)
     const second = await throwReadable(bot, signal)
     throws.push(second)
     if (second.near != null) return done(bot, null, second.near, throws, ticks)
@@ -293,7 +293,7 @@ export async function locateStronghold (bot: Bot, args: LocateStrongholdArgs = {
     if (second.ray != null) {
       const third = secondThrowPoint(second.ray, args.thirdSideways ?? THIRD_SIDEWAYS)
       trace('locateStronghold: the rays disagree: a third throw from', third)
-      await onTheSurface(bot, async () => await travel(bot, { target: new Vec3(third.x, bot.entity.position.y, third.z), range: 8, hop: args.hop }, signal))
+      await overland(bot, { target: new Vec3(third.x, bot.entity.position.y, third.z), range: 8, hop: args.hop }, signal)
       const t3 = await throwReadable(bot, signal)
       throws.push(t3)
       if (t3.near != null) return done(bot, null, t3.near, throws, ticks)
@@ -307,6 +307,16 @@ export async function locateStronghold (bot: Bot, args: LocateStrongholdArgs = {
   } finally {
     bot.off('physicsTick', onTick)
   }
+}
+
+/**
+ * A trip over the surface: up out of a cave or a mine first (a trip set off from the bottom of a night's mine went on
+ * through the caves at y 8 at 30 ticks a second, the pathfinder finding no way on hop after hop: 26.3 seed 2), then
+ * travel with the surface's step costs (onTheSurface)
+ */
+export async function overland (bot: Bot, args: TravelArgs, signal?: AbortSignal): Promise<void> {
+  await ensureSurface(bot, signal)
+  await onTheSurface(bot, async () => await travel(bot, args, signal))
 }
 
 /**
@@ -408,7 +418,7 @@ export async function reachStronghold (bot: Bot, args: ReachStrongholdArgs = {},
         trace('reachStronghold: to', target, Math.round(d), 'blocks')
         try {
           const to = new Vec3(target.x, bot.entity.position.y, target.z)
-          await onTheSurface(bot, async () => await travel(bot, { target: to, range: 4, hop: args.hop }, signal))
+          await overland(bot, { target: to, range: 4, hop: args.hop }, signal)
         } catch (err) {
           if (isAbort(err)) throw err
           trace('reachStronghold: travel stopped:', (err as Error).message)
@@ -551,7 +561,7 @@ export async function strongholdToPortalRoom (bot: Bot, args: LocateStrongholdAr
     if (Math.hypot(spot.x - bot.entity.position.x, spot.z - bot.entity.position.z) > ROOM_TRAVEL_RANGE) {
       trace('strongholdToPortalRoom: back to the stronghold at', spot.x, spot.z)
       const to = new Vec3(spot.x, bot.entity.position.y, spot.z)
-      await onTheSurface(bot, async () => await travel(bot, { target: to, range: 8, hop: args.hop }, signal))
+      await overland(bot, { target: to, range: 8, hop: args.hop }, signal)
     }
     return { located: null, reached: null, room: await findPortalRoom(bot, { near: { x: spot.x, z: spot.z } }, signal) }
   }

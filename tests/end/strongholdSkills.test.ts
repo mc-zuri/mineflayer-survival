@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, nextAlongRay, awaitEyeDrop, consistentCrossing, throwEnderEye, rememberedRays as raysOf, EYE_RAY, EYE_DROP_TICKS } from '../../src/end/strongholdSkills'
+import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, nextAlongRay, awaitEyeDrop, consistentCrossing, throwEnderEye, overland, rememberedRays as raysOf, EYE_RAY, EYE_DROP_TICKS } from '../../src/end/strongholdSkills'
 import { isSkillError } from '../../src/skills/errors'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
@@ -145,4 +145,28 @@ test('throwEnderEye remembers the eye\'s ray as soon as its flight is read, befo
   } finally {
     clearInterval(timer)
   }
+})
+
+test('overland: a trip from a cave or a mine climbs out first; one from the surface sets off as it is', async () => {
+  const { Vec3 } = require('vec3')
+  const used: string[] = []
+  const pathfinder = new Proxy({}, {
+    get: (_t, k) => {
+      if (k === 'pathfinderSettings' || k === 'defaultMoveSettings') return {}
+      if (k === 'setOptions' || k === 'setMoveOptions') return () => {}
+      used.push(String(k))
+      return () => { throw new Error('no pathfinder here') }
+    }
+  })
+  const surface = fakeBot({ position: new Vec3(0.5, 70, 0.5), world: (p: any) => p.y < 70 ? 'stone' : 'air' })
+  surface.game.dimension = 'overworld'
+  surface.pathfinder = pathfinder
+  // already there: travel ends at once
+  await overland(surface, { target: new Vec3(1, 70, 1), range: 3 })
+  assert.deepStrictEqual(used, [])
+  const cave = fakeBot({ position: new Vec3(0.5, -6, 0.5), world: (p: any) => p.y >= -6 && p.y <= -4 ? 'air' : 'stone' })
+  cave.game.dimension = 'overworld'
+  cave.pathfinder = pathfinder
+  await overland(cave, { target: new Vec3(1, -6, 1), range: 3 }).catch(() => {})
+  assert.ok(used.length > 0, 'no way up was looked for')
 })
