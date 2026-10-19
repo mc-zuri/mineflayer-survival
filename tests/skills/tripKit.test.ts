@@ -73,3 +73,17 @@ test('nearPortal: a cell 2 or fewer blocks from a portal\'s blocks is not for th
   assert.strictEqual(nearPortal(world, new Vec3(1, 64, 1)), true)
   assert.strictEqual(nearPortal(world, new Vec3(3, 64, 0)), false)
 })
+
+test('withTickBudget: the work is aborted once its ticks are gone', async () => {
+  const { withTickBudget } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const bot = fakeBot()
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    const r = await withTickBudget(bot, 50, new AbortController().signal, async () => 'quick')
+    assert.strictEqual(r, 'quick')
+    await assert.rejects(withTickBudget(bot, 5, new AbortController().signal, async (s) => await new Promise((_resolve, reject) => s.addEventListener('abort', () => reject(s.reason)))), /budget of 5 ticks/)
+  } finally {
+    clearInterval(ticking)
+  }
+})

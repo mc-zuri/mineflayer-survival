@@ -821,13 +821,38 @@ export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortS
     const hasBed = bot.inventory.items().some(i => i.name.endsWith('_bed'))
     for (const want of [[{ item: 'chest', count: 1 }], ...(hasBed ? [] : [[{ item: beds, count: 1 }]])]) {
       const plan = executor.plan(want)
-      if (plan.ok && plan.cost <= TRIP_KIT_TICKS) await executor.obtain(want, signal)
+      if (!plan.ok || plan.cost > TRIP_KIT_TICKS) continue
+      // within twice the estimate at most (the bed's 3 sheep, 'cheap' by the plan, were hunted 90000 ticks and 1800
+      // blocks off the stronghold, 26.3)
+      await withTickBudget(bot, TRIP_KIT_TICKS * 2, signal, async (s) => await executor.obtain(want, s)).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`trip kit: no ${want[0].item === 'chest' ? 'chest' : 'bed'}: ${(err as Error).message}`)
+      })
     }
     const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s), signal)
     log(`trip kit at ${kit.chest.toString()}: ${Object.entries(kit.stored).map(([n, c]) => `${c} ${n}`).join(', ')}${kit.bed != null ? ', the respawn point by it' : ''}`)
   } catch (err) {
     if (signal.aborted || TaskError.is(err, 'DIED')) throw err
     log(`no trip kit: ${(err as Error).message}`)
+  }
+}
+
+/**
+ * Runs `fn` under a signal that also aborts after `ticks` game ticks (or with `signal`); throws what `fn` throws, an
+ * abort for the budget gone included
+ */
+export async function withTickBudget<T> (bot: Bot, ticks: number, signal: AbortSignal, fn: (s: AbortSignal) => Promise<T>): Promise<T> {
+  const ctrl = new AbortController()
+  let n = 0
+  const onTick = (): void => { if (++n >= ticks) ctrl.abort(new TaskError('TIMEOUT', `over the budget of ${ticks} ticks`)) }
+  const onAbort = (): void => { ctrl.abort(signal.reason) }
+  bot.on('physicsTick', onTick)
+  signal.addEventListener('abort', onAbort, { once: true })
+  try {
+    return await fn(ctrl.signal)
+  } finally {
+    bot.off('physicsTick', onTick)
+    signal.removeEventListener('abort', onAbort)
   }
 }
 
