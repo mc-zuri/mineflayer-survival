@@ -9,6 +9,7 @@ import { gridWalk } from './gridWalk'
 import { trace, waitTicks, waitUntil } from './util'
 import { normalizeDimension } from '../core/memory'
 import { trailRoute } from '../nether/trail'
+import { FLY_MIN_DISTANCE, canFly, flyTo } from './elytra'
 
 /** the heuristic's ticks a block of the pathfinder's goals (COST_HEURISTIC: 20 / 4.317, a sprint's) */
 const HEURISTIC_PER_BLOCK = 20 / 4.317
@@ -66,6 +67,11 @@ export interface TravelArgs {
    * trail: trailRoute) (default true)
    */
   trail?: boolean
+  /**
+   * in the overworld, a trip of FLY_MIN_DISTANCE or more flies with the elytra and rockets when the bot has them
+   * (skills/elytra canFly, flyTo), the rest walked (default true)
+   */
+  fly?: boolean
 }
 
 export interface TravelResult {
@@ -158,7 +164,18 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
   const range = args.range ?? 3
   const hop = args.hop ?? 48
   const target = args.target
-  const startDistance = Math.hypot(target.x - bot.entity.position.x, target.z - bot.entity.position.z)
+  let startDistance = Math.hypot(target.x - bot.entity.position.x, target.z - bot.entity.position.z)
+  // by air: the overworld's open sky, the elytra and rockets carried
+  if (args.fly !== false && normalizeDimension(bot.game?.dimension) === 'overworld' && startDistance >= FLY_MIN_DISTANCE && canFly(bot)) {
+    try {
+      const res = await flyTo(bot, target, { signal, range })
+      trace('travel: flew', Math.round(res.distance), 'blocks in', res.ticks, 'ticks with', res.rockets, 'rockets')
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('travel: the flight failed:', (err as Error).message)
+    }
+    startDistance = Math.hypot(target.x - bot.entity.position.x, target.z - bot.entity.position.z)
+  }
   const maxTicks = args.maxTicks ?? Math.ceil(startDistance * 20 + 2400)
   let ticks = 0
   let hops = 0

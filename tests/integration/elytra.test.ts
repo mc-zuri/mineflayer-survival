@@ -15,6 +15,7 @@ import { isInEnd, seekEndShip, seekGateway, takeElytra, throughGateway } from '.
 import { END_CITY_POI } from '../../src/end/endCity'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { countItems } from '../../src/skills/util'
+import { flyTo } from '../../src/skills/elytra'
 
 const USER = 'survivor'
 const SEED = 'elytra'
@@ -129,5 +130,26 @@ describe(`the elytra epoch's skills on ${DEFAULT_VERSION}: the gateway, an End C
     assert.ok(countItems(bot, 'elytra') >= 1)
     assert.ok(Object.keys(res.looted).length > 0, 'the ship\'s chests gave nothing')
     assert.match(await run('execute in minecraft:the_end positioned 1274 132 4 if entity @e[type=minecraft:item_frame,distance=..2,nbt={Item:{id:"minecraft:elytra"}}]'), /failed/)
+  })
+
+  test('a glide of 200 blocks with the elytra and rockets, landed on the target unhurt', async (t) => {
+    await run(`execute in minecraft:overworld run tp ${USER} 0.5 -60 0.5`)
+    await commands([`effect give ${USER} minecraft:instant_health 1 10 true`, 'time set 1000', 'kill @e[type=minecraft:creeper]'])
+    if (countItems(bot, 'elytra') === 0) await run(`give ${USER} elytra`)
+    if (countItems(bot, 'firework_rocket') < 8) await run(`give ${USER} firework_rocket 8`)
+    assert.ok(await waitFor(bot, () => bot.game.dimension.endsWith('overworld') && bot.entity.onGround && countItems(bot, 'elytra') > 0, 400))
+    await bot.waitForTicks(20)
+    const rockets = countItems(bot, 'firework_rocket')
+    const health = bot.health
+    const target = new Vec3(200.5, -60, 0.5)
+    const res = await timed(t, bot, 'flyTo 200 blocks', async () => await flyTo(bot, target))
+    console.log(`[elytra] flew ${res.distance.toFixed(1)} blocks in ${res.ticks} ticks with ${res.rockets} rockets (${rockets - countItems(bot, 'firework_rocket')} used), landed at ${res.landed.toString()}, ${res.wear} durability, health ${health} to ${bot.health}`)
+    assert.ok(res.distance >= 195, `${res.distance} blocks`)
+    assert.ok(Math.hypot(res.landed.x - target.x, res.landed.z - target.z) <= 8, `landed at ${res.landed.toString()}`)
+    assert.ok(bot.entity.onGround)
+    assert.strictEqual(bot.health, health, 'hurt on the way or the landing')
+    assert.ok(res.rockets >= 1)
+    // the chestplate back on, the elytra in the bag
+    assert.strictEqual(bot.inventory.slots[6]?.name, 'diamond_chestplate')
   })
 })
