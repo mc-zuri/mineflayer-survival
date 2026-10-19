@@ -293,6 +293,9 @@ export class Runner {
       ...options.executor,
       // the stock's working set carried, the rest stored at the base
       keep: options.executor?.keep ?? (this.stock != null ? stockKeepRule(this.stock) : undefined),
+      // and with no base's chests to take the rest, the stock over its working set goes when room is wanted (the
+      // tunnels' cobblestone, 160 of it on 26.3 seed 3, the bag full: the diamond pickaxe's craft failed for room)
+      surplus: options.executor?.surplus ?? (name => this.stock?.keepCount(name, bot.registry as any) != null && (baseRecord(this.memory)?.chests.length ?? 0) === 0),
       hooks: {
         ...options.executor?.hooks,
         beforeStep: async (step) => {

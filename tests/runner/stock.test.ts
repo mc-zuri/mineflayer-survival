@@ -160,3 +160,13 @@ test('a top-up that gathers tells the stall watchdog (bot.survival.diagnostics.p
   assert.deepEqual(steps, ['mine 64 oak_log'])
   assert.ok(progress.includes('stock wood 64'), progress.join(', '))
 })
+
+test('with no base the stock over its working set may go when room is wanted; with the base\'s chests it is stored', () => {
+  const bot = fakeBot()
+  const runner = new Runner(bot, { log: () => {} })
+  assert.equal(runner.executor.options.surplus('cobblestone'), true)
+  assert.equal(runner.executor.options.surplus('raw_iron'), false)
+  bot.survival.memory.setBase({ x: 0, y: 40, z: 0 })
+  bot.survival.memory.rememberChest({ x: 1, y: 40, z: 0 }, {})
+  assert.equal(runner.executor.options.surplus('cobblestone'), false)
+})

@@ -55,6 +55,11 @@ export interface ExecutorOptions {
   minToolUses?: number
   /** make room when fewer slots than this are free (default 2) */
   minFreeSlots?: number
+  /**
+   * What making room may throw away beyond the keep rule's count, after the junk (the runner's: the stock over its
+   * working set while there's no base to store it in; default nothing)
+   */
+  surplus?: (name: string) => boolean
   /** strategies the plans never use (default: barter, until the nether skills do it) */
   exclude?: StrategyKind[]
   runners?: Partial<Record<PlanStep['kind'], StepRunner<any>>>
@@ -149,6 +154,7 @@ export class Executor {
       maxStepFailures: opts.maxStepFailures ?? 3,
       minToolUses: opts.minToolUses ?? MIN_TOOL_USES,
       minFreeSlots: opts.minFreeSlots ?? 2,
+      surplus: opts.surplus ?? (() => false),
       exclude: opts.exclude ?? ['barter']
     }
     this.runners = { ...DEFAULT_RUNNERS, ...opts.runners } as any
@@ -429,7 +435,7 @@ export class Executor {
         if (emptySlots(this.bot) >= this.options.minFreeSlots) return
       }
       const want = this.options.minFreeSlots + 2 - emptySlots(this.bot)
-      const toss = junkToToss(this.bot.inventory.items(), want, { keep: this.options.keep, registry: this.bot.registry, needed, anything: force })
+      const toss = junkToToss(this.bot.inventory.items(), want, { keep: this.options.keep, registry: this.bot.registry, needed, anything: force, surplus: this.options.surplus })
       if (toss.length > 0) this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
       if (toss.length > 0) {
         await this.task('make room', async (s) => {

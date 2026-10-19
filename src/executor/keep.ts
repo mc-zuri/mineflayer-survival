@@ -86,10 +86,11 @@ export function splitInventory (items: readonly ItemCount[], opts: SplitOptions 
 }
 
 /**
- * What to throw away to free `slots` slots: junk first, whole stacks, the most of an item first; then (only when
+ * What to throw away to free `slots` slots: junk first, whole stacks, the most of an item first; then what `surplus`
+ * says may go beyond what's kept (the stock over its working set with no base to store it in); then (only when
  * `anything` is set) what `splitInventory` would store, the cheapest blocks first. Each entry is one stack.
  */
-export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number }>, slots: number, opts: SplitOptions & { anything?: boolean } = {}): Array<{ name: string, count: number }> {
+export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean } = {}): Array<{ name: string, count: number }> {
   const needed = opts.needed ?? {}
   const keepRule = opts.keep ?? defaultKeep
   const out: Array<{ name: string, count: number }> = []
@@ -109,6 +110,7 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number 
     }
   }
   pick(name => JUNK.has(name))
+  if (opts.surplus != null) pick(name => !JUNK.has(name) && opts.surplus?.(name) === true)
   if (opts.anything === true) pick(name => !JUNK.has(name) && (keepRule(name, opts.registry) ?? 0) !== Infinity)
   return out
 }

@@ -66,3 +66,16 @@ test('spare kit: a second pickaxe, sword and axe at the carried tier, and 20 foo
   // wooden tools are no loss
   assert.deepEqual(spareKitGoals(new Inventory(registry, { wooden_pickaxe: 1 }), { bread: 4 }), [])
 })
+
+test('junkToToss: after the junk, what surplus names may go beyond its kept count (the stock with no base), never below it', async () => {
+  const registry = minecraftData('1.21.11')
+  const { StockPolicy } = await import('../../src/planner/stock')
+  const { stockKeepRule } = await import('../../src/executor/keep')
+  const policy = new StockPolicy()
+  const stacks = [{ name: 'dirt', count: 64 }, { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 64 }, { name: 'raw_iron', count: 20 }]
+  const keep = stockKeepRule(policy)
+  // without surplus only the junk goes
+  assert.deepEqual(junkToToss(stacks, 3, { keep, registry }), [{ name: 'dirt', count: 64 }])
+  const surplus = (name: string): boolean => policy.keepCount(name, registry) != null
+  assert.deepEqual(junkToToss(stacks, 3, { keep, registry, surplus }), [{ name: 'dirt', count: 64 }, { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 64 }])
+})
