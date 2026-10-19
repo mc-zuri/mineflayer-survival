@@ -9,7 +9,7 @@ import type { MilestoneHandler } from './runner'
 import { blockGetter, buildPortal, castPortalAway, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
 import { obsidianFromLava } from './nether/obsidian'
-import { ensureSurface } from './executor/explore'
+import { descendTo, ensureSurface } from './executor/explore'
 import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
 import { isAbort, isSkillError } from './skills/errors'
@@ -308,7 +308,17 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
     await executor.task('build a nether portal', async (s) => await buildPortal(bot, { method: 'obsidian' }, s), signal)
   }
   if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
-  const tried = (p: { x: number, z: number }): boolean => executor.memory.getPois('lava_tried', { dimension: 'overworld' }).some(t => Math.hypot(t.x - p.x, t.z - p.z) < 16)
+  const tried = (p: { x: number, y: number, z: number }): boolean => executor.memory.getPois('lava_tried', { dimension: 'overworld' }).some(t => Math.hypot(t.x - p.x, t.z - p.z) < 16 && Math.abs(t.y - p.y) < 16)
+  for (let depth = 0; depth < 2; depth++) {
+    if (depth === 1) {
+      // the deep caves' lava next (the lava lakes under y -54 are everywhere, their floors a shore to pour on)
+      if (bot.entity.position.y < DEEP_LAVA_Y + 10) break
+      log(`a portal frame: down to y ${DEEP_LAVA_Y} for the deep lava`)
+      await executor.task('down to the deep lava', async (s) => await descendTo(bot, DEEP_LAVA_Y, {}, s), signal).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`down: ${(err as Error).message}`)
+      })
+    }
   for (const pool of nearestLavaPools(bot).filter(p => !tried(p)).slice(0, 4)) {
     const at = new Vec3(pool.x, pool.y, pool.z)
     log(`a portal frame: the lava pool at ${pool.x.toFixed(0)} ${pool.y.toFixed(0)} ${pool.z.toFixed(0)}`)
@@ -346,10 +356,14 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
       log(`a portal frame at that pool: ${(err as Error).message}`)
     }
   }
+  }
   log(`a portal frame: no pool to cast by, ${count('obsidian')} obsidian: getting obsidian`)
   await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], signal)
   await placeFromObsidian()
 }
+
+/** the depth of the deep caves' lava lakes (the aquifers' lava level, y -54 and under) the portal's search goes down to */
+export const DEEP_LAVA_Y = -50
 
 /** the empty buckets a cast carried up from far lava takes its lava in, a trip */
 export const LAVA_BUCKETS = 5
