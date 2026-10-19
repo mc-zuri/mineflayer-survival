@@ -110,7 +110,8 @@ describe(`play's epochs on a ${DEFAULT_VERSION} server`, { timeout: (TICKS / 40 
     fs.writeFileSync(saveFile, JSON.stringify({ version: 1, memory: { version: 1, blocks: [], chests: [], base: null, pois: [], death: null }, reached, ticks: reached.length }))
     const t0 = Date.now()
     const k0 = bot.lockstep.ticks
-    const result = await bot.survival.play({ epochs: true, saveFile, maxTicks: TICKS, stock: false, sleep: false, nightMining: false })
+    // (the elytra epoch, a trip to the End, has its own tests: tests/integration/elytra)
+    const result = await bot.survival.play({ epochs: true, skip: ['elytra'], saveFile, maxTicks: TICKS, stock: false, sleep: false, nightMining: false })
     const ticks = bot.lockstep.ticks - k0
     const wall = (Date.now() - t0) / 1000
     for (const r of result.reached.filter(r => r.tick > MILESTONES.length)) console.log(`[epochs] ${r.id}: tick ${r.tick}, ${(r.wallMs / 1000).toFixed(1)} s wall`)

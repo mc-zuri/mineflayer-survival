@@ -5,7 +5,9 @@
 // sown again after each harvest, bone meal on it when held: bread, and wheat to breed with), the experience farm is
 // built round a zombie spawner seen on the way (skills/spawnerFarm.ts) and is then the levels' first source, and the
 // mending epoch fishes in open water for a book of mending (skills/fish.ts) and puts it on the pickaxe, the sword and
-// the chestplate in turn at an anvil.
+// the chestplate in turn at an anvil. The elytra epoch goes back into the End for an elytra from an End City's ship
+// (through the dragon's gateway by pearl, out on the islands by towers and bridges of end stone) and makes rockets
+// for it (paper from the cane, gunpowder from the nights' creepers).
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import type { Milestone, ProgressState } from './planner/progression'
@@ -17,13 +19,25 @@ import { FARM_PLOTS } from './core/crops'
 import { makeWaterHole } from './skills/caneFarm'
 import { boneMealFarm, extendFarm, farmCells, farmPlots, findFarmSite, grownPlots, harvestFarm, knownFarms, plantFarm } from './skills/farm'
 import { bestRod, fish, fishingSpotFor, mendingBooks } from './skills/fish'
-import { applyBooks } from './skills/anvil'
+import { ANVIL_BLOCKS, applyBooks, repairItem } from './skills/anvil'
+import { bestElytra, durabilityLeft, equipChestplate } from './skills/elytra'
 import { itemKind } from './skills/enchant'
 import { BOOTH_MOBS, buildSpawnerFarm, knownFarmableSpawners, rememberXpFarm, SPAWNER_POI, useSpawnerFarm, XP_FARM_POI } from './skills/spawnerFarm'
 import { travel } from './skills/travel'
 import { experience } from './skills/xp'
-import { countItems } from './skills/util'
-import { FARM_RANGE, levelsToward } from './milestones'
+import { countItems, waitTicks } from './skills/util'
+import { FARM_RANGE, endStoneTopLayer, levelsToward, nightLeg, pearlsByNight } from './milestones'
+import { collectDropsNear, hunt } from './skills/hunt'
+import { shoot } from './skills/shoot'
+import { isAlive } from './skills/combatUtil'
+import { dayPhase } from './planner/schedule'
+import { collectBlock } from './skills/collectBlock'
+import { crossToIsland, enterEnd, isInEnd, leaveEnd, SCAFFOLD_ITEMS } from './end/skills'
+import { seekGateway, throughGateway } from './end/skills/gateway'
+import { seekEndShip, takeElytra } from './end/skills/endCity'
+import { GATEWAY_POI } from './end/gateway'
+import { strongholdToPortalRoom } from './end/strongholdSkills'
+import type { Seed } from './worldgen'
 
 /** the plots the farm epoch keeps sown: two farms' worth (FARM_PLOTS each), one water's row all round */
 export const FARM_EPOCH_PLOTS = 2 * FARM_PLOTS
@@ -78,6 +92,12 @@ export const EPOCHS: readonly Milestone[] = [
     // (a pickaxe owned at least: a bot that died and lost its gear has nothing mended, not everything)
     done: s => ownsKind(s, 'pickaxe') && unmendedKinds(s).length === 0,
     goals: () => [{ item: 'fishing_rod', count: 1 }]
+  },
+  {
+    id: 'elytra',
+    title: 'an elytra from an End City\'s ship, and rockets for it',
+    done: s => ownsElytra(s) && s.inventory.count('firework_rocket') >= ROCKETS_KEPT,
+    goals: () => [{ item: 'firework_rocket', count: ROCKETS_KEPT }]
   }
 ]
 
@@ -228,5 +248,182 @@ export const mendingEpochHandler: MilestoneHandler = async ({ bot, executor, sig
 export const EPOCH_HANDLERS: Record<string, MilestoneHandler> = {
   farm: farmEpochHandler,
   xp_farm: xpFarmEpochHandler,
-  mending: mendingEpochHandler
+  mending: mendingEpochHandler,
+  elytra: async (ctx) => await elytraEpochHandler(ctx)
+}
+
+/** rockets the elytra epoch keeps (the recipe's 3 a paper and a gunpowder) */
+export const ROCKETS_KEPT = 32
+/** pearls taken to the End for the gateways: in and out, and a miss each way */
+export const GATEWAY_PEARLS = 4
+/** blocks taken for the towers and bridges out on the islands (the gateways' throw spots, the ship's pillar) */
+export const OUTER_BLOCKS = 160
+/** ticks the creepers of the overworld's nights are hunted for the rockets' gunpowder at a go */
+export const GUNPOWDER_NIGHTS_TICKS = 36000
+
+/** the bot owns an elytra (worn or carried) */
+export function ownsElytra (state: Pick<ProgressState, 'inventory' | 'equipment'>): boolean {
+  return state.inventory.count('elytra') > 0 || (state.equipment ?? []).includes('elytra')
+}
+
+/** a creeper this far off or more is shot rather than fought (its swell starts within 3, Creeper's SwellGoal) */
+export const CREEPER_SHOOT_DISTANCE = 5
+
+/**
+ * The nearest creeper killed for its gunpowder: shot with the bow while it comes (an arrow from the full draw takes a
+ * third of its 20), else fought with the sword backing off from its swell, not taking the blast on the shield (a creeper
+ * that blows up drops nothing: LivingEntity.dropAllDeathLoot comes of a death only; the hunts' fights blocked four
+ * blasts on the shield in a 26.3 night and got none). Its drops picked up. Resolves whether it died.
+ */
+export async function creeperForGunpowder (bot: Bot, signal: AbortSignal): Promise<boolean> {
+  const target = Object.values(bot.entities)
+    .filter(e => e.name === 'creeper' && isAlive(bot, e) && e.position.distanceTo(bot.entity.position) <= 64)
+    .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
+  if (target == null) return false
+  const bow = countItems(bot, 'bow') > 0 && countItems(bot, ['arrow', 'spectral_arrow', 'tipped_arrow']) > 0
+  let at = target.position.clone()
+  if (bow && target.position.distanceTo(bot.entity.position) >= CREEPER_SHOOT_DISTANCE) {
+    await shoot(bot, target, { signal, maxShots: 6 }).catch(err => { if (signal.aborted) throw err })
+    at = target.position.clone()
+    // dead (it stays among the entities for its death's 20 ticks, its health 0): its drops where it fell
+    if (!isAlive(bot, target)) {
+      await collectDropsNear(bot, at, { signal })
+      return true
+    }
+  }
+  if (!isAlive(bot, target)) return false
+  const res = await hunt(bot, target, { range: 64, shield: false, signal })
+  return res.killed
+}
+
+/**
+ * Gunpowder from the overworld's creepers at night up to `want`, GUNPOWDER_NIGHTS_TICKS at most: the creepers in sight
+ * hunted (the fight's shield and its backing off from a swelling one), a leg of the spiral round home walked at night
+ * when none is, the days waited out (the night reflex's shelter held off while the night is the work). Resolves the
+ * gunpowder held.
+ */
+export async function gunpowderByNight (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const start = executor.tasks.tick
+  const survival = (bot as any).survival ?? {}
+  const before = survival.nightWork
+  survival.nightWork = true
+  let leg = 0
+  // the legs round where the hunt began (home, or here without one), not round wherever the last leg ended
+  const center = home(bot, executor)
+  // (a live one: a creeper killed stays among the entities for its death's 20 ticks)
+  const creeper = (): boolean => Object.values(bot.entities).some(e => e.name === 'creeper' && isAlive(bot, e) && e.position.distanceTo(bot.entity.position) <= 64)
+  try {
+    while (countItems(bot, 'gunpowder') < want && executor.tasks.tick - start < GUNPOWDER_NIGHTS_TICKS) {
+      if (signal.aborted) throw signal.reason
+      try {
+        if (creeper()) {
+          await executor.task('a creeper for gunpowder', async (s) => await creeperForGunpowder(bot, s), signal)
+          await waitTicks(bot, 1, signal)
+          continue
+        }
+        if (dayPhase(bot.time?.timeOfDay ?? 0) === 'day') {
+          await executor.task('wait for the night', async (s) => { await waitTicks(bot, 600, s) }, signal)
+          continue
+        }
+        const point = nightLeg(center, leg++)
+        await executor.task('a night leg for creepers', async (s) => await travel(bot, { target: new Vec3(point.x, bot.entity.position.y, point.z), range: 8, onHop: creeper }, s), signal)
+      } catch (err) {
+        if (fatal(signal, err)) throw err
+        log(`gunpowder by night: ${(err as Error).message}`)
+        // a tick at least before the next go: a hunt that fails at once, over and over, never let the event loop
+        // through (the lockstep's ticks unacked, the connection 'Timed out', 26.3)
+        await waitTicks(bot, 1, signal)
+      }
+    }
+  } finally {
+    survival.nightWork = before
+  }
+  log(`gunpowder: ${countItems(bot, 'gunpowder')} of ${want} after ${executor.tasks.tick - start} ticks`)
+  return countItems(bot, 'gunpowder')
+}
+
+/**
+ * Rockets up to `count`: the paper for them got (from the sugar cane held, or the cane's), the gunpowder from the
+ * nights' creepers (gunpowderByNight), then the crafts (a paper and a gunpowder for 3 rockets of flight duration 1).
+ * Resolves the rockets held.
+ */
+export async function makeRockets (bot: Bot, executor: Executor, count: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const short = count - countItems(bot, 'firework_rocket')
+  if (short <= 0) return countItems(bot, 'firework_rocket')
+  const crafts = Math.ceil(short / 3)
+  if (countItems(bot, 'paper') < crafts) await executor.obtain([{ item: 'paper', count: crafts }], signal)
+  if (countItems(bot, 'gunpowder') < crafts) await gunpowderByNight(bot, executor, crafts, signal, log)
+  const can = Math.min(crafts, countItems(bot, 'paper'), countItems(bot, 'gunpowder'))
+  if (can > 0) await executor.obtain([{ item: 'firework_rocket', count: countItems(bot, 'firework_rocket') + can * 3 }], signal)
+  log(`rockets: ${countItems(bot, 'firework_rocket')} (${can} crafts of ${crafts})`)
+  return countItems(bot, 'firework_rocket')
+}
+
+const distanceFromOrigin = (bot: Bot): number => Math.hypot(bot.entity.position.x, bot.entity.position.z)
+
+/**
+ * The End trip for an elytra: the kit (pearls for the gateways, blocks for the towers and bridges, the bow, a water
+ * bucket), back into the End by the stronghold's portal, through the dragon's gateway by pearl (seekGateway,
+ * throughGateway), to an End City's ship (seekEndShip: the seed's candidates when it's known, else the purpur and the
+ * frame looked for on legs outward), the elytra taken and the ship's chests looted (takeElytra), back through the exit
+ * gateway and out by the exit portal.
+ */
+export async function elytraFromEndCity (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, seed?: Seed): Promise<void> {
+  if (!isInEnd(bot)) {
+    await executor.obtain([{ item: 'bow', count: 1 }, { item: 'arrow', count: 32 }, { item: 'water_bucket', count: 1 }].map(g => ({ ...g, optional: true })), signal)
+      .catch(err => { if (fatal(signal, err)) throw err; log(`elytra: kit short: ${(err as Error).message}`) })
+    if (countItems(bot, 'ender_pearl') < GATEWAY_PEARLS) await pearlsByNight(bot, executor, GATEWAY_PEARLS, signal, log)
+    if (countItems(bot, 'ender_pearl') < 2) throw new TaskError('MISSING_ITEMS', `${countItems(bot, 'ender_pearl')} ender pearls for the gateways`)
+    await executor.task('to the portal room', async (s) => await strongholdToPortalRoom(bot, {}, s), signal)
+    await executor.task('into the End', async (s) => await enterEnd(bot, { signal: s }), signal)
+    await executor.task('over to the island', async (s) => await crossToIsland(bot, { signal: s }), signal)
+  }
+  // blocks for the islands: the main island's end stone
+  const blocks = countItems(bot, SCAFFOLD_ITEMS)
+  if (blocks < OUTER_BLOCKS && distanceFromOrigin(bot) < 200) {
+    if ((bot.inventory.emptySlotCount?.() ?? 9) < 3) await executor.makeRoom?.({ end_stone: OUTER_BLOCKS, ender_pearl: 16, firework_rocket: 64 }, signal, true)?.catch(err => { if (fatal(signal, err)) throw err })
+    const top = endStoneTopLayer(bot, OUTER_BLOCKS - blocks)
+    await executor.task('end stone', async (s) => await collectBlock(bot, top.length > 0 ? { positions: top } : { names: ['end_stone'], count: OUTER_BLOCKS - blocks, maxDistance: 32 }, s), signal)
+      .catch(err => { if (fatal(signal, err)) throw err; log(`elytra: end stone: ${(err as Error).message}`) })
+  }
+  if (countItems(bot, 'elytra') === 0 && distanceFromOrigin(bot) < 600) {
+    const known = executor.memory.getPois(GATEWAY_POI, { dimension: 'the_end', near: bot.entity.position }).find(p => p.note === 'main')
+    const gateway = known != null ? new Vec3(known.x, known.y, known.z) : await executor.task('find the gateway', async (s) => await seekGateway(bot, { signal: s }), signal)
+    if (gateway == null) throw new TaskError('NOT_FOUND', 'no end gateway on the ring')
+    const res = await executor.task('through the gateway', async (s) => await throughGateway(bot, gateway, { signal: s }), signal)
+    log(`elytra: through the gateway at ${gateway.toString()} to ${res.arrival.floored().toString()} (${res.throws} pearls, ${res.ticks} ticks)`)
+  }
+  if (countItems(bot, 'elytra') === 0) {
+    const frame = await executor.task('to an End City\'s ship', async (s) => await seekEndShip(bot, { signal: s, seed }), signal)
+    if (frame == null) throw new TaskError('NOT_FOUND', 'no End City ship found')
+    const got = await executor.task('the elytra', async (s) => await takeElytra(bot, { signal: s }), signal)
+    log(`elytra: taken from the frame at ${got.frame.floored().toString()} in ${got.ticks} ticks; the chests: ${Object.keys(got.looted).length > 0 ? Object.entries(got.looted).map(([n, c]) => `${c} ${n}`).join(', ') : 'nothing'}`)
+  }
+  // home: the exit gateway nearest, then the main island's exit portal
+  const exit = executor.memory.getPois(GATEWAY_POI, { dimension: 'the_end', near: bot.entity.position }).find(p => p.note === 'exit')
+  if (exit != null && distanceFromOrigin(bot) > 600) {
+    const at = new Vec3(exit.x, exit.y, exit.z)
+    await executor.task('back to the exit gateway', async (s) => await travel(bot, { target: at, range: 8 }, s), signal)
+    await executor.task('back through the gateway', async (s) => await throughGateway(bot, at, { signal: s }), signal)
+  }
+  if (isInEnd(bot) && distanceFromOrigin(bot) < 300) await executor.task('out of the End', async (s) => await leaveEnd(bot, { signal: s }), signal)
+}
+
+/**
+ * The elytra epoch: an elytra from an End City's ship (elytraFromEndCity) when none is owned, then the rockets for it
+ * (makeRockets: paper and the nights' gunpowder), ROCKETS_KEPT of them; an elytra worn past half mended with the
+ * phantom membranes held at an anvil near (AnvilMenu's repair with the item's repair material)
+ */
+export const elytraEpochHandler: MilestoneHandler = async ({ bot, executor, signal, log, seed }) => {
+  if (countItems(bot, 'elytra') === 0 && bot.inventory.slots[6]?.name !== 'elytra') await elytraFromEndCity(bot, executor, signal, log, seed)
+  if (isInEnd(bot)) throw new TaskError('FAILED', 'still in the End')
+  await makeRockets(bot, executor, ROCKETS_KEPT, signal, log)
+  const elytra = bestElytra(bot)
+  const anvil = bot.findBlock({ matching: ANVIL_BLOCKS.map(n => bot.registry.blocksByName[n]?.id).filter((id): id is number => id != null), maxDistance: 16 })
+  if (elytra != null && durabilityLeft(elytra) * 2 < (elytra.maxDurability ?? 432) && countItems(bot, 'phantom_membrane') > 0 && anvil != null) {
+    if (bot.inventory.slots[6] === elytra) await equipChestplate(bot)
+    await executor.task('mend the elytra', async (s) => await repairItem(bot, { item: 'elytra', anvil: anvil.position }, s), signal)
+      .then(() => log(`elytra: mended with phantom membrane, ${durabilityLeft(bestElytra(bot))} left`))
+      .catch(err => { if (fatal(signal, err)) throw err; log(`elytra: no mending: ${(err as Error).message}`) })
+  }
 }

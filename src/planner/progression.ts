@@ -10,7 +10,7 @@ import { SMELTING } from './sources'
 export type MilestoneId = 'wood' | 'stone' | 'food' | 'base' | 'iron' | 'diamonds' | 'enchanting' | 'nether' | 'eyes' | 'end' | EpochId
 
 /** the epochs after the dragon (planner/epochs.ts: a farm kept, an experience farm, mending on the gear) */
-export type EpochId = 'farm' | 'xp_farm' | 'mending'
+export type EpochId = 'farm' | 'xp_farm' | 'mending' | 'elytra'
 
 export interface ProgressState {
   /** what the bot carries */

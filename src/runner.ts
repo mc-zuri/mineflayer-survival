@@ -38,6 +38,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { Diagnostics, ReportSummary, WatchdogOptions } from './diagnostics'
 import { isDeathMessage } from './diagnostics/death'
 import { blockIdsNamed, findBlock } from './core/findBlocks'
+import type { Seed } from './worldgen'
 
 export interface MilestoneContext {
   bot: Bot
@@ -46,6 +47,8 @@ export interface MilestoneContext {
   executor: Executor
   signal: AbortSignal
   log: (line: string) => void
+  /** the world's seed, when play was given it (the End Cities' placement for the elytra epoch) */
+  seed?: Seed
 }
 
 /** works on a milestone; play checks `done` again after it returns */
@@ -94,6 +97,11 @@ export interface PlayOptions {
    * gear), each left out after maxFailures, play finishing when none is left (default false: play ends at the dragon)
    */
   epochs?: boolean
+  /**
+   * the world's seed when it's known: the epochs go by the structures it places (the End Cities' candidates), not only
+   * by what's in sight
+   */
+  seed?: Seed
   /** handlers by milestone, over bot.survival.handlers and the defaults */
   handlers?: Partial<Record<MilestoneId, MilestoneHandler>>
   /** the memory and progress are saved here after every milestone and step, and loaded from it at the start */
@@ -529,7 +537,7 @@ export class Runner {
       this.diagnostics?.milestoneStarted(m.id, m.title, describeGoals(m, state))
       try {
         const how = await this.untilDusk(signal, async (s) => {
-          await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log })
+          await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log, seed: this.options.seed })
           // the milestone ends with the stock topped up for the ones after it, what can be got where the bot is
           // (topUpPlaces: the surface's by day, the mine's down there); the milestone's own marks apply once it's done
           const done = m.done(progressState(this.bot, this.memory))

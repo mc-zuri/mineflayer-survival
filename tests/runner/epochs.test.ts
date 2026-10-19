@@ -8,7 +8,7 @@ import { WorldMemory } from '../../src/core/memory'
 import { Inventory } from '../../src/core/inventory'
 import { Runner, type MilestoneHandler } from '../../src/runner'
 import { MILESTONES, type MilestoneId, type ProgressState } from '../../src/planner/progression'
-import { EPOCHS, FARM_EPOCH_PLOTS, isEpoch, nextEpoch, unmendedKinds } from '../../src/epochs'
+import { EPOCHS, FARM_EPOCH_PLOTS, ROCKETS_KEPT, isEpoch, nextEpoch, ownsElytra, unmendedKinds } from '../../src/epochs'
 import { extendFarm, farmPlots } from '../../src/skills/farm'
 
 /* eslint-disable @typescript-eslint/no-var-requires */
@@ -30,8 +30,8 @@ function fakeBot (): any {
 const state = (memory: WorldMemory, items: Record<string, number> = {}, mended: string[] = [], equipment: string[] = []): ProgressState =>
   ({ inventory: new Inventory(registry, items), memory, equipment, mended })
 
-test('the epochs: the farm, then the experience farm once a zombie spawner is known, then mending', () => {
-  assert.deepEqual(EPOCHS.map(e => e.id), ['farm', 'xp_farm', 'mending'])
+test('the epochs: the farm, then the experience farm once a zombie spawner is known, then mending, then the elytra', () => {
+  assert.deepEqual(EPOCHS.map(e => e.id), ['farm', 'xp_farm', 'mending', 'elytra'])
   assert.ok(isEpoch('mending') && !isEpoch('end'))
   const memory = new WorldMemory()
   const s = state(memory, { diamond_pickaxe: 1, diamond_sword: 1 }, [], ['diamond_chestplate'])
@@ -44,7 +44,21 @@ test('the epochs: the farm, then the experience farm once a zombie spawner is kn
   assert.equal(nextEpoch(s, ['farm'])?.id, 'xp_farm')
   memory.addPoi('xp_farm', new Vec3(9, 20, 5), 'overworld', '{}')
   assert.equal(nextEpoch(s, ['farm'])?.id, 'mending')
-  assert.equal(nextEpoch(s, ['farm', 'mending']), null)
+  assert.equal(nextEpoch(s, ['farm', 'mending'])?.id, 'elytra')
+  assert.equal(nextEpoch(s, ['farm', 'mending', 'elytra']), null)
+})
+
+test('the elytra epoch is done with an elytra owned, worn or carried, and its rockets', () => {
+  const memory = new WorldMemory()
+  const elytra = EPOCHS.find(e => e.id === 'elytra')
+  assert.ok(elytra != null)
+  assert.equal(ownsElytra(state(memory, { elytra: 1 })), true)
+  assert.equal(ownsElytra(state(memory, {}, [], ['elytra'])), true)
+  assert.equal(ownsElytra(state(memory, { diamond_chestplate: 1 })), false)
+  assert.equal(elytra.done(state(memory, { elytra: 1, firework_rocket: ROCKETS_KEPT - 1 })), false)
+  assert.equal(elytra.done(state(memory, { firework_rocket: 64 })), false)
+  assert.equal(elytra.done(state(memory, { firework_rocket: ROCKETS_KEPT }, [], ['elytra'])), true)
+  assert.deepEqual(elytra.goals(state(memory)), [{ item: 'firework_rocket', count: ROCKETS_KEPT }])
 })
 
 test('the farm epoch is done with its plots sown; one water\'s farm grows in one record', () => {
@@ -81,7 +95,8 @@ test('play goes on to the epochs after the dragon only when asked, and an epoch 
   const worked: string[] = []
   const handlers: Partial<Record<MilestoneId, MilestoneHandler>> = {
     farm: async () => { worked.push('farm'); throw new TaskError('NOT_FOUND', 'no water') },
-    mending: async ({ bot }) => { worked.push('mending'); (bot as any).mended = true }
+    mending: async ({ bot }) => { worked.push('mending'); (bot as any).mended = true },
+    elytra: async ({ seed }) => { worked.push(`elytra ${String(seed)}`); throw new TaskError('NOT_FOUND', 'no gateway') }
   }
   const plain = await new Runner(fakeBot(), { skip: all, handlers, log: () => {} }).play()
   assert.equal(plain.reason, 'finished')
@@ -90,8 +105,9 @@ test('play goes on to the epochs after the dragon only when asked, and an epoch 
   const bot = fakeBot()
   bot.inventory.slots[36] = { name: 'diamond_pickaxe', count: 1, type: registry.itemsByName.diamond_pickaxe.id, slot: 36 }
   bot.inventory.items = () => [bot.inventory.slots[36]].map((i: any) => bot.mended === true ? { ...i, enchants: [{ name: 'mending', lvl: 1 }] } : i)
-  const result = await new Runner(bot, { skip: all, handlers, epochs: true, log: () => {} }).play()
+  const result = await new Runner(bot, { skip: all, handlers, epochs: true, seed: 42, log: () => {} }).play()
   assert.equal(result.reason, 'finished')
-  assert.deepEqual(worked, ['farm', 'farm', 'farm', 'farm', 'farm', 'mending'])
+  // (the handlers get play's seed)
+  assert.deepEqual(worked, ['farm', 'farm', 'farm', 'farm', 'farm', 'mending', ...Array(5).fill('elytra 42')])
   assert.deepEqual(result.reached.map(r => r.id), ['mending'])
 })

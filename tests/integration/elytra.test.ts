@@ -16,6 +16,8 @@ import { END_CITY_POI } from '../../src/end/endCity'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { countItems } from '../../src/skills/util'
 import { flyTo } from '../../src/skills/elytra'
+import { makeRockets } from '../../src/epochs'
+import { Executor } from '../../src/executor/executor'
 
 const USER = 'survivor'
 const SEED = 'elytra'
@@ -130,6 +132,28 @@ describe(`the elytra epoch's skills on ${DEFAULT_VERSION}: the gateway, an End C
     assert.ok(countItems(bot, 'elytra') >= 1)
     assert.ok(Object.keys(res.looted).length > 0, 'the ship\'s chests gave nothing')
     assert.match(await run('execute in minecraft:the_end positioned 1274 132 4 if entity @e[type=minecraft:item_frame,distance=..2,nbt={Item:{id:"minecraft:elytra"}}]'), /failed/)
+  })
+
+  test('rockets from sugar cane and the gunpowder of the night\'s creepers', async (t) => {
+    const elytra = countItems(bot, 'elytra')
+    await kit()
+    if (elytra > 0) await run(`give ${USER} elytra`)
+    await run(`execute in minecraft:overworld run tp ${USER} 0.5 -60 0.5`)
+    assert.ok(await waitFor(bot, () => bot.game.dimension.endsWith('overworld') && bot.entity.onGround, 400))
+    await bot.waitForChunksToLoad()
+    await commands(['time set 14000', `give ${USER} sugar_cane 6`, `give ${USER} crafting_table`])
+    // 20 to 26 blocks off, past a creeper's follow range of 16 (it comes for the bot, and blows up by it, from inside it)
+    // (kept from despawning, Mob.checkDespawn, as the bot's legs take it off from them); six for the four gunpowder
+    // wanted: one that gets to blow up drops none
+    for (const [dx, dz] of [[24, 6], [-22, 10], [8, -24], [-18, -16], [26, -14], [-6, 25]]) await run(`summon minecraft:creeper ${dx + 0.5} -60 ${dz + 0.5} {PersistenceRequired:1b}`)
+    await waitFor(bot, () => Object.values(bot.entities).filter(e => e.name === 'creeper').length >= 6, 100)
+    const executor = new Executor(bot, { log: line => t.diagnostic(line) })
+    const lines: string[] = []
+    const rockets = await timed(t, bot, 'makeRockets', async () => await makeRockets(bot, executor, 12, new AbortController().signal, line => { lines.push(line); t.diagnostic(line) }))
+    console.log(`[elytra] ${rockets} rockets, ${countItems(bot, 'paper')} paper and ${countItems(bot, 'gunpowder')} gunpowder left, health ${bot.health}: ${lines.join('; ')}`)
+    assert.ok(rockets >= 12, `${rockets} rockets`)
+    assert.strictEqual(bot.inventory.items().find(i => i.name === 'firework_rocket')?.name, 'firework_rocket')
+    await run('time set 1000')
   })
 
   test('a glide of 200 blocks with the elytra and rockets, landed on the target unhurt', async (t) => {
