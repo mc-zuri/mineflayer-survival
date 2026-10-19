@@ -1,13 +1,14 @@
 // findFortress / findBlazeSpawner / collectBlazeRods: to a nether fortress (the seed's candidates, nearest first, or a
 // straight walk along an axis without it), recognised by its nether bricks; its blaze spawner; blazes fought there
-// (shot at range, met with the sword and the shield close up) until the bot has its rods.
+// (from a nook built by it, else camped near it: shot at range, met with the sword and the shield close up) until the
+// bot has its rods.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import type { Pos } from '../core/memory'
 import { findBlocks } from '../core/findBlocks'
 import type { Seed } from '../worldgen/random'
 import { parseSeed } from '../worldgen/random'
-import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
+import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { travel } from '../skills/travel'
 import { moveNear } from '../skills/gridWalk'
 import { countItems, trace, waitTicks } from '../skills/util'
@@ -23,6 +24,7 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
+import { type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, planBlazeNooks } from './blazeFight'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
 
@@ -276,6 +278,25 @@ export async function findBlazeSpawner (bot: Bot, args: FindSpawnerArgs = {}, si
   return args.safety === false ? await run() : await withNetherSafety(bot, run, args.safety)
 }
 
+/** the nook's blocks the bag must have: its most (planBlazeNook's maxBlocks) and the front's two */
+export const NOOK_MIN_BLOCKS = 14
+
+/** the nook each spawner's fight was fought from, per bot: gone back to after a death or a reflex's preemption */
+const nooks = new WeakMap<Bot, Map<string, BlazeNook>>()
+
+function keepNook (bot: Bot, spawner: Vec3, nook: BlazeNook): void {
+  let m = nooks.get(bot)
+  if (m == null) nooks.set(bot, m = new Map())
+  m.set(spawner.toString(), nook)
+}
+
+/** the nook kept for the spawner, its blocks to put again looked at afresh (null when it can't be had now) */
+function keptNook (bot: Bot, spawner: Vec3, lookup: NookLookup): BlazeNook | null {
+  const kept = nooks.get(bot)?.get(spawner.toString())
+  if (kept == null) return null
+  return nookAround(lookup, kept.stand, kept.facing)
+}
+
 /** from further than this from the spawner, the camp is gone to by a trip (travel) first */
 export const CAMP_TRIP = 48
 
@@ -294,6 +315,8 @@ export interface BlazeRodsArgs {
   retreatAt?: number
   /** give up after this many ticks (default 24000) */
   maxTicks?: number
+  /** fight from a nook built by the spawner (planBlazeNook) when one can be had (default true) */
+  nook?: boolean
   /** drink fire resistance when the bot has a potion of it and the effect is off (default true) */
   fireResistance?: boolean
   safety?: NetherSafetyOptions | false
@@ -306,7 +329,9 @@ export interface BlazeRodsResult {
 }
 
 /**
- * Blaze rods by the spawner: near it (where its blazes come out), each blaze shot with the bow while it hovers off
+ * Blaze rods by the spawner: from a nook built 7 to 13 blocks off it, open toward it (blazeFight: fightFromNook, the
+ * shield up while a blaze in sight is about to shoot, the bow between), when the bag has the blocks for one and
+ * there's a site; else camped near it (where its blazes come out), each blaze shot with the bow while it hovers off
  * (and the bot has arrows) or fought with the melee weapon once near, the shield up while one is charged; rods picked
  * up after each kill; eats when hurt; until `count` rods are in the inventory.
  */
@@ -334,11 +359,56 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       noEat?.()
     }
   }
+  /**
+   * The fight from a nook by the spawner (planBlazeNook: the one built before, else the cheapest), built and fought
+   * from; null when there's no nook to be had (too few blocks, no site, its building failed), the camp's fight then
+   */
+  const fightFromCover = async (spawner: Vec3): Promise<BlazeRodsResult | null> => {
+    if (nookBlocks(bot) < NOOK_MIN_BLOCKS) { trace('collectBlazeRods: too few blocks for a nook,', nookBlocks(bot)); return null }
+    if (bot.entity.position.distanceTo(spawner) > CAMP_TRIP) {
+      await travel(bot, { target: spawner, range: 16 }, signal).catch(err => {
+        if (isAbort(err)) throw err
+        trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
+      })
+    }
+    const lookup = (p: Vec3): any => bot.blockAt(p)
+    const kept = keptNook(bot, spawner, lookup)
+    // the one built before, else the cheapest three in turn (one the bot finds no way to, the next)
+    const candidates = kept != null ? [kept] : planBlazeNooks(lookup, spawner, { from: bot.entity.position }, 3)
+    let nook: BlazeNook | null = null
+    for (const c of candidates) {
+      trace('collectBlazeRods: the nook at', c.stand.toString(), 'facing', c.facing.toString(), c.build.length, 'blocks')
+      try {
+        await buildNook(bot, c, signal)
+        nook = c
+        break
+      } catch (err) {
+        if (isAbort(err)) throw err
+        trace('collectBlazeRods: the nook not built:', (err as Error).message)
+      }
+    }
+    if (nook == null) { trace('collectBlazeRods: no nook by the spawner at', spawner.toString(), 'of', candidates.length); return null }
+    keepNook(bot, spawner, nook)
+    try {
+      const fought = await fightFromNook(bot, nook, { count, spawner, maxTicks: maxTicks - ticks, eatAt: args.eatAt ?? 14, onKill: () => { kills++ } }, signal)
+      trace('collectBlazeRods: from the nook,', fought.kills, 'kills,', fought.shots, 'shots,', fought.ticks, 'ticks')
+    } catch (err) {
+      if (isAbort(err) || isSkillError(err, 'TIMEOUT') || bot.health <= 0) throw err
+      trace('collectBlazeRods: the fight from the nook:', (err as Error).message)
+      return null
+    }
+    return { rods: countItems(bot, 'blaze_rod'), kills, ticks }
+  }
   const fightForRods = async (): Promise<BlazeRodsResult> => {
     const spawner = args.spawner != null ? v3(args.spawner) : v3(await findBlazeSpawner(bot, { safety: false }, signal))
     // (from 9 off, out of the swarm the spawner keeps about it, the blazes come one or two at a time and are shot:
     // camped 5 off, among 6 of them, a diamond-armored 26.3 bot burned to death five times at one spawner)
     const standOff = args.standOff ?? BLAZE_STAND_OFF
+    // from cover first: a nook built by the spawner (blazeFight); the camp's fight below when none can be had
+    if (args.nook !== false) {
+      const fought = await fightFromCover(spawner)
+      if (fought != null) return fought
+    }
     const spots = campSpots(bot, spawner, standOff)
     const camp = async (): Promise<void> => {
       if (bot.entity.position.distanceTo(spawner) <= standOff + 3 && seesFrom(bot, eyePosition(bot), spawner.offset(0.5, 0.5, 0.5), spawner)) return
