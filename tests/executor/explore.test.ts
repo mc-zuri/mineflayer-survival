@@ -109,6 +109,64 @@ test('ensurePickaxe: the one held, else a stone one made, else a wooden one', as
   assert.equal(tried.length, 2)
 })
 
+test('pickaxeKeeper: a dug route with no pickaxe makes one before its step, and after a failure tries again PICKAXE_RETRY_STEPS steps on; with one carried, none made', async () => {
+  // (26.3 run full-f: the staircase to the deep lava dug from y 12 to -50 by hand after the diamond pickaxe broke, a
+  // crafting table, 17 sticks and 600 cobblestone in the bag)
+  const { pickaxeKeeper, PICKAXE_RETRY_STEPS } = await import('../../src/executor/explore')
+  const bag: string[] = ['cobblestone', 'stick', 'crafting_table']
+  const bot: any = { inventory: { items: () => bag.map(name => ({ name })) } }
+  const tried: string[] = []
+  let canMake = false
+  const craft = async (_b: unknown, args: { item: string }): Promise<void> => {
+    tried.push(args.item)
+    if (!canMake) throw new Error('no sticks')
+    bag.push(args.item)
+  }
+  const keep = pickaxeKeeper(bot, craft)
+  await keep()
+  assert.deepEqual(tried, ['stone_pickaxe', 'wooden_pickaxe'])
+  for (let i = 1; i < PICKAXE_RETRY_STEPS; i++) await keep()
+  assert.equal(tried.length, 2)
+  canMake = true
+  await keep()
+  assert.deepEqual(tried.slice(2), ['stone_pickaxe'])
+  assert.ok(bag.includes('stone_pickaxe'))
+  // the bag has one now: none made
+  for (let i = 0; i < 20; i++) await keep()
+  assert.equal(tried.length, 3)
+})
+
+test('ensurePickaxe: no room for the table in a one-wide staircase digs a nook beside the bot, once, and crafts there', async (t) => {
+  const { ensurePickaxe } = await import('../../src/executor/explore')
+  const { SkillError } = await import('../../src/skills/errors')
+  const bag: string[] = []
+  // a one-wide shaft along x: the walls beside the feet are stone with stone under them
+  const cells: Record<string, string> = { '0,20,0': 'air', '0,21,0': 'air', '1,20,0': 'air', '1,21,0': 'air', '-1,20,0': 'air', '-1,21,0': 'air' }
+  const lookup = world(cells)
+  const dug: string[] = []
+  const bot: any = {
+    inventory: { items: () => bag.map(name => ({ name })) },
+    entity: { position: new Vec3(0.5, 20, 0.5) },
+    blockAt: (p: Vec3) => ({ ...lookup(p), position: p })
+  }
+  const tried: string[] = []
+  const craft = async (_b: unknown, args: { item: string }): Promise<void> => {
+    tried.push(args.item)
+    if (dug.length === 0) throw new SkillError('CANNOT_PLACE', 'no room for the crafting table')
+    bag.push(args.item)
+  }
+  const collect = await import('../../src/skills/collectBlock')
+  t.mock.method(collect, 'collectBlock', async (_b: unknown, args: { positions: Vec3[] }) => {
+    for (const p of args.positions) { cells[`${p.x},${p.y},${p.z}`] = 'air'; dug.push(p.toString()) }
+    return {}
+  })
+  assert.equal(await ensurePickaxe(bot, undefined, craft), 'stone_pickaxe')
+  assert.deepEqual(tried, ['stone_pickaxe', 'stone_pickaxe'])
+  assert.equal(dug.length, 1)
+  // the wall beside the feet
+  assert.match(dug[0], /^\(0, 20, -?1\)$/)
+})
+
 test('withRoom: a station that found no room is tried again (from the surface)', async () => {
   const { withRoom } = await import('../../src/executor/steps')
   const { SkillError } = await import('../../src/skills/errors')

@@ -8,7 +8,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import { findBlocks } from '../core/findBlocks'
-import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
+import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { navigate, walkTo } from '../skills/navigate'
 import { settlePickups } from '../skills/pickupDrops'
@@ -560,16 +560,47 @@ export async function ensurePickaxe (bot: Bot, signal?: AbortSignal, craftFn?: C
   const held = (): string | null => bot.inventory.items().find(i => i.name.endsWith('_pickaxe'))?.name ?? null
   if (held() != null) return held()
   const make = craftFn ?? (await import('../skills/craft')).craft
+  let nook = false
   for (const pickaxe of ['stone_pickaxe', 'wooden_pickaxe']) {
-    try {
-      await make(bot, { item: pickaxe, pickUpTable: true }, signal)
-      if (held() != null) return held()
-    } catch (err) {
-      if (isAbort(err)) throw err
-      trace('explore: no', pickaxe, ':', (err as Error).message)
+    for (let tries = 0; tries < 2; tries++) {
+      try {
+        await make(bot, { item: pickaxe, pickUpTable: true }, signal)
+        if (held() != null) return held()
+        break
+      } catch (err) {
+        if (isAbort(err)) throw err
+        trace('explore: no', pickaxe, ':', (err as Error).message)
+        // no room for the table in a one-wide staircase or tunnel: a nook dug into the wall beside the bot, once
+        if (!isSkillError(err, 'CANNOT_PLACE') || nook) break
+        nook = true
+        if (!(await digNook(bot, signal))) break
+      }
     }
   }
   return null
+}
+
+/** a dug route's steps between tries at a pickaxe after one failed (pickaxeKeeper) */
+export const PICKAXE_RETRY_STEPS = 16
+
+/**
+ * A dug route's pickaxe kept, a step at a time: when the bag has none (the last one broke on the way, the wear watch
+ * having found nothing to make another from, or none was carried), one made from what's carried before the step is
+ * dug (ensurePickaxe: the route's own cobblestone, a stick, the table carried), tried again PICKAXE_RETRY_STEPS steps
+ * on when none can be. A 26.3 whole game's staircase to the deep lava dug from y 12 to -50 by hand after its diamond
+ * pickaxe broke, some 50000 ticks (a block of deepslate takes 300 ticks by hand, 23 with a stone pickaxe), with 17
+ * sticks, a crafting table and 600 cobblestone in the bag.
+ */
+export function pickaxeKeeper (bot: Bot, craftFn?: Crafter): (signal?: AbortSignal) => Promise<void> {
+  let step = 0
+  let next = 0
+  return async (signal) => {
+    step++
+    if (step < next || bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))) return
+    const made = await ensurePickaxe(bot, signal, craftFn)
+    if (made == null) next = step + PICKAXE_RETRY_STEPS
+    trace('explore: no pickaxe for the route:', made != null ? `a ${made} made` : `none made, again in ${PICKAXE_RETRY_STEPS} steps`)
+  }
 }
 
 /**
@@ -580,11 +611,12 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
   const lookup = lookupOf(bot)
   let dir = facingDir(bot.entity.yaw)
   const maxSteps = args.maxSteps ?? 128
-  await ensurePickaxe(bot, signal)
+  const pickaxe = pickaxeKeeper(bot)
   for (let i = 0; i < maxSteps; i++) {
     throwIfAborted(signal)
     const feet = feetOf(bot)
     if (onSurface(lookup, feet, inOverworld(bot))) return true
+    await pickaxe(signal)
     await routeRoom(bot, args, signal, staircaseUpStep(feet, dir).next)
     const turns = [dir, new Vec3(-dir.z, 0, dir.x), new Vec3(dir.z, 0, -dir.x), dir.scaled(-1)]
     let stepped = false
@@ -876,11 +908,13 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
   const maxSteps = args.maxSteps ?? 400
   let moves = 0
   let dug = 0
+  const pickaxe = pickaxeKeeper(bot)
   for (let i = 0; i < maxSteps; i++) {
     throwIfAborted(signal)
     if (args.found?.() === true) return true
     const feet = feetOf(bot)
     if (feet.y <= y) return true
+    await pickaxe(signal)
     await routeRoom(bot, args, signal, staircaseStep(feet, dir).next)
     const turns = [dir, new Vec3(-dir.z, 0, dir.x), new Vec3(dir.z, 0, -dir.x), dir.scaled(-1)]
     let stepped = false
@@ -959,11 +993,13 @@ export async function tunnel (bot: Bot, args: DigRouteArgs & { length?: number, 
   const length = args.length ?? 24
   const legs = args.legs ?? 8
   let dug = 0
+  const pickaxe = pickaxeKeeper(bot)
   for (let leg = 0; leg < legs; leg++) {
     let blocked = 0
     for (let i = 0; i < length; i++) {
       throwIfAborted(signal)
       if (args.found?.() === true) return true
+      await pickaxe(signal)
       await routeRoom(bot, args, signal, tunnelStep(feetOf(bot), dir).next)
       const feet = feetOf(bot)
       const step = tunnelStep(feet, dir)

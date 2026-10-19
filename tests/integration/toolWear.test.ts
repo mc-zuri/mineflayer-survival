@@ -72,4 +72,27 @@ describe(`a pickaxe worn out down a staircase on a ${DEFAULT_VERSION} server`, {
     assert.strictEqual(countItems(bot, 'iron_ingot'), 0)
     assert.ok(picks.some(u => u > 100), `pickaxes' uses: ${picks.join(', ')}`)
   })
+
+  it('makes a stone pickaxe from the cobblestone carried before a staircase\'s first step when the bag has none, and digs down with it', async (t) => {
+    // (26.3 run full-f: the staircase to the deep lava dug from y 12 to -50 by hand after its diamond pickaxe broke,
+    // a crafting table, 17 sticks and 600 cobblestone in the bag)
+    const o = new Vec3(Math.floor(bot.entity.position.x) + 60, GROUND + 1, Math.floor(bot.entity.position.z))
+    const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
+    await run(`fill ${xyz(-4, 0, -4)} ${xyz(36, HEIGHT - 1, 4)} stone`)
+    await run(`fill ${xyz(-4, HEIGHT, -4)} ${xyz(36, HEIGHT + 4, 4)} air`)
+    await run(`clear ${USERNAME}`)
+    for (const [item, n] of [['cobblestone', 64], ['stick', 4], ['crafting_table', 1]] as const) await run(`give ${USERNAME} ${item} ${n}`)
+    await run(`tp ${USERNAME} ${o.x + 0.5} ${o.y + HEIGHT} ${o.z + 0.5} -90 0`)
+    const top = o.offset(0.5, HEIGHT, 0.5)
+    assert.ok(await waitUntil(bot, () => bot.entity.position.distanceTo(top) < 0.5 && countItems(bot, 'crafting_table') > 0 && countItems(bot, 'stick') > 0, 200))
+    const executor = new Executor(bot, { log: line => t.diagnostic(line) })
+    const start = bot.survival.tasks.tick
+    const reached = await executor.task('down the staircase', async (s) => await descendTo(bot, BOTTOM, {}, s))
+    const ticks = bot.survival.tasks.tick - start
+    t.diagnostic(`reached ${String(reached)} at ${bot.entity.position.floored().toString()} in ${ticks} ticks`)
+    assert.strictEqual(reached, true)
+    assert.strictEqual(countItems(bot, 'stone_pickaxe'), 1)
+    // 27 steps of 3 blocks: by hand 150 ticks a block of stone, with the stone pickaxe some 8
+    assert.ok(ticks < 4000, `${ticks} ticks`)
+  })
 })
