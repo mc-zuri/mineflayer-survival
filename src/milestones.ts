@@ -274,6 +274,16 @@ export function fortressRoute (memory: WorldMemory, from: Vec3): ExploreOptions 
   return route
 }
 
+/** the pools of PORTAL_LAVA lava sources or more in the loaded chunks (96 blocks round), nearest first: their middles */
+export function nearestLavaPools (bot: Bot): Array<{ x: number, y: number, z: number }> {
+  const id = bot.registry.blocksByName.lava?.id
+  if (id == null || typeof bot.findBlocks !== 'function') return []
+  const sources = bot.findBlocks({ matching: id, maxDistance: 96, count: 4096 })
+    .filter(p => isLavaSource({ name: 'lava', properties: (bot.blockAt(p) as any)?.getProperties?.() } as any))
+    .map(p => ({ x: p.x, y: p.y, z: p.z }))
+  return lavaPools(sources, bot.entity.position, PORTAL_LAVA).map(p => p.center)
+}
+
 /** the nearest pool of PORTAL_LAVA lava sources or more in the loaded chunks (96 blocks round), its middle */
 export function nearestLavaPool (bot: Bot): { x: number, y: number, z: number } | null {
   const id = bot.registry.blocksByName.lava?.id
@@ -282,6 +292,49 @@ export function nearestLavaPool (bot: Bot): { x: number, y: number, z: number } 
     .filter(p => isLavaSource({ name: 'lava', properties: (bot.blockAt(p) as any)?.getProperties?.() } as any))
     .map(p => ({ x: p.x, y: p.y, z: p.z }))
   return lavaPools(sources, bot.entity.position, PORTAL_LAVA)[0]?.center ?? null
+}
+
+/**
+ * A nether portal by the bot's means: placed from 10 obsidian carried; else cast by a lava pool of the loaded chunks,
+ * the nearest first, each gone to (the caves' lakes too) and tried: the cast where its mould has room, else obsidian
+ * made from the pool's shore and placed up on the surface; the pools tried are remembered (lava_tried) and passed
+ * over after; else the obsidian got by the planner. (A cave's lake on 26.3 seed 2 had no room for the mould and no
+ * shore, and the milestone failed on it five times.)
+ */
+export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  const count = (name: string): number => countItems(bot, name)
+  const placeFromObsidian = async (): Promise<void> => {
+    await executor.task('up to the surface', async (s) => await ensureSurface(bot, s), signal)
+    await executor.task('build a nether portal', async (s) => await buildPortal(bot, { method: 'obsidian' }, s), signal)
+  }
+  if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
+  const tried = (p: { x: number, z: number }): boolean => executor.memory.getPois('lava_tried', { dimension: 'overworld' }).some(t => Math.hypot(t.x - p.x, t.z - p.z) < 16)
+  for (const pool of nearestLavaPools(bot).filter(p => !tried(p)).slice(0, 4)) {
+    const at = new Vec3(pool.x, pool.y, pool.z)
+    log(`a portal frame: the lava pool at ${pool.x.toFixed(0)} ${pool.y.toFixed(0)} ${pool.z.toFixed(0)}`)
+    executor.memory.addPoi('lava_tried', at.floored(), 'overworld')
+    try {
+      await executor.task('to the lava', async (s) => await moveNear(bot, at, 5, s).catch(async err => {
+        if (isAbort(err)) throw err
+        await tunnelTo(bot, { target: at, range: 5 }, s)
+      }), signal)
+      try {
+        await executor.task('build a nether portal', async (s) => await buildPortal(bot, {}, s), signal)
+        return
+      } catch (err) {
+        if (signal.aborted || TaskError.is(err, 'DIED') || !isSkillError(err, 'CANNOT_PLACE')) throw err
+        log(`a portal frame: ${(err as Error).message}: obsidian from the lava's shore`)
+      }
+      await executor.task('obsidian from the lava', async (s) => await obsidianFromLava(bot, PORTAL_OBSIDIAN, s), signal)
+      return await placeFromObsidian()
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`a portal frame at that pool: ${(err as Error).message}`)
+    }
+  }
+  log(`a portal frame: no pool to cast by, ${count('obsidian')} obsidian: getting obsidian`)
+  await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], signal)
+  await placeFromObsidian()
 }
 
 /** a frame's obsidian, and the lava sources to cast one from */
@@ -295,35 +348,7 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
       // the frame's makings: 10 lava sources by the bot to cast it from, else 10 obsidian got (the planner's mine
       // step goes to the obsidian of lava met by water): buildPortal casts only from lava within 16 blocks, and the
       // bot that started the nether at the spawn had none near
-      let lava = findLavaSources(blockGetter(bot), bot.entity.position, 16).length
-      if (lava < PORTAL_LAVA && count('obsidian') < PORTAL_OBSIDIAN) {
-        // a pool in the loaded chunks (the client has the caves' blocks too: the lava lakes deep down), gone to
-        const pool = nearestLavaPool(bot)
-        if (pool != null) {
-          log(`a portal frame: the lava pool at ${pool.x.toFixed(0)} ${pool.y.toFixed(0)} ${pool.z.toFixed(0)}`)
-          await executor.task('to the lava', async (s) => await moveNear(bot, new Vec3(pool.x, pool.y, pool.z), 5, s).catch(async err => {
-            if (isAbort(err)) throw err
-            await tunnelTo(bot, { target: new Vec3(pool.x, pool.y, pool.z), range: 5 }, s)
-          }), signal)
-          lava = findLavaSources(blockGetter(bot), bot.entity.position, 16).length
-        }
-      }
-      if (lava < PORTAL_LAVA && count('obsidian') < PORTAL_OBSIDIAN) {
-        log(`a portal frame: ${lava} lava sources near, ${count('obsidian')} obsidian: getting obsidian`)
-        await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], signal)
-      }
-      log('building a nether portal')
-      try {
-        await executor.task('build a nether portal', async (s) => await buildPortal(bot, {}, s), signal)
-      } catch (err) {
-        if (signal.aborted || TaskError.is(err, 'DIED') || !isSkillError(err, 'CANNOT_PLACE')) throw err
-        // no room by the lava for the cast's mould (a cave's lake): obsidian made from the pool with the water
-        // bucket and mined, and the frame placed from it up on the surface
-        log(`a portal frame: ${(err as Error).message}: obsidian from the lava instead`)
-        await executor.task('obsidian from the lava', async (s) => await obsidianFromLava(bot, PORTAL_OBSIDIAN, s), signal)
-        await executor.task('up to the surface', async (s) => await ensureSurface(bot, s), signal)
-        await executor.task('build a nether portal', async (s) => await buildPortal(bot, { method: 'obsidian' }, s), signal)
-      }
+      await buildAPortal(bot, executor, signal, log)
     }
     await executor.task('into the nether', async (s) => await enterNether(bot, { build: true }, s), signal)
   }

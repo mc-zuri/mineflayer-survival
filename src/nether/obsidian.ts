@@ -35,11 +35,14 @@ export function pourSpot (getBlock: ObsidianLookup, source: Vec3): Vec3 | null {
  * The source to turn and where the water goes, of some sources nearest first: the first with ground beside it (the
  * water poured there, side), else the first open to the air above (the water poured into the lava cell itself)
  */
-export function pourTarget (get: ObsidianLookup, sources: readonly Vec3[]): { source: Vec3, spot: Vec3, side: boolean } | null {
+export function pourTarget (get: ObsidianLookup, sources: readonly Vec3[], intoLava = false): { source: Vec3, spot: Vec3, side: boolean } | null {
   for (const p of sources) {
     const spot = pourSpot(get, p)
     if (spot != null) return { source: p, spot, side: true }
   }
+  // (the water poured into a lava cell turns it to obsidian and is gone: a bucket an obsidian, with no water near to
+  // fill it again, so only when asked)
+  if (!intoLava) return null
   const open = sources.find(p => AIR.has(get(p.offset(0, 1, 0))?.name ?? ''))
   return open == null ? null : { source: open, spot: open, side: false }
 }

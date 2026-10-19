@@ -48,5 +48,5 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
   bot.game.dimension = 'overworld'
   bot.findBlocks = () => []
   await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any })
-  assert.deepStrictEqual(calls.slice(0, 3), ['obtain 10 obsidian', 'build a nether portal', 'into the nether'])
+  assert.deepStrictEqual(calls.slice(0, 4), ['obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
 })

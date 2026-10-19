@@ -28,7 +28,8 @@ test('pourTarget: a source with ground beside it first; in a lake, one open to t
     if (p.y >= 48) return { name: 'cave_air', boundingBox: 'empty' }
     return { name: 'stone', boundingBox: 'block' }
   }
-  const t = pourTarget(lake, [new Vec3(0, 47, 0)])
+  assert.equal(pourTarget(lake, [new Vec3(0, 47, 0)]), null)
+  const t = pourTarget(lake, [new Vec3(0, 47, 0)], true)
   assert.deepEqual(t, { source: new Vec3(0, 47, 0), spot: new Vec3(0, 47, 0), side: false })
   // the shore: a source at the edge with a floor beside it at its level
   const shore = (p: Vec3) => (p.x === 3 && p.y === 47 && p.z === 0) ? { name: 'cave_air', boundingBox: 'empty' } : lake(p)
