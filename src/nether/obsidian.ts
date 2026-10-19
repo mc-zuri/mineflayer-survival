@@ -85,7 +85,9 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
       .slice(0, count - countItems(bot, 'obsidian'))
     if (made.length > 0) {
       try {
-        await collectBlock(bot, { positions: made, pickup: true }, signal)
+        // (each passed over once lava touches it: the obsidian mined before it opened a cell for the lake's lava to
+        // flow along, and a 26.3 bot broke the next block into its flow and down the pit it stood in)
+        await collectBlock(bot, { positions: made, pickup: true, avoidLava: true }, signal)
       } catch (err) {
         if (isAbort(err)) throw err
         trace('obsidianFromLava: mining', (err as Error).message)

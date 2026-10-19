@@ -107,6 +107,25 @@ test('collectBlock passes over an ore with lava beside or over it (broken, it op
   await assert.rejects(collectBlock(bot, { names: ['iron_ore'], count: 1 }), (err: any) => err.code === 'NOT_FOUND')
 })
 
+test('collectBlock with avoidLava passes over a block given by position once lava touches it, as its turn comes (the lava one broken before let in)', async () => {
+  const registry = require('minecraft-data')('1.21.11')
+  const blocks = new Map<string, string>([['1,64,0', 'obsidian'], ['3,64,0', 'obsidian'], ['3,64,1', 'lava']])
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (pos: Vec3) => blocks.get(`${pos.x},${pos.y},${pos.z}`) ?? (pos.y < 64 ? 'stone' : 'air') })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; return b }
+  const targets: string[] = []
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: (block: any) => { targets.push(block.position.toString()); throw new Error('the test stops here') } }
+  // lava over the first and beside the second: the third is gone for
+  blocks.set('1,65,0', 'lava')
+  blocks.set('-2,64,0', 'obsidian')
+  await assert.rejects(collectBlock(bot, { positions: [new Vec3(1, 64, 0), new Vec3(3, 64, 0), new Vec3(-2, 64, 0)], avoidLava: true }), /the test stops here/)
+  assert.deepStrictEqual(targets, ['(-2, 64, 0)'])
+  // without it, the positions are broken as given
+  targets.length = 0
+  await assert.rejects(collectBlock(bot, { positions: [new Vec3(1, 64, 0)] }), /the test stops here/)
+  assert.deepStrictEqual(targets, ['(1, 64, 0)'])
+})
+
 test('collectBlock with anyTool breaks a block by hand that the bag has no harvest tool for (a way out of a mine), and expects no drop', async () => {
   const registry = require('minecraft-data')('1.21.11')
   const blocks = new Map<string, string>([['1,64,0', 'stone']])

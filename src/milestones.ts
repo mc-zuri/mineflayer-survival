@@ -504,7 +504,7 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   if (natural.length > 0 && natural.length >= PORTAL_OBSIDIAN - count('obsidian')) {
     log(`a portal frame: ${natural.length} obsidian in sight: mining it`)
     try {
-      await executor.task('mine the obsidian', async (s) => await withNetherSafety(bot, async () => await collectBlock(bot, { positions: natural.slice(0, PORTAL_OBSIDIAN - count('obsidian')), pickup: true }, s)), signal)
+      await executor.task('mine the obsidian', async (s) => await withNetherSafety(bot, async () => await collectBlock(bot, { positions: natural.slice(0, PORTAL_OBSIDIAN - count('obsidian')), pickup: true, avoidLava: true }, s)), signal)
       if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
     } catch (err) {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err

@@ -35,7 +35,8 @@ export interface CollectBlockArgs {
   exclude?: (pos: Vec3) => boolean
   /**
    * Pass over blocks of `names` with lava beside or over them (default true): broken, the block's cell opens to the
-   * lava (FlowingFluid spreads into it), and the bot that broke it stands next to it
+   * lava (FlowingFluid spreads into it), and the bot that broke it stands next to it. Blocks given by `positions` are
+   * passed over so only when it's true, checked as each one's turn comes (the lava one broken before let in)
    */
   avoidLava?: boolean
   /**
@@ -127,6 +128,11 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
         if (tried.has(key)) continue
         tried.add(key)
         const block = bot.blockAt(pos.floored())
+        // (lava there now: one of the blocks broken before let it in, FlowingFluid spreading into the cell)
+        if (args.avoidLava === true && lavaBeside(p => bot.blockAt(p), pos.floored())) {
+          trace('collectBlock: passing over', block?.name, pos.toString(), ': lava against it')
+          continue
+        }
         if (block != null && block.type !== 0 && (ids.length === 0 || ids.includes(block.type))) return block
       }
       return null

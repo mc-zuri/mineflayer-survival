@@ -7,6 +7,7 @@ import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { obsidianFromLava } from '../../src/nether/obsidian'
+import { collectBlock } from '../../src/skills/collectBlock'
 import { countItems, waitUntil } from '../../src/skills/util'
 
 const USERNAME = 'obsidianbot'
@@ -64,5 +65,35 @@ describe(`obsidian from a lava lake on a ${DEFAULT_VERSION} server`, { timeout: 
     const got = await obsidianFromLava(bot, 4)
     console.log(`obsidianFromLava (deep): ${got} obsidian, water bucket ${countItems(bot, 'water_bucket')}`)
     assert.ok(got >= 4, `${got} obsidian`)
+  })
+  it('mines the obsidian it was given, passing over one that lava has come against since the list was made', async () => {
+    // (beside the other tests' ground) obsidian at x 2 and x 4 sunk in the stone, the bot by them; then lava let in
+    // against x 4 (as the lava a mined block let in flows on), after the list of blocks to mine was made
+    const o = (start ?? bot.entity.position.floored()).offset(-24, 0, 0)
+    const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
+    await run(`fill ${xyz(-6, -4, -6)} ${xyz(8, -1, 6)} stone`)
+    await run(`fill ${xyz(-6, 0, -6)} ${xyz(8, 6, 6)} air`)
+    await run(`setblock ${xyz(2, -1, 0)} obsidian`)
+    await run(`setblock ${xyz(4, -1, 0)} obsidian`)
+    await run(`clear ${USERNAME}`)
+    await run(`give ${USERNAME} diamond_pickaxe 1`)
+    await run(`tp ${USERNAME} ${o.x + 3.5} ${o.y} ${o.z + 2.5}`)
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'diamond_pickaxe') > 0 && bot.blockAt(o.offset(4, -1, 0))?.name === 'obsidian', 200))
+    const positions = [o.offset(2, -1, 0), o.offset(4, -1, 0)]
+    await run(`setblock ${xyz(5, -1, 0)} lava`)
+    assert.ok(await waitUntil(bot, () => bot.blockAt(o.offset(5, -1, 0))?.name === 'lava', 20))
+    let lava = 0
+    const onTick = (): void => { if ((bot.entity as any).isInLava === true) lava++ }
+    bot.on('physicsTick', onTick)
+    try {
+      // (one of the two: NOT_FOUND, 'broke 1 of 2 blocks')
+      const out = await collectBlock(bot, { positions, pickup: false, avoidLava: true }).then(r => `${r.mined} mined`, (err: Error) => err.message)
+      console.log(`by the lava: ${out}, x 2 ${bot.blockAt(positions[0])?.name}, x 4 ${bot.blockAt(positions[1])?.name}, ${lava} ticks in lava`)
+      assert.strictEqual(bot.blockAt(positions[0])?.name, 'air')
+      assert.strictEqual(bot.blockAt(positions[1])?.name, 'obsidian', 'the block lava had come against was mined, the lava let into its cell')
+      assert.strictEqual(lava, 0)
+    } finally {
+      bot.off('physicsTick', onTick)
+    }
   })
 })
