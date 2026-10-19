@@ -1060,12 +1060,12 @@ export async function recoverEndDrops (bot: Bot, executor: Executor, signal: Abo
 }
 
 /** ticks the way back to a nether death's drops may take */
-export const NETHER_DROPS_TICKS = 8000
+export const NETHER_DROPS_TICKS = 20000
 
 /**
  * Back to a nether death's drops (its diamond gear at a fortress's spawner): the items of an unloaded chunk don't
  * age (ItemEntity ticks only in loaded chunks), so they lie there till the bot is back; gone to by the nether's path
- * settings within NETHER_DROPS_TICKS, unless the death was in the lava sea or the spot is lava when seen
+ * settings within NETHER_DROPS_TICKS (8000 ran out 500 blocks from the portal), unless the death was in the lava sea or the spot is lava when seen
  * (a 26.3 bot came back to the spawner naked three times, its kit's diamonds lying there)
  */
 export async function recoverNetherDrops (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
