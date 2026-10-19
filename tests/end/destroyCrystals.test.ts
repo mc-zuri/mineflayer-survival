@@ -87,3 +87,17 @@ test('pillarToLeave: up a pillar cut short and off to another job, it is come do
   // a way down that failed twice is not tried again (the loop came back to it in the same tick, forever)
   assert.strictEqual(pillarToLeave({ current: { column, base: 63, downTries: 2 } }, { x: 39.5, y: 84, z: 0.4 }, other), null)
 })
+
+test('cloudUnder: a cloud across the pillar\'s column under the bot\'s feet is waited out up there; one off it or above, not', async () => {
+  const { cloudUnder } = await import('../../src/end/skills/destroyCrystals')
+  const pillar = { column: { x: 39, z: 0 }, base: 62 }
+  const feet = { x: 39.5, y: 82, z: 0.5 }
+  const cloud = (x: number, y: number, radius = 3.3): any => ({ center: { x, z: 0.2 }, y, radius, why: 'cloud' })
+  assert.ok(cloudUnder([cloud(39, 80)], feet, pillar) != null)
+  // on the ground by the pillar's foot: the way down ends in it too
+  assert.ok(cloudUnder([cloud(41, 62)], feet, pillar) != null)
+  // off to the side, or at the bot's own feet (the watch's to get it out of), or a fireball's landing: none
+  assert.strictEqual(cloudUnder([cloud(48, 80)], feet, pillar), null)
+  assert.strictEqual(cloudUnder([cloud(39, 82)], feet, pillar), null)
+  assert.strictEqual(cloudUnder([{ ...cloud(39, 80), why: 'fireball' }], feet, pillar), null)
+})

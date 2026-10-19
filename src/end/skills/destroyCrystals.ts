@@ -8,7 +8,7 @@ import { attackStrengthOf, bestMeleeWeapon } from '../../skills/weapons'
 import { wornArmor, armorPiece, damageAfterArmor } from '../../skills/armor'
 import { getSpikesForLevel, spikeCenters, type Box, type EndSpike } from '../spikes'
 import { CRYSTAL_EXPLOSION_POWER, boxEntry, cellsOnLine, planCrystals, type CrystalTarget, type ShootSpot } from '../crystals'
-import { dragonDangers, eatIfHurt, evadeDangers, inDanger, underDragonWatch } from './danger'
+import { dragonDangers, eatIfHurt, evadeDangers, inDanger, underDragonWatch, type Danger } from './danger'
 import { blockGetter, groundY, digDown, gotoBlock, holdOneOf, pillarUp, PICKAXES, VoidGuard, findPortalY, worldMinY, type BlockGetter } from './world'
 
 // destroyCrystals: the end crystals on the obsidian spikes, by the crystal plan (src/end/crystals): the open ones shot
@@ -139,6 +139,8 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
   let spikes = readSpikes(get, [], opts.seed)
   /** the pillar the bot is building or standing on, and the ground it went up from */
   const pillar: PillarState = { current: null }
+  /** waiting up a pillar for a cloud under the bot to go */
+  let waitingOver = false
   const onGone = (e: Entity): void => {
     const index = ids.get(e.id)
     if (index == null) return
@@ -204,6 +206,17 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
       // (a 1.21.11 bot left on spike 0's pillar 20 blocks up walked for spike 1's spot, 'stopped short' three times, and fell)
       const down = pillarToLeave(pillar, bot.entity.position, target)
       if (down != null) {
+        // a cloud on the pillar's column under the bot (a fireball's, put on the bot up there): waited out above it, not
+        // dug down into (the watch sent a 1.21.11 bot back up out of it 28 times, two blocks each, over 1300 ticks)
+        const cloud = cloudUnder(dragonDangers(bot, ground), bot.entity.position, down)
+        if (cloud != null) {
+          if (!waitingOver) opts.log?.(`a cloud on the pillar at ${cloud.y?.toFixed(1) ?? '?'} under the bot: waited out up here`)
+          waitingOver = true
+          await evadeDangers(bot, () => dragonDangers(bot, bot.entity.onGround ? bot.entity.position.y : ground, ground), guard, { signal, island: ground, maxTicks: 20 })
+          await waitTicks(bot, 10, signal)
+          continue
+        }
+        waitingOver = false
         opts.log?.(`down the pillar at ${down.column.x} ${down.column.z} to ${down.base} first`)
         const t = down
         await underDragonWatch(bot, ground, async (s) => await digDown(bot, t.base, { signal: s }), { signal, guard, eatBelowHealth: opts.eatBelowHealth, log: opts.log }).catch(async err => {
@@ -283,6 +296,18 @@ export function pillarToLeave (pillar: PillarState, pos: Pos, next: CrystalTarge
   if (p == null || !onColumn(pos, p.column) || Math.floor(pos.y + 1e-6) <= p.base || (p.downTries ?? 0) >= MAX_DOWN_TRIES) return null
   if (next.method === 'pillar' && next.pillar != null && next.pillar.column.x === p.column.x && next.pillar.column.z === p.column.z) return null
   return p
+}
+
+/**
+ * A cloud (AreaEffectCloud: half a block high) lying across the pillar's column between its foot and the bot's feet,
+ * which the way down passes through: horizontally over the column (its radius and a block), at least a block under the
+ * feet (the bot stands clear of it up there)
+ */
+export function cloudUnder (dangers: Danger[], feet: Pos, pillar: { column: { x: number, z: number }, base: number }): Danger | null {
+  const x = pillar.column.x + 0.5
+  const z = pillar.column.z + 0.5
+  return dangers.find(d => d.why === 'cloud' && d.y != null && d.y >= pillar.base - 1 && d.y <= feet.y - 0.5 &&
+    Math.hypot(d.center.x - x, d.center.z - z) < d.radius + 1) ?? null
 }
 
 /** tries at a crystal before it is left (a dodge of the dragon is not one) */
