@@ -25,6 +25,7 @@ import { experience, gainLevels } from './skills/xp'
 import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from './skills/husbandry'
 import { makeWaterHole, plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
+import { herdPen, inPen, leadIntoPen, type PenPlan } from './skills/pen'
 import { TRIP_KIT, stashTripKit } from './skills/tripKit'
 import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
@@ -76,8 +77,20 @@ export function herdChore (state: { leather: number, want: number, adults: numbe
 export async function leatherFromHerd (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
   const start = executor.tasks.tick
   const home = executor.memory.getPois(HERD, { dimension: 'overworld', near: bot.entity.position })[0]
-  const at = home != null ? new Vec3(home.x, home.y, home.z) : bot.entity.position.clone()
-  const near = (e: any): boolean => e.position.distanceTo(at) <= 96
+  let at = home != null ? new Vec3(home.x, home.y, home.z) : bot.entity.position.clone()
+  // the herd shut in a pen by home (cows wander: a herd of 8 let out was 5 to 8 by home over 150000 ticks, its calves
+  // gone off), the pen built or the one remembered; the herd left loose and gathered when there's none
+  let pen: PenPlan | null = null
+  try {
+    const r = await executor.task('the herd pen', async (s) => await herdPen(bot, { home: at, memory: executor.memory, obtain: async (reqs, sig) => await executor.obtain(reqs, sig ?? signal), mob: 'cow' }, s), signal)
+    pen = r.pen
+    at = pen.center.clone()
+    log(`herd: the pen at ${pen.center.toString()}${r.built ? ' built' : ''}, ${r.inside} cows in`)
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`herd: no pen: ${(err as Error).message}`)
+  }
+  const near = (e: any): boolean => pen != null ? inPen(pen, e.position) : e.position.distanceTo(at) <= 96
   let lastLine = ''
   for (;;) {
     if (signal.aborted) throw signal.reason
@@ -108,7 +121,12 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
     // the farm's wheat for the herd, the strays brought home (cows wander: the herd of 8 let out was 5 to 8 by home
     // over 150000 ticks, its calves gone off), and the pairs ready
     await harvestGrownFarms(bot, executor, signal, log, false).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
-    await executor.task('gather the herd', async (s) => await gatherHerd(bot, at, { mob: 'cow' }, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+    const strays = pen == null ? 0 : Object.values(bot.entities).filter(e => e.name === 'cow' && !inPen(pen as PenPlan, e.position) && e.position.distanceTo(at) <= 32).length
+    if (pen != null && strays > 0 && countItems(bot, 'wheat') > 0) {
+      await executor.task('the herd into its pen', async (s) => await leadIntoPen(bot, pen as PenPlan, { mob: 'cow' }, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+    } else if (pen == null) {
+      await executor.task('gather the herd', async (s) => await gatherHerd(bot, at, { mob: 'cow' }, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+    }
     if (countItems(bot, 'wheat') >= 2 && state.adults >= 2) {
       await executor.task('breed the cows', async (s) => await breedAnimals(bot, { mob: 'cow', pairs: Math.floor(state.adults / 2), radius: 48 }, s), signal)
         .then(r => log(`herd: ${r.fed} fed (${state.adults} cows, ${state.calves} calves, ${state.leather} leather of ${want})`))

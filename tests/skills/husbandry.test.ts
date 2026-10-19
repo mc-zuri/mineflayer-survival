@@ -131,3 +131,39 @@ test('startFarm with no water near and a water bucket held digs a water hole for
   assert.strictEqual(await startFarm(bot, executor, new AbortController().signal, () => {}), false)
   assert.deepStrictEqual(tasks, ['a water hole for the farm'])
 })
+
+test('leatherFromHerd pens the herd first, and leads the cows outside the pen back in, not a 96-block gather', async () => {
+  const { leatherFromHerd } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({
+    position: new Vec3(0.5, 64, 0.5),
+    items: [item('wheat', 20)],
+    entities: [
+      { id: 1, name: 'cow', position: new Vec3(10, 64, 10), metadata: [] },
+      { id: 2, name: 'cow', position: new Vec3(11, 64, 10), metadata: [] },
+      { id: 3, name: 'cow', position: new Vec3(20, 64, 0), metadata: [] }
+    ]
+  })
+  bot.game.dimension = 'overworld'
+  const pen = { center: new Vec3(10, 64, 10), size: 5, side: 'west', gate: new Vec3(8, 64, 10), inside: new Vec3(9, 64, 10), outside: new Vec3(7, 64, 10), fences: [] }
+  let tick = 0
+  const tasks: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { get tick () { return tick } },
+    obtain: async () => {},
+    plan: () => ({ ok: false }),
+    task: async (name: string) => {
+      tasks.push(name)
+      if (name === 'the herd pen') return { pen, inside: 2, built: true }
+      if (name === 'wait for the calves') tick += 1e6
+      return { fed: 0 }
+    }
+  }
+  await leatherFromHerd(bot, executor, 46, new AbortController().signal, () => {})
+  assert.equal(tasks[0], 'the herd pen')
+  assert.ok(tasks.includes('the herd into its pen'), tasks.join(', '))
+  assert.ok(!tasks.includes('gather the herd'))
+})
