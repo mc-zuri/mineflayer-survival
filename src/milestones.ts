@@ -705,6 +705,9 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
  */
 export const PEARL_NETHER_LEGS = 10
 
+/** the lowest height a nether pearl leg aims at (the lava sea is at 31) */
+export const PEARL_LEG_Y = 64
+
 /** blocks a pearl search in the nether goes on each leg looking for piglins or endermen */
 export const PEARL_LEG = 96
 /** rounds of the overworld's night hunt at most (a hunt, a leg, a day's levels each) */
@@ -777,7 +780,9 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
       // a spiral out from where the search began (the fortress walks' legs went back and forth over the same 100
       // blocks round the fortress, 10 legs and no new ground, 26.3)
       const point = spiral[walked++ % spiral.length]
-      to = new Vec3(point.x, bot.entity.position.y, point.z)
+      // at a height well over the lava sea (y 31): a leg at the bot's own height from its shore led it down to the
+      // sea's level, and into the lava (26.3)
+      to = new Vec3(point.x, Math.max(PEARL_LEG_Y, bot.entity.position.y), point.z)
     }
     log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for ${seen?.kind ?? 'piglins or endermen'}`)
     await executor.task('a leg for pearls', async (s) => await withNetherSafety(bot, async () => await travel(bot, {

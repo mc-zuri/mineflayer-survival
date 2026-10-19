@@ -306,3 +306,16 @@ test('a way in through the remembered portal that fails makes another the milest
   assert.deepStrictEqual(calls.slice(first, first + 4), ['into the nether', 'up to the surface', 'build a nether portal', 'into the nether'])
   assert.equal(memory.getPois('nether_portal', { dimension: 'overworld' }).length, 0)
 })
+
+test('the nether pearl legs aim well over the lava sea, not at the bot\'s height by its shore', async () => {
+  const { pearlsInTheNether, PEARL_LEG_Y } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 33, 0.5) })
+  bot.game.dimension = 'the_nether'
+  const lines: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async () => {} }
+  await pearlsInTheNether(bot, executor, 4, new AbortController().signal, l => lines.push(l))
+  const ys = lines.map(l => /on to \(-?\d+, (-?\d+),/.exec(l)?.[1]).filter(y => y != null).map(Number)
+  assert.ok(ys.length > 0 && ys.every(y => y >= PEARL_LEG_Y), ys.join(','))
+})
