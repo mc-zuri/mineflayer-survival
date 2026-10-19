@@ -124,3 +124,67 @@ test('a big smelt is shared out among the furnaces as evenly as can be', async (
   assert.ok(Math.max(...shareOut(33, PARALLEL_FURNACES)) * 3 <= 33)
   assert.ok(PARALLEL_MIN_ITEMS >= PARALLEL_FURNACES * 4)
 })
+
+test('smeltParallel picks up one furnace after (FURNACES_CARRIED), the rest left standing, and a smelt after uses the ones standing near before making more', async () => {
+  // (26.3 seed 2: 4 furnaces in the bag down the diamonds' mine)
+  const { Vec3 } = await import('vec3')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const smeltModule = await import('../../src/skills/smelt')
+  const placeModule = require('../../src/skills/placeBlock')
+  const collectModule = require('../../src/skills/collectBlock')
+  const craftModule = require('../../src/skills/craft')
+  const registry = require('minecraft-data')('1.21.11')
+  const furnaces = new Map<string, { input: any, fuel: any, output: any }>()
+  const key = (p: any): string => `${p.x},${p.y},${p.z}`
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('raw_iron', 12), item('coal', 4), item('furnace', 3)], world: (pos: Vec3) => furnaces.has(key(pos)) ? 'furnace' : pos.y < 64 ? 'stone' : 'air' })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; return b }
+  bot.findBlocks = () => [...furnaces.keys()].map(k => new Vec3(...k.split(',').map(Number) as [number, number, number]))
+  bot._client = { on: () => {}, off: () => {} }
+  const take = (name: string, n: number): void => { const it = bot.inventory.items().find((i: any) => i.name === name); it.count -= n; if (it.count <= 0) bot.inventory.slots[it.slot] = null }
+  const give = (name: string, n: number): void => {
+    const it = bot.inventory.items().find((i: any) => i.name === name)
+    if (it != null) { it.count += n; return }
+    const slot = bot.inventory.slots.findIndex((s: any, i: number) => i >= 9 && i < 45 && s == null)
+    bot.inventory.slots[slot] = item(name, n)
+    bot.inventory.slots[slot].slot = slot
+  }
+  const real = { place: placeModule.placeBlock, collect: collectModule.collectBlock, craft: craftModule.craft }
+  placeModule.placeBlock = async (_bot: any, args: any) => { take('furnace', 1); furnaces.set(key(args.pos), { input: null, fuel: null, output: null }) }
+  collectModule.collectBlock = async (_bot: any, args: any) => { furnaces.delete(key(args.positions[0])); give('furnace', 1); return { mined: 1, positions: args.positions, items: {}, count: 1 } }
+  let crafted = 0
+  craftModule.craft = async () => { crafted++; give('furnace', 1) }
+  bot.openFurnace = async (block: any) => {
+    const f = furnaces.get(key(block.position)) as any
+    return {
+      items: () => bot.inventory.items(),
+      inputItem: () => f.input, fuelItem: () => f.fuel, outputItem: () => f.output,
+      putInput: async (type: number, _m: unknown, n: number) => { take(registry.items[type].name, n); f.output = { name: 'iron_ingot', count: n } },
+      putFuel: async (type: number, _m: unknown, n: number) => { take(registry.items[type].name, n) },
+      takeOutput: async () => { give(f.output.name, f.output.count); f.output = null },
+      takeInput: async () => { f.input = null },
+      takeFuel: async () => { f.fuel = null },
+      close: () => {}
+    }
+  }
+  const ticker = setInterval(() => bot.emit('physicsTick'), 0)
+  try {
+    assert.strictEqual(await smeltModule.smeltParallel(bot, { input: 'raw_iron', count: 12 }), 12)
+    const count = (name: string): number => bot.inventory.items().filter((i: any) => i.name === name).reduce((n: number, i: any) => n + i.count, 0)
+    assert.strictEqual(count('furnace'), smeltModule.FURNACES_CARRIED)
+    assert.strictEqual(furnaces.size, 2)
+    // the next big smelt here: the two standing and the bag's, none made
+    give('raw_iron', 12)
+    give('coal', 4)
+    give('cobblestone', 64)
+    assert.strictEqual(await smeltModule.smeltParallel(bot, { input: 'raw_iron', count: 12 }), 12)
+    assert.strictEqual(crafted, 0)
+    assert.strictEqual(count('furnace'), 1)
+    assert.strictEqual(furnaces.size, 2)
+  } finally {
+    clearInterval(ticker)
+    placeModule.placeBlock = real.place
+    collectModule.collectBlock = real.collect
+    craftModule.craft = real.craft
+  }
+})
