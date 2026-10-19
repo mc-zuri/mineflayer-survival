@@ -170,3 +170,21 @@ test('with no base the stock over its working set may go when room is wanted; wi
   bot.survival.memory.rememberChest({ x: 1, y: 40, z: 0 }, {})
   assert.equal(runner.executor.options.surplus('cobblestone'), false)
 })
+
+test('on a trip (the eyes\' search, the End) the stock tops up only what the trip spends: food, arrows, blocks; not gold', async () => {
+  const gear = { diamond_pickaxe: 1, diamond_sword: 1, iron_helmet: 1, iron_chestplate: 1, iron_leggings: 1, iron_boots: 1, shield: 1, bucket: 1, crafting_table: 1, furnace: 1, stone_axe: 1, cooked_beef: 4 }
+  const reached = ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting', 'nether'] as const
+  const bot = fakeBot({ ...gear, ender_eye: 16 })
+  bot.survival.memory.setBase({ x: 0, y: 40, z: 0 })
+  const runner = new Runner(bot, { log: () => {}, executor: { log: () => {} } })
+  runner.reached.push(...at([...reached]))
+  const trip = runner.dueTopUps(['surface', 'underground']).map(u => u.mark.id)
+  assert.ok(trip.length > 0)
+  assert.ok(trip.every(id => ['food', 'arrow', 'stone'].includes(id)), trip.join(', '))
+  // at home before the nether, gold and the rest are due as before
+  const home = fakeBot({ ...gear })
+  home.survival.memory.setBase({ x: 0, y: 40, z: 0 })
+  const r2 = new Runner(home, { log: () => {}, executor: { log: () => {} } })
+  r2.reached.push(...at(['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting']))
+  assert.ok(r2.dueTopUps(['surface', 'underground']).some(u => u.mark.id === 'gold'))
+})

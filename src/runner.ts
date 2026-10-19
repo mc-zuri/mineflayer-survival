@@ -60,6 +60,8 @@ export const OPTIONAL_MILESTONES: readonly MilestoneId[] = ['enchanting']
 
 /** milestones that are a trip across the world, not worked from home: the night's mining waits till they're done */
 export const TRIP_MILESTONES: readonly MilestoneId[] = ['eyes', 'end']
+/** the stock's marks topped up on a trip: what it spends on the way (food, arrows, blocks to bridge and pillar with) */
+export const TRIP_STOCK_MARKS: readonly string[] = ['food', 'arrow', 'stone']
 
 export interface MilestoneEvent {
   id: MilestoneId
@@ -623,7 +625,11 @@ export class Runner {
     const bag = new Inventory(this.bot.registry as any, this.bot.inventory.items().map(i => ({ name: i.name, count: i.count })))
     // with no base's chests to take what's over the working set, a top-up gathers no more than it
     const canStore = (baseRecord(this.memory)?.chests.length ?? 0) > 0
-    return this.stock.topUps(ownedInventory(this.bot), this.stockStored(), reached, places, { bag, canStore }).filter(u => (this.stockRetryAt.get(u.mark.id) ?? 0) <= now)
+    const due = this.stock.topUps(ownedInventory(this.bot), this.stockStored(), reached, places, { bag, canStore }).filter(u => (this.stockRetryAt.get(u.mark.id) ?? 0) <= now)
+    // on a trip (the stronghold search, the End) only what the trip itself spends: on 1.21.11 seed 2 a gold top-up mined
+    // 48 ores 26 blocks off from the portal room it had just found
+    const upNext = nextToWork(progressState(this.bot, this.memory), reached, new Set(this.options.skip ?? []))
+    return upNext != null && TRIP_MILESTONES.includes(upNext.id) ? due.filter(u => TRIP_STOCK_MARKS.includes(u.mark.id)) : due
   }
 
   /**
