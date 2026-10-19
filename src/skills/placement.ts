@@ -36,6 +36,39 @@ export function botCells (position: Vec3, width = 0.6, height = 1.8): Vec3[] {
   return cells
 }
 
+/** whether the bot's box at `position` (its feet) reaches into `cell` at all */
+export function boxInCell (position: Vec3, cell: Vec3): boolean {
+  return botCells(position).some(c => c.equals(cell))
+}
+
+/**
+ * Where the bot steps to get its box out of `cell` before a block goes in it (the server refuses a block whose
+ * collision shape the player is in: BlockItem.canPlace, Level.isUnobstructed; a gate's bar is a quarter of the cell
+ * across, and a bot standing half in the gate's cell, its feet's cell, had the gate refused three times, 26.3: the
+ * reach goal took it as out by the cell beside it its box was in too): the middle of the nearest cell about its feet
+ * the bot stands in (room for its feet and head, a floor), out of `cell`'s column. Null when its box is out of
+ * `cell` already, or there's nowhere to step.
+ */
+export function cellToStepOff (lookup: BlockLookup, position: Vec3, cell: Vec3): Vec3 | null {
+  if (!boxInCell(position, cell)) return null
+  const feet = position.floored()
+  const passable = (p: Vec3): boolean => {
+    const b = lookup(p)
+    return b != null && b.boundingBox === 'empty' && b.name !== 'lava' && b.name !== 'water'
+  }
+  let best: { pos: Vec3, d: number } | null = null
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      const pos = feet.offset(dx, 0, dz)
+      if (pos.x === cell.x && pos.z === cell.z) continue
+      if (!passable(pos) || !passable(pos.offset(0, 1, 0)) || !isSolid(lookup(pos.offset(0, -1, 0)))) continue
+      const d = Math.hypot(pos.x + 0.5 - position.x, pos.z + 0.5 - position.z) + (dx !== 0 && dz !== 0 ? 0.5 : 0)
+      if (best == null || d < best.d) best = { pos, d }
+    }
+  }
+  return best?.pos ?? null
+}
+
 export interface FindPlacementOptions {
   /** how far from the bot's block, horizontally (default 2) */
   radius?: number

@@ -69,6 +69,8 @@ export function planPen (lookup: Lookup, center: Vec3, size: number, side: Side)
   const plan: PenPlan = { center: c, size: 2 * r + 1, side, gate, inside: gate.minus(out), outside: gate.plus(out), fences: [], fillers: [], clear: [] }
   const solid = (p: Vec3): boolean => isSolid(lookup(p) as any)
   const free = (p: Vec3): boolean => isFree(lookup(p) as any)
+  // (a ring begun before: its fences are the ring's, not steps to fence on top of)
+  const fence = (p: Vec3): boolean => /_fence$/.test(lookup(p)?.name ?? '')
   const floor = (p: Vec3): void => {
     if (solid(p.offset(0, -1, 0))) return
     if (!solid(p.offset(0, -2, 0))) plan.fillers.push(p.offset(0, -2, 0))
@@ -79,8 +81,13 @@ export function planPen (lookup: Lookup, center: Vec3, size: number, side: Side)
       if (Math.max(Math.abs(dx), Math.abs(dz)) !== r) continue
       const cell = c.offset(dx, 0, dz)
       if (cell.equals(gate)) continue
+      if (fence(cell)) {
+        plan.fences.push(cell)
+        continue
+      }
       if (solid(cell)) {
         const above = cell.offset(0, 1, 0)
+        if (fence(above)) plan.fences.push(above)
         if (solid(above)) continue
         if (!free(above)) plan.clear.push(above)
         plan.fences.push(above)
@@ -93,7 +100,7 @@ export function planPen (lookup: Lookup, center: Vec3, size: number, side: Side)
   }
   for (const cell of [plan.outside, gate, plan.inside]) {
     floor(cell)
-    for (const p of [cell, cell.offset(0, 1, 0)]) if (!free(p)) plan.clear.push(p)
+    for (const p of [cell, cell.offset(0, 1, 0)]) if (!free(p) && !(p.equals(gate) && /_fence_gate$/.test(lookup(p)?.name ?? ''))) plan.clear.push(p)
   }
   return plan
 }
@@ -164,28 +171,31 @@ async function clearCell (bot: Bot, pos: Vec3, signal?: AbortSignal): Promise<vo
 
 /**
  * Builds a pen of fences with one gate (planPen): the fences and the gate got first (`obtain`), the plants and blocks
- * in the way cleared, the holes under it filled, each fence and the gate placed with placeBlock (the gate facing
- * along the way through it: FenceGateBlock.getStateForPlacement takes the player's facing), and the ring kept from the
- * pathfinder's digs (protectPen). Resolves the pen as built; a ring with a gap left throws.
+ * in the way cleared, the holes under it filled, the gate placed first (facing along the way through it:
+ * FenceGateBlock.getStateForPlacement takes the player's facing) in the middle of a side no mob stands in, then each
+ * fence round the ring from it, each with placeBlock; the ring kept from the pathfinder's digs (protectPen). Resolves
+ * the pen as built, its gate shut; a ring with a gap or no gate throws.
  */
 export async function buildPen (bot: Bot, args: BuildPenArgs, signal?: AbortSignal): Promise<Pen> {
   throwIfAborted(signal)
   const center = args.center.floored()
-  const side = args.side ?? nearestSide(center, bot.entity.position)
+  const size = args.size ?? 9
+  let side = args.side ?? nearestSide(center, bot.entity.position)
   const lookup: Lookup = p => bot.blockAt(p) as any
-  const plan = planPen(lookup, center, args.size ?? 9, side)
+  let plan = planPen(lookup, center, size, side)
   const tags = itemTags(bot.registry as any)
   const fenceNames = tags.members('#wooden_fences')
   const gateNames = tags.members('#fence_gates')
   const isFence = (name: string | undefined): boolean => name != null && fenceNames.includes(name)
-  const toPlace = plan.fences.filter(p => !isFence(bot.blockAt(p)?.name))
-  const gateThere = gateNames.includes(bot.blockAt(plan.gate)?.name ?? '')
+  const isGate = (pos: Vec3): boolean => gateNames.includes(bot.blockAt(pos)?.name ?? '')
+  const fencesToPlace = (): Vec3[] => plan.fences.filter(p => !isFence(bot.blockAt(p)?.name))
 
   // the materials: the fences and the gate (the planner crafts them), the fillers from what's held
+  const toPlace = fencesToPlace()
   const fencesHeld = countItems(bot, [...fenceNames])
   const want: Array<{ item: string, count: number }> = []
   if (fencesHeld < toPlace.length) want.push({ item: '#wooden_fences', count: toPlace.length })
-  if (!gateThere && countItems(bot, [...gateNames]) === 0) want.push({ item: '#fence_gates', count: 1 })
+  if (!isGate(plan.gate) && countItems(bot, [...gateNames]) === 0) want.push({ item: '#fence_gates', count: 1 })
   if (want.length > 0) {
     if (args.obtain == null) throw new SkillError('MISSING_ITEMS', `a pen of ${plan.size} takes ${toPlace.length} fences and a gate`)
     await args.obtain(want, signal)
@@ -193,41 +203,83 @@ export async function buildPen (bot: Bot, args: BuildPenArgs, signal?: AbortSign
   const fillersNeeded = plan.fillers.filter(p => !isSolid(bot.blockAt(p))).length
   if (fillersNeeded > countItems(bot, PEN_FILLERS)) throw new SkillError('MISSING_ITEMS', `the pen's ground takes ${fillersNeeded} blocks to fill its holes`)
 
+  // the gate first, in the middle of a side no mob stands in: the side asked for, else the others, the nearest first
+  // (a mob in its cell is waited for and pushed off first, clearOfMobs: a cow in the gap left for the gate kept it out
+  // when it went in last)
+  if (!isGate(plan.gate)) {
+    const others = (Object.keys(SIDE_DIRS) as Side[]).filter(s => s !== side)
+    const away = (s: Side): number => center.plus(SIDE_DIRS[s]).distanceTo(bot.entity.position)
+    let lastError: unknown = null
+    for (const s of [side, ...others.sort((a, b) => away(a) - away(b))]) {
+      throwIfAborted(signal)
+      const p = planPen(lookup, center, size, s)
+      // (another side's middle fenced already, a ring begun before: not dug out for the gate)
+      if (s !== side && isFence(bot.blockAt(p.gate)?.name)) continue
+      plan = p
+      side = s
+      // (the ring kept from the pathfinder's digs while it goes up: a fence costs less to dig than the walk round)
+      protectPen(bot, plan)
+      await prepare(bot, plan, signal)
+      if (!(await clearOfMobs(bot, plan.gate, SIDE_DIRS[side], signal))) {
+        trace('buildPen: a mob stays in the gate\'s cell', plan.gate.toString(), 'on the', side)
+        lastError = new SkillError('CANNOT_PLACE', `a mob stays in the pen's gate cell at ${plan.gate.toString()}`)
+        continue
+      }
+      const item = gateNames.find(n => countItems(bot, n) > 0)
+      if (item == null) throw new SkillError('MISSING_ITEMS', 'no fence gate for the pen')
+      try {
+        // the gate's bar lies across the way through it: placed facing out (or in) of the pen
+        await placeWithRetry(bot, plan.gate, item, SIDE_DIRS[side], signal)
+      } catch (err) {
+        if (!isSkillError(err, 'CANNOT_PLACE')) throw err
+        trace('buildPen: no gate on the', side, (err as Error).message)
+        lastError = err
+        continue
+      }
+      break
+    }
+    if (!isGate(plan.gate)) throw lastError ?? new SkillError('VERIFY_FAILED', `no gate at ${plan.gate.toString()}`)
+  } else {
+    protectPen(bot, plan)
+    await prepare(bot, plan, signal)
+  }
+
+  const order = fencesToPlace()
+  let placed = plan.fences.length - order.length
+  // round the ring from the gate, so the bot isn't walled off from the cells still to do
+  order.sort((a, b) => ringAngle(plan, a) - ringAngle(plan, b))
+  for (const pos of order) {
+    throwIfAborted(signal)
+    const item = fenceNames.find(n => countItems(bot, n) > 0)
+    if (item == null) throw new SkillError('MISSING_ITEMS', 'no fence left for the pen')
+    await clearOfMobs(bot, pos, ringOut(plan, pos), signal)
+    const res = await placeWithRetry(bot, pos, item, undefined, signal)
+    if (!isFence(res.block)) throw new SkillError('VERIFY_FAILED', `${res.block} is at ${pos.toString()}, not a fence`)
+    placed++
+  }
+  // the ring whole, the gate in it and shut
+  const gap = plan.fences.find(p => !isFence(bot.blockAt(p)?.name))
+  if (gap != null) throw new SkillError('VERIFY_FAILED', `the pen's ring has a gap at ${gap.toString()}`)
+  const gate = bot.blockAt(plan.gate)
+  if (gate == null || !gateNames.includes(gate.name)) throw new SkillError('VERIFY_FAILED', `no gate at ${plan.gate.toString()}`)
+  if ((gate.getProperties() as any).open === true) await useGate(bot, plan.gate, false, signal)
+  trace('buildPen:', placed, 'fences and a gate at', plan.gate.toString())
+  return { ...plan, placed }
+}
+
+/** the plan's ground made: the plants and blocks in the way cleared, the holes under the ring and the gate's way filled */
+async function prepare (bot: Bot, plan: PenPlan, signal?: AbortSignal): Promise<void> {
   for (const pos of plan.clear) await clearCell(bot, pos, signal)
   for (const pos of plan.fillers) {
     if (isSolid(bot.blockAt(pos))) continue
     const filler = PEN_FILLERS.find(n => countItems(bot, n) > 0)
     if (filler == null) throw new SkillError('MISSING_ITEMS', 'no block to fill the hole under the pen')
-    await placeBlock(bot, { pos, item: filler }, signal)
+    await placeWithRetry(bot, pos, filler, undefined, signal)
   }
-
-  let placed = plan.fences.length - toPlace.length
-  // round the ring from the gate, so the bot isn't walled off from the cells still to do
-  const order = [...toPlace].sort((a, b) => ringAngle(plan, a) - ringAngle(plan, b))
-  for (const pos of order) {
-    throwIfAborted(signal)
-    const item = fenceNames.find(n => countItems(bot, n) > 0)
-    if (item == null) throw new SkillError('MISSING_ITEMS', 'no fence left for the pen')
-    const res = await placeWithRetry(bot, pos, item, signal)
-    if (!isFence(res.block)) throw new SkillError('VERIFY_FAILED', `${res.block} is at ${pos.toString()}, not a fence`)
-    placed++
-  }
-  if (!gateThere) {
-    const item = gateNames.find(n => countItems(bot, n) > 0)
-    if (item == null) throw new SkillError('MISSING_ITEMS', 'no fence gate for the pen')
-    // the gate's bar lies across the way through it: placed facing out (or in) of the pen
-    await placeWithRetry(bot, plan.gate, item, signal, SIDE_DIRS[side])
-    const gate = bot.blockAt(plan.gate)
-    if (gate == null || !gateNames.includes(gate.name)) throw new SkillError('VERIFY_FAILED', `no gate at ${plan.gate.toString()}`)
-    if ((gate.getProperties() as any).open === true) await useGate(bot, plan.gate, false, signal)
-  }
-  protectPen(bot, plan)
-  trace('buildPen:', placed, 'fences and a gate at', plan.gate.toString())
-  return { ...plan, placed }
 }
 
 /** whether a mob (any entity but items, orbs and arrows) has its box in the cell: a block isn't placed there */
-function mobIn (bot: Bot, pos: Vec3): boolean {
+export function mobIn (bot: Bot, pos: Vec3): boolean {
   return Object.values(bot.entities).some((e: any) => {
     if (e === bot.entity || e.position == null || /^(item|experience_orb|arrow|spectral_arrow)$/.test(e.name ?? '')) return false
     const hw = (e.width ?? 0.6) / 2
@@ -236,14 +288,44 @@ function mobIn (bot: Bot, pos: Vec3): boolean {
   })
 }
 
+/** the way out of the ring at one of its cells (a corner's: along x) */
+export function ringOut (pen: Pick<PenPlan, 'center'>, pos: Vec3): Vec3 {
+  const dx = pos.x - pen.center.x
+  const dz = pos.z - pen.center.z
+  return Math.abs(dx) >= Math.abs(dz) ? new Vec3(Math.sign(dx), 0, 0) : new Vec3(0, 0, Math.sign(dz))
+}
+
+/** ticks a mob in a cell of the ring is waited for before the bot pushes it off */
+export const MOB_WAIT_TICKS = 60
+
 /**
- * placeBlock, out of the cell first (outOfCell) and with no mob in it (the server refuses a block whose collision
- * shape an entity is in: BlockItem.canPlace, Level.isUnobstructed; a sheep wandered into the ring), and again from
- * nearer when the server didn't place it (twice more)
+ * No mob in a cell of the ring (the server refuses a block whose collision shape an entity is in: BlockItem.canPlace,
+ * Level.isUnobstructed; a sheep wandered into the ring): waited for (MOB_WAIT_TICKS), then pushed off, three times at
+ * most: the bot walks into the cell from the side of it nearer it (`out`: the way across the ring there) and back (a
+ * mob and a player whose boxes meet are pushed apart, Entity.push from the mob's LivingEntity.pushEntities).
+ * Resolves whether the cell is clear.
  */
-async function placeWithRetry (bot: Bot, pos: Vec3, item: string, signal?: AbortSignal, facing?: Vec3): Promise<{ block: string }> {
+async function clearOfMobs (bot: Bot, pos: Vec3, out: Vec3, signal?: AbortSignal): Promise<boolean> {
+  const stand = (p: Vec3): boolean => isFree(bot.blockAt(p)) && isFree(bot.blockAt(p.offset(0, 1, 0))) && isSolid(bot.blockAt(p.offset(0, -1, 0)))
+  for (let push = 0; push < 3 && mobIn(bot, pos); push++) {
+    if (await waitUntil(bot, () => !mobIn(bot, pos), MOB_WAIT_TICKS, signal)) break
+    const from = [pos.plus(out), pos.minus(out)].filter(stand)
+      .sort((a, b) => a.offset(0.5, 0, 0.5).distanceTo(bot.entity.position) - b.offset(0.5, 0, 0.5).distanceTo(bot.entity.position))[0]
+    if (from == null) break
+    trace('buildPen: pushing a mob off', pos.toString(), 'from', from.toString())
+    await navigate(bot, { goal: new goals.GoalBlock(from.x, from.y, from.z) }, signal).catch(err => trace('buildPen: not by the cell:', (err as Error).message))
+    await walkTo(bot, pos.offset(0.5, 0, 0.5), { within: 0.2, maxTicks: 30, until: () => !mobIn(bot, pos) }, signal)
+    await walkTo(bot, from.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 30 }, signal)
+  }
+  return !mobIn(bot, pos)
+}
+
+/**
+ * placeBlock with no mob in the cell (one there waited for; clearOfMobs pushes one off first), the bot's own box out
+ * of it (placeBlock steps off), and again from nearer when the server didn't place it (twice more)
+ */
+async function placeWithRetry (bot: Bot, pos: Vec3, item: string, facing?: Vec3, signal?: AbortSignal): Promise<{ block: string }> {
   for (let attempt = 0; ; attempt++) {
-    await outOfCell(bot, pos, signal)
     if (mobIn(bot, pos)) await waitUntil(bot, () => !mobIn(bot, pos), 200, signal)
     try {
       return await placeBlock(bot, { pos, item, facing }, signal)
@@ -253,20 +335,6 @@ async function placeWithRetry (bot: Bot, pos: Vec3, item: string, signal?: Abort
       await navigateNear(bot, pos, 2, signal).catch(() => {})
     }
   }
-}
-
-/**
- * The bot's box out of the cell a fence goes in (to the middle of the block it stands in): the server refuses a
- * block whose collision shape the player is in (BlockItem.canPlace: Level.isUnobstructed), and a fence joined to its
- * neighbours reaches the cell's edges
- */
-async function outOfCell (bot: Bot, pos: Vec3, signal?: AbortSignal): Promise<void> {
-  const p = bot.entity.position
-  const overlaps = p.x + 0.3 > pos.x && p.x - 0.3 < pos.x + 1 && p.z + 0.3 > pos.z && p.z - 0.3 < pos.z + 1 && p.y < pos.y + 1 && p.y + 1.8 > pos.y
-  if (!overlaps) return
-  const feet = p.floored()
-  if (feet.x === pos.x && feet.z === pos.z) return // (placeBlock goes off the cell itself)
-  await walkTo(bot, feet.offset(0.5, 0, 0.5), { within: 0.1, maxTicks: 20 }, signal)
 }
 
 /** the angle of a ring cell about the pen's middle, from the gate round */
@@ -402,6 +470,19 @@ export function penFromMemory (memory: WorldMemory, near: Vec3, range = 64): Pen
   return null
 }
 
+/**
+ * Whether a pen (remembered) has a gap in its ring or no gate in its gate's cell, as far as its blocks are loaded (a
+ * block not loaded: not known broken)
+ */
+export function penBroken (lookup: (pos: Vec3) => { name: string } | null, pen: Pick<PenPlan, 'fences' | 'gate'>): boolean {
+  const gate = lookup(pen.gate)
+  if (gate != null && !/_fence_gate$/.test(gate.name)) return true
+  return pen.fences.some(p => {
+    const b = lookup(p)
+    return b != null && !/_fence$/.test(b.name)
+  })
+}
+
 /** remembers the pen (penFromMemory) */
 export function rememberPen (memory: WorldMemory, pen: PenPlan): void {
   const note = JSON.stringify({ size: pen.size, side: pen.side, fences: pen.fences.map(p => p.toArray()), fillers: pen.fillers.map(p => p.toArray()) })
@@ -464,7 +545,13 @@ export interface HerdPenArgs {
 export async function herdPen (bot: Bot, args: HerdPenArgs, signal?: AbortSignal): Promise<{ pen: PenPlan, inside: number, built: boolean }> {
   let pen = penFromMemory(args.memory, args.home)
   let built = false
-  if (pen != null) {
+  if (pen != null && penBroken(p => bot.blockAt(p), pen)) {
+    // a pen remembered with a gap in its ring or no gate (broken since): finished as built, its gate where it can go
+    trace('herdPen: the pen at', pen.center.toString(), 'has a gap or no gate: built again')
+    pen = await buildPen(bot, { center: pen.center, size: pen.size, side: pen.side, obtain: args.obtain }, signal)
+    rememberPen(args.memory, pen)
+    built = true
+  } else if (pen != null) {
     protectPen(bot, pen)
   } else {
     const size = args.size ?? 9

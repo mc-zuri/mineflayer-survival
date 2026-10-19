@@ -2,9 +2,9 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { SkillError, throwIfAborted } from './errors'
-import { navigateToReach } from './navigate'
-import { isFree, isInteractive, isSolid } from './placement'
-import { FACES, blockAtOrThrow, countItems, findInventoryItem, settleInventory, waitTicks, waitUntil, withinReach, type Block } from './util'
+import { navigateToReach, walkTo } from './navigate'
+import { boxInCell, cellToStepOff, isFree, isInteractive, isSolid } from './placement'
+import { FACES, blockAtOrThrow, countItems, findInventoryItem, settleInventory, trace, waitTicks, waitUntil, withinReach, type Block } from './util'
 import { placeAgainst } from '../core/actions'
 
 export interface PlaceBlockArgs {
@@ -57,6 +57,24 @@ function chooseAgainst (bot: Bot, pos: Vec3): Block | null {
   return againstCandidates(bot, pos)[0] ?? null
 }
 
+/**
+ * The bot's box out of `cell` (cellToStepOff: the server refuses a block whose collision shape the player is in,
+ * BlockItem.canPlace): walked to the middle of the nearest cell beside it it can stand in. Resolves whether its box is
+ * out.
+ */
+export async function stepOff (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise<boolean> {
+  const lookup = (p: Vec3): any => bot.blockAt(p)
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const to = cellToStepOff(lookup, bot.entity.position, cell)
+    if (to == null) break
+    trace('placeBlock: out of', cell.toString(), 'to', to.toString(), 'from', bot.entity.position.toString())
+    await walkTo(bot, to.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal)
+    // (stopped: the walk's momentum carried on a tick or two)
+    await waitUntil(bot, () => Math.hypot(bot.entity.velocity.x, bot.entity.velocity.z) < 0.01, 10, signal)
+  }
+  return !boxInCell(bot.entity.position, cell)
+}
+
 export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: AbortSignal): Promise<PlaceBlockResult> {
   throwIfAborted(signal)
   const pos = args.pos.floored()
@@ -75,6 +93,9 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
   if (!withinReach(bot, against.position) || bot.entity.position.floored().equals(pos) || bot.entity.position.floored().offset(0, 1, 0).equals(pos)) {
     await navigateToReach(bot, pos, signal)
   }
+  // (the reach goal takes a bot standing partly in the cell as out of it, by the cell beside it its box is in too)
+  const shape = bot.registry.blocksByName[args.item]?.boundingBox
+  if (shape != null && shape !== 'empty') await stepOff(bot, pos, signal)
 
   await settleInventory(bot, signal)
   const had = countItems(bot, args.item)

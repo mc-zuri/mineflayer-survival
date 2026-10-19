@@ -10,7 +10,8 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { countItems, navigate, waitUntil } from '../../src/skills/gather'
-import { buildPen, herdPen, inPen, leadIntoPen } from '../../src/skills/pen'
+import { buildPen, herdPen, inPen, leadIntoPen, planPen } from '../../src/skills/pen'
+import { placeBlock } from '../../src/skills/placeBlock'
 import { WorldMemory } from '../../src/core/memory'
 import { Executor } from '../../src/executor/executor'
 
@@ -133,6 +134,56 @@ describe(`a pen and a door on a ${DEFAULT_VERSION} server`, { timeout: 15 * 60 *
     assert.strictEqual(again.built, false)
     assert.deepStrictEqual(again.pen.gate.toArray(), first.pen.gate.toArray())
     assert.ok(again.inside >= first.inside)
+  })
+
+  it('puts the gate in with the bot standing half in its cell (26.3: the gate refused 3 times, no pen)', async () => {
+    // the ring up but for the gate, which goes in leaf litter; the bot as it stood on 26.3: its feet's cell the gate's,
+    // its box 0.05 into the cell beside it (the reach goal took it as out of the gate's cell)
+    await give('oak_fence_gate', 1)
+    const center = at(0, 0, 8)
+    const plan = planPen(p => bot.blockAt(p) as any, center, 5, 'east')
+    for (const p of plan.fences) await run(`setblock ${xyz(p)} oak_fence`)
+    await run(`setblock ${xyz(plan.gate)} leaf_litter`)
+    assert.ok(await waitUntil(bot, () => plan.fences.every(p => bot.blockAt(p)?.name === 'oak_fence') && bot.blockAt(plan.gate)?.name === 'leaf_litter', 40))
+    await run(`tp ${USERNAME} ${plan.gate.x + 0.75} ${plan.gate.y} ${plan.gate.z + 0.67}`)
+    assert.ok(await waitUntil(bot, () => Math.abs(bot.entity.position.x - (plan.gate.x + 0.75)) < 0.01, 40))
+    // the gate as buildPen puts it (facing out of the pen), then the pen finished: the ring begun kept, nothing on it
+    await placeBlock(bot, { pos: plan.gate, item: 'oak_fence_gate', facing: new Vec3(1, 0, 0) })
+    const pen = await buildPen(bot, { center, size: 5, side: 'east' })
+    assert.strictEqual(pen.placed, 15)
+    for (const p of pen.fences) assert.ok(bot.blockAt(p.offset(0, 1, 0))?.name === 'air', `a fence on the fence at ${p.toString()}`)
+    assert.ok(pen.gate.equals(plan.gate))
+    assert.ok(fenceGates().includes(bot.blockAt(pen.gate)?.name ?? ''), `no gate at ${pen.gate.toString()}: ${bot.blockAt(pen.gate)?.name}`)
+    assert.strictEqual(open(pen.gate), false, 'the gate is shut')
+  })
+
+  it('puts the gate on another side when a cow stands in its cell and won\'t be pushed off, and the fence there once it can be', async () => {
+    await give('oak_fence', 16)
+    await give('oak_fence_gate', 1)
+    const center = at(0, 0, 8)
+    const north = center.offset(0, 0, -2)
+    // the cow stands in the gate's cell (NoAI: it neither wanders nor is pushed), till the gate is in elsewhere
+    await run(`summon cow ${north.x + 0.5} ${north.y} ${north.z + 0.5} {NoAI:1b}`)
+    assert.ok(await waitUntil(bot, () => Object.values(bot.entities).some(e => e.name === 'cow'), 40))
+    const middles = [center.offset(2, 0, 0), center.offset(-2, 0, 0), center.offset(0, 0, 2)]
+    let freed = false
+    const watch = (): void => {
+      if (freed || !middles.some(p => fenceGates().includes(bot.blockAt(p)?.name ?? ''))) return
+      freed = true
+      void run('data merge entity @e[type=cow,limit=1] {NoAI:0b}')
+    }
+    bot.on('physicsTick', watch)
+    try {
+      const pen = await buildPen(bot, { center, size: 5, side: 'north' })
+      assert.ok(freed, 'the gate went in on another side')
+      assert.notStrictEqual(pen.side, 'north')
+      assert.ok(fenceGates().includes(bot.blockAt(pen.gate)?.name ?? ''), `no gate at ${pen.gate.toString()}`)
+      assert.strictEqual(pen.fences.length, 15)
+      for (const p of pen.fences) assert.ok(bot.blockAt(p)?.name.endsWith('_fence'), `no fence at ${p.toString()}: ${bot.blockAt(p)?.name}`)
+      assert.ok(pen.fences.some(p => p.equals(north)), 'a fence where the gate was to go')
+    } finally {
+      bot.removeListener('physicsTick', watch)
+    }
   })
 
   it('walks into a house by its door and out again; the door is shut behind it by night', async () => {

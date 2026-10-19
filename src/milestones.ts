@@ -58,6 +58,8 @@ export const ENCHANTING_KEEP: Record<string, number> = { wheat: 64, wheat_seeds:
 
 /** the herd pen's sizes tried, biggest first (cells across, the ring included) */
 export const PEN_SIZES = [9, 7, 5]
+/** tries at a pen of a size: the fences got once, a placement failed tried again */
+export const PEN_TRIES = 3
 
 /** ticks the enchanting milestone may spend growing its herd for the books' leather (lockstep: days of game time) */
 export const HERD_BUDGET_TICKS = 150000
@@ -95,7 +97,8 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
   // (the fences and the gate are got here, out of the pen's task: an obtain inside it queued its 'make room' task
   // behind the pen's own and both waited on each other for 300000 ticks, 26.3)
   sizes: for (const size of PEN_SIZES) {
-    for (let round = 0; round < 2; round++) {
+    let obtained = false
+    for (let round = 0; round < PEN_TRIES; round++) {
       let needs: Array<{ item: string, count: number }> | null = null
       try {
         const r = await executor.task('the herd pen', async (s) => await herdPen(bot, {
@@ -111,12 +114,16 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
         break sizes
       } catch (err) {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-        if (needs != null && round === 0) {
+        if (needs != null && !obtained) {
+          obtained = true
           const want: Array<{ item: string, count: number }> = needs
           await executor.obtain(want, signal).catch(e => { if (signal.aborted || TaskError.is(e, 'DIED')) throw e; log(`herd: no fences: ${(e as Error).message}`) })
           continue
         }
         log(`herd: no pen of ${size}: ${(err as Error).message}`)
+        // a block not placed (a cow in the way, the bot's own box in the gate's cell: the gate refused 3 times, 26.3)
+        // or the pen not as planned: tried again, its ring kept as far as it got (planPen takes its fences)
+        if (/CANNOT_PLACE|VERIFY_FAILED/.test((err as Error).message) && round < PEN_TRIES - 1) continue
         if (!/no ground/.test((err as Error).message)) break sizes
         break
       }

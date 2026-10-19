@@ -141,3 +141,25 @@ test('bedRoomToDig: in a 1-wide tunnel, the two cells straight out from the bot 
   const away = bedRoomToDig(solid(), feet, p => p.x > 0)
   assert.ok(away != null && away.facing.x <= 0)
 })
+
+test('cellToStepOff: a bot standing half in the gate\'s cell steps to the middle of the cell beside it (26.3: the gate refused 3 times)', async () => {
+  const { boxInCell, cellToStepOff } = await import('../../src/skills/placement')
+  const ground = flat({ '-48,-60,0': 'leaf_litter' })
+  const lookup = (p: Vec3): BlockView => p.toString() === '(-48, -60, 0)' ? { name: 'leaf_litter', boundingBox: 'empty' } : ground(p)
+  const gate = new Vec3(-48, -60, 0)
+  // the bot as it stood: its feet's cell the gate's (x -47.25 floors to -48), its box 0.05 into the cell east of it
+  const bot = new Vec3(-47.25, -60, 0.67)
+  assert.ok(boxInCell(bot, gate))
+  const to = cellToStepOff(lookup, bot, gate)
+  assert.ok(to != null)
+  assert.notStrictEqual(to.x, gate.x, 'out of the gate\'s column')
+  assert.ok(!boxInCell(to.offset(0.5, 0, 0.5), gate), `the middle of ${to.toString()} is clear of the gate's cell`)
+  assert.deepStrictEqual(to.toArray(), [-47, -60, 0], 'the nearest cell beside it')
+  // a box clear of the cell: no step
+  assert.strictEqual(cellToStepOff(lookup, new Vec3(-46.5, -60, 0.5), gate), null)
+  // in the middle of the cell: beside it, not into a wall
+  const walled = (p: Vec3): BlockView => (p.y === -60 && p.x === -48 && p.z === 1) ? { name: 'stone', boundingBox: 'block' } : lookup(p)
+  const out = cellToStepOff(walled, new Vec3(-47.5, -60, 0.5), gate)
+  assert.ok(out != null && !(out.x === -48 && out.z === 1))
+  assert.strictEqual(Math.abs(out.x - gate.x) + Math.abs(out.z - gate.z), 1, 'a cardinal neighbour first')
+})

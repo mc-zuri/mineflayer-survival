@@ -93,3 +93,36 @@ test('choosePenSite: flat ground near home, not over the pond; a pen remembered 
   assert.deepStrictEqual(back.fences.map(key), plan.fences.map(key))
   assert.strictEqual(penFromMemory(memory, new Vec3(500, 64, 0)), null, 'none near another place')
 })
+
+test('planPen: a ring begun before (a try that failed) keeps its fences, on a step too, and nothing goes on top of them', () => {
+  const fence: Cell = { name: 'oak_fence', boundingBox: 'block' }
+  const gate: Cell = { name: 'oak_fence_gate', boundingBox: 'block' }
+  const first = planPen(ground({ '2,64,1': grass }), new Vec3(0, 64, 0), 5, 'south')
+  // the fences placed as far as it got (the step's on top of it), and the gate
+  const changes: Record<string, Cell> = { '2,64,1': grass, '0,64,2': gate }
+  for (const p of first.fences.slice(0, 9)) changes[key(p)] = fence
+  changes['2,65,1'] = fence
+  const again = planPen(ground(changes), new Vec3(0, 64, 0), 5, 'south')
+  assert.deepStrictEqual(again.fences.map(key).sort(), first.fences.map(key).sort())
+  assert.deepStrictEqual(again.clear, [], 'the gate is not dug out')
+  assert.deepStrictEqual(again.fillers, [])
+})
+
+test('penBroken: a gap in the ring or no gate; blocks not loaded are not known broken', async () => {
+  const { penBroken, ringOut } = await import('../../src/skills/pen')
+  const plan = planPen(ground(), new Vec3(0, 64, 0), 5, 'south')
+  const world: Record<string, string> = { [key(plan.gate)]: 'oak_fence_gate' }
+  for (const p of plan.fences) world[key(p)] = 'oak_fence'
+  const lookup = (p: Vec3): { name: string } | null => world[key(p)] != null ? { name: world[key(p)] } : null
+  assert.strictEqual(penBroken(lookup, plan), false)
+  world[key(plan.gate)] = 'air'
+  assert.strictEqual(penBroken(lookup, plan), true, 'no gate')
+  world[key(plan.gate)] = 'oak_fence_gate'
+  world[key(plan.fences[3])] = 'leaf_litter'
+  assert.strictEqual(penBroken(lookup, plan), true, 'a gap')
+  delete world[key(plan.fences[3])]
+  assert.strictEqual(penBroken(lookup, plan), false, 'not loaded')
+  // the way across the ring at a cell: out of the pen
+  assert.deepStrictEqual(ringOut(plan, plan.gate).toArray(), [0, 0, 1])
+  assert.deepStrictEqual(ringOut(plan, new Vec3(-2, 64, 1)).toArray(), [-1, 0, 0])
+})
