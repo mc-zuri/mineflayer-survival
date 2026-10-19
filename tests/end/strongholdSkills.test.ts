@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, nextAlongRay, awaitEyeDrop, EYE_RAY, EYE_DROP_TICKS } from '../../src/end/strongholdSkills'
+import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, nextAlongRay, awaitEyeDrop, consistentCrossing, EYE_RAY, EYE_DROP_TICKS } from '../../src/end/strongholdSkills'
 import { isSkillError } from '../../src/skills/errors'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
@@ -91,4 +91,20 @@ test('awaitEyeDrop: the eye\'s item that comes ticks after the eye goes is waite
   const none = awaitEyeDrop(bot, at)
   tick(EYE_DROP_TICKS + 1)
   assert.strictEqual(await none, false)
+})
+
+test('consistentCrossing: rays to two strongholds are no estimate; the pair that agrees is (26.3 seed 2: south from the spawn, east 500 blocks off)', () => {
+  const toward = (o: { x: number, z: number }, p: { x: number, z: number }) => ({ origin: o, direction: { x: p.x - o.x, z: p.z - o.z } })
+  const east = { x: 2400, z: 1008 }
+  const south = { x: 300, z: -2200 }
+  const r1 = toward({ x: -27, z: 11 }, south)
+  const r2 = toward({ x: 464, z: -48 }, east)
+  assert.strictEqual(consistentCrossing([r1, r2]), null)
+  // a third throw 300 blocks off the second's line, toward the same stronghold
+  const r3 = toward({ x: 464 - 0.48 * 300, z: -48 + 0.88 * 300 }, east)
+  const est = consistentCrossing([r1, r2, r3]) as any
+  assert.ok(est != null)
+  assert.ok(Math.hypot(est.x - east.x, est.z - east.z) < 5, `${est.x} ${est.z}`)
+  // two rays that cross well inside the rings' inner edge (300 blocks out) aren't a stronghold either
+  assert.strictEqual(consistentCrossing([toward({ x: 0, z: 0 }, { x: 300, z: 0 }), toward({ x: 0, z: 200 }, { x: 300, z: 0 })]), null)
 })

@@ -15,7 +15,7 @@ import { countItems, findInventoryItem, settleInventory, trace, waitTicks, waitU
 import type { Entity } from '../skills/combatUtil'
 import { TOO_FAR_DISTANCE, inferThrowDirection, type ThrowDirection, type Vec } from './eye'
 import { secondThrowPoint, triangulate, type EyeRay, type Triangulation, type XZ } from './triangulate'
-import { guessFromOneThrow } from './stronghold'
+import { guessFromOneThrow, strongholdRings } from './stronghold'
 import { analyzePortalRoom, findPortalFrames, type PortalRoom } from './portalRoom'
 import { ensureSurface, inWater, onTheSurface, toShore } from '../executor/explore'
 
@@ -206,9 +206,32 @@ function rememberEstimate (memory: WorldMemory | undefined, target: XZ, note: st
   memory?.addPoi('stronghold_estimate', { x: Math.round(target.x), y: 0, z: Math.round(target.z) }, 'overworld', note)
 }
 
+/** blocks off the second throw's line the third throw is made from, when the first two disagree */
+export const THIRD_SIDEWAYS = 300
+
+/**
+ * The crossing of two rays that agree, the newest pairs first: ahead of both throws, crossing at 2 degrees or more,
+ * and in a stronghold ring's band of distances from 0, 0 (strongholdRings). Rays to two strongholds cross behind a
+ * throw, or far off the rings, and are no estimate.
+ */
+export function consistentCrossing (rays: readonly EyeRay[]): Triangulation | null {
+  const rings = strongholdRings()
+  for (let j = rays.length - 1; j >= 1; j--) {
+    for (let i = j - 1; i >= 0; i--) {
+      const t = triangulate([rays[i], rays[j]])
+      if (t == null || t.crossingAngle <= 2) continue
+      const r = Math.hypot(t.x, t.z)
+      if (rings.some(ring => r >= ring.minDistance && r <= ring.maxDistance)) return t
+    }
+  }
+  return null
+}
+
 export interface LocateStrongholdArgs {
   /** blocks to walk sideways before the second throw (default 500) */
   sideways?: number
+  /** blocks off the second throw's line for a third when the two disagree (default THIRD_SIDEWAYS) */
+  thirdSideways?: number
   /** blocks per travel hop (default 48) */
   hop?: number
 }
@@ -235,8 +258,8 @@ export async function locateStronghold (bot: Bot, args: LocateStrongholdArgs = {
     const memory = bot.survival?.memory
     // a first throw made before a reflex or a death cut the search off: on from it to the side
     const known = rememberedRays(memory)
-    const crossing = known.length >= 2 ? triangulate(known) : null
-    if (crossing != null && crossing.crossingAngle > 2) return done(bot, crossing, crossing, throws, ticks)
+    const crossing = consistentCrossing(known)
+    if (crossing != null) return done(bot, crossing, crossing, throws, ticks)
     let firstRay: EyeRay | null = known[known.length - 1] ?? null
     if (firstRay == null) {
       const first = await throwReadable(bot, signal)
@@ -255,10 +278,24 @@ export async function locateStronghold (bot: Bot, args: LocateStrongholdArgs = {
     throws.push(second)
     if (second.near != null) return done(bot, null, second.near, throws, ticks)
     if (second.ray != null) rememberRay(memory, second.ray)
-    const rays = [firstRay, ...(second.ray != null ? [second.ray] : [])]
-    const estimate = triangulate(rays)
-    if (estimate != null && estimate.crossingAngle > 2) return done(bot, estimate, estimate, throws, ticks)
-    const guess = guessFromOneThrow(rays[rays.length - 1])
+    let estimate = consistentCrossing(rememberedRays(memory))
+    if (estimate != null) return done(bot, estimate, estimate, throws, ticks)
+    // the rays don't agree (an eye flies to the stronghold nearest the throw, and the step sideways crossed over to
+    // another's side: seed 2's first throw went south, the second east): a third throw off the second's line, and the
+    // pair that agrees
+    let last = second.ray ?? firstRay
+    if (second.ray != null) {
+      const third = secondThrowPoint(second.ray, args.thirdSideways ?? THIRD_SIDEWAYS)
+      trace('locateStronghold: the rays disagree: a third throw from', third)
+      await onTheSurface(bot, async () => await travel(bot, { target: new Vec3(third.x, bot.entity.position.y, third.z), range: 8, hop: args.hop }, signal))
+      const t3 = await throwReadable(bot, signal)
+      throws.push(t3)
+      if (t3.near != null) return done(bot, null, t3.near, throws, ticks)
+      if (t3.ray != null) { rememberRay(memory, t3.ray); last = t3.ray }
+      estimate = consistentCrossing(rememberedRays(memory))
+      if (estimate != null) return done(bot, estimate, estimate, throws, ticks)
+    }
+    const guess = guessFromOneThrow(last)
     if (guess == null) throw new SkillError('VERIFY_FAILED', 'the eyes\' rays neither cross nor meet a stronghold ring')
     return done(bot, estimate, guess, throws, ticks)
   } finally {
@@ -379,7 +416,7 @@ export async function reachStronghold (bot: Bot, args: ReachStrongholdArgs = {},
       if (t.ray == null) continue
       rays.push(t.ray)
       rememberRay(bot.survival?.memory, t.ray)
-      const est = rays.length >= 2 ? triangulate(rays) : null
+      const est = consistentCrossing(rays)
       along = nextAlongRay(along, t.ray, est)
       target = along.target
       rememberEstimate(bot.survival?.memory, target, 'reach')
