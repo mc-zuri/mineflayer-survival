@@ -44,3 +44,23 @@ test('ceilingToDig: under a frozen sea the ice over the head is dug for air; ope
   assert.strictEqual(ceilingToDig(world({ 60: 'water', 61: 'obsidian' }), eyes), null)
   assert.strictEqual(ceilingToDig(world({ 60: 'water', 61: 'water', 62: 'water', 63: 'water', 64: 'stone' }), eyes), null)
 })
+
+test('escapeHazard in a lava sea with no ground within 6 swims for the ground 12 blocks off', async () => {
+  const { escapeHazard } = await import('../../src/skills/escape')
+  // a lava sea at y 31 and under for x < 12, netherrack ground at y 31 from x 12 on
+  const sea = (p: Vec3): string => p.x >= 12 ? (p.y <= 31 ? 'stone' : 'air') : (p.y <= 31 ? (p.y > 20 ? 'lava' : 'stone') : 'air')
+  const bot = fakeBot({ position: new Vec3(0.5, 31, 0.5), world: sea })
+  const looks: number[] = []
+  ;(bot as any).look = async (yaw: number) => { looks.push(yaw) }
+  ;(bot as any).clearControlStates = () => {}
+  if ((bot as any).setControlState == null) (bot as any).setControlState = () => {}
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(escapeHazard(bot, { maxTicks: 3 }), /still in lava/)
+  } finally {
+    clearInterval(ticking)
+  }
+  // toward +x: mineflayer's yaw for +x is -pi/2
+  assert.ok(looks.length > 0)
+  assert.ok(Math.abs(looks[0] + Math.PI / 2) < 0.3, String(looks[0]))
+})

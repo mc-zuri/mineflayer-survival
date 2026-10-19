@@ -72,6 +72,8 @@ export function nearestSpot (bot: Bot, radius: number, test: (pos: Vec3) => bool
 
 export interface EscapeHazardOptions extends SkillOptions {
   searchRadius?: number
+  /** how far ground is looked for when none is within searchRadius (default 16) */
+  farRadius?: number
   /** run to water this close when burning (0 off) */
   waterRadius?: number
   maxTicks?: number
@@ -97,7 +99,12 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
         await waitTicks(bot, 1, opts.signal)
         continue
       }
-      if (target == null || t % 10 === 0 || !isSafeStand(bot, target)) target = nearestSpot(bot, radius, p => isSafeStand(bot, p) && !p.equals(here))
+      if (target == null || t % 10 === 0 || !isSafeStand(bot, target)) {
+        // the near ground first, then any within farRadius: in the nether's lava sea none was within 6 and the bot
+        // swam up in place for 200 ticks till it burned (26.3)
+        target = nearestSpot(bot, radius, p => isSafeStand(bot, p) && !p.equals(here)) ??
+          (t % 40 === 0 ? nearestSpot(bot, opts.farRadius ?? 16, p => isSafeStand(bot, p) && !p.equals(here)) : target)
+      }
       if (target == null) {
         // nowhere known: swim up and hope
         bot.setControlState('jump', true)
