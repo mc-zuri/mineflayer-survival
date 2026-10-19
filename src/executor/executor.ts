@@ -16,6 +16,8 @@ import { toolsAtLeast } from '../planner/progression'
 import { checkPlan, type PlanStep, type Station } from '../planner/steps'
 import { baseRecord, type BaseRecord } from '../base/pois'
 import { storeItems } from '../skills/chest'
+import { placeBlock } from '../skills/placeBlock'
+import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
 import { emptySlots, settleInventory, trace } from '../skills/util'
 import { wornOutTools } from './durability'
@@ -441,7 +443,10 @@ export class Executor {
 
   /**
    * Frees slots: stores what isn't kept in the base's chests when the base is within reach (or `force`), else throws
-   * the junk away (and, when that isn't enough and `force`, the rest of what storing would take).
+   * the junk away, the least worth first (and, when that isn't enough and `force`, the rest of what storing would take,
+   * never a valuable: keep.ts's isValuable). When `force` and there's no room still, what isn't kept goes into a chest
+   * near (stashNearby), else it fails INVENTORY_FULL: a forced room had thrown an enchanting table and a diamond away
+   * (26.3).
    */
   async makeRoom (needed: Record<string, number> = {}, signal?: AbortSignal, force = false): Promise<void> {
     if (this.makingRoom) return
@@ -453,7 +458,8 @@ export class Executor {
         if (emptySlots(this.bot) >= this.options.minFreeSlots) return
       }
       const want = this.options.minFreeSlots + 2 - emptySlots(this.bot)
-      const toss = junkToToss(this.bot.inventory.items(), want, { keep: this.options.keep, registry: this.bot.registry, needed, anything: force, surplus: this.options.surplus })
+      const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
+      const toss = junkToToss(stacks, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything: force, surplus: this.options.surplus })
       if (toss.length > 0) this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
       if (toss.length > 0) {
         await this.task('make room', async (s) => {
@@ -463,9 +469,60 @@ export class Executor {
           }
         }, signal)
       }
+      if (!force || emptySlots(this.bot) >= this.options.minFreeSlots) return
+      await this.stashNearby(needed, signal)
+      if (emptySlots(this.bot) === 0) {
+        throw new TaskError('INVENTORY_FULL', 'no room: nothing to throw away but what is kept or valuable, and no chest near to put it in')
+      }
     } finally {
       this.makingRoom = false
     }
+  }
+
+  /**
+   * Puts what the keep rule doesn't keep (nor the needed) into a chest near the bot: a known one within 32 blocks, else
+   * a carried one put down here (room over it: ChestBlock.isChestBlockedAt); the chest remembered with what went in, for
+   * the planner to fetch it from. What was stored.
+   */
+  async stashNearby (needed: Record<string, number> = {}, signal?: AbortSignal): Promise<Record<string, number>> {
+    const moved: Record<string, number> = {}
+    const { store } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed })
+    if (store.length === 0) return moved
+    const dimension = normalizeDimension(this.bot.game?.dimension)
+    const here = this.bot.entity.position
+    const near = this.memory.knownChests(dimension)
+      .map(c => vec(c))
+      .filter(p => p.distanceTo(here) <= 32 && ['chest', 'trapped_chest', 'barrel'].includes(this.bot.blockAt(p)?.name ?? ''))
+      .sort((a, b) => a.distanceTo(here) - b.distanceTo(here))
+    let chest: Vec3 | null = near[0] ?? null
+    if (chest == null) {
+      if (!this.bot.inventory.items().some(i => i.name === 'chest')) return moved
+      const at = findPlacement(p => this.bot.blockAt(p) as any, here, { radius: 3, freeAbove: true })
+      if (at == null) return moved
+      try {
+        await this.task('put down a chest', async (s) => await placeBlock(this.bot, { pos: at, item: 'chest' }, s), signal)
+      } catch (err) {
+        if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true) throw err
+        return moved
+      }
+      chest = at
+      this.memory.rememberChest(chest, {}, dimension)
+    }
+    for (const it of store) {
+      throwIfOwnerAborted(signal)
+      try {
+        const res = await this.task(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest, filter: [it.name], count: it.count }, s), signal)
+        const n = res.moved[it.name] ?? 0
+        this.rememberStored(chest, it.name, n, dimension)
+        if (n > 0) moved[it.name] = (moved[it.name] ?? 0) + n
+      } catch (err) {
+        if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true) throw err
+        // a full chest, or one that won't open: the rest stays
+        break
+      }
+    }
+    if (Object.keys(moved).length > 0) this.log(`stashed ${Object.entries(moved).map(([n, c]) => `${c} ${n}`).join(', ')} in a chest at ${chest.toString()}`)
+    return moved
   }
 
   /** takes everything the keep rule doesn't keep (nor the needed) to the base's chests, the remembered contents updated */
@@ -558,6 +615,15 @@ export class Executor {
     const items = { ...(known?.items ?? {}) }
     items[name] = (items[name] ?? 0) + n
     this.memory.rememberChest(pos, items, dimension)
+  }
+}
+
+/** a stack with enchantments (prismarine-item's, of its components or its NBT): never thrown away */
+function isEnchanted (item: unknown): boolean {
+  try {
+    return ((item as { enchants?: unknown[] }).enchants?.length ?? 0) > 0
+  } catch {
+    return false
   }
 }
 

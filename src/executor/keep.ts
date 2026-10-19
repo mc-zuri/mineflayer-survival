@@ -66,6 +66,59 @@ export const JUNK = new Set([
   'firefly_bush', 'short_dry_grass', 'tall_dry_grass', 'vine', 'pale_hanging_moss'
 ])
 
+/**
+ * What is never thrown away, whatever room it takes (stored at the base or in a chest put down instead, or the bag left
+ * full): gear, the crafted stations and containers, ores, raw metal, ingots and gems and their blocks, and the rare
+ * drops and makings of the run (a forced room threw an enchanting table and a diamond away, and the gear's enchanting
+ * failed at "can't craft 1 enchanting_table", 26.3). An enchanted stack is never thrown either (junkToToss).
+ */
+const VALUABLE = new Set([
+  'shears', 'elytra', 'shield', 'bow', 'crossbow', 'trident', 'mace', 'fishing_rod', 'flint_and_steel', 'brush',
+  'spyglass', 'compass', 'recovery_compass', 'clock', 'saddle', 'name_tag', 'lead', 'carrot_on_a_stick',
+  'warped_fungus_on_a_stick', 'goat_horn',
+  'crafting_table', 'furnace', 'blast_furnace', 'smoker', 'anvil', 'chipped_anvil', 'damaged_anvil', 'enchanting_table',
+  'chest', 'trapped_chest', 'barrel', 'ender_chest', 'brewing_stand', 'smithing_table', 'grindstone', 'stonecutter',
+  'loom', 'cartography_table', 'fletching_table', 'lectern', 'cauldron', 'bookshelf', 'chiseled_bookshelf', 'beacon',
+  'respawn_anchor', 'lodestone', 'crafter', 'jukebox', 'hopper',
+  'ancient_debris', 'diamond', 'emerald', 'lapis_lazuli', 'redstone', 'quartz', 'amethyst_shard', 'netherite_scrap',
+  'coal', 'charcoal', 'obsidian', 'crying_obsidian',
+  'ender_pearl', 'ender_eye', 'blaze_rod', 'blaze_powder', 'breeze_rod', 'ghast_tear', 'nether_star', 'dragon_egg',
+  'dragon_breath', 'totem_of_undying', 'golden_apple', 'enchanted_golden_apple', 'golden_carrot', 'experience_bottle',
+  'potion', 'splash_potion', 'lingering_potion', 'book', 'enchanted_book', 'writable_book', 'written_book',
+  'heart_of_the_sea', 'nautilus_shell', 'echo_shard', 'shulker_shell', 'trial_key', 'ominous_trial_key', 'heavy_core'
+])
+const VALUABLE_PATTERN = /(_ore|_ingot|_nugget|_shulker_box|_smithing_template|_horse_armor)$|^shulker_box$|^raw_(iron|gold|copper)(_block)?$|^(iron|gold|diamond|emerald|lapis|redstone|netherite|copper|coal|quartz|amethyst)_block$|^music_disc_/
+
+/** never thrown away (VALUABLE): gear, stations, ores, metal and gems, the rare drops */
+export function isValuable (name: string): boolean {
+  return VALUABLE.has(name) || VALUABLE_PATTERN.test(name) || parseTool(name) != null || ARMOR.test(name) || isBed(name)
+}
+
+/** the ground's blocks and the plants a dig picks up, worth nothing: thrown first */
+const TOSS_FIRST = new Set([
+  'dirt', 'coarse_dirt', 'rooted_dirt', 'gravel', 'sand', 'red_sand', 'granite', 'diorite', 'andesite', 'tuff', 'calcite',
+  'netherrack', 'cobbled_deepslate', 'moss_block', 'dripstone_block', 'pointed_dripstone', 'glow_lichen', 'kelp',
+  'seagrass', 'short_grass', 'tall_grass', 'fern', 'dead_bush', 'vine', 'pale_hanging_moss', 'leaf_litter', 'wildflowers',
+  'bush', 'firefly_bush', 'short_dry_grass', 'tall_dry_grass'
+])
+/** the common stone, worth a little: after the junk, beyond the stock */
+const COMMON_STONE = new Set([
+  'cobblestone', 'stone', 'deepslate', 'blackstone', 'basalt', 'smooth_basalt', 'end_stone', 'sandstone', 'red_sandstone',
+  'mud', 'soul_sand', 'soul_soil', 'magma_block', 'terracotta', 'clay', 'snow_block', 'ice'
+])
+
+/**
+ * The order things are thrown away in, the least worth first: the ground's blocks and plants, the common stone, the
+ * junk drops (seeds, rotten flesh, bones), then anything else not valuable; null for what is never thrown (isValuable)
+ */
+export function tossValue (name: string): number | null {
+  if (isValuable(name)) return null
+  if (TOSS_FIRST.has(name) || name.endsWith('_leaves')) return 0
+  if (COMMON_STONE.has(name)) return 1
+  if (JUNK.has(name)) return 2
+  return 3
+}
+
 export interface SplitOptions {
   keep?: KeepRule
   /** the version's registry, for the keep rule */
@@ -91,11 +144,13 @@ export function splitInventory (items: readonly ItemCount[], opts: SplitOptions 
 }
 
 /**
- * What to throw away to free `slots` slots: junk first, whole stacks, the most of an item first; then what `surplus`
- * says may go beyond what's kept (the stock over its working set with no base to store it in); then (only when
- * `anything` is set) what `splitInventory` would store, the cheapest blocks first. Each entry is one stack.
+ * What to throw away to free `slots` slots, whole stacks, the least worth first (tossValue: the ground's blocks, the
+ * common stone, the junk drops, the rest), the most of an item first: the junk; what `surplus` says may go beyond
+ * what's kept (the stock over its working set with no base to store it in); and only when `anything` is set, what
+ * `splitInventory` would store. Never what's kept or needed, nor a valuable (isValuable) or an enchanted stack, whatever
+ * the room it takes: fewer stacks than asked for then. Each entry is one stack.
  */
-export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean } = {}): Array<{ name: string, count: number }> {
+export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number, enchanted?: boolean }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean } = {}): Array<{ name: string, count: number }> {
   const needed = opts.needed ?? {}
   const keepRule = opts.keep ?? defaultKeep
   const out: Array<{ name: string, count: number }> = []
@@ -103,7 +158,14 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number 
   const left = new Map<string, number>()
   for (const s of stacks) left.set(s.name, (left.get(s.name) ?? 0) + s.count)
   const pick = (filter: (name: string) => boolean): void => {
-    const candidates = [...stacks].filter(s => filter(s.name)).sort((a, b) => ((left.get(b.name) ?? 0) - (left.get(a.name) ?? 0)) !== 0 ? (left.get(b.name) ?? 0) - (left.get(a.name) ?? 0) : b.count - a.count)
+    const candidates = [...stacks]
+      .filter(s => s.enchanted !== true && tossValue(s.name) != null && filter(s.name))
+      .sort((a, b) => {
+        const value = (tossValue(a.name) ?? 0) - (tossValue(b.name) ?? 0)
+        if (value !== 0) return value
+        const most = (left.get(b.name) ?? 0) - (left.get(a.name) ?? 0)
+        return most !== 0 ? most : b.count - a.count
+      })
     for (const s of candidates) {
       if (out.length >= slots) return
       const total = left.get(s.name) ?? 0
@@ -114,9 +176,8 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number 
       left.set(s.name, total - s.count)
     }
   }
-  pick(name => JUNK.has(name))
-  if (opts.surplus != null) pick(name => !JUNK.has(name) && opts.surplus?.(name) === true)
-  if (opts.anything === true) pick(name => !JUNK.has(name) && (keepRule(name, opts.registry) ?? 0) !== Infinity)
+  pick(name => JUNK.has(name) || TOSS_FIRST.has(name) || opts.surplus?.(name) === true ||
+    (opts.anything === true && (keepRule(name, opts.registry) ?? 0) !== Infinity))
   return out
 }
 

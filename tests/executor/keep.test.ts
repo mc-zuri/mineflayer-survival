@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import minecraftData from 'minecraft-data'
-import { defaultKeep, junkToToss, splitInventory } from '../../src/executor/keep'
+import { defaultKeep, isValuable, junkToToss, splitInventory, tossValue } from '../../src/executor/keep'
 import { VERSIONS } from '../versions'
 
 for (const version of VERSIONS) {
@@ -40,9 +40,34 @@ test('junkToToss frees whole slots of junk, never what is kept or needed', () =>
   assert.deepEqual(junkToToss(stacks, 2), [{ name: 'dirt', count: 64 }, { name: 'dirt', count: 12 }])
   // gravel the plan needs (flint) stays
   assert.deepEqual(junkToToss(stacks, 4, { needed: { gravel: 10 } }), [{ name: 'dirt', count: 64 }, { name: 'dirt', count: 12 }, { name: 'wheat_seeds', count: 3 }])
-  // with `anything`, what storing would take goes too: the cobblestone over a stack, the raw iron
+  // with `anything`, what storing would take goes too, the least worth first: the cobblestone over a stack before the
+  // seeds; never the raw iron (an ore's)
   const all = junkToToss(stacks, 6, { anything: true })
-  assert.deepEqual(all.slice(4), [{ name: 'cobblestone', count: 64 }, { name: 'raw_iron', count: 9 }])
+  assert.deepEqual(all, [{ name: 'dirt', count: 64 }, { name: 'dirt', count: 12 }, { name: 'gravel', count: 30 }, { name: 'cobblestone', count: 64 }, { name: 'wheat_seeds', count: 3 }])
+})
+
+test('junkToToss never throws a valuable, a station, gear or an enchanted stack, even with `anything` and no room', () => {
+  // (26.3 enchant run u: a forced room threw an enchanting table and a diamond away, and the gear's enchanting failed
+  // at "can't craft 1 enchanting_table")
+  const registry = minecraftData('1.21.11')
+  const stacks = [
+    { name: 'enchanting_table', count: 1 }, { name: 'anvil', count: 1 }, { name: 'diamond', count: 1 }, { name: 'crafting_table', count: 1 },
+    { name: 'furnace', count: 1 }, { name: 'chest', count: 1 }, { name: 'white_bed', count: 1 }, { name: 'iron_ingot', count: 40 },
+    { name: 'raw_gold', count: 5 }, { name: 'deepslate_diamond_ore', count: 1 }, { name: 'lapis_lazuli', count: 32 }, { name: 'obsidian', count: 4 },
+    { name: 'ender_eye', count: 16 }, { name: 'book', count: 3 }, { name: 'iron_block', count: 2 }, { name: 'bookshelf', count: 12 },
+    { name: 'leather', count: 39, enchanted: false }, { name: 'fishing_rod', count: 1, enchanted: true }, { name: 'rotten_flesh', count: 7 },
+    { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 61 }, { name: 'wheat_seeds', count: 32 }, { name: 'dirt', count: 20 },
+    { name: 'sugar_cane', count: 64 }
+  ]
+  const toss = junkToToss(stacks, 30, { registry, anything: true, needed: { sugar_cane: 64 } })
+  // the least worth first: the dirt, the cobblestone over its stack, the seeds and the rotten flesh, then the leather
+  // the plan doesn't need; nothing else, whatever the room asked for
+  assert.deepEqual(toss.map(t => t.name), ['dirt', 'cobblestone', 'wheat_seeds', 'rotten_flesh', 'leather'])
+  for (const name of ['enchanting_table', 'anvil', 'diamond', 'iron_ingot', 'raw_gold', 'white_bed', 'obsidian', 'bookshelf', 'iron_block']) {
+    assert.equal(isValuable(name), true, name)
+    assert.equal(tossValue(name), null, name)
+  }
+  assert.deepEqual(['dirt', 'cobblestone', 'rotten_flesh', 'leather'].map(tossValue), [0, 1, 2, 3])
 })
 
 test('spare kit: a second pickaxe, sword and axe at the carried tier, and 20 food points, less what the chests hold', async () => {

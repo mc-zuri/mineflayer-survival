@@ -241,3 +241,43 @@ test('a plan that fails its check the same way twice is made again counting on n
   await assert.rejects(stuck.ex.obtain(requests), /the plans fail their check the same way: smelt 4 cooked_beef needs 4 beef, has 0/)
   assert.deepEqual(stuck.planned, [false, false, true])
 })
+
+test('a forced room throws the junk away, the least worth first, never a valuable: with nothing else to throw and no chest near, INVENTORY_FULL', async () => {
+  // (26.3 enchant run u: a forced room threw an enchanting table and a diamond away)
+  const valuables = [
+    'enchanting_table', 'anvil', 'diamond', 'crafting_table', 'furnace', 'white_bed', 'iron_ingot', 'gold_ingot', 'raw_iron',
+    'raw_gold', 'lapis_lazuli', 'redstone', 'emerald', 'obsidian', 'ender_eye', 'ender_pearl', 'blaze_rod', 'book', 'bookshelf',
+    'iron_block', 'diamond_pickaxe', 'diamond_sword', 'diamond_axe', 'iron_shovel', 'diamond_helmet', 'iron_boots', 'bow',
+    'crossbow', 'shield', 'flint_and_steel', 'shears', 'coal', 'golden_apple', 'totem_of_undying', 'iron_ore'
+  ]
+  const fill = (extra: Record<string, number>): any => {
+    const bot = fakeBot({ ...Object.fromEntries(valuables.map(n => [n, 1])), ...extra })
+    bot.tossed = []
+    bot.toss = async (type: number, _meta: unknown, n: number) => {
+      const name = registry.items[type].name
+      bot.tossed.push(name)
+      bot.take(name, n)
+    }
+    bot.blockAt = () => null
+    bot._client = new EventEmitter()
+    return bot
+  }
+  // the bag full of what's never thrown: nothing goes, and the room fails
+  const full = fill({ cobblestone: 64 })
+  const ex = new Executor(full, { runners: {} })
+  await assert.rejects(ex.makeRoom({}, undefined, true), (err: any) => TaskError.is(err, 'INVENTORY_FULL'))
+  assert.deepEqual(full.tossed, [])
+  // with junk in it: the junk goes, the dirt first, then the rotten flesh; the valuables stay
+  const junk = fill({ rotten_flesh: 5 })
+  junk.take('iron_ore', 1)
+  junk.give('dirt', 30)
+  const ex2 = new Executor(junk, { runners: {} })
+  const ticking = setInterval(() => junk.emit('physicsTick'), 2)
+  try {
+    await ex2.makeRoom({}, undefined, true)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.deepEqual(junk.tossed, ['dirt', 'rotten_flesh'])
+  for (const name of valuables.filter(n => n !== 'iron_ore')) assert.equal(count(junk, name), 1, name)
+})

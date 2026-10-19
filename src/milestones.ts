@@ -1112,7 +1112,13 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
     log(`End: ${blocks} blocks to pillar with: digging end stone`)
     // room for it (a full bag dug none, 'NO_SPACE', and the fights failed five times at once, 'short of blocks to
     // pillar up', 26.3)
-    if ((bot.inventory.emptySlotCount?.() ?? 9) < 2) await executor.makeRoom?.({ end_stone: 64, arrow: 64, ender_pearl: 16 }, signal, true)
+    // (a bag of what's never thrown away stays full: the fight goes on with the blocks there are)
+    if ((bot.inventory.emptySlotCount?.() ?? 9) < 2) {
+      await executor.makeRoom?.({ end_stone: 64, arrow: 64, ender_pearl: 16 }, signal, true)?.catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`End: no room for end stone: ${(err as Error).message}`)
+      })
+    }
     // the island's top layer only, round the bot and not under it: the nearest end stone dug a pit the bot stood in
     // at y 49, every crystal's pillar spot out of the pathfinder's reach (26.3)
     const top = endStoneTopLayer(bot, END_BLOCKS - blocks)
