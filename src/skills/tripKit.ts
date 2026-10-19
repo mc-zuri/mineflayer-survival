@@ -66,13 +66,17 @@ export function tripKitItems (items: readonly ItemCount[]): ItemCount[] {
 
 /** the iron a spare chestplate and leggings take (8 and 7) */
 export const SPARE_ARMOR_IRON = 15
+/** the gold spare golden boots take */
+export const SPARE_BOOTS_GOLD = 4
+const GOLDEN_ARMOR = /^golden_(helmet|chestplate|leggings|boots)$/
 
 /**
  * The spare gear to make for a trip kit from what the bot holds, as obtain requests in groups (`owned`: every item the
  * bot has, worn and held too; `carried`: the bag's): an iron chestplate and leggings, when no armor piece is carried
  * spare and the iron for both is (a respawn by the kit had none to put on, and a 26.3 bot went back into the nether
  * bare and died there three more times); then a shield, when none is carried spare and an ingot is left (the
- * blazes' fireballs, the creepers' blasts and the skeletons' arrows on the way back)
+ * blazes' fireballs, the creepers' blasts and the skeletons' arrows on the way back); and golden boots for the
+ * piglins, from 4 of the gold held
  */
 export function kitSpares (owned: readonly ItemCount[], carried: readonly ItemCount[]): Array<Array<{ item: string, count: number }>> {
   const has = (list: readonly ItemCount[], name: string): number => list.filter(i => i.name === name).reduce((n, i) => n + i.count, 0)
@@ -83,6 +87,9 @@ export function kitSpares (owned: readonly ItemCount[], carried: readonly ItemCo
     iron -= SPARE_ARMOR_IRON
   }
   if (has(carried, 'shield') === 0 && iron >= 1) out.push([{ item: 'shield', count: has(owned, 'shield') + 1 }])
+  // golden boots when no golden piece is carried spare and the gold is held: a respawn back into the nether bare had the
+  // piglins at it by the portal (PiglinAi.isWearingGold; a 26.3 bot was slain so by the arrival portal)
+  if (!carried.some(i => GOLDEN_ARMOR.test(i.name)) && has(owned, 'gold_ingot') >= SPARE_BOOTS_GOLD) out.push([{ item: 'golden_boots', count: has(owned, 'golden_boots') + 1 }])
   return out
 }
 

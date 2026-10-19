@@ -4,7 +4,8 @@
 // without going into the lava; a magma cube fought across a lava pocket without the bot walking into it. 26.3 nether
 // runs died in the lava: a Diagonal across two shafts' corners, a fight chasing a magma cube into a pocket, a step back
 // off a ledge over the lava sea. And a room walked across round the spot where the bot died, there and back; the trip
-// kit left by the portal given a spare iron chestplate, leggings and shield made from the iron held.
+// kit left by the portal given a spare iron chestplate, leggings and shield made from the iron held, golden boots from
+// the gold.
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import { appendFileSync } from 'node:fs'
@@ -169,7 +170,7 @@ describe(`nether travel on a ${DEFAULT_VERSION} server (seed 4)`, { timeout: 20 
     }
   })
 
-  it('makes the trip kit a spare iron chestplate, leggings and shield from the iron it holds, and leaves them in it', async () => {
+  it('makes the trip kit a spare iron chestplate, leggings and shield from the iron it holds, golden boots from its gold, and leaves them in it', async () => {
     // on a stone floor in the overworld, the nether stage's kit: diamond armor and a shield worn, 16 iron
     await run(`effect give ${USERNAME} minecraft:slow_falling 60 0 true`)
     await run(`execute in minecraft:overworld run tp ${USERNAME} 300.5 123 300.5`)
@@ -183,7 +184,7 @@ describe(`nether travel on a ${DEFAULT_VERSION} server (seed 4)`, { timeout: 20 
     await run(`execute in minecraft:overworld run tp ${USERNAME} 300.5 120 300.5`)
     await run(`effect clear ${USERNAME} minecraft:slow_falling`)
     assert.ok(await waitUntil(bot, () => bot.entity.onGround && bot.entity.position.y === 120, 200), `at ${bot.entity.position.toString()}`)
-    await kit([['chest', 1], ['white_bed', 1], ['crafting_table', 1], ['oak_planks', 16], ['iron_ingot', 16], ['cooked_beef', 16], ['cobblestone', 64], ['diamond_sword', 1]])
+    await kit([['chest', 1], ['white_bed', 1], ['crafting_table', 1], ['oak_planks', 16], ['iron_ingot', 16], ['gold_ingot', 32], ['cooked_beef', 16], ['cobblestone', 64], ['diamond_sword', 1]])
     await run(`item replace entity ${USERNAME} armor.chest with diamond_chestplate`)
     await run(`item replace entity ${USERNAME} armor.legs with diamond_leggings`)
     await run(`item replace entity ${USERNAME} weapon.offhand with shield`)
@@ -196,7 +197,7 @@ describe(`nether travel on a ${DEFAULT_VERSION} server (seed 4)`, { timeout: 20 
     console.log(`the trip kit: ${lines.filter(l => /trip kit/.test(l)).join('; ')}`)
     assert.ok(poi != null, lines.join('\n'))
     const items = bot.survival.memory.chestAt(poi, 'overworld')?.items ?? {}
-    for (const name of ['iron_chestplate', 'iron_leggings', 'shield']) assert.strictEqual(items[name], 1, `${name} in the kit: ${JSON.stringify(items)}`)
+    for (const name of ['iron_chestplate', 'iron_leggings', 'shield', 'golden_boots']) assert.strictEqual(items[name], 1, `${name} in the kit: ${JSON.stringify(items)}`)
     // what's worn stays on
     assert.strictEqual(bot.inventory.slots[6]?.name, 'diamond_chestplate')
     assert.strictEqual(bot.inventory.slots[45]?.name, 'shield')

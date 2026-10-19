@@ -32,6 +32,10 @@ test('kitSpares: an iron chestplate and leggings from 15 iron when no armor is c
   const carried = [{ name: 'iron_helmet', count: 1 }, { name: 'shield', count: 1 }, { name: 'iron_ingot', count: 30 }]
   assert.deepStrictEqual(kitSpares([...worn, ...carried], carried), [])
   assert.deepStrictEqual(kitSpares(worn, []), [])
+  // gold for the piglins: golden boots from 4 ingots, none with a golden piece carried spare or fewer ingots
+  assert.deepStrictEqual(kitSpares([{ name: 'golden_boots', count: 1 }, { name: 'gold_ingot', count: 32 }], [{ name: 'gold_ingot', count: 32 }]), [[{ item: 'golden_boots', count: 2 }]])
+  assert.deepStrictEqual(kitSpares([{ name: 'gold_ingot', count: 3 }], [{ name: 'gold_ingot', count: 3 }]), [])
+  assert.deepStrictEqual(kitSpares([{ name: 'golden_helmet', count: 1 }, { name: 'gold_ingot', count: 9 }], [{ name: 'golden_helmet', count: 1 }, { name: 'gold_ingot', count: 9 }]), [])
   // an iron chestplate worn: the spare is one more than owned
   assert.deepStrictEqual(kitSpares([{ name: 'iron_chestplate', count: 1 }, { name: 'iron_ingot', count: 15 }], [{ name: 'iron_ingot', count: 15 }])[0], [{ item: 'iron_chestplate', count: 2 }, { item: 'iron_leggings', count: 1 }])
 })
