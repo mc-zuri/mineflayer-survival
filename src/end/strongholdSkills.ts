@@ -534,14 +534,27 @@ async function toward (bot: Bot, p: Vec3, range: number, signal?: AbortSignal): 
   }
 }
 
+/** how far from the stronghold a resumed search travels back to it before looking for the room */
+export const ROOM_TRAVEL_RANGE = 64
+
 /** the whole milestone after the eyes are made: locate, reach, and find the portal room */
 export async function strongholdToPortalRoom (bot: Bot, args: LocateStrongholdArgs = {}, signal?: AbortSignal): Promise<{ located: LocateStrongholdResult | null, reached: ReachStrongholdResult | null, room: FindPortalRoomResult }> {
   // on from where the search got to, as the memory has it: the task runs again from the start after a reflex
   // preempts it (a zombie on the way), and each start threw a new first eye and set off sideways again (all 14 eyes
   // gone on 26.3 seed 2, the stronghold never reached)
   const memory = bot.survival?.memory
-  const spot = memory?.getPois(STRONGHOLD_SPOT, { dimension: 'overworld', near: bot.entity.position })[0]
-  if (spot != null) return { located: null, reached: null, room: await findPortalRoom(bot, { near: { x: spot.x, z: spot.z } }, signal) }
+  // the room or the spot over it known (a trip back for more eyes since): there on the surface first, a walk of
+  // thousands of blocks being travel's, not the room search's
+  const knownRoom = memory?.getPois('end_portal', { dimension: 'overworld', near: bot.entity.position })[0]
+  const spot = knownRoom ?? memory?.getPois(STRONGHOLD_SPOT, { dimension: 'overworld', near: bot.entity.position })[0]
+  if (spot != null) {
+    if (Math.hypot(spot.x - bot.entity.position.x, spot.z - bot.entity.position.z) > ROOM_TRAVEL_RANGE) {
+      trace('strongholdToPortalRoom: back to the stronghold at', spot.x, spot.z)
+      const to = new Vec3(spot.x, bot.entity.position.y, spot.z)
+      await onTheSurface(bot, async () => await travel(bot, { target: to, range: 8, hop: args.hop }, signal))
+    }
+    return { located: null, reached: null, room: await findPortalRoom(bot, { near: { x: spot.x, z: spot.z } }, signal) }
+  }
   const estimate = memory?.getPois('stronghold_estimate', { dimension: 'overworld', near: bot.entity.position })[0]
   const located = estimate == null ? await locateStronghold(bot, args, signal) : null
   const target = located?.target ?? { x: (estimate as Poi).x, z: (estimate as Poi).z }

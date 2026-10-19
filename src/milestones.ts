@@ -4,7 +4,7 @@
 // through, the dragon fought, out by the exit portal). Each skill runs as one foreground task, so the reflexes still
 // preempt it (it starts over after).
 import type { Bot } from 'mineflayer'
-import { BOOKSHELVES, EYES_TARGET } from './planner/progression'
+import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
 import { buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls, returnOverworld } from './nether/skills'
 import type { ExploreOptions } from './nether/fortress'
@@ -127,9 +127,35 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
   await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
 }
 
-export const eyesHandler: MilestoneHandler = async ({ bot, executor, signal, log }) => {
+/** eyes kept for the throws still to come while the portal room isn't found */
+export const EYE_SEARCH_RESERVE = 2
+
+/**
+ * The eyes short of what the rest of the search and the portal take, counting the ones the pearls and powder held
+ * make: the room's empty frames once it is found (eyesForPortal), else a frame's 12 and EYE_SEARCH_RESERVE for the
+ * throws. More than none sends the run back to the nether for pearls and rods (the eyes run out on a long search).
+ */
+export function eyesShort (inv: { count: (name: string) => number }, memory: WorldMemory): number {
+  const craftable = Math.min(inv.count('ender_pearl'), inv.count('blaze_powder') + 2 * inv.count('blaze_rod'))
+  const roomKnown = memory.getPois('end_portal', { dimension: 'overworld' }).length > 0
+  const want = roomKnown ? eyesForPortal(memory) : EYES_FOR_FRAME + EYE_SEARCH_RESERVE
+  return Math.max(0, want - inv.count('ender_eye') - craftable)
+}
+
+export const eyesHandler: MilestoneHandler = async (ctx) => {
+  const { bot, executor, signal, log } = ctx
   if (inNether(bot)) await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
-  await executor.task('craft the eyes', async (s) => await craftEyes(bot, { count: EYES_TARGET }, s), signal)
+  // out of eyes (thrown, broken, a long search): back for more pearls and rods first, not five failures and the end
+  // of the game (26.3 seed 2); the search then goes on from the memory's rays and estimate
+  const short = eyesShort({ count: (n: string) => countItems(bot, n) }, executor.memory)
+  if (short > 0) {
+    log(`eyes: ${short} short of the portal and the search: to the nether for pearls and rods`)
+    await netherHandler(ctx)
+  }
+  const makeable = Math.min(countItems(bot, 'ender_pearl'), countItems(bot, 'blaze_powder') + 2 * countItems(bot, 'blaze_rod'))
+  if (countItems(bot, 'ender_eye') < EYES_TARGET && makeable > 0) {
+    await executor.task('craft the eyes', async (s) => await craftEyes(bot, { count: EYES_TARGET }, s), signal)
+  }
   log(`${countItems(bot, 'ender_eye')} eyes: off to the stronghold`)
   const { room } = await executor.task('to the stronghold', async (s) => await strongholdToPortalRoom(bot, {}, s), signal)
   // the milestone's check: the stronghold remembered, enough eyes left for the frame

@@ -19,3 +19,18 @@ test('each search takes the next walk and notes it, so a search that found none 
   assert.deepEqual(walks.map(w => `${w.direction as number > 0 ? '+' : '-'}${String(w.axis)}`), ['-x', '+z', '-z', '+x', '-x'])
   assert.match(memory.getPois('fortress_search', { dimension: 'the_nether' })[0].note ?? '', /^searches=5;last=-x/)
 })
+
+test('eyesShort: out of eyes on the search or in the portal room is a trip back to the nether for more, not the end of the game', async () => {
+  const { eyesShort } = await import('../../src/milestones')
+  const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
+  const memory = new WorldMemory()
+  // the search still on: a frame's 12 and 2 for the throws
+  assert.equal(eyesShort(inv({ ender_eye: 16 }), memory), 0)
+  assert.equal(eyesShort(inv({ ender_eye: 9 }), memory), 5)
+  assert.equal(eyesShort(inv({ ender_eye: 9, ender_pearl: 6, blaze_rod: 2 }), memory), 1)
+  assert.equal(eyesShort(inv({}), memory), 14)
+  // in the portal room: its empty frames
+  memory.addPoi('end_portal', { x: 2351, y: -22, z: 1013 }, 'overworld', 'eyes=11')
+  assert.equal(eyesShort(inv({ ender_eye: 9 }), memory), 2)
+  assert.equal(eyesShort(inv({ ender_eye: 11 }), memory), 0)
+})
