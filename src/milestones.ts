@@ -503,6 +503,9 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   await placeFromObsidian()
 }
 
+/** blocks carried for the nether's bridges and pillars (netherrack mined when fewer than half are held) */
+export const NETHER_BLOCKS = 64
+
 /** a lava pool is tried this many times at most (a death or a lost bucket the first time) */
 export const POOL_TRIES = 2
 /** legs walked for lava when every pool near is tried */
@@ -534,6 +537,14 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     await executor.task('into the nether', async (s) => await enterNether(bot, { build: true }, s), signal)
   }
   const needs = netherNeeds({ count })
+  // blocks for the nether's bridges before its long walks (the netherrack about: a path bridged over the lava sea
+  // at y 81 ran out of blocks half way, 'no item to place', and the bot fell into the lava, three times on 26.3)
+  if (inNether(bot) && countItems(bot, SCAFFOLD_ITEMS) < NETHER_BLOCKS / 2) {
+    await executor.obtain([{ item: 'netherrack', count: countItems(bot, 'netherrack') + NETHER_BLOCKS - countItems(bot, SCAFFOLD_ITEMS) }], signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`nether: no netherrack: ${(err as Error).message}`)
+    })
+  }
   if (needs.rods > 0) {
     log(`blaze rods: ${needs.rods} to get`)
     // a fortress first: the spawner is looked for in the one in view (the arrival is seldom by one)

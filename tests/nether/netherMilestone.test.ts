@@ -127,3 +127,20 @@ test('the blaze rods wanted are fixed before the task: a restart with rods got m
   await assert.rejects(netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }), /stop here/)
   assert.deepEqual(rods, { rods: 8, kills: 0, ticks: 0 })
 })
+
+test('in the nether with few blocks the milestone mines netherrack for its bridges before the fortress', async () => {
+  const { netherHandler, NETHER_BLOCKS } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('cobblestone', 8)] })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs[0].count} ${reqs[0].item}`) },
+    task: async (name: string) => { calls.push(name); throw new Error('stop here') }
+  }
+  await assert.rejects(netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }), /stop here/)
+  assert.equal(calls[0], `obtain ${NETHER_BLOCKS - 8} netherrack`)
+})
