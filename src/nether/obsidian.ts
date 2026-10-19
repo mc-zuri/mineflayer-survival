@@ -75,7 +75,12 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
   for (let round = 0; countItems(bot, 'obsidian') < count && round < count * 3; round++) {
     throwIfAborted(signal)
     // obsidian made already about: mined first
-    const made = bot.findBlocks({ matching: obsidianId, maxDistance: 8, count: count - countItems(bot, 'obsidian') })
+    // (not one with lava against it, a deep lake's lid, nor the one under the bot: mined, the lava takes the bot)
+    const feet = bot.entity.position.floored().offset(0, -1, 0)
+    const lavaNext = (p: Vec3): boolean => [...SIDES, new Vec3(0, -1, 0), new Vec3(0, 1, 0)].some(d => get(p.plus(d))?.name === 'lava')
+    const made = bot.findBlocks({ matching: obsidianId, maxDistance: 8, count: 64 })
+      .filter(p => !p.equals(feet) && !lavaNext(p))
+      .slice(0, count - countItems(bot, 'obsidian'))
     if (made.length > 0) {
       try {
         await collectBlock(bot, { positions: made, pickup: true }, signal)
