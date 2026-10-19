@@ -61,6 +61,9 @@ export const UNWIRED: readonly MilestoneId[] = []
 export const OPTIONAL_MILESTONES: readonly MilestoneId[] = ['enchanting']
 
 /** milestones that are a trip across the world, not worked from home: the night's mining waits till they're done */
+/** deaths in a row while recovering from one before play just goes on */
+export const RECOVERY_DEATHS = 5
+
 export const TRIP_MILESTONES: readonly MilestoneId[] = ['eyes', 'end']
 /** the stock's marks topped up on a trip: what it spends on the way (food, arrows, blocks to bridge and pillar with) */
 export const TRIP_STOCK_MARKS: readonly string[] = ['food', 'arrow', 'stone']
@@ -443,7 +446,7 @@ export class Runner {
     this.load()
     for (;;) {
       if (stopped()) return this.stop(null, 'aborted')
-      if (this.bot.health <= 0 || (this.bot as any).isAlive === false) await this.recoverFromDeath(signal)
+      if (this.bot.health <= 0 || (this.bot as any).isAlive === false) await this.recover(signal)
       const state = progressState(this.bot, this.memory)
       this.noteReached(state)
       if (this.options.until != null && this.reached.some(r => r.id === this.options.until)) return this.stop(null, 'until')
@@ -454,7 +457,7 @@ export class Runner {
         if (stopped()) return this.stop(null, 'aborted', err)
         if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
           this.log(`died in the night's mine: ${(err as Error).message}`)
-          await this.recoverFromDeath(signal)
+          await this.recover(signal)
           continue
         }
         throw err
@@ -472,7 +475,7 @@ export class Runner {
           if (stopped()) return this.stop('food', 'aborted', err)
           if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
             this.log(`died getting food: ${(err as Error).message}`)
-            await this.recoverFromDeath(signal)
+            await this.recover(signal)
             continue
           }
           this.restockRetryAt = this.bot.survival.tasks.tick + RESTOCK_RETRY_TICKS
@@ -508,7 +511,7 @@ export class Runner {
         if (stopped()) return this.stop(m.id, 'aborted', err)
         if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
           this.log(`died working on ${m.id}: ${(err as Error).message}`)
-          await this.recoverFromDeath(signal)
+          await this.recover(signal)
           continue
         }
         const n = (failures.get(m.id) ?? 0) + 1
@@ -897,6 +900,25 @@ export class Runner {
   readonly deadlySpots: Vec3[] = []
 
   /** after a death: respawned, then back for the items, or to the base for a kit (the death report told how it went) */
+  /**
+   * recoverFromDeath for play's loop: a death on the way back (to the kit, the items) is recovered from in turn, up to
+   * RECOVERY_DEATHS times, and a recovery that fails otherwise is logged, play going on (a creeper's death on the
+   * walk back to the trip kit was an unhandled rejection that ended the 26.3 run)
+   */
+  async recover (signal?: AbortSignal): Promise<void> {
+    for (let i = 0; i < RECOVERY_DEATHS; i++) {
+      try {
+        await this.recoverFromDeath(signal)
+        return
+      } catch (err) {
+        if (signal?.aborted === true) throw err
+        if (TaskError.is(err, 'DIED') || this.bot.health <= 0) { this.log(`died again recovering: ${(err as Error).message}`); continue }
+        this.log(`recovery: ${(err as Error).message}`)
+        return
+      }
+    }
+  }
+
   async recoverFromDeath (signal?: AbortSignal): Promise<void> {
     try {
       await this.recoverOnce(signal)

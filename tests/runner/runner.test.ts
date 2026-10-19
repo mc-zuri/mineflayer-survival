@@ -428,3 +428,18 @@ test('a trip across the world (the eyes\' stronghold search, the End) isn\'t sto
   bot2.give('blaze_rod', 8)
   assert.equal(home.nightDue(), null)
 })
+
+test('a death while recovering from one is recovered from in turn, not thrown out of play', async () => {
+  const bot = fakeBot({ cooked_beef: 8 })
+  const lines: string[] = []
+  const runner = new Runner(bot, { log: line => lines.push(line) })
+  let calls = 0
+  runner.recoverFromDeath = async () => { calls++; if (calls < 3) throw new TaskError('DIED', 'the bot died') }
+  await runner.recover()
+  assert.equal(calls, 3)
+  calls = 0
+  runner.recoverFromDeath = async () => { calls++; throw new TaskError('NO_PATH', 'no way to the kit') }
+  await runner.recover()
+  assert.equal(calls, 1)
+  assert.ok(lines.some(l => /recovery: no way to the kit/.test(l)), lines.join(' | '))
+})
