@@ -41,11 +41,16 @@ export interface EnterEndResult {
  * Where to step into the portal from: the cell outside each side's middle frame, at the frames' own level (on the
  * platform), nearest first
  */
-export function portalApproach (room: PortalRoom, from: Vec3): Vec3[] {
-  return room.expected
+export function portalApproach (room: PortalRoom, from: Vec3, get?: BlockGetter): Vec3[] {
+  const spots = room.expected
     .filter(f => f.pos.x === room.center.x || f.pos.z === room.center.z)
-    .map(f => new Vec3(f.pos.x - FACING_STEP[f.facing].x, f.pos.y, f.pos.z - FACING_STEP[f.facing].z))
-    .sort((a, b) => a.distanceTo(from) - b.distanceTo(from))
+    .map(f => ({ spot: new Vec3(f.pos.x - FACING_STEP[f.facing].x, f.pos.y, f.pos.z - FACING_STEP[f.facing].z), frame: new Vec3(f.pos.x, f.pos.y, f.pos.z) }))
+  // the ones with room over them for the jump onto the frame first (the spot's and the frame's two cells over the
+  // head: under the stairs' low roof a 26.3 bot jumped 0.2 against the frame for 200 ticks, and the milestone failed)
+  const headroom = (a: { spot: Vec3, frame: Vec3 }): number => get == null ? 0 : [a.spot.offset(0, 2, 0), a.frame.offset(0, 1, 0), a.frame.offset(0, 2, 0)].filter(c => get(c)?.boundingBox !== 'empty').length
+  return spots
+    .sort((a, b) => headroom(a) - headroom(b) || a.spot.distanceTo(from) - b.spot.distanceTo(from))
+    .map(a => a.spot)
 }
 
 function framePos (p: { x: number, y: number, z: number }): Vec3 {
@@ -170,7 +175,7 @@ export async function enterEnd (bot: Bot, opts: EnterEndOptions = {}): Promise<E
   // from the floor at a corner the bot jumped against the frames for 200 ticks (26.3 seed 2)
   try {
     let at = false
-    for (const spot of portalApproach(room, bot.entity.position)) {
+    for (const spot of portalApproach(room, bot.entity.position, blockGetter(bot))) {
       try {
         await gotoBlock(bot, spot, { signal })
         at = true

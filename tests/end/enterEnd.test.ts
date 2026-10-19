@@ -69,6 +69,19 @@ test('portalApproach: into the portal from outside a side\'s middle frame, on th
   assert.ok(['2348,1013', '2351,1016'].includes(keys[0]), keys[0])
 })
 
+test('portalApproach: a spot with a low roof over it (by the stairs) comes after the ones with room for the jump onto the frame', () => {
+  const { expectedFrames } = require('../../src/end/portalRoom')
+  const center = { x: 2351, y: -22, z: 1013 }
+  const room: any = { center, expected: expectedFrames(center) }
+  // a roof 2 over the spot at 2351, 1010, the nearest to the bot
+  const get = (p: Vec3): any => ({ name: p.x === 2351 && p.z === 1010 && p.y === -20 ? 'stone_bricks' : 'air', boundingBox: p.x === 2351 && p.z === 1010 && p.y === -20 ? 'block' : 'empty' })
+  const from = new Vec3(2351.5, -22, 1010.5)
+  assert.deepStrictEqual(portalApproach(room, from)[0], new Vec3(2351, -22, 1010))
+  const spots = portalApproach(room, from, get)
+  assert.notDeepStrictEqual(spots[0], new Vec3(2351, -22, 1010))
+  assert.deepStrictEqual(spots[3], new Vec3(2351, -22, 1010))
+})
+
 test('portalRoomNear: the room\'s 12 frames in reach; 26 blocks off (mining gold for the stock) it isn\'t, and the End handler goes back first', async () => {
   const { portalRoomNear } = await import('../../src/milestones')
   const { expectedFrames } = require('../../src/end/portalRoom')
