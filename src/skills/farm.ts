@@ -125,19 +125,6 @@ async function tillHeld (bot: Bot, cell: Vec3, hoe: Item, signal?: AbortSignal):
     await waitUntil(bot, () => false, 2, signal)
     const again = bot.inventory.items().filter(i => i.name === hoe.name)[0] ?? hoe
     await bot.equip(again, 'hand')
-    // the off hand emptied for the retry: with a shield there a 26.3 server tills nothing (1.21.11 does), and it is
-    // worn again after
-    const off = bot.inventory.slots[45]
-    if (off != null && bot.inventory.emptySlotCount() > 0) {
-      await bot.unequip('off-hand').catch(() => {})
-      try {
-        await bot.activateBlock(bot.blockAt(cell) as Block, new Vec3(0, 1, 0))
-        if (await waitUntil(bot, () => bot.blockAt(cell)?.name === 'farmland', 10, signal)) return
-      } finally {
-        const back = bot.inventory.items().find(i => i.name === off.name)
-        if (back != null && bot.inventory.slots[45] == null) await bot.equip(back, 'off-hand').catch(() => {})
-      }
-    }
   }
   throw new SkillError('VERIFY_FAILED', `${bot.blockAt(cell)?.name ?? 'nothing'} at ${cell.toString()} after the hoe (holding ${bot.heldItem?.name ?? 'nothing'})`)
 }
