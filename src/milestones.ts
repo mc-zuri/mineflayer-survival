@@ -304,8 +304,11 @@ export async function levelsToward (bot: Bot, executor: Executor, level: number,
   let leg = 0
   while (experience(bot).level < level && executor.tasks.tick - start < LEVELS_BUDGET_TICKS) {
     if (signal.aborted) throw signal.reason
+    const before = experience(bot).level
     try {
       await executor.task('levels', async (s) => await gainLevels(bot, { level, range: 48, maxTicks: 12000 }, s), signal)
+      // (done with no level gained: nothing more to have from it)
+      if (experience(bot).level <= before) break
     } catch (err) {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       if (!/NOT_FOUND/.test((err as Error).message)) continue
@@ -344,6 +347,9 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   // (and the paper: the leather of 41 books with the canes of 21 had the shelves' plan fail whole, 'short of 84
   // sugar_cane', and none made, 26.3)
   const cap = Math.min(shelvesForLeather({ count: (n: string) => countItems(bot, n) }, cows, around), shelvesForPaper({ count: (n: string) => countItems(bot, n) }, around))
+  // room for the shelves' crafts, what they take kept (the stage's bag full of cobblestone, coal and raw meat failed
+  // the paper's craft five times, 'the inventory is full', and the milestone was left out, 26.3)
+  await executor.makeRoom?.({ sugar_cane: 256, paper: 256, leather: 64, book: 64, bookshelf: 64, oak_log: 64, oak_planks: 64, lapis_lazuli: 64 }, signal, true)
   for (let attempt = 0; attempt < 2; attempt++) {
     const held = countItems(bot, 'bookshelf')
     const want = shelvesWithin(n => {

@@ -255,3 +255,26 @@ test('levelsToward: the near ores, then down for the deep ones, then tunnel legs
   assert.deepEqual(tasks.slice(0, 5), ['levels', 'down for the ores', 'levels', 'a tunnel for ores', 'levels'])
   assert.ok(tick <= 72000 + 20000)
 })
+
+test('the enchanting milestone makes room in the bag, what the shelves take kept, before it crafts them', async () => {
+  const { enchantingHandler } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('leather', 40), item('sugar_cane', 120), item('enchanting_table', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.findBlock = () => null
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    plan: () => ({ ok: true, cost: 0 }),
+    makeRoom: async (needed: Record<string, number>, _s: unknown, force: boolean) => { calls.push(`room ${force ? 'force' : ''} ${needed.sugar_cane ?? 0}`) },
+    obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs[0]?.item}`) },
+    task: async (name: string) => { calls.push(name); if (name === 'enchant the gear') throw new Error('stop here') }
+  }
+  await assert.rejects(enchantingHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: { goals: () => [] } as any, state: null as any }), /stop here/)
+  const room = calls.findIndex(c => /^room force/.test(c))
+  assert.ok(room >= 0, calls.join(', '))
+  assert.ok(room < calls.indexOf('obtain bookshelf'), calls.join(', '))
+})
