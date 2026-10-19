@@ -1,6 +1,6 @@
-// Nether safety: pathfinder rules that keep the bot off lava edges and out of lava flows, never bridge over lava (a
-// guarded bridge does that), and leave piglins' gold alone; one gold armor piece worn for the piglins; ghast fireballs
-// punched back.
+// Nether safety: pathfinder rules that keep the bot off lava edges, magma and ledges over deadly falls and out of lava
+// flows, never bridge over lava (a guarded bridge does that), and leave piglins' gold alone; one gold armor piece worn
+// for the piglins; ghast fireballs punched back.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import type { MovementOptions } from '@nxg-org/mineflayer-pathfinder'
@@ -37,6 +37,12 @@ export interface NetherSafetyOptions {
   nearLavaCost?: number
   /** forbid breaking piglin-guarded blocks when a piglin is near (default true) */
   piglins?: boolean
+  /**
+   * the pathfinder's edgeHazardCost: ticks on top for each side of a cell the path ends a move in with a deadly fall
+   * beside it (default 16, four times the pathfinder's: the nether's falls end in the lava sea or a delta's lava pockets,
+   * and blazes' and ghasts' fireballs knock the bot about; more widens the search a lot)
+   */
+  edgeCost?: number
 }
 
 interface BlockInfoLike { position: Vec3, type: number }
@@ -78,8 +84,9 @@ export function overLava (isLava: (pos: Vec3) => boolean, isAir: (pos: Vec3) => 
 
 /**
  * The pathfinder's movement settings for the nether: exclusion areas (the pathfinder's own hook) that forbid
- * standing next to lava, breaking a block lava rests against, placing a block over lava (the pathfinder's bridges
- * have no rails: bridgeOverLava does), and breaking what piglins guard while one is near.
+ * standing next to lava or on magma, breaking a block lava rests against, placing a block over lava (the
+ * pathfinder's bridges have no rails: bridgeOverLava does), and breaking what piglins guard while one is near; and a
+ * high cost on a ledge's edge (edgeHazardCost), so that the path keeps to the inner side or tunnels.
  */
 export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): Partial<MovementOptions> {
   const gap = opts.lavaGap ?? 1
@@ -106,6 +113,8 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
     }
     return v
   }
+  const magmaStates = stateRange(bot, 'magma_block')
+  const isMagma = (p: Vec3): boolean => { const s = stateAt(p); return s != null && s >= magmaStates[0] && s <= magmaStates[1] }
   const isAir = (p: Vec3): boolean => { const s = stateAt(p); return s != null && airStates.some(([a, b]) => s >= a && s <= b) }
   const guarded = new Set([...PIGLIN_GUARDED].map(n => bot.registry.blocksByName[n]?.id).filter((n): n is number => n != null))
   let piglinCheckTick = -1
@@ -125,7 +134,9 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
     const known = stepCache.get(key)
     if (known != null) return known
     let cost = 0
-    if (isLava(p) || isLava(p.offset(0, 1, 0)) || isLava(p.offset(0, -1, 0)) || lavaBeside(isLava, p, gap)) cost = FORBID
+    // (a magma block hurts a player standing on it who isn't sneaking, MagmaBlock.stepOn, and lies round the basalt
+    // deltas' lava pockets)
+    if (isLava(p) || isLava(p.offset(0, 1, 0)) || isLava(p.offset(0, -1, 0)) || lavaBeside(isLava, p, gap) || isMagma(p.offset(0, -1, 0))) cost = FORBID
     else if (nearCost > 0 && lavaBeside(isLava, p, gap + 1)) cost = nearCost
     stepCache.set(key, cost)
     return cost
@@ -138,7 +149,13 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
   }
   const place = (block: BlockInfoLike): number => overLava(isLava, isAir, block.position) ? FORBID : 0
   // a drop ends on the ground: the nether's liquid is lava, no landing (MovementOptions.infiniteLiquidDropdownDistance)
-  return { infiniteLiquidDropdownDistance: false, exclusionAreasStep: [step as any], exclusionAreasBreak: [breakArea as any], exclusionAreasPlace: [place as any] }
+  return {
+    infiniteLiquidDropdownDistance: false,
+    edgeHazardCost: opts.edgeCost ?? 16,
+    exclusionAreasStep: [step as any],
+    exclusionAreasBreak: [breakArea as any],
+    exclusionAreasPlace: [place as any]
+  }
 }
 
 /** the pathfinder's settings now (a copy), to put back after */

@@ -73,3 +73,17 @@ test('bridgeOverLava: a bridge with its rails takes 3 blocks a step, one without
   // without rails the 2 blocks do for the floor: it gets as far as placing it (the fake places nothing)
   await assert.rejects(bridgeOverLava(mk(), { direction: new Vec3(-1, 0, 0), length: 1, rails: false }), (err: any) => !/out of cobblestone/.test(err.message))
 })
+
+test('netherMoveSettings: magma underfoot is no place to stand, and a ledge over a deadly fall costs 16 a side (edgeHazardCost)', () => {
+  const bot = fakeBot()
+  const reg = bot.registry
+  bot.world = {
+    getBlockStateId: (p: Vec3) => (p.x === 3 && p.y === 63 ? reg.blocksByName.magma_block.defaultState : (p.y < 64 ? reg.blocksByName.netherrack.defaultState : reg.blocksByName.air.defaultState))
+  }
+  const s = netherMoveSettings(bot)
+  const step = s.exclusionAreasStep?.[0] as any
+  assert.equal(step({ position: new Vec3(3, 64, 0), type: 0 }), FORBID)
+  assert.equal(step({ position: new Vec3(0, 64, 0), type: 0 }), 0)
+  assert.equal(s.edgeHazardCost, 16)
+  assert.equal(netherMoveSettings(bot, { edgeCost: 10 }).edgeHazardCost, 10)
+})

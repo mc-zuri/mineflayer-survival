@@ -1,13 +1,19 @@
 // Nether travel against a real server (SURVIVAL_VERSION, default 1.21.11), the tests/harness lockstep server and bot on
-// seed 4: a magma cube fought across a lava pocket without the bot walking into it. 26.3 nether runs died in the lava:
-// a fight chasing a magma cube into a pocket, a step back off a ledge over the lava sea.
+// seed 4: a room built high in the nether like a basalt delta (a basalt floor over the lava sea, one-block shafts down
+// to it in pairs that touch at a corner, lava pockets in the floor) crossed with the nether's settings, there and back,
+// without going into the lava; a magma cube fought across a lava pocket without the bot walking into it. 26.3 nether
+// runs died in the lava: a Diagonal across two shafts' corners, a fight chasing a magma cube into a pocket, a step back
+// off a ledge over the lava sea.
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import { appendFileSync } from 'node:fs'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
+import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { withNetherSafety } from '../../src/nether/safety'
+import { travel } from '../../src/skills/travel'
 import { fight } from '../../src/skills/fight'
 import { countItems, waitUntil } from '../../src/skills/gather'
 
@@ -82,6 +88,50 @@ describe(`nether travel on a ${DEFAULT_VERSION} server (seed 4)`, { timeout: 20 
     assert.ok(await waitUntil(bot, () => bot.game.dimension === 'the_nether' || bot.game.dimension === 'minecraft:the_nether', 1200))
     await bot.waitForChunksToLoad()
   }
+
+  it('crosses a basalt-delta room of lava shafts and pockets there and back with the nether settings, never in the lava', async () => {
+    // the room: x0 to x0 + 30 along x, z -7 to 7 round z0, the floor of basalt at y - 1 over air down to the lava sea
+    // at y - 8
+    const [x0, y, z0] = [200, 100, 200]
+    const start = new Vec3(x0 + 1.5, y, z0 + 0.5)
+    const far = new Vec3(x0 + 29, y, z0)
+    await arrive(start)
+    await fill(`${x0 - 2} ${y - 9} ${z0 - 9} ${x0 + 32} ${y + 6} ${z0 + 9} netherrack`)
+    await fill(`${x0 - 1} ${y - 7} ${z0 - 8} ${x0 + 31} ${y + 5} ${z0 + 8} air`)
+    await fill(`${x0 - 1} ${y - 8} ${z0 - 8} ${x0 + 31} ${y - 8} ${z0 + 8} lava`)
+    await fill(`${x0 - 1} ${y - 1} ${z0 - 8} ${x0 + 31} ${y - 1} ${z0 + 8} basalt`)
+    // the shafts, in pairs touching at a corner (a Diagonal between the two cells beside them cuts across both), and
+    // a lava pocket in the floor now and then
+    let shafts = 0
+    for (let x = x0 + 4; x <= x0 + 25; x += 3) {
+      for (let z = z0 - 6; z <= z0 + 6; z += 3) {
+        await setblock(x, y - 1, z, 'air')
+        await setblock(x + 1, y - 1, z + 1, 'air')
+        shafts += 2
+        if ((x + z) % 2 === 0) await setblock(x + 1, y - 1, z, 'lava')
+      }
+    }
+    await nether(`tp ${USERNAME} ${start.x} ${y} ${start.z}`)
+    await run(`effect clear ${USERNAME} minecraft:slow_falling`)
+    await kit([['netherrack', 64], ['diamond_pickaxe', 1], ['cooked_beef', 8]])
+    assert.ok(await waitUntil(bot, () => bot.entity.onGround && bot.entity.position.distanceTo(start) < 1.5, 200), `at ${bot.entity.position.toString()}`)
+    console.log(`the delta room: ${shafts} shafts`)
+
+    // there: the nether's long walk (travel: the grid walk first, then the pathfinder)
+    const watch = watchLava()
+    const t0 = bot.lockstep.ticks
+    await withNetherSafety(bot, async () => await travel(bot, { target: far, range: 2 }))
+    const there = bot.entity.position.clone()
+    // and back with the pathfinder alone
+    await withNetherSafety(bot, async () => await bot.pathfinder.goto(new goals.GoalNear(Math.floor(start.x), y, Math.floor(start.z), 1)))
+    const { lava, lowest } = watch.stop()
+    console.log(`across and back: ${bot.lockstep.ticks - t0} ticks, there at ${there.toString()}, back at ${bot.entity.position.toString()}, lowest ${lowest.toFixed(2)}, ${lava} ticks in lava`)
+    assert.ok(Math.hypot(there.x - far.x, there.z - far.z) <= 3, `the walk there ended at ${there.toString()}`)
+    assert.ok(bot.entity.position.distanceTo(start) <= 2.5, `the walk back ended at ${bot.entity.position.toString()}`)
+    assert.strictEqual(lava, 0, 'the bot was in the lava')
+    assert.ok(lowest >= y - 1, `the bot fell to ${lowest}`)
+    assert.ok(bot.health > 0)
+  })
 
   it('fights a magma cube across a lava pocket from its edge, never stepping into the lava', async () => {
     // a basalt floor at y - 1 with a lava pocket 3 wide across it between the bot and the cube (which doesn't move)
