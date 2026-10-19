@@ -449,3 +449,27 @@ test('pearls in the nether with the seed: legs to its nearest warped forest, wai
   assert.equal(new Set(points.map(p => `${p.x},${p.z}`)).size, points.length, 'no spot twice')
   for (const p of points) assert.equal(biomes.biomeAt(p.x, p.z), 'warped_forest')
 })
+
+test('pearls by night: an enderman there\'s no way to is passed over for the night\'s legs, not hunted round after round', async () => {
+  const { pearlsByNight } = await import('../../src/milestones')
+  const { fakeBot, entity } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  bot.game.dimension = 'overworld'
+  ;(bot as any).time = { timeOfDay: 18000 }
+  const far = entity({ name: 'enderman', position: new Vec3(30.5, 90, 0.5) })
+  bot.entities[far.id] = far
+  // (behind the cliff: no stare)
+  ;(bot as any).world = { raycast: () => ({ position: new Vec3(10, 70, 0) }) }
+  const tasks: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    // the hunt itself runs (the fake bot has no pathfinder: no way to the enderman); the rest is noted
+    task: async (name: string, fn: (s: AbortSignal) => Promise<unknown>) => { tasks.push(name); executor.tasks.tick += 500; if (name === 'endermen for pearls') return await fn(new AbortController().signal) }
+  }
+  await pearlsByNight(bot, executor, 2, new AbortController().signal, () => {})
+  assert.equal(tasks[0], 'endermen for pearls')
+  assert.equal(tasks.filter(t => t === 'endermen for pearls').length, 1)
+  assert.equal(tasks[1], 'a night leg for endermen')
+})

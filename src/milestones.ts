@@ -1031,6 +1031,8 @@ export async function pearlsByNight (bot: Bot, executor: Executor, want: number,
   const count = (name: string): number => countItems(bot, name)
   const start = executor.tasks.tick
   let leg = 0
+  // the endermen there was no way to (across a river, up a cliff), left alone unless they come
+  const passOver = new Set<number>()
   // the night's out on the surface is the work: the night reflex's shelter (or bed) held off meanwhile (it took the
   // bot in each night, and three nights found no enderman, 26.3)
   const survival = (bot as any).survival ?? {}
@@ -1046,9 +1048,9 @@ export async function pearlsByNight (bot: Bot, executor: Executor, want: number,
             .catch(async () => { await executor.task('wait for the night', async (s) => { await waitTicks(bot, 1000, s) }, signal) })
           continue
         }
-        const enderman = Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 64)
+        const enderman = Object.values(bot.entities).some(e => huntable(bot, e, passOver) && e.position.distanceTo(bot.entity.position) <= 64)
         if (enderman) {
-          await executor.task('endermen for pearls', async (s) => await huntEndermen(bot, { pearls: want - count('ender_pearl'), range: 64, maxTicks: 3000 }, s), signal)
+          await executor.task('endermen for pearls', async (s) => await huntEndermen(bot, { pearls: want - count('ender_pearl'), range: 64, maxTicks: 3000, passOver }, s), signal)
           continue
         }
         const center = executor.memory.base != null ? new Vec3(executor.memory.base.x, executor.memory.base.y, executor.memory.base.z) : bot.entity.position
@@ -1056,7 +1058,7 @@ export async function pearlsByNight (bot: Bot, executor: Executor, want: number,
         await executor.task('a night leg for endermen', async (s) => await overland(bot, {
           target: new Vec3(point.x, bot.entity.position.y, point.z),
           range: 8,
-          onHop: () => Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 64)
+          onHop: () => Object.values(bot.entities).some(e => huntable(bot, e, passOver) && e.position.distanceTo(bot.entity.position) <= 64)
         }, s), signal)
       } catch (err) {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
