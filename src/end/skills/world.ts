@@ -294,6 +294,9 @@ export async function holdOneOf (bot: Bot, names: string[]): Promise<boolean> {
 
 export const PICKAXES = ['netherite_pickaxe', 'diamond_pickaxe', 'iron_pickaxe', 'stone_pickaxe', 'golden_pickaxe', 'wooden_pickaxe']
 
+/** placements in a row a tower may miss before it gives up (one missed jump failed the End milestone on 1.21.11) */
+export const TOWER_MISSES = 3
+
 /**
  * Towers straight up where the bot stands to feet height `topY`: a jump, and at the top of it a block put under the
  * feet on the block below (the player pillar-jump; the server lets it in once the body has cleared the cell,
@@ -305,6 +308,7 @@ export async function towerUp (bot: Bot, topY: number, opts: SkillOptions = {}):
   const have = countItems(bot, SCAFFOLD_ITEMS)
   if (have < needed) throw new TaskError('MISSING_ITEMS', `${needed} blocks to pillar up, ${have} in the inventory`)
   const get = blockGetter(bot)
+  let misses = 0
   try {
     while (Math.floor(bot.entity.position.y + 1e-6) < topY) {
       throwIfAborted(signal)
@@ -327,7 +331,15 @@ export async function towerUp (bot: Bot, topY: number, opts: SkillOptions = {}):
       if (!cleared) throw new TaskError('NO_PATH', `couldn't jump clear of ${feet.toString()}`)
       const below = bot.blockAt(feet.offset(0, -1, 0))
       if (below == null || below.boundingBox !== 'block') throw new TaskError('NO_PATH', `nothing to build on under ${feet.toString()}`)
-      if (isOpenAt(get, feet)) await bot.placeBlock(below, new Vec3(0, 1, 0))
+      if (isOpenAt(get, feet)) {
+        try {
+          await bot.placeBlock(below, new Vec3(0, 1, 0))
+          misses = 0
+        } catch (err) {
+          // the jump's top missed (the server's 'No block has been placed' as the bot came down): down, and jump again
+          if (++misses >= TOWER_MISSES) throw err
+        }
+      }
       for (let t = 0; t < 20 && !bot.entity.onGround; t++) await bot.waitForTicks(1)
     }
   } finally {

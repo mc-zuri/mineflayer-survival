@@ -54,3 +54,29 @@ test('the pillars are built of any full block in the bag: deepslate, andesite, d
   const poor = fakeBot({ position: new (require('vec3').Vec3)(0.5, 64, 0.5), items: [item('cobblestone', 12)] })
   await assert.rejects(towerUp(poor, 82), /18 blocks to pillar up, 12 in the inventory/)
 })
+
+test('towerUp: a placement the jump missed is jumped for again, up to TOWER_MISSES in a row', async () => {
+  const { towerUp, TOWER_MISSES } = await import('../../src/end/skills/world')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const placed = new Set<string>()
+  const mk = (failures: number): any => {
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('cobblestone', 10)], world: (p: Vec3) => p.y < 64 || placed.has(`${p.x},${p.y},${p.z}`) ? 'stone' : 'air' })
+    let base = 64
+    let left = failures
+    bot.equip = async () => {}
+    bot.setControlState = (k: string, v: boolean) => { if (k === 'jump' && v) bot.entity.position = new Vec3(0.5, base + 1.1, 0.5) }
+    bot.placeBlock = async () => {
+      if (left-- > 0) { bot.entity.position = new Vec3(0.5, base, 0.5); throw new Error('No block has been placed : the block is still air') }
+      placed.add(`0,${base},0`)
+      base++
+      bot.entity.position = new Vec3(0.5, base, 0.5)
+    }
+    return bot
+  }
+  placed.clear()
+  const bot = mk(2)
+  await towerUp(bot, 66)
+  assert.strictEqual(Math.floor(bot.entity.position.y), 66)
+  placed.clear()
+  await assert.rejects(towerUp(mk(TOWER_MISSES), 66), /No block has been placed/)
+})
