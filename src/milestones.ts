@@ -339,6 +339,18 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
         log(`down: ${(err as Error).message}`)
       })
     }
+  // obsidian there already in the loaded chunks (where the caves' lava met their water, a ruined portal): mined
+  const natural = bot.findBlocks?.({ matching: bot.registry.blocksByName.obsidian.id, maxDistance: 64, count: PORTAL_OBSIDIAN * 2 }) ?? []
+  if (natural.length >= PORTAL_OBSIDIAN - count('obsidian')) {
+    log(`a portal frame: ${natural.length} obsidian in sight: mining it`)
+    try {
+      await executor.task('mine the obsidian', async (s) => await collectBlock(bot, { positions: natural.slice(0, PORTAL_OBSIDIAN - count('obsidian')), pickup: true }, s), signal)
+      if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`a portal frame: the obsidian: ${(err as Error).message}`)
+    }
+  }
   for (const pool of nearestLavaPools(bot).filter(p => !tried(p)).slice(0, 4)) {
     const at = new Vec3(pool.x, pool.y, pool.z)
     log(`a portal frame: the lava pool at ${pool.x.toFixed(0)} ${pool.y.toFixed(0)} ${pool.z.toFixed(0)}`)

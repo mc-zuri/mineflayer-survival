@@ -68,3 +68,17 @@ test('pearls in the nether: the endermen in sight hunted, else a leg on to find 
   await pearlsInTheNether(alone, executor, 4, new AbortController().signal, () => {})
   assert.deepEqual(tasks, ['a leg for pearls', 'a leg for pearls', 'a leg for pearls', 'a leg for pearls'])
 })
+
+test('a portal\'s frame from the obsidian in sight first (the caves\' lava met by water): mined, then placed', async () => {
+  const { buildAPortal } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const calls: string[] = []
+  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5) })
+  bot.game.dimension = 'overworld'
+  const obsidian = bot.registry.blocksByName.obsidian.id
+  bot.findBlocks = (opts: any) => opts.matching === obsidian ? Array.from({ length: 12 }, (_, i) => new Vec3(i, -52, 3)) : []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async () => { calls.push('obtain') }, task: async (name: string) => { calls.push(name) } }
+  await buildAPortal(bot, executor, new AbortController().signal, () => {})
+  assert.equal(calls[0], 'mine the obsidian')
+})
