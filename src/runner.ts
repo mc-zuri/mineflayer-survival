@@ -65,6 +65,8 @@ export const UNWIRED: readonly MilestoneId[] = []
  * fails maxFailures times in a row is left out and play goes on, where any other stops it
  */
 export const OPTIONAL_MILESTONES: readonly MilestoneId[] = ['enchanting']
+/** the ticks an optional milestone may have in all before it's left out (the enchant epoch's herd, shelves and levels fit in 300000) */
+export const OPTIONAL_MILESTONE_TICKS = 400000
 
 /** milestones that are a trip across the world, not worked from home: the night's mining waits till they're done */
 /** deaths in a row while recovering from one before play just goes on */
@@ -485,6 +487,7 @@ export class Runner {
     this.playSignal = signal
     const skip = new Set(this.options.skip ?? [])
     const failures = new Map<MilestoneId, number>()
+    const spent = new Map<MilestoneId, number>()
     const maxFailures = this.options.maxFailures ?? 5
     const stopped = (): boolean => signal.aborted
     this.load()
@@ -536,8 +539,17 @@ export class Runner {
         this.log(`milestone ${m.id} needs skills that aren't wired yet: stopping (register bot.survival.handlers.${m.id})`)
         return this.stop(m.id, 'unwired')
       }
+      // an optional milestone that has had its time is left out (the enchanting's 5 failures took 300000 ticks of a
+      // 26.3 whole game, the dragon not needing it)
+      if (OPTIONAL_MILESTONES.includes(m.id) && (spent.get(m.id) ?? 0) >= OPTIONAL_MILESTONE_TICKS) {
+        this.log(`milestone ${m.id} left out after ${spent.get(m.id) ?? 0} ticks: on to the next`)
+        skip.add(m.id)
+        continue
+      }
       this.log(`working on ${m.id}: ${m.title}`)
       this.diagnostics?.milestoneStarted(m.id, m.title, describeGoals(m, state))
+      const begun = this.bot.survival.tasks.tick
+      const account = (): void => { spent.set(m.id, (spent.get(m.id) ?? 0) + this.bot.survival.tasks.tick - begun) }
       try {
         const how = await this.untilDusk(signal, async (s) => {
           await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log, seed: this.options.seed })
@@ -546,6 +558,7 @@ export class Runner {
           const done = m.done(progressState(this.bot, this.memory))
           await this.topUp(this.topUpPlacesNow(), s, done ? [...reachedIds, m.id] : reachedIds)
         })
+        account()
         if (stopped()) return this.stop(m.id, 'aborted')
         if (how === 'dusk') {
           this.log(`dusk: ${m.id} left for the night's mine`)
@@ -553,6 +566,7 @@ export class Runner {
         }
         failures.delete(m.id)
       } catch (err) {
+        account()
         if (stopped()) return this.stop(m.id, 'aborted', err)
         if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
           this.log(`died working on ${m.id}: ${(err as Error).message}`)

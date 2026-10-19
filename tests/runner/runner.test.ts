@@ -457,3 +457,22 @@ test('a resumed run keeps the trip kit\'s chest and the spawn bed (its foot and 
   for (const p of [[2358, -24, 1015], [2359, -24, 1014], [2359, -24, 1013]]) assert.ok(cost(p[0], p[1], p[2]) >= 1e9, p.join(','))
   assert.strictEqual(cost(2365, -24, 1014), 0)
 })
+
+test('an optional milestone that has had its ticks is left out before it fails five times', async () => {
+  const { OPTIONAL_MILESTONE_TICKS } = await import('../../src/runner')
+  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, cooked_beef: 8 })
+  bot.give('iron_pickaxe', 1)
+  for (const n of ['iron_sword', 'iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots', 'shield', 'bucket', 'diamond_pickaxe', 'diamond_sword']) bot.give(n, 1)
+  bot.survival.memory.setBase({ x: 0, y: 40, z: 0 })
+  let tries = 0
+  const lines: string[] = []
+  const runner = new Runner(bot, {
+    stopAt: 'nether',
+    log: line => lines.push(line),
+    handlers: { enchanting: async () => { tries++; (bot.survival.tasks as any).tick += OPTIONAL_MILESTONE_TICKS; throw new TaskError('NOT_FOUND', 'no more sugar_cane found') } }
+  })
+  const result = await runner.play()
+  assert.equal(tries, 1)
+  assert.equal(result.stoppedAt, 'nether')
+  assert.ok(lines.some(l => /milestone enchanting left out after \d+ ticks/.test(l)), lines.join(' | '))
+})
