@@ -17,17 +17,39 @@ function nameAt (bot: Bot, pos: Vec3): string | undefined {
 /** blocks that freeze a body in them (PowderSnowBlock: the freeze ticks climb, then the damage) */
 const FREEZING = new Set(['powder_snow'])
 
-/** In lava, fire or powder snow: the blocks at its feet or head, or mineflayer's lava flag. */
-export function inHazard (bot: Bot): boolean {
-  const feet = bot.entity.position.floored()
-  const bad = (n: string | undefined): boolean => BURNING.has(n ?? '') || FREEZING.has(n ?? '')
-  return (bot.entity as any).isInLava === true || bad(nameAt(bot, feet)) || bad(nameAt(bot, feet.offset(0, 1, 0)))
+/**
+ * The cells the bot's box is in (its width and height, deflated by 1e-5), the middle's feet and head first: those whose
+ * blocks act on it (Entity.checkInsideBlocks: a fire beside the bot's middle burns it once its box reaches in)
+ */
+export function boxCells (bot: Bot): Vec3[] {
+  const pos = bot.entity.position
+  const half = ((bot.entity as any).width ?? 0.6) / 2 - 1e-5
+  const height = ((bot.entity as any).height ?? 1.8) - 1e-5
+  const feet = pos.floored()
+  const out: Vec3[] = [feet, feet.offset(0, 1, 0)]
+  for (let y = Math.floor(pos.y + 1e-5); y <= Math.floor(pos.y + height); y++) {
+    for (let x = Math.floor(pos.x - half); x <= Math.floor(pos.x + half); x++) {
+      for (let z = Math.floor(pos.z - half); z <= Math.floor(pos.z + half); z++) {
+        if (!out.some(c => c.x === x && c.y === y && c.z === z)) out.push(new Vec3(x, y, z))
+      }
+    }
+  }
+  return out
 }
 
-/** a fire block at the bot's feet or head, else null */
+/**
+ * In lava, fire or powder snow: a block of the cells the bot's box is in (boxCells), or mineflayer's lava flag. A
+ * 26.3 bot stood 140 ticks by a fire on the netherrack, its box in the fire's cell and its middle out of it, hurt every
+ * 10 ticks (in_fire), and the reflex, which looked at its middle's cells alone, never went.
+ */
+export function inHazard (bot: Bot): boolean {
+  const bad = (n: string | undefined): boolean => BURNING.has(n ?? '') || FREEZING.has(n ?? '')
+  return (bot.entity as any).isInLava === true || boxCells(bot).some(p => bad(nameAt(bot, p)))
+}
+
+/** a fire block in a cell of the bot's box (boxCells), else null */
 export function fireToPutOut (bot: Bot): Vec3 | null {
-  const feet = bot.entity.position.floored()
-  for (const p of [feet, feet.offset(0, 1, 0)]) { const n = nameAt(bot, p); if (n === 'fire' || n === 'soul_fire') return p }
+  for (const p of boxCells(bot)) { const n = nameAt(bot, p); if (n === 'fire' || n === 'soul_fire') return p }
   return null
 }
 

@@ -82,3 +82,19 @@ test('fireToPutOut: the fire at the feet or head, none elsewhere', async () => {
   assert.deepStrictEqual(fireToPutOut(fakeBot({ position: new Vec3(0.5, 64, 0.5), world: fire })), new Vec3(0, 64, 0))
   assert.strictEqual(fireToPutOut(fakeBot({ position: new Vec3(3.5, 64, 0.5), world: fire })), null)
 })
+
+test('inHazard: a fire in a cell the bot\'s box reaches into, its middle out of it, is one (Entity.checkInsideBlocks); fireToPutOut finds it', async () => {
+  const { boxCells, fireToPutOut } = await import('../../src/skills/escape')
+  const fireEast = (p: Vec3): string => p.x === 1 && p.y === 64 && p.z === 0 ? 'fire' : p.y < 64 ? 'netherrack' : 'air'
+  // the box from x 0.45 to 1.05: in the fire's cell
+  const by = fakeBot({ position: new Vec3(0.75, 64, 0.5), world: fireEast })
+  assert.strictEqual(inHazard(by), true)
+  assert.deepStrictEqual(fireToPutOut(by)?.toArray(), [1, 64, 0])
+  // from x 0.2 to 0.8: out of it
+  const off = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: fireEast })
+  assert.strictEqual(inHazard(off), false)
+  assert.strictEqual(fireToPutOut(off), null)
+  // the cells: the middle's feet and head, then every cell the box is in (two wide here, two high)
+  assert.strictEqual(boxCells(by).length, 4)
+  assert.deepStrictEqual(boxCells(off).map(c => c.toArray()), [[0, 64, 0], [0, 65, 0]])
+})
