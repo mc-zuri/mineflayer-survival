@@ -120,7 +120,14 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
 
   if (opts.destroyCrystals !== false && Object.values(bot.entities).some(e => e.name === 'end_crystal')) {
     log('crystals first')
-    await destroyCrystals(bot, { signal, seed: opts.seed, log: opts.log })
+    try {
+      await destroyCrystals(bot, { signal, seed: opts.seed, log: opts.log })
+    } catch (err) {
+      // a crystal no way reached (its cage's bars, no arc over the spike's rim) is left: the dragon heals at it only
+      // while it flies by, and the fight goes on (a 1.21.11 run's End milestone failed five times on one caged crystal)
+      if (!TaskError.is(err, 'NO_PATH')) throw err
+      log(`crystals left: ${(err as Error).message}`)
+    }
   }
 
   let dragonId: number | null = null
