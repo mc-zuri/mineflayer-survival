@@ -110,7 +110,8 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
       }
     }
     if (target == null) throw new SkillError('NOT_FOUND', `no lava source left to turn to obsidian (${countItems(bot, 'obsidian')} of ${count})`)
-    const { source, spot, side } = target
+    const { source, side } = target
+    let spot = target.spot
     trace('obsidianFromLava: water at', spot.toString(), 'for the lava at', source.toString())
     await navigateNear(bot, spot, side ? 2 : 3, signal).catch(err => { if (isAbort(err)) throw err })
     const bucket = findInventoryItem(bot, 'water_bucket')
@@ -132,7 +133,14 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
     await waitTicks(bot, 5, signal)
     // the water back up
     const empty = findInventoryItem(bot, 'bucket')
-    if (empty != null && bot.blockAt(spot)?.name === 'water') {
+    // the water where it went: at the spot, else a water source it made about it (the look may have hit a block by it)
+    const waterId = bot.registry.blocksByName.water.id
+    const placed = bot.blockAt(spot)?.name === 'water'
+      ? spot
+      : bot.findBlocks({ matching: waterId, point: spot, maxDistance: 4, count: 16 }).find(p => Number((bot.blockAt(p) as any)?.getProperties?.()?.level ?? 1) === 0) ?? null
+    if (placed == null) trace('obsidianFromLava: no water source left about', spot.toString())
+    if (empty != null && placed != null) {
+      spot = placed
       const lavaBefore = countItems(bot, 'lava_bucket')
       await bot.equip(empty, 'hand')
       await bot.lookAt(spot.offset(0.5, 0.5, 0.5), true)

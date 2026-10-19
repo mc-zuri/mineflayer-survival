@@ -341,11 +341,13 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
       })
     }
   // obsidian there already in the loaded chunks (where the caves' lava met their water, a ruined portal): mined
-  const natural = bot.findBlocks?.({ matching: bot.registry.blocksByName.obsidian.id, maxDistance: 64, count: PORTAL_OBSIDIAN * 2 }) ?? []
+  // (none with lava against it: the bot mining a lake's lid falls into the lava under it)
+  const lavaNext = (p: Vec3): boolean => [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0], [0, 1, 0]].some(([dx, dy, dz]) => bot.blockAt(p.offset(dx, dy, dz))?.name === 'lava')
+  const natural = (bot.findBlocks?.({ matching: bot.registry.blocksByName.obsidian.id, maxDistance: 64, count: PORTAL_OBSIDIAN * 4 }) ?? []).filter(p => !lavaNext(p))
   if (natural.length >= PORTAL_OBSIDIAN - count('obsidian')) {
     log(`a portal frame: ${natural.length} obsidian in sight: mining it`)
     try {
-      await executor.task('mine the obsidian', async (s) => await collectBlock(bot, { positions: natural.slice(0, PORTAL_OBSIDIAN - count('obsidian')), pickup: true }, s), signal)
+      await executor.task('mine the obsidian', async (s) => await withNetherSafety(bot, async () => await collectBlock(bot, { positions: natural.slice(0, PORTAL_OBSIDIAN - count('obsidian')), pickup: true }, s)), signal)
       if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
     } catch (err) {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
