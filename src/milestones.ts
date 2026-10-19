@@ -17,7 +17,7 @@ import { tunnelTo } from './skills/tunnel'
 import { isAbort, isSkillError } from './skills/errors'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, overland, strongholdToPortalRoom } from './end/strongholdSkills'
-import { crossToIsland, enterEnd, fightDragon, gotoNear, isInEnd, leaveEnd, readPortalRoom, SCAFFOLD_ITEMS } from './end/skills'
+import { crossToIsland, enterEnd, fightDragon, gotoNear, isInEnd, leaveEnd, readPortalRoom, rememberGateways, SCAFFOLD_ITEMS, visibleGateways } from './end/skills'
 import { towerUp } from './end/skills/world'
 import { collectBlock } from './skills/collectBlock'
 import { countBookshelves, enchant, enchantGear, findEnchantingTable, offerCostRange } from './skills/enchant'
@@ -1223,6 +1223,8 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
   if (!fight.killed) return
   // the milestone's check: vanilla's end/kill_dragon advancement
   bot.survival.advancements.add('end/kill_dragon')
+  // the gateway the kill opened on the ring (EnderDragonFight.spawnNewGateway), for the elytra's trip
+  rememberGateways(bot, visibleGateways(bot))
   if (isInEnd(bot)) await executor.task('out of the End', async (s) => await leaveEnd(bot, { signal: s }), signal)
 }
 
