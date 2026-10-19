@@ -55,7 +55,8 @@ const STACK = 64
  * - redstone: a compass and a clock (1 each), rails and the odd dispenser, from the diamonds on;
  * - lapis: 3 a level-30 enchantment, for the pickaxe, sword, bow and armor and again later;
  * - obsidian: a nether portal (10) and an enchanting table (4);
- * - food: 3 stacks of steak would be some 1500 points, more than a run to the dragon eats: 60 to 120 points;
+ * - food: 3 stacks of steak would be some 1500 points, more than a run to the dragon eats: a top-up under the food
+ *   milestone's 40 points, to twice that (a hunt runs dear: 80 points took over 4000 ticks);
  * - arrows: the End's crystals and the dragon (the End kit's 64), from the diamonds on.
  */
 export const STOCK_MARKS: readonly StockMark[] = [
@@ -69,7 +70,7 @@ export const STOCK_MARKS: readonly StockMark[] = [
   { id: 'lapis', counts: { lapis_lazuli: 1, lapis_block: 9 }, gather: 'lapis_lazuli', low: 27, high: 64, from: 'iron', where: 'underground', ticksPerUnit: 80 },
   { id: 'diamond', counts: { diamond: 1, diamond_block: 9 }, gather: 'diamond', low: 8, high: 24, from: 'iron', where: 'underground', ticksPerUnit: 900 },
   { id: 'obsidian', counts: { obsidian: 1 }, gather: 'obsidian', low: 14, high: 24, from: 'diamonds', where: 'underground', ticksPerUnit: 450 },
-  { id: 'food', counts: { '#food': 1 }, gather: FOOD_GOAL, unit: 'nutrition', low: 60, high: 120, from: 'food', where: 'surface', ticksPerUnit: 50 },
+  { id: 'food', counts: { '#food': 1 }, gather: FOOD_GOAL, unit: 'nutrition', low: 40, high: 80, from: 'food', where: 'surface', ticksPerUnit: 50 },
   { id: 'arrow', counts: { arrow: 1 }, gather: 'arrow', low: 32, high: 64, keep: { arrow: Infinity }, from: 'diamonds', where: 'surface', ticksPerUnit: 150 }
 ]
 
