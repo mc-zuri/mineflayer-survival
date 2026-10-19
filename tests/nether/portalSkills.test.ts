@@ -60,3 +60,12 @@ test('portal notes keep the link to the other side', () => {
   assert.deepEqual(portalLinkOf({ note }), { dimension: 'the_nether', pos: new Vec3(12, 64, -4) })
   assert.equal(portalLinkOf({ note: 'arrival' }), null)
 })
+
+test('choosePortalSite: rough ground near the bot, flat ground 12 blocks off found within 16 (buildPortal\'s second look)', () => {
+  // rock up to y 70 for x < 10 (the bot in a cave mouth at x 0), level ground at y 64 from x 10 on
+  const get = (p: Pos): BlockInfo => ({ name: p.x < 10 ? (p.y < 70 ? 'stone' : 'air') : (p.y < 64 ? 'stone' : 'air') })
+  assert.equal(choosePortalSite(get, { x: 0.5, y: 64, z: 0.5 }), null)
+  const site = choosePortalSite(get, { x: 0.5, y: 64, z: 0.5 }, { radius: 16 })
+  assert.ok(site != null)
+  assert.ok(site.origin.x >= 10)
+})

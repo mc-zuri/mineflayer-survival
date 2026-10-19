@@ -119,6 +119,8 @@ export interface BuildPortalArgs {
   scaffoldItem?: string
   /** light it (default true) */
   light?: boolean
+  /** how far from the bot a placed frame's site is looked for when none is within 8 (default 16) */
+  siteRadius?: number
   /** remember the portal in bot.survival.memory (default true) */
   remember?: boolean
 }
@@ -158,7 +160,9 @@ export async function buildPortal (bot: Bot, args: BuildPortalArgs = {}, signal?
   let frame: PortalFrame
   if (method === 'obsidian') {
     if (countItems(bot, 'obsidian') < 10) throw new SkillError('MISSING_ITEMS', `${countItems(bot, 'obsidian')} obsidian of the 10 a frame takes`)
-    const site = args.origin != null ? { origin: args.origin.floored(), axis: args.axis ?? 'x' } : choosePortalSite(getBlock, bot.entity.position, { axis: args.axis })
+    const site = args.origin != null
+      ? { origin: args.origin.floored(), axis: args.axis ?? 'x' }
+      : choosePortalSite(getBlock, bot.entity.position, { axis: args.axis }) ?? choosePortalSite(getBlock, bot.entity.position, { axis: args.axis, radius: args.siteRadius ?? 16 })
     if (site == null) throw new SkillError('CANNOT_PLACE', 'no flat clear ground for a portal frame near the bot')
     frame = portalFrame(site.origin, site.axis)
     await placeFrame(bot, frame, signal)
