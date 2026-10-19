@@ -36,3 +36,20 @@ test('pourTarget: a source with ground beside it first; in a lake, one open to t
   assert.deepEqual(pourTarget(shore, [new Vec3(0, 47, 0), new Vec3(2, 47, 0)])?.spot, new Vec3(3, 47, 0))
   assert.equal(pourTarget((p: Vec3) => ({ name: 'stone', boundingBox: 'block' }), [new Vec3(0, 47, 0)]), null)
 })
+
+test('refillWater: nothing done with a water bucket held or no empty bucket; with an empty one and no water near, false', async () => {
+  const { refillWater } = await import('../../src/nether/obsidian')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  let looked = 0
+  const withWater = fakeBot({ items: [item('water_bucket', 1), item('bucket', 1)] })
+  ;(withWater as any).findBlock = () => { looked++; return null }
+  assert.equal(await refillWater(withWater), false)
+  const noBucket = fakeBot({ items: [item('cobblestone', 8)] })
+  ;(noBucket as any).findBlock = () => { looked++; return null }
+  assert.equal(await refillWater(noBucket), false)
+  assert.equal(looked, 0)
+  const empty = fakeBot({ items: [item('bucket', 1)] })
+  ;(empty as any).findBlock = () => { looked++; return null }
+  assert.equal(await refillWater(empty), false)
+  assert.equal(looked, 1)
+})

@@ -7,6 +7,7 @@ import { Vec3 } from 'vec3'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { placeBlock } from '../skills/placeBlock'
+import { emptyBucket, fillBucket } from '../skills/bucket'
 import { aimAtFace } from '../core/actions'
 import { navigateNear } from '../skills/navigate'
 import { countItems, findInventoryItem, trace, waitTicks, waitUntil } from '../skills/util'
@@ -64,6 +65,7 @@ export async function obsidianFromLava (bot: Bot, count: number, signal?: AbortS
 }
 
 async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Promise<number> {
+  await refillWater(bot, signal)
   if (countItems(bot, 'water_bucket') === 0) throw new SkillError('MISSING_ITEMS', 'no water bucket to make obsidian with')
   if (countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) throw new SkillError('MISSING_ITEMS', 'no diamond pickaxe to mine obsidian with')
   const get: ObsidianLookup = p => {
@@ -114,19 +116,24 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
     let spot = target.spot
     trace('obsidianFromLava: water at', spot.toString(), 'for the lava at', source.toString())
     await navigateNear(bot, spot, side ? 2 : 3, signal).catch(err => { if (isAbort(err)) throw err })
+    await refillWater(bot, signal)
     const bucket = findInventoryItem(bot, 'water_bucket')
     if (bucket == null) throw new SkillError('MISSING_ITEMS', 'the water bucket is gone')
-    await bot.equip(bucket, 'hand')
-    // the crosshair on the top of the block under the spot (the bucket goes where the look hits: in a cave the rock
-    // round the bot can be in the way), from closer when it isn't in sight
-    const floor = bot.blockAt(spot.offset(0, -1, 0))
-    let aimed = floor != null && await aimAtFace(bot, floor as any, new Vec3(0, 1, 0)) != null
-    if (!aimed && floor != null) {
-      await navigateNear(bot, spot, 1, signal).catch(err => { if (isAbort(err)) throw err })
-      aimed = await aimAtFace(bot, floor as any, new Vec3(0, 1, 0)) != null
+    // the bucket skill's pour (a face in sight to pour against, approached to a spot that sees it), else the
+    // crosshair on the top of the block under the spot (the bucket goes where the look hits: in a cave the rock round
+    // the bot can be in the way), from closer when it isn't in sight
+    const poured = await emptyBucket(bot, { pos: spot, fluid: 'water' }, signal).then(() => true, err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the pour:', (err as Error).message); return false })
+    if (!poured && findInventoryItem(bot, 'water_bucket') != null) {
+      await bot.equip(findInventoryItem(bot, 'water_bucket')!, 'hand')
+      const floor = bot.blockAt(spot.offset(0, -1, 0))
+      let aimed = floor != null && await aimAtFace(bot, floor as any, new Vec3(0, 1, 0)) != null
+      if (!aimed && floor != null) {
+        await navigateNear(bot, spot, 1, signal).catch(err => { if (isAbort(err)) throw err })
+        aimed = await aimAtFace(bot, floor as any, new Vec3(0, 1, 0)) != null
+      }
+      if (!aimed) await bot.lookAt(spot.offset(0.5, 0.02, 0.5), true)
+      bot.activateItem()
     }
-    if (!aimed) await bot.lookAt(spot.offset(0.5, 0.02, 0.5), true)
-    bot.activateItem()
     // poured beside a source it turns the source; poured on the pedestal it turns the sources about it
     const turned = (): boolean => side ? bot.blockAt(source)?.name === 'obsidian' : bot.findBlocks({ matching: obsidianId, point: spot, maxDistance: 2, count: 1 }).length > 0
     await waitUntil(bot, turned, 40, signal)
@@ -142,10 +149,15 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
     if (empty != null && placed != null) {
       spot = placed
       const lavaBefore = countItems(bot, 'lava_bucket')
-      await bot.equip(empty, 'hand')
-      await bot.lookAt(spot.offset(0.5, 0.5, 0.5), true)
-      bot.activateItem()
-      await waitUntil(bot, () => countItems(bot, 'water_bucket') > 0 || countItems(bot, 'lava_bucket') > lavaBefore, 20, signal)
+      const waterBefore = countItems(bot, 'water_bucket')
+      // the bucket skill's scoop (a point of the source in sight), else a look at its middle
+      const scooped = await fillBucket(bot, { fluid: 'water', pos: spot }, signal).then(() => true, err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the scoop:', (err as Error).message); return false })
+      if (!scooped && countItems(bot, 'water_bucket') === waterBefore && findInventoryItem(bot, 'bucket') != null) {
+        await bot.equip(findInventoryItem(bot, 'bucket')!, 'hand')
+        await bot.lookAt(spot.offset(0.5, 0.5, 0.5), true)
+        bot.activateItem()
+        await waitUntil(bot, () => countItems(bot, 'water_bucket') > waterBefore || countItems(bot, 'lava_bucket') > lavaBefore, 20, signal)
+      }
       // lava scooped instead (a source on the ray before the water): poured back where it came from
       if (countItems(bot, 'lava_bucket') > lavaBefore) {
         const lavaBucket = findInventoryItem(bot, 'lava_bucket')
@@ -155,4 +167,24 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
     if (countItems(bot, 'water_bucket') === 0) trace('obsidianFromLava: the water was lost')
   }
   return countItems(bot, 'obsidian')
+}
+
+/** how far a water source is looked for to fill an empty bucket from */
+export const REFILL_RANGE = 48
+
+/**
+ * With no water bucket and an empty one held, one filled from the nearest water source within REFILL_RANGE (a pour
+ * lost in a cave lake was the end of the obsidian on 26.3 seed 2, with a river by): no source, nothing done.
+ */
+export async function refillWater (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  if (countItems(bot, 'water_bucket') > 0 || findInventoryItem(bot, 'bucket') == null) return false
+  try {
+    await fillBucket(bot, { fluid: 'water', maxDistance: REFILL_RANGE }, signal)
+    trace('refillWater: a water bucket filled')
+    return true
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('refillWater:', (err as Error).message)
+    return false
+  }
 }
