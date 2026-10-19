@@ -90,3 +90,12 @@ test('chooseDigSite: the site with no liquid in it, the least work first', async
   const wet = (p: Pos): BlockInfo => ({ name: p.y < 64 ? 'stone' : 'water' })
   assert.equal(chooseDigSite(wet, new Vec3(0, 64, 0)), null)
 })
+
+test('portalSiteWork for a cast: 6 high and two rows each side (the mould behind, the pours before)', async () => {
+  const { portalSiteWork } = await import('../../src/nether/portalSkills')
+  const stone = (p: Pos): BlockInfo => ({ name: p.y < 64 ? 'stone' : 'stone' })
+  const placed = portalSiteWork(stone, { x: 0, y: 64, z: 0 }, 'x')
+  const cast = portalSiteWork(stone, { x: 0, y: 64, z: 0 }, 'x', true)
+  assert.equal(placed.dig.length, 4 * 3 * 5)
+  assert.equal(cast.dig.length, 4 * 5 * 6)
+})

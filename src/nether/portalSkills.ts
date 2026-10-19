@@ -114,14 +114,18 @@ const SITE_FILLERS = ['cobblestone', 'cobbled_deepslate', 'netherrack', 'dirt', 
  * The cells a frame at `origin` needs cleared (the frame, its inside and a row each side of it) and filled (the
  * ground under its four columns and those rows): what preparePortalSite digs and places
  */
-export function portalSiteWork (getBlock: BlockGetter, origin: Pos, axis: Axis): { dig: Pos[], fill: Pos[] } {
+export function portalSiteWork (getBlock: BlockGetter, origin: Pos, axis: Axis, cast = false): { dig: Pos[], fill: Pos[] } {
   const dig: Pos[] = []
   const fill: Pos[] = []
+  // a cast frame wants more room: 6 high (the water poured over the top), and two rows before it and one behind for
+  // the mould (planLavaCast's siteFits)
+  const depths = cast ? [-2, -1, 0, 1, 2] : [-1, 0, 1]
+  const height = cast ? 6 : 5
   for (let u = 0; u < 4; u++) {
-    for (const depth of [-1, 0, 1]) {
+    for (const depth of depths) {
       const under = frameCell(origin, axis, u, -1, depth)
       if (!isSolid(getBlock(under))) fill.push(under)
-      for (let v = 0; v < 5; v++) {
+      for (let v = 0; v < height; v++) {
         const cell = frameCell(origin, axis, u, v, depth)
         const b = getBlock(cell)
         if (b != null && !PASSABLE.has(b.name)) dig.push(cell)
@@ -135,14 +139,15 @@ export function portalSiteWork (getBlock: BlockGetter, origin: Pos, axis: Axis):
  * The site to dig a frame's room out of by the bot's feet: of the four along each axis on each side of it, the one with
  * no liquid in it (the liquids aren't dug into: a cave's water by the first site failed it, 26.3) and the least work
  */
-export function chooseDigSite (getBlock: BlockGetter, feet: Vec3): { origin: Vec3, axis: Axis, work: { dig: Pos[], fill: Pos[] } } | null {
+export function chooseDigSite (getBlock: BlockGetter, feet: Vec3, cast = false): { origin: Vec3, axis: Axis, work: { dig: Pos[], fill: Pos[] } } | null {
+  const off = cast ? 3 : 2
   const sites: Array<{ origin: Vec3, axis: Axis }> = [
-    { origin: feet.offset(-1, 0, 2), axis: 'x' }, { origin: feet.offset(-1, 0, -2), axis: 'x' },
-    { origin: feet.offset(2, 0, -1), axis: 'z' }, { origin: feet.offset(-2, 0, -1), axis: 'z' }
+    { origin: feet.offset(-1, 0, off), axis: 'x' }, { origin: feet.offset(-1, 0, -off), axis: 'x' },
+    { origin: feet.offset(off, 0, -1), axis: 'z' }, { origin: feet.offset(-off, 0, -1), axis: 'z' }
   ]
   const fluid = (b: { name: string } | null | undefined): boolean => /lava|water/.test(b?.name ?? '')
   return sites
-    .map(site => ({ ...site, work: portalSiteWork(getBlock, site.origin, site.axis) }))
+    .map(site => ({ ...site, work: portalSiteWork(getBlock, site.origin, site.axis, cast) }))
     .filter(site => !site.work.dig.some(p => fluid(getBlock(p))) && !site.work.fill.some(p => fluid(getBlock(p))))
     // (a hole to fill is more trouble than a block to dig)
     .sort((a, b) => (a.work.dig.length + 4 * a.work.fill.length) - (b.work.dig.length + 4 * b.work.fill.length))[0] ?? null
@@ -153,10 +158,10 @@ export function chooseDigSite (getBlock: BlockGetter, feet: Vec3): { origin: Vec
  * the frame's cells and a row each side dug out, the ground under them filled; resolves the origin, along x
  * (a cave's bot with 11 obsidian found 'no flat clear ground' and the milestone failed five times at once, 26.3)
  */
-export async function preparePortalSite (bot: Bot, signal?: AbortSignal): Promise<{ origin: Vec3, axis: Axis }> {
+export async function preparePortalSite (bot: Bot, signal?: AbortSignal, cast = false): Promise<{ origin: Vec3, axis: Axis }> {
   const getBlock = blockGetter(bot)
   const feet = bot.entity.position.floored()
-  const site = chooseDigSite(getBlock, feet)
+  const site = chooseDigSite(getBlock, feet, cast)
   if (site == null) throw new SkillError('CANNOT_PLACE', `liquid where a portal site would be about ${feet.toString()}`)
   const { origin, axis, work } = site
   // top down, so nothing falls into a dug cell; a few passes, each cell on its own (one out of reach from where the
@@ -168,10 +173,10 @@ export async function preparePortalSite (bot: Bot, signal?: AbortSignal): Promis
       if (PASSABLE.has(getBlock(p)?.name ?? 'air')) continue
       await collectBlock(bot, { positions: [p], pickup: false }, signal).catch(err => { if (isAbort(err)) throw err; trace('preparePortalSite:', p.toString(), (err as Error).message) })
     }
-    dig = portalSiteWork(getBlock, origin, axis).dig.map(v3)
+    dig = portalSiteWork(getBlock, origin, axis, cast).dig.map(v3)
   }
   // the frame's own plane must be clear (the obsidian goes in it); a side row's block left is walked round
-  const blocked = portalSiteWork(getBlock, origin, axis).dig.filter(p => (axis === 'x' ? p.z : p.x) === (axis === 'x' ? origin.z : origin.x))
+  const blocked = portalSiteWork(getBlock, origin, axis, cast).dig.filter(p => (axis === 'x' ? p.z : p.x) === (axis === 'x' ? origin.z : origin.x))
   if (blocked.length > 0) throw new SkillError('CANNOT_PLACE', `${blocked.length} blocks left in the portal site at ${origin.toString()}`)
   // the ground filled: a hole's bottom first, up (a cell with nothing solid by it can't take a block: 'nothing solid
   // to place against', 26.3); the frame's own row must hold, a side row's hole is walked round
@@ -339,7 +344,9 @@ async function castStep (bot: Bot, step: CastStep, frameCells: Set<string>, getB
       await placeBlock(bot, { pos: v3(step.pos), item: step.item }, signal)
       return
     case 'fill_lava': {
-      if (countItems(bot, 'lava_bucket') > 0) return
+      // (a trip carries a bucket of lava per fill step: one held already skipped only the first's fill, and a trip of
+      // 3 went with 1, the second pour finding 'no lava bucket', 26.3)
+      if (countItems(bot, 'lava_bucket') > 0 && countItems(bot, 'bucket') === 0) return
       let pos = v3(step.pos)
       // the planned source can be gone (taken, or turned by water); any other source of the pool does
       if (!isSource(bot.blockAt(pos), 'lava')) {
@@ -472,7 +479,13 @@ export async function castPortalAway (bot: Bot, lava: readonly Vec3[], lavaBucke
   const startTick = tickCounter(bot)
   const getBlock = blockGetter(bot)
   const here = bot.entity.position.floored()
-  const site = chooseFrameSite(getBlock, [{ x: here.x, y: here.y - 1, z: here.z }], { lavaClearance: 0, siteRadius: 12 })
+  let site: { origin: Pos, axis: Axis } | null = chooseFrameSite(getBlock, [{ x: here.x, y: here.y - 1, z: here.z }], { lavaClearance: 0, siteRadius: 12 })
+  // no open flat ground (a forest's slope, a cave): a site dug out where the bot is, as for a placed frame ('no open
+  // flat ground for a cast frame' twice, the lava carried up for nothing, 26.3)
+  if (site == null) {
+    trace('castPortalAway: no flat ground: a site dug out here')
+    site = await preparePortalSite(bot, signal, true).catch(err => { if (isAbort(err)) throw err; trace('castPortalAway: no site dug:', (err as Error).message); return null })
+  }
   if (site == null) throw new SkillError('CANNOT_PLACE', `no open flat ground for a cast frame near ${here.toString()}`)
   const scaffoldItem = fillerItem(bot, 1) ?? 'cobblestone'
   const plan = planLavaCast(getBlock, lava.map(v3), { origin: site.origin, axis: site.axis, lavaBuckets, scaffoldItem })

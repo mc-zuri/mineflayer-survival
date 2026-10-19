@@ -45,3 +45,42 @@ describe(`a portal site dug out of a cave on a ${DEFAULT_VERSION} server`, { tim
     assert.ok(res.portal.length > 0)
   })
 })
+
+describe(`a cast portal on a dug site in a cave on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 * 1000 }, () => {
+  let server: TestServer
+  let bot: Bot
+  const run = async (cmd: string): Promise<string> => (await server.command(cmd)).join(' | ')
+
+  before(async () => {
+    server = await startServer({ flat: true, seed: 'castsite', difficulty: 'peaceful', gamerules: { advance_time: false, spawn_mobs: false, advance_weather: false } })
+    bot = await connectLockstepBot(server, { username: USERNAME })
+    await bot.waitForChunksToLoad()
+    bot.loadPlugin(createPlugin({ reflexes: false }))
+  })
+  after(async () => {
+    if (bot != null) await quitBot(bot)
+    if (server != null) await server.cleanup()
+  })
+
+  it('casts the frame from lava carried in buckets on a site dug out of the stone', async () => {
+    const { castPortalAway } = await import('../../src/nether/skills')
+    const { Vec3 } = await import('vec3')
+    const o = bot.entity.position.floored()
+    const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
+    await run(`fill ${xyz(-20, -3, -20)} ${xyz(20, 8, 20)} stone`)
+    await run(`fill ${xyz(0, 0, 0)} ${xyz(0, 1, 0)} air`)
+    // a pool of 12 lava sources a corridor away (dug: y 0 to 1 from the bot to it)
+    await run(`fill ${xyz(1, 0, 0)} ${xyz(8, 1, 0)} air`)
+    await run(`fill ${xyz(6, -1, 1)} ${xyz(9, -1, 3)} lava`)
+    await run(`fill ${xyz(6, 0, 1)} ${xyz(9, 1, 3)} air`)
+    await run(`clear ${USERNAME}`)
+    for (const [it, n] of [['bucket', 3], ['flint_and_steel', 1], ['diamond_pickaxe', 1], ['cobblestone', 64], ['water_bucket', 1]] as const) await run(`give ${USERNAME} ${it} ${n}`)
+    await run(`tp ${USERNAME} ${o.x + 0.5} ${o.y} ${o.z + 0.5}`)
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'cobblestone') > 0 && bot.blockAt(o.offset(6, -1, 1))?.name === 'lava', 200))
+    const lava: InstanceType<typeof Vec3>[] = []
+    for (let x = 6; x <= 9; x++) for (let z = 1; z <= 3; z++) lava.push(o.offset(x, -1, z))
+    const res = await castPortalAway(bot, lava, 3).catch(err => { console.log('inventory', bot.inventory.items().map(i => `${i.name}:${i.count}`).join(' ')); throw err })
+    console.log(`cast away: ${res.portal.length} portal blocks`)
+    assert.ok(res.portal.length > 0)
+  })
+})
