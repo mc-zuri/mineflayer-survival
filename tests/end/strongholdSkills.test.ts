@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, nextAlongRay, EYE_RAY } from '../../src/end/strongholdSkills'
+import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, nextAlongRay, awaitEyeDrop, EYE_RAY, EYE_DROP_TICKS } from '../../src/end/strongholdSkills'
 import { isSkillError } from '../../src/skills/errors'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
@@ -73,4 +73,22 @@ test('nextAlongRay: on along the eyes\' flight, the step doubling while they fly
   assert.deepStrictEqual(nextAlongRay(a, east(160), crossing).target, { x: 190, z: 3 })
   // behind the throw: on along the ray instead
   assert.deepStrictEqual(nextAlongRay(null, east(200), crossing).target, { x: 232, z: 0 })
+})
+
+test('awaitEyeDrop: the eye\'s item that comes ticks after the eye goes is waited for; none in EYE_DROP_TICKS is an eye that broke', async () => {
+  const { Vec3 } = require('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  const at = new Vec3(10, 70, 3)
+  const tick = (n: number): void => { for (let i = 0; i < n; i++) setImmediate(() => bot.emit('physicsTick')) }
+  // the item turns up 5 ticks on, its stack known
+  const late = awaitEyeDrop(bot, at)
+  setImmediate(() => {
+    bot.entities[7] = { id: 7, name: 'item', position: new Vec3(10.2, 66, 3.1), getDroppedItem: () => ({ name: 'ender_eye' }) }
+  })
+  tick(5)
+  assert.strictEqual(await late, true)
+  delete bot.entities[7]
+  const none = awaitEyeDrop(bot, at)
+  tick(EYE_DROP_TICKS + 1)
+  assert.strictEqual(await none, false)
 })

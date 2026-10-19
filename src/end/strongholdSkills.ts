@@ -7,7 +7,7 @@ import { Vec3 } from 'vec3'
 import { normalizeDimension, type Poi, type WorldMemory } from '../core/memory'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { craft } from '../skills/craft'
-import { pickupDrops } from '../skills/pickupDrops'
+import { nearbyDrops, pickupDrops } from '../skills/pickupDrops'
 import { travel } from '../skills/travel'
 import { moveNear } from '../skills/gridWalk'
 import { tunnelTo } from '../skills/tunnel'
@@ -43,6 +43,16 @@ export async function craftEyes (bot: Bot, args: CraftEyesArgs = {}, signal?: Ab
   const eyes = countItems(bot, 'ender_eye')
   if (eyes - have < n) throw new SkillError('VERIFY_FAILED', `${eyes - have} of ${n} eyes crafted`)
   return { crafted: eyes - have, eyes }
+}
+
+/** how long after the eye goes its item is looked for, how far from where it was last seen, and the walks after it */
+export const EYE_DROP_TICKS = 30
+export const EYE_DROP_RADIUS = 16
+export const EYE_PICKUP_TRIES = 3
+
+/** waits up to EYE_DROP_TICKS for an eye of ender item near where the thrown eye was last seen; resolves whether one came */
+export async function awaitEyeDrop (bot: Bot, at: Vec3, signal?: AbortSignal): Promise<boolean> {
+  return await waitUntil(bot, () => nearbyDrops(bot, at, EYE_DROP_RADIUS, ['ender_eye']).length > 0, EYE_DROP_TICKS, signal)
 }
 
 export interface ThrowEyeResult {
@@ -111,13 +121,20 @@ export async function throwEnderEye (bot: Bot, opts: { recover?: boolean } = {},
     if (opts.recover !== false && positions.length > 0) {
       // the item drops where the eye was (EyeOfEnder.tick: spawnAtLocation at its position) and falls
       const at = positions[positions.length - 1]
-      await waitTicks(bot, 3, signal)
       const had = countItems(bot, 'ender_eye')
       if (!overWater(p => bot.blockAt(p) as any, at)) {
-        try {
-          await pickupDrops(bot, { near: at, radius: 16, names: ['ender_eye'] }, signal)
-        } catch (err) {
-          if (isAbort(err)) throw err
+        // the item comes a tick or more after the eye goes, its stack in the entity data after that: waited for (the
+        // first throw at seed 2's spawn looked 3 ticks after and found none), and gone after again from where the
+        // first walk got to when the way there (a hill, a ledge) ran out
+        const seen = await awaitEyeDrop(bot, at, signal)
+        if (!seen) trace('throwEnderEye: no eye came down (it broke: 1 in 5)')
+        for (let i = 0; seen && i < EYE_PICKUP_TRIES && countItems(bot, 'ender_eye') <= had; i++) {
+          if (nearbyDrops(bot, at, EYE_DROP_RADIUS, ['ender_eye']).length === 0) break
+          try {
+            await pickupDrops(bot, { near: at, radius: EYE_DROP_RADIUS, names: ['ender_eye'] }, signal)
+          } catch (err) {
+            if (isAbort(err)) throw err
+          }
         }
       } else {
         trace('throwEnderEye: the eye came down into a frozen sea: left')
