@@ -172,7 +172,9 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
         bow: hasBow(bot),
         from: { x: bot.entity.position.x, z: bot.entity.position.z },
         destroyed: spikes.map(s => s.index).filter(i => !todo.includes(i)),
-        brokenBars
+        brokenBars,
+        // the world's own blocks on the way too (the shot's arrowWorld clips on them; the cage's bars are the plan's)
+        solidAt: (x, y, z) => { const b = get(new Vec3(x, y, z)); return b != null && b.boundingBox === 'block' && b.name !== 'iron_bars' }
       })
       let target = plan[0]
       if (target == null) break
@@ -191,6 +193,10 @@ export async function destroyCrystals (bot: Bot, opts: DestroyCrystalsOptions = 
         if (err.code === 'MISSING_ITEMS') throw err
         opts.log?.(`spike ${target.spike.index} failed: ${err.code} ${err.message}`)
         failures.set(target.spike.index, (failures.get(target.spike.index) ?? 0) + 1)
+        // no arc from the spot the opened cage was planned to be shot from: planned again (with the bars broken so far),
+        // up the pillar for the ones still on a line (five 'no arc reaches the target' from one spot, the crystal left
+        // and the dragon healed by it back to 200, 26.3)
+        if (open != null) opened.delete(target.spike.index)
         reasons.set(target.spike.index, err.message)
         // what failed at once (a walk the pathfinder gave up on) may well work a moment later
         await waitTicks(bot, 10, signal)

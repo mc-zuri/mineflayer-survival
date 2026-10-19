@@ -111,3 +111,19 @@ test('no shooting spot on a caged spike\'s cage either, where the ground a gette
     assert.ok(!tops.has(`${Math.floor(spot.x)},${Math.floor(spot.z)}`), `spike ${t.spike.index} shot from ${spot.x}, ${spot.y}, ${spot.z}, on a spike or its cage`)
   }
 })
+
+test('a caged crystal\'s shooting spot keeps its line clear of the world\'s own blocks (solidAt), as the shot\'s arrow world does', () => {
+  const spikes = getSpikesForLevel(parseSeed('2'))
+  const caged = spikes.find(s => s.guarded) as (typeof spikes)[number]
+  const first = planCrystals(spikes, { from: { x: 0, z: 0 }, destroyed: spikes.filter(s => s !== caged).map(s => s.index) })[0]
+  assert.ok(first.shootFrom != null)
+  // a block on that line, a few blocks out from the shooter's eyes
+  const eye = { x: first.shootFrom.x, y: first.shootFrom.y + 1.62, z: first.shootFrom.z }
+  const cells = cellsOnLine(eye, boxEntry(eye, first.shootFrom.aim, first.crystal.box))
+  const wall = cells[3]
+  const solidAt = (x: number, y: number, z: number): boolean => x === wall.x && y === wall.y && z === wall.z
+  const again = planCrystals(spikes, { from: { x: 0, z: 0 }, destroyed: spikes.filter(s => s !== caged).map(s => s.index), solidAt })[0]
+  assert.ok(again.shootFrom != null)
+  const eye2 = { x: again.shootFrom.x, y: again.shootFrom.y + 1.62, z: again.shootFrom.z }
+  assert.ok(!cellsOnLine(eye2, boxEntry(eye2, again.shootFrom.aim, again.crystal.box)).some(c => solidAt(c.x, c.y, c.z)))
+})
