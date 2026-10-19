@@ -79,3 +79,9 @@ test('junkToToss: after the junk, what surplus names may go beyond its kept coun
   const surplus = (name: string): boolean => policy.keepCount(name, registry) != null
   assert.deepEqual(junkToToss(stacks, 3, { keep, registry, surplus }), [{ name: 'dirt', count: 64 }, { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 64 }])
 })
+
+test('junkToToss throws the leaves and leaf litter a shears\' dig picked up', () => {
+  const stacks = [{ name: 'oak_leaves', count: 64 }, { name: 'leaf_litter', count: 25 }, { name: 'oak_log', count: 45 }, { name: 'leather', count: 38 }]
+  const toss = junkToToss(stacks, 2)
+  assert.deepEqual(toss.map(t => t.name).sort(), ['leaf_litter', 'oak_leaves'])
+})

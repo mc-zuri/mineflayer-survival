@@ -58,7 +58,12 @@ export const JUNK = new Set([
   'poisonous_potato', 'spider_eye', 'bone', 'string', 'feather', 'egg', 'ink_sac', 'flint', 'clay_ball', 'moss_block',
   'dripstone_block', 'pointed_dripstone', 'glow_lichen', 'kelp', 'seagrass', 'short_grass', 'tall_grass', 'fern',
   'dead_bush', 'oak_sapling', 'birch_sapling', 'spruce_sapling', 'jungle_sapling', 'acacia_sapling', 'dark_oak_sapling',
-  'cherry_sapling', 'mangrove_propagule', 'pale_oak_sapling', 'apple', 'stick'
+  'cherry_sapling', 'mangrove_propagule', 'pale_oak_sapling', 'apple', 'stick',
+  // the leaves a shears' dig drops (the bag of a 26.3 enchant run held 159 leaves and leaf litter, no room left for
+  // the bookshelves' planks: 'crafting oak_planks x18 gave 0 of 72')
+  'oak_leaves', 'birch_leaves', 'spruce_leaves', 'jungle_leaves', 'acacia_leaves', 'dark_oak_leaves', 'mangrove_leaves',
+  'cherry_leaves', 'azalea_leaves', 'flowering_azalea_leaves', 'pale_oak_leaves', 'leaf_litter', 'wildflowers', 'bush',
+  'firefly_bush', 'short_dry_grass', 'tall_dry_grass', 'vine', 'pale_hanging_moss'
 ])
 
 export interface SplitOptions {
