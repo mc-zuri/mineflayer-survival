@@ -71,7 +71,7 @@ export interface ExecutorOptions {
 }
 
 /** what a caller adds to the executor's plans (the night's: undergroundOnly; a stock top-up's: no loot, exclude) */
-export type PlanOptions = Pick<ObtainOptions, 'undergroundOnly' | 'exclude'>
+export type PlanOptions = Pick<ObtainOptions, 'undergroundOnly' | 'exclude' | 'exactYields'>
 
 export interface ObtainOutcome {
   /** plans made */
@@ -239,6 +239,11 @@ export class Executor {
     let plans = 0
     let steps = 0
     let lastError: unknown = null
+    // the check that failed the last plan before a step of it ran, by its step and reason with the counts: a plan
+    // made again from the same inventory fails it again (the planner counted on what its steps don't yield), so the
+    // second time the next plans count on no drop beyond their steps' counts (exactYields), and a third time it fails
+    let lastCheck: string | null = null
+    let exact = planOptions.exactYields === true
     while (true) {
       throwIfOwnerAborted(signal)
       const inv = ownedInventory(this.bot)
@@ -246,7 +251,7 @@ export class Executor {
       if (plans >= this.options.maxReplans) {
         throw new TaskError('FAILED', `gave up after ${plans} plans`, { cause: lastError })
       }
-      const plan = this.plan(requests, inv, planOptions)
+      const plan = this.plan(requests, inv, exact ? { ...planOptions, exactYields: true } : planOptions)
       plans++
       if (!plan.ok) {
         const what = plan.unresolved.map(r => `${r.count} ${String(r.item)}`).join(', ')
@@ -265,7 +270,14 @@ export class Executor {
         // the rest of the plan has to hold for what the bot has now (a reflex ate, a tool broke, the bot died)
         const check = checkPlan(this.bot.registry as any, plan.steps.slice(i), ownedInventory(this.bot), this.stations())
         if (!check.ok) {
-          this.log(`replan: ${check.error != null ? `${describeStep(check.error.step)} ${check.error.reason}` : 'the plan no longer holds'}`)
+          const why = check.error != null ? `${describeStep(check.error.step)} ${check.error.reason}` : 'the plan no longer holds'
+          this.log(`replan: ${why}`)
+          if (why === lastCheck) {
+            if (exact) throw new TaskError('FAILED', `the plans fail their check the same way: ${why}`, { cause: lastError })
+            exact = true
+            this.log('replan: the same check failed twice: planning from the inventory, counting on no drop beyond the steps\' counts')
+          }
+          lastCheck = why
           break
         }
         const key = `${step.kind}:${step.item}`

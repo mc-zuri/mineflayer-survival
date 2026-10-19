@@ -70,6 +70,11 @@ export interface ObtainOptions {
    * none is: such a farm costs that, not a sowing and a growing
    */
   farmCost?: (crop: string) => number | undefined
+  /**
+   * count on each mine and kill step for its count alone, not the drops expected beyond it (a cow's second beef): the
+   * executor's plan after its plans failed their check twice the same way
+   */
+  exactYields?: boolean
 }
 
 /** what findCost is asked about: a block or mob of a source, and the source's own estimate */
@@ -549,7 +554,7 @@ export class Resolver {
     if (!Number.isFinite(own)) return null
     t.cost += own
     if (t.cost > limit) return null
-    const extra = [...surplus(item, n, blockCount * perBlock), ...extras(src.drops, item, blockCount)]
+    const extra = [...(this.opts.exactYields === true ? [] : surplus(item, n, blockCount * perBlock)), ...extras(src.drops, item, blockCount)]
     t.inv.add(item, n)
     for (const e of extra) t.inv.add(e.name, e.count)
     t.visited.add(src.block)
@@ -570,7 +575,7 @@ export class Resolver {
     const own = this.dimensionCost(s, src.dimension) + this.findCost(s, src.mob, 'mob', src.dimension, src.find, src.each) + (kills - 1) * src.each + kills * (FIGHT_TICKS + PICKUP_TICKS)
     s.cost += own
     if (s.cost > limit) return null
-    const extra = [...surplus(item, n, kills * perKill), ...extras(src.drops, item, kills)]
+    const extra = [...(this.opts.exactYields === true ? [] : surplus(item, n, kills * perKill)), ...extras(src.drops, item, kills)]
     s.inv.add(item, n)
     for (const e of extra) s.inv.add(e.name, e.count)
     s.visited.add(src.mob)

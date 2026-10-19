@@ -193,3 +193,51 @@ test('a hunt that explored and found no animal makes the next plan go for anothe
   assert.ok(ex.sightings.isScarce('cow') && ex.sightings.isScarce('rabbit'))
   assert.ok(heldFor(ownedInventory(bot), FOOD_GOAL, { unit: 'nutrition' }) >= FOOD_POINTS)
 })
+
+test('a plan that fails its check the same way twice is made again counting on no drop beyond its steps\' counts, and a third time fails', async () => {
+  // the food plans of 26.3 seed 2, which counted a cow's second beef their kill step didn't: 30 plans each failed
+  // "smelt 4 cooked_beef needs 4 beef, has 3" before a step ran
+  const make = (): { bot: any, ex: Executor, lines: string[], log: string[], planned: boolean[] } => {
+    const bot = fakeBot({ furnace: 1, coal: 8, stone_sword: 1 })
+    const log: string[] = []
+    const lines: string[] = []
+    const planned: boolean[] = []
+    const runners: Record<string, StepRunner<any>> = {
+      ...honestRunners(bot, log),
+      kill: async (step) => { log.push(describeStep(step)); bot.give(step.item, step.count); return { gained: step.count } },
+      smelt: async (step) => {
+        log.push(describeStep(step))
+        for (const i of [...step.inputs, ...step.fuel]) bot.take(i.name, i.count)
+        bot.give(step.item, step.count)
+        return { gained: step.count }
+      }
+    }
+    const ex = new Executor(bot, { runners, log: line => lines.push(line) })
+    const plan = ex.plan.bind(ex)
+    // the planner of before: the kill steps leave out the beef expected beyond their counts
+    ex.plan = (requests, inventory, extra = {}) => {
+      planned.push(extra.exactYields === true)
+      const out = plan(requests, inventory, extra)
+      return { ...out, steps: out.steps.map(s => s.kind === 'kill' ? { ...s, extra: s.extra?.filter(e => e.name !== s.item) } : s) }
+    }
+    return { bot, ex, lines, log, planned }
+  }
+  const requests = [{ item: 'cooked_beef', count: 1 }, { item: 'cooked_beef', count: 5 }]
+
+  const { bot, ex, lines, log, planned } = make()
+  await ex.obtain(requests)
+  assert.equal(count(bot, 'cooked_beef'), 5)
+  assert.deepEqual(planned.slice(0, 3), [false, false, true], lines.join('\n'))
+  assert.equal(lines.filter(l => l === 'replan: smelt 5 cooked_beef needs 5 beef, has 4').length, 2, lines.join('\n'))
+  assert.ok(lines.some(l => l.includes('the same check failed twice')), lines.join('\n'))
+  assert.ok(log[0].startsWith('kill'), log.join('; '))
+
+  // a plan that fails the same way even so stops at the third plan, not the 30th
+  const stuck = make()
+  stuck.ex.plan = (requests, inventory, extra = {}) => {
+    stuck.planned.push(extra.exactYields === true)
+    return { ok: true, steps: [{ kind: 'smelt', item: 'cooked_beef', count: 4, input: 'beef', inputs: [{ name: 'beef', count: 4 }], fuel: [{ name: 'coal', count: 1 }], station: 'furnace', cost: 800 }], cost: 800, inventory: ownedInventory(stuck.bot), unresolved: [] }
+  }
+  await assert.rejects(stuck.ex.obtain(requests), /the plans fail their check the same way: smelt 4 cooked_beef needs 4 beef, has 0/)
+  assert.deepEqual(stuck.planned, [false, false, true])
+})
