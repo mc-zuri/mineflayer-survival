@@ -39,3 +39,28 @@ test('unlitFrameAt: the whole obsidian frame with nothing in it round a remember
   assert.deepEqual(found.origin, { x: 10, y: 50, z: 5 })
   assert.equal(unlitFrameAt(fakeBot({ world: () => 'air' }), new Vec3(11, 51, 5)), null)
 })
+
+test('enterNether digs down to a remembered portal under the bot when the walk finds no way', async () => {
+  const travelModule = require('../../src/skills/travel')
+  const tunnelModule = require('../../src/skills/tunnel')
+  const { enterNether } = await import('../../src/nether/portalTravel')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ position: new Vec3(-27.5, 59, -38.5) })
+  bot.game.dimension = 'overworld'
+  const memory = new WorldMemory()
+  memory.addPoi('nether_portal', { x: -27, y: 51, z: -39 }, 'overworld', 'built')
+  ;(bot as any).survival = { memory }
+  bot.findBlocks = () => []
+  const calls: string[] = []
+  const realTravel = travelModule.travel
+  const realTunnel = tunnelModule.tunnelTo
+  travelModule.travel = async () => { calls.push('travel'); throw new Error('NO_PATH: no way on') }
+  tunnelModule.tunnelTo = async () => { calls.push('tunnel'); throw new Error('dug') }
+  try {
+    await assert.rejects(enterNether(bot, { build: false }), /dug/)
+  } finally {
+    travelModule.travel = realTravel
+    tunnelModule.tunnelTo = realTunnel
+  }
+  assert.deepEqual(calls, ['travel', 'tunnel'])
+})

@@ -8,6 +8,7 @@ import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { navigate, walkTo } from '../skills/navigate'
 import { isSolid } from '../skills/placement'
 import { travel } from '../skills/travel'
+import { tunnelTo } from '../skills/tunnel'
 import { trace, waitTicks, waitUntil } from '../skills/util'
 import { portalDestination } from './coords'
 import { blockGetter, buildPortal, lightPortal, type BuildPortalArgs } from './portalSkills'
@@ -275,7 +276,13 @@ async function takePortal (bot: Bot, to: Dimension, args: EnterNetherArgs, signa
       // to its height too (exactY): a portal built in a cave lies under the ground the walk ends on, and the bot on
       // the surface 100 blocks over a 26.3 portal at y -43 saw none and built another ('0 lava sources found')
       // in the nether with its path settings (no lava edges, no magma, the deaths kept away from) and by its trail
-      const walk = async (): Promise<unknown> => await travel(bot, { target: at, range: 4, exactY: true }, signal)
+      // (no path down the last blocks to it, the portal in a cave under the bot: a stair dug down to it, 8 blocks over
+      // a 26.3 portal the walk gave up, 'no way on')
+      const walk = async (): Promise<unknown> => await travel(bot, { target: at, range: 4, exactY: true }, signal).catch(async err => {
+        if (isAbort(err) || Math.hypot(bot.entity.position.x - at.x, bot.entity.position.z - at.z) > 12) throw err
+        trace('takePortal: down to the portal by a tunnel:', (err as Error).message)
+        return await tunnelTo(bot, { target: at, range: 3 }, signal)
+      })
       await (here === 'the_nether' ? withNetherSafety(bot, walk) : walk())
       portal = findPortal(bot, 16)
       // the frame there gone out (no portal blocks in it): lit again with the flint and steel (a 26.3 bot back from
