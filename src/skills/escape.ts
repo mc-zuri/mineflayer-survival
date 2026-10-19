@@ -47,6 +47,38 @@ export function inHazard (bot: Bot): boolean {
   return (bot.entity as any).isInLava === true || boxCells(bot).some(p => bad(nameAt(bot, p)))
 }
 
+const CLIMB_FILLERS = ['cobblestone', 'netherrack', 'cobbled_deepslate', 'dirt', 'stone', 'andesite', 'diorite', 'granite', 'blackstone', 'basalt', 'end_stone']
+
+function inLava (bot: Bot): boolean {
+  const feet = bot.entity.position.floored()
+  return (bot.entity as any).isInLava === true || nameAt(bot, feet) === 'lava' || nameAt(bot, feet.offset(0, 1, 0)) === 'lava'
+}
+
+/**
+ * Puts a block into a lava cell beside the bot at its feet's level, against the solid floor under it (a block held
+ * of CLIMB_FILLERS), and resolves the cell on top of it to climb onto; null when there's no such cell or no block
+ */
+export async function blockToClimb (bot: Bot, signal?: AbortSignal): Promise<Vec3 | null> {
+  const filler = CLIMB_FILLERS.find(n => bot.inventory.items().some(i => i.name === n))
+  if (filler == null) return null
+  const feet = bot.entity.position.floored()
+  for (const d of [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1)]) {
+    const cell = feet.plus(d)
+    const b = bot.blockAt(cell)
+    const under = bot.blockAt(cell.offset(0, -1, 0))
+    if (b == null || under == null || (b.name !== 'lava' && b.boundingBox !== 'empty') || under.boundingBox !== 'block') continue
+    if (!passable(bot, cell.offset(0, 1, 0), false) || !passable(bot, cell.offset(0, 2, 0), false)) continue
+    try {
+      const { placeBlock } = await import('./placeBlock')
+      await placeBlock(bot, { pos: cell, item: filler, against: cell.offset(0, -1, 0), intoFluid: true }, signal)
+      if (bot.blockAt(cell)?.boundingBox === 'block') return cell.offset(0, 1, 0)
+    } catch (err) {
+      if (isAbort(err)) throw err
+    }
+  }
+  return null
+}
+
 /** a fire block in a cell of the bot's box (boxCells), else null */
 export function fireToPutOut (bot: Bot): Vec3 | null {
   for (const p of boxCells(bot)) { const n = nameAt(bot, p); if (n === 'fire' || n === 'soul_fire') return p }
@@ -162,6 +194,12 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
         // swam up in place for 200 ticks till it burned (26.3)
         target = nearestSpot(bot, radius, p => isSafeStand(bot, p) && !p.equals(here)) ??
           (t % 40 === 0 ? nearestSpot(bot, opts.farRadius ?? 16, p => isSafeStand(bot, p) && !p.equals(here)) : target)
+      }
+      // in lava a while with no ground near: a block put into the lava beside the bot, against the floor under it,
+      // to climb out onto (the basalt deltas' pools: lava all round, no stand within reach, 26.3's deaths in the nether)
+      if (inLava(bot) && t >= 10 && t % 20 === 10 && (target == null || target.distanceTo(here) > 3)) {
+        const step = await blockToClimb(bot, opts.signal)
+        if (step != null) target = step
       }
       if (target == null) {
         // nowhere known: swim up and hope
