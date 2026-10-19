@@ -19,6 +19,7 @@ import { storeItems } from '../skills/chest'
 import { placeBlock } from '../skills/placeBlock'
 import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
+import { tossAway } from '../skills/pickupDrops'
 import { emptySlots, settleInventory, trace } from '../skills/util'
 import { wornOutTools } from './durability'
 import { defaultKeep, junkToToss, splitInventory, type KeepRule } from './keep'
@@ -466,10 +467,8 @@ export class Executor {
       if (toss.length > 0) this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
       if (toss.length > 0) {
         await this.task('make room', async (s) => {
-          for (const t of toss) {
-            await settleInventory(this.bot, s)
-            await this.bot.toss(this.bot.registry.itemsByName[t.name].id, null, t.count).catch(() => {})
-          }
+          // behind the bot, and never gone back for (tossAway)
+          for (const t of toss) await tossAway(this.bot, t.name, t.count, s).catch(err => { if (isAbort(err)) throw err })
         }, signal)
       }
       if (!force || emptySlots(this.bot) >= this.options.minFreeSlots) return

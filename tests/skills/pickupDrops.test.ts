@@ -83,3 +83,52 @@ test('nearbyDrops passes over an item entity whose item has not come yet (getDro
   const found = nearbyDrops(bot, bot.entity.position, 8, ['ender_pearl'])
   assert.deepEqual(found.map(e => e.id), [6])
 })
+
+test('tossAway throws behind the bot and remembers what it threw: no pickup goes back for it while it lies there (ITEM_LIFETIME)', async () => {
+  // (26.3 seed 2: the cobblestone thrown away for room was picked up again down the mine, and the bag was full again)
+  const { tossAway, nearbyDrops, pickupDrops, isThrownDrop, ITEM_LIFETIME } = await import('../../src/skills/pickupDrops')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const registry = require('minecraft-data')('1.21.11')
+  const Item = require('prismarine-item')('1.21.11')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('cobblestone', 64), item('andesite', 10)] })
+  bot.inventory.inventoryStart = 9
+  bot.inventory.inventoryEnd = 45
+  bot._client = { on: () => {}, off: () => {} }
+  bot.time = { age: 1000 }
+  bot.entity.yaw = 0
+  const looks: number[] = []
+  bot.look = async (yaw: number) => { looks.push(yaw) }
+  const drop = (id: number, name: string, pos: Vec3): any => ({ id, name: 'item', position: pos, getDroppedItem: () => new Item(registry.itemsByName[name].id, 1) })
+  // the server drops the stack along the look: 3 blocks behind (yaw 0 looks to -z, behind is +z)
+  bot.toss = async (type: number, _meta: unknown, n: number) => {
+    const stack = bot.inventory.items().find((i: any) => i.type === type)
+    stack.count -= n
+    if (stack.count <= 0) bot.inventory.slots[stack.slot] = null
+    setTimeout(() => { bot.entities[70] = drop(70, registry.items[type].name, new Vec3(0.5, 64, 3.5)) }, 3)
+  }
+  // a block's drop (not thrown) lies beside the bot
+  bot.entities[71] = drop(71, 'cobblestone', new Vec3(-2.5, 64, 0.5))
+  let trips = 0
+  bot.pathfinder = { isPathing: false, goto: async () => { trips++ }, cancel: async () => {}, world: {} }
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    assert.strictEqual(await tossAway(bot, 'cobblestone', 64), 64)
+    assert.deepStrictEqual(looks, [Math.PI])
+    assert.ok(isThrownDrop(bot, bot.entities[70]))
+    assert.deepStrictEqual(nearbyDrops(bot, bot.entity.position, 8).map(e => e.id), [71])
+    // with another id (the chunk sent again), an item of its name where it lay is it still; another item isn't
+    bot.entities[72] = drop(72, 'cobblestone', new Vec3(0.9, 64, 4))
+    bot.entities[73] = drop(73, 'andesite', new Vec3(0.9, 64, 4))
+    assert.deepStrictEqual(nearbyDrops(bot, bot.entity.position, 8).map(e => e.id).sort(), [71, 73])
+    // the pickups go for the block's drop and the andesite, not what was thrown
+    delete bot.entities[71]
+    delete bot.entities[73]
+    await pickupDrops(bot, { near: bot.entity.position, radius: 8, waitTicks: 1 })
+    assert.strictEqual(trips, 0)
+    // it despawns after ITEM_LIFETIME: one there then is another
+    bot.time.age += ITEM_LIFETIME
+    assert.strictEqual(isThrownDrop(bot, bot.entities[70]), false)
+  } finally {
+    clearInterval(ticker)
+  }
+})

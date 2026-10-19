@@ -260,6 +260,9 @@ test('a forced room throws the junk away, the least worth first, never a valuabl
     }
     bot.blockAt = () => null
     bot._client = new EventEmitter()
+    bot.entity.yaw = 0
+    bot.entities = {}
+    bot.look = async () => {}
     return bot
   }
   // the bag full of what's never thrown: nothing goes, and the room fails
