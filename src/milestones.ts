@@ -78,9 +78,9 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
   let lastLine = ''
   for (;;) {
     if (signal.aborted) throw signal.reason
-    // back to the herd for its chores (the levels' mining between takes the bot off: 120 blocks off and 60 down, the
-    // herd out of sight and not bred, on 26.3)
-    if (bot.entity.position.distanceTo(at) > 16) {
+    // back to the herd for its chores, up on its ground (the levels' mining between takes the bot off: 120 blocks off
+    // and 60 down, or 14 under it in a cave, the herd out of reach and never bred, on 26.3)
+    if (Math.hypot(bot.entity.position.x - at.x, bot.entity.position.z - at.z) > 12 || Math.abs(bot.entity.position.y - at.y) > 4) {
       await executor.task('back to the herd', async (s) => await overland(bot, { target: at, range: 4 }, s), signal).catch(err => {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
         log(`herd: no way back: ${(err as Error).message}`)
@@ -105,7 +105,7 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
     // the farm's wheat for the herd, and the pairs ready
     await harvestGrownFarms(bot, executor, signal, log, false).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
     if (countItems(bot, 'wheat') >= 2 && state.adults >= 2) {
-      await executor.task('breed the cows', async (s) => await breedAnimals(bot, { mob: 'cow', pairs: Math.floor(state.adults / 2) }, s), signal)
+      await executor.task('breed the cows', async (s) => await breedAnimals(bot, { mob: 'cow', pairs: Math.floor(state.adults / 2), radius: 48 }, s), signal)
         .then(r => log(`herd: ${r.fed} fed (${state.adults} cows, ${state.calves} calves, ${state.leather} leather of ${want})`))
         .catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
     }
