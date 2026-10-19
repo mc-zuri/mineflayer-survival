@@ -810,6 +810,8 @@ export const PEARL_LEG_Y = 64
 
 /** blocks a pearl search in the nether goes on each leg looking for piglins or endermen */
 export const PEARL_LEG = 96
+/** the spiral's next points a pearl leg is chosen among by the ground seen toward them (pearlLeg) */
+export const PEARL_LEG_CHOICES = 4
 /** rounds of the overworld's night hunt at most (a hunt, a leg, a day's levels each) */
 export const PEARL_ROUNDS = 200
 /** game ticks the overworld's night hunt for endermen may take (3 days) */
@@ -844,9 +846,8 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
   const count = (name: string): number => countItems(bot, name)
   let legs = PEARL_NETHER_LEGS
   const spiral = spiralWaypoints(bot.entity.position, PEARL_LEG, PEARL_LEG * PEARL_NETHER_LEGS)
-  let walked = 0
-  // where the legs began and ended: not gone back over
-  const legEnds: Array<{ x: number, z: number }> = []
+  // the spiral's points walked to (by their index)
+  const usedLegs = new Set<number>()
   for (let leg = 0; leg < legs && count('ender_pearl') < want; leg++) {
     if (signal.aborted) throw signal.reason
     const piglin = Object.values(bot.entities).some(e => isAdultPiglin(bot, e) && e.position.distanceTo(bot.entity.position) <= 48)
@@ -881,11 +882,13 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
     } else {
       // a spiral out from where the search began (the fortress walks' legs went back and forth over the same 100
       // blocks round the fortress, 10 legs and no new ground, 26.3), its next point the way taken unless the ground
-      // seen another way is better for the endermen and piglins, or that way is a basalt delta or a soul sand valley
-      // (pearlLeg; a leg into seed 2's delta east of the fortress ended in a magma cube swarm by the lava sea, 26.3),
-      // and not back over the legs walked
-      const leg = pearlLeg(bot, bot.entity.position, PEARL_LEG, { walked: legEnds, gold: count('gold_ingot') > 0, prefer: spiral[walked % spiral.length] })
-      walked++
+      // seen toward one of the few after it is better for the endermen and piglins, or that way is a basalt delta or
+      // a soul sand valley (pearlLeg; a leg into seed 2's delta east of the fortress ended in a magma cube swarm by
+      // the lava sea, 26.3); no point twice
+      if (usedLegs.size >= spiral.length) usedLegs.clear()
+      const next = spiral.map((p, i) => ({ p, i })).filter(c => !usedLegs.has(c.i)).slice(0, PEARL_LEG_CHOICES)
+      const leg = pearlLeg(bot, bot.entity.position, next.map(c => c.p), { gold: count('gold_ingot') > 0 })
+      usedLegs.add(next[leg.index].i)
       const point = leg.point
       if (leg.ground.delta + leg.ground.valley + leg.ground.warped + leg.ground.crimson > 0) {
         log(`ender pearls: the ground that way: ${leg.ground.warped} warped, ${leg.ground.crimson} crimson, ${leg.ground.delta} delta, ${leg.ground.valley} soul sand valley`)
@@ -894,7 +897,6 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
       // sea's level, and into the lava (26.3)
       to = new Vec3(point.x, Math.max(PEARL_LEG_Y, bot.entity.position.y), point.z)
     }
-    legEnds.push({ x: bot.entity.position.x, z: bot.entity.position.z }, { x: to.x, z: to.z })
     log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for ${seen?.kind ?? 'piglins or endermen'}`)
     await executor.task('a leg for pearls', async (s) => await withNetherSafety(bot, async () => await travel(bot, {
       target: to,

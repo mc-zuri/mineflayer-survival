@@ -24,6 +24,8 @@ const COUNT_CAP = 48
 /** blocks of each kind within `radius` of `point` in the loaded chunks (each up to COUNT_CAP) */
 export function groundAround (bot: Bot, point: Vec3, radius: number): GroundCounts {
   const out: GroundCounts = { delta: 0, valley: 0, warped: 0, crimson: 0 }
+  // (a bot with no world to look in: none seen)
+  if (typeof (bot.world as any)?.getColumn !== 'function' && typeof bot.findBlocks !== 'function') return out
   for (const kind of Object.keys(NETHER_GROUND_BLOCKS) as NetherGround[]) {
     const ids = NETHER_GROUND_BLOCKS[kind].map(n => bot.registry.blocksByName[n]?.id).filter((id): id is number => id != null)
     if (ids.length === 0) continue
@@ -40,13 +42,12 @@ export function pearlGroundScore (c: GroundCounts, gold: boolean): number {
   return 3 * c.warped + (gold ? 2 : 1) * c.crimson - 2 * c.delta - c.valley
 }
 
-/** the eight ways a pearl leg can go: east, south, west, north (the spiral's order), then the diagonals */
-const WAYS: Array<[number, number]> = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [-1, -1], [1, -1]]
-
-/** a leg's end this near where a leg went before is ground walked already */
-export const LEG_WALKED_RADIUS = 48
+/** how far out along a leg its ground is looked at (the loaded chunks reach about this far: the server's view distance) */
+export const LEG_LOOK = 96
 
 export interface PearlLeg {
+  /** which of the candidates */
+  index: number
   /** the leg's end (x and z; the height is the walker's) */
   point: { x: number, z: number }
   score: number
@@ -54,46 +55,30 @@ export interface PearlLeg {
 }
 
 /**
- * The next pearl leg's end, `length` blocks from `from` one of eight ways: the one whose ground seen (groundAround the
- * points a third, two thirds and all of the way out, 24 round each) scores best (pearlGroundScore), the ends of legs
- * walked before (`walked`, within LEG_WALKED_RADIUS) left out unless every way's is one, `prefer`'s way (the spiral's
- * next) first among equals. A 26.3 bot whose leg went east from seed 2's fortress into the basalt delta there was
- * fought down to the lava sea by a magma cube swarm and died on a magma block.
+ * The next pearl leg of `candidates` (the spiral's next points, in its order): the one whose ground seen along the way
+ * there (groundAround the points a third, two thirds and all of the way out, LEG_LOOK at most, 24 round each) scores
+ * best (pearlGroundScore), the first among equals (as the spiral goes when nothing is seen). A 26.3 bot whose leg went
+ * east from seed 2's fortress into the basalt delta there was fought down to the lava sea by a magma cube swarm and
+ * died on a magma block.
  */
-export function pearlLeg (bot: Bot, from: Vec3, length: number, opts: { walked?: Array<{ x: number, z: number }>, gold?: boolean, prefer?: { x: number, z: number } } = {}): PearlLeg {
-  const walked = opts.walked ?? []
-  const preferWay = opts.prefer == null ? -1 : bestWay(opts.prefer.x - from.x, opts.prefer.z - from.z)
-  let best: (PearlLeg & { fresh: boolean, way: number }) | null = null
-  for (let w = 0; w < WAYS.length; w++) {
-    const [dx, dz] = WAYS[w]
-    const n = Math.hypot(dx, dz)
-    const ux = dx / n
-    const uz = dz / n
+export function pearlLeg (bot: Bot, from: Vec3, candidates: ReadonlyArray<{ x: number, z: number }>, opts: { gold?: boolean } = {}): PearlLeg {
+  let best: PearlLeg | null = null
+  for (let i = 0; i < candidates.length; i++) {
+    const point = candidates[i]
+    const dx = point.x - from.x
+    const dz = point.z - from.z
+    const length = Math.hypot(dx, dz)
+    const reach = Math.min(length, LEG_LOOK)
     const ground: GroundCounts = { delta: 0, valley: 0, warped: 0, crimson: 0 }
-    for (const f of [1 / 3, 2 / 3, 1]) {
-      const c = groundAround(bot, new Vec3(from.x + ux * length * f, from.y, from.z + uz * length * f), 24)
-      for (const k of Object.keys(ground) as NetherGround[]) ground[k] += c[k]
+    if (length > 1e-6) {
+      for (const f of [1 / 3, 2 / 3, 1]) {
+        const c = groundAround(bot, new Vec3(from.x + dx / length * reach * f, from.y, from.z + dz / length * reach * f), 24)
+        for (const k of Object.keys(ground) as NetherGround[]) ground[k] += c[k]
+      }
     }
-    const point = { x: Math.floor(from.x + ux * length), z: Math.floor(from.z + uz * length) }
-    const fresh = walked.every(p => Math.hypot(p.x - point.x, p.z - point.z) > LEG_WALKED_RADIUS)
     const score = pearlGroundScore(ground, opts.gold === true)
-    const better = best == null ||
-      (fresh && !best.fresh) ||
-      (fresh === best.fresh && (score > best.score || (score === best.score && w === preferWay && best.way !== preferWay)))
-    if (better) best = { point, score, ground, fresh, way: w }
+    if (best == null || score > best.score) best = { index: i, point: { x: point.x, z: point.z }, score, ground }
   }
-  const { point, score, ground } = best as PearlLeg
-  return { point, score, ground }
-}
-
-/** the one of WAYS nearest the direction (dx, dz) */
-function bestWay (dx: number, dz: number): number {
-  let best = 0
-  let bestDot = -Infinity
-  for (let w = 0; w < WAYS.length; w++) {
-    const [x, z] = WAYS[w]
-    const dot = (x * dx + z * dz) / Math.hypot(x, z)
-    if (dot > bestDot) { bestDot = dot; best = w }
-  }
+  if (best == null) throw new Error('no candidates for a pearl leg')
   return best
 }

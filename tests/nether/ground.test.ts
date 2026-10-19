@@ -17,7 +17,7 @@ function patchedWorld (patches: Array<{ block: string, x: [number, number], z: [
   return { bot: rig.bot, stop: () => rig.stopPassivePhysics() }
 }
 
-test('pearlLeg: away from a basalt delta, toward a warped forest; the spiral\'s way when nothing is seen; not back over the legs walked', () => {
+test('pearlLeg: of the spiral\'s next points, away from a basalt delta and toward a warped forest; the first when nothing is seen', () => {
   const { bot, stop } = patchedWorld([
     { block: 'basalt', x: [20, 60], z: [-8, 8] },
     { block: 'magma_block', x: [62, 70], z: [-4, 4] },
@@ -29,17 +29,17 @@ test('pearlLeg: away from a basalt delta, toward a warped forest; the spiral\'s 
     assert.ok(east.delta >= 40, JSON.stringify(east))
     assert.ok(pearlGroundScore(east, false) < 0)
     // the spiral's next is east, into the delta: south, to the warped forest, instead
-    const leg = pearlLeg(bot, from, 96, { prefer: { x: 96, z: 0 } })
+    const spiral = [{ x: 96, z: 0 }, { x: 96, z: 96 }, { x: 0, z: 96 }, { x: -96, z: 96 }]
+    const leg = pearlLeg(bot, from, spiral)
+    assert.strictEqual(leg.index, 2)
     assert.deepStrictEqual(leg.point, { x: 0, z: 96 })
     assert.ok(leg.ground.warped > 0)
-    // south walked already: not back there; not east either (the delta)
-    const next = pearlLeg(bot, from, 96, { prefer: { x: 96, z: 0 }, walked: [{ x: 0, z: 90 }] })
-    assert.notDeepStrictEqual(next.point, { x: 0, z: 96 })
-    assert.ok(next.point.x <= 0 || next.ground.delta === 0, JSON.stringify(next))
-    // no warped forest, and west the spiral's next: west
+    // without the forest's: not into the delta, the next after it
+    assert.strictEqual(pearlLeg(bot, from, [{ x: 96, z: 0 }, { x: 96, z: 96 }]).index, 1)
+    // nothing seen: the spiral's first
     const { bot: plain, stop: stopPlain } = patchedWorld([])
     try {
-      assert.deepStrictEqual(pearlLeg(plain, from, 96, { prefer: { x: -96, z: 0 } }).point, { x: -96, z: 0 })
+      assert.strictEqual(pearlLeg(plain, from, spiral).index, 0)
     } finally {
       stopPlain()
     }
