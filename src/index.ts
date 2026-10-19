@@ -9,6 +9,7 @@ import { openSky } from './executor/explore'
 import type { MilestoneId } from './planner/progression'
 import { Diagnostics, type DiagnosticsOptions } from './diagnostics'
 import { StockPolicy, type StockOptions } from './planner/stock'
+import { advancementsDone, type AdvancementProgressPacket } from './core/advancements'
 
 export * from './core'
 export * from './planner'
@@ -77,6 +78,10 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     const stock = options.stock === false || options.stock.enabled === false ? null : new StockPolicy(options.stock)
     bot.survival = { options, tasks, memory, reflexes, handlers: {}, advancements: new Set(), play: async (playOptions) => await play(bot, playOptions), diagnostics, stock }
     bot.on('physicsTick', () => { memory.now = tasks.tick })
+    // the advancements as the server tells them: the End milestone's check is the dragon's minecraft:end/kill_dragon
+    ;(bot as any)._client?.on?.('advancements', (packet: AdvancementProgressPacket) => {
+      for (const id of advancementsDone(packet)) bot.survival.advancements.add(id)
+    })
     bot.on('death', () => {
       // the running and queued tasks can't go on; the death spot is where the items are
       if (bot.entity != null) {
