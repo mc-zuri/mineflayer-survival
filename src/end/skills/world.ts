@@ -348,7 +348,11 @@ export async function towerUp (bot: Bot, topY: number, opts: SkillOptions = {}):
   }
 }
 
-/** Digs straight down through the blocks under the feet to feet height `toY` (a pillar taken back down). */
+/**
+ * Digs straight down through the blocks under the feet to feet height `toY` (a pillar taken back down). The pillar is
+ * of whatever full blocks the bag had, the island's end stone too (dug for them): only bedrock and obsidian (the
+ * podium, a spike) are taken for ground over `toY`; the ground under `toY` is never dug.
+ */
 export async function digDown (bot: Bot, toY: number, opts: SkillOptions = {}): Promise<void> {
   const signal = opts.signal
   try {
@@ -358,7 +362,7 @@ export async function digDown (bot: Bot, toY: number, opts: SkillOptions = {}): 
       const below = bot.blockAt(feet.offset(0, -1, 0))
       if (below == null) throw new TaskError('NO_PATH', 'the block below is unloaded')
       if (below.boundingBox === 'block') {
-        if (below.name === 'bedrock' || below.name === 'obsidian' || below.name === 'end_stone') throw new TaskError('NO_PATH', `the ground (${below.name}) is under the feet`)
+        if (below.name === 'bedrock' || below.name === 'obsidian') throw new TaskError('NO_PATH', `the ground (${below.name}) is under the feet at ${feet.toString()}, over ${toY}`)
         await holdOneOf(bot, PICKAXES)
         await bot.dig(below, true)
       }

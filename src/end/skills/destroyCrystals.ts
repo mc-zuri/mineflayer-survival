@@ -305,6 +305,7 @@ async function destroyOne (bot: Bot, target: CrystalTarget, crystal: Entity, bro
     const base = same ? (pillar.current as { base: number }).base : groundY(get, column.x, column.z, topY + 2)
     if (base != null) pillar.current = { column, base }
     await pillarUp(bot, column, topY, { signal, avoid })
+    opts.log?.(`up the pillar at ${bot.entity.position.floored().toString()} (from ${String(base)}): ${breakBars.length} bars to break`)
     for (const bar of breakBars) {
       throwIfAborted(signal)
       const block = bot.blockAt(new Vec3(bar.x, bar.y, bar.z))

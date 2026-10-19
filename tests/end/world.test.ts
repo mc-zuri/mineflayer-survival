@@ -80,3 +80,21 @@ test('towerUp: a placement the jump missed is jumped for again, up to TOWER_MISS
   placed.clear()
   await assert.rejects(towerUp(mk(TOWER_MISSES), 66), /No block has been placed/)
 })
+
+test('digDown: a pillar of end stone (dug from the island for blocks) is taken down to its foot, the ground under it left', async () => {
+  const { digDown } = await import('../../src/end/skills/world')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // the island's end stone up to 61, a pillar of it from 62 to 79, the bot's feet at 80
+  const dug = new Set<number>()
+  const bot = fakeBot({ position: new Vec3(39.5, 80, 0.5), world: (p: Vec3) => p.y <= 79 && !dug.has(p.y) && (p.y <= 61 || (p.x === 39 && p.z === 0)) ? 'end_stone' : 'air' })
+  bot.equip = async () => {}
+  bot.dig = async (block: any) => {
+    assert.ok(block.position.y >= 62, `dug the ground at ${block.position.y}`)
+    dug.add(block.position.y)
+    bot.entity.position = new Vec3(39.5, block.position.y, 0.5)
+    bot.entity.onGround = true
+  }
+  await digDown(bot, 62)
+  assert.strictEqual(Math.floor(bot.entity.position.y), 62)
+  assert.strictEqual(dug.size, 18)
+})
