@@ -45,6 +45,8 @@ export interface CollectBlockArgs {
    * it drops (default false: NO_TOOL)
    */
   anyTool?: boolean
+  /** drops not picked up (the route's stone the stock has enough of) */
+  unwanted?: (name: string) => boolean
 }
 
 const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, 1, 0), new Vec3(0, -1, 0)]
@@ -239,7 +241,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       // Block.dropResources: the drops spawn on the break, the bot hears of them a tick or two later
       const centre = pos.offset(0.5, 0.5, 0.5)
       if ((bot.registry.blocks[block.type]?.drops?.length ?? 0) > 0) await waitUntil(bot, () => nearbyDrops(bot, centre, 3).length > 0, 10, signal)
-      const picked = await pickupDrops(bot, { near: centre, radius: 6, names: pickupNames([block.type]) }, signal)
+      const picked = await pickupDrops(bot, { near: centre, radius: 6, names: pickupNames([block.type]), unwanted: args.unwanted }, signal)
       trace('collectBlock: picked up', picked.items)
     }
   }
@@ -247,7 +249,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
   if (pickup) {
     for (const pos of positions) {
       const names = pickupNames(minedTypes)
-      if (nearbyDrops(bot, pos.offset(0.5, 0.5, 0.5), 8, names).length > 0) await pickupDrops(bot, { near: pos.offset(0.5, 0.5, 0.5), radius: 8, names }, signal)
+      if (nearbyDrops(bot, pos.offset(0.5, 0.5, 0.5), 8, names, args.unwanted).length > 0) await pickupDrops(bot, { near: pos.offset(0.5, 0.5, 0.5), radius: 8, names, unwanted: args.unwanted }, signal)
     }
   }
 
@@ -258,7 +260,8 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     throw new SkillError('NOT_FOUND', `${missing}: no more ${args.names?.join(', ') ?? 'blocks'} found`, res)
   }
   // (minecraft-data's drops: empty for the blocks that drop nothing without silk touch, as glass)
-  const dropsSomething = minedTypes.some(type => (bot.registry.blocks[type]?.drops?.length ?? 0) > 0)
+  // (and some of it wanted: the route's stone the stock has enough of is left lying)
+  const dropsSomething = minedTypes.some(type => (bot.registry.blocks[type]?.drops?.length ?? 0) > 0 && !dropsOf(type).every(name => args.unwanted?.(name) === true))
   if (pickup && res.count === 0 && dropsSomething && toolless < positions.length) {
     throw new SkillError('VERIFY_FAILED', `broke ${positions.length} blocks but no item came into the inventory`, res)
   }

@@ -110,3 +110,22 @@ test('junkToToss throws the leaves and leaf litter a shears\' dig picked up', ()
   const toss = junkToToss(stacks, 2)
   assert.deepEqual(toss.map(t => t.name).sort(), ['leaf_litter', 'oak_leaves'])
 })
+
+test('junkToToss: the route\'s stone over the keep count goes when `surplus` says so, and a stack of building blocks always stays (scaffold)', async () => {
+  const { ROUTE_STONE } = await import('../../src/executor/keep')
+  const { SCAFFOLD_ITEMS } = await import('../../src/executor/steps')
+  const stacks = [
+    { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 50 },
+    { name: 'andesite', count: 20 }, { name: 'raw_iron', count: 9 }
+  ]
+  const surplus = (name: string): boolean => ROUTE_STONE.has(name)
+  const scaffold = { items: SCAFFOLD_ITEMS, keep: 64 }
+  // the stock full: the andesite, then the cobblestone over a stack, the most first
+  assert.deepEqual(junkToToss(stacks, 6, { surplus, scaffold }), [{ name: 'andesite', count: 20 }, { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 50 }])
+  // the stock short of its high mark: only the junk
+  assert.deepEqual(junkToToss(stacks, 6, { surplus: () => false, scaffold }), [{ name: 'andesite', count: 20 }])
+  // no cobblestone: the junk that's all there is to build with keeps a stack's worth
+  const deep = [{ name: 'cobbled_deepslate', count: 64 }, { name: 'cobbled_deepslate', count: 40 }, { name: 'tuff', count: 30 }, { name: 'dirt', count: 10 }]
+  assert.deepEqual(junkToToss(deep, 4, { surplus, scaffold }), [{ name: 'cobbled_deepslate', count: 64 }, { name: 'dirt', count: 10 }])
+  assert.deepEqual(junkToToss(deep, 4, { surplus }).length, 4)
+})

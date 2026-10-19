@@ -119,6 +119,26 @@ export function tossValue (name: string): number | null {
   return 3
 }
 
+/**
+ * The stone and ground a dug route (the staircase, the tunnels, the pathfinder's breaks on its way to an ore) brings
+ * into the bag: its cells' drops, picked up as the bot walks into them (Player.aiStep touches them, ItemEntity.
+ * playerTouch). What the bag carries of it beyond the keep count is no use once the stock has its high mark, and is
+ * thrown away rather than stored (a 26.3 bag held 433 cobblestone down the diamonds' mine)
+ */
+export const ROUTE_STONE = new Set([
+  'cobblestone', 'cobbled_deepslate', 'deepslate', 'stone', 'andesite', 'diorite', 'granite', 'tuff', 'netherrack',
+  'blackstone', 'basalt', 'dirt', 'gravel'
+])
+
+/**
+ * The blocks the pathfinder bridges, towers and plugs lava with: however much is thrown away, `keep` of them stay
+ * (of all of `items` together)
+ */
+export interface ScaffoldKeep {
+  items: readonly string[]
+  keep: number
+}
+
 export interface SplitOptions {
   keep?: KeepRule
   /** the version's registry, for the keep rule */
@@ -148,15 +168,17 @@ export function splitInventory (items: readonly ItemCount[], opts: SplitOptions 
  * common stone, the junk drops, the rest), the most of an item first: the junk; what `surplus` says may go beyond
  * what's kept (the stock over its working set with no base to store it in); and only when `anything` is set, what
  * `splitInventory` would store. Never what's kept or needed, nor a valuable (isValuable) or an enchanted stack, whatever
- * the room it takes: fewer stacks than asked for then. Each entry is one stack.
+ * the room it takes: fewer stacks than asked for then, nor the building blocks `scaffold` keeps. Each entry is one stack.
  */
-export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number, enchanted?: boolean }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean } = {}): Array<{ name: string, count: number }> {
+export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number, enchanted?: boolean }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean, scaffold?: ScaffoldKeep } = {}): Array<{ name: string, count: number }> {
   const needed = opts.needed ?? {}
   const keepRule = opts.keep ?? defaultKeep
   const out: Array<{ name: string, count: number }> = []
   // the stacks beyond what's kept, smallest stacks last so a toss frees whole slots
   const left = new Map<string, number>()
   for (const s of stacks) left.set(s.name, (left.get(s.name) ?? 0) + s.count)
+  const scaffoldItems = new Set(opts.scaffold?.items ?? [])
+  let scaffoldLeft = [...left].reduce((n, [name, c]) => n + (scaffoldItems.has(name) ? c : 0), 0)
   const pick = (filter: (name: string) => boolean): void => {
     const candidates = [...stacks]
       .filter(s => s.enchanted !== true && tossValue(s.name) != null && filter(s.name))
@@ -172,8 +194,13 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number,
       const keep = Math.max(keepRule(s.name, opts.registry) ?? 0, needed[s.name] ?? 0)
       // a stack may go when what's left of the item without it still covers what's kept
       if (total - s.count < Math.min(keep, total)) continue
+      // and the building blocks left cover the pathfinder's bridges and towers (the dirt and andesite are, with no
+      // cobblestone)
+      const scaffold = scaffoldItems.has(s.name)
+      if (scaffold && scaffoldLeft - s.count < (opts.scaffold?.keep ?? 0)) continue
       out.push({ name: s.name, count: s.count })
       left.set(s.name, total - s.count)
+      if (scaffold) scaffoldLeft -= s.count
     }
   }
   pick(name => JUNK.has(name) || TOSS_FIRST.has(name) || opts.surplus?.(name) === true ||

@@ -281,6 +281,58 @@ test('a forced room throws the junk away, the least worth first, never a valuabl
   } finally {
     clearInterval(ticking)
   }
-  assert.deepEqual(junk.tossed, ['dirt', 'rotten_flesh'])
+  // (the dirt, all the bag has to build with, stays: SCAFFOLD_KEEP)
+  assert.deepEqual(junk.tossed, ['rotten_flesh'])
   for (const name of valuables.filter(n => n !== 'iron_ore')) assert.equal(count(junk, name), 1, name)
+})
+
+test('makeRoom throws the route\'s cobblestone over a stack away once the stock has its high mark, not before; the drops of it are unwanted then', async () => {
+  // (26.3 seed 2: 433 cobblestone in the bag down the diamonds' mine, the chests out of reach)
+  const fill = (): any => {
+    const bot = fakeBot()
+    // 4 stacks of cobblestone and 32 other things: the bag full
+    const stacks: Array<{ name: string, count: number }> = [1, 2, 3, 4].map(() => ({ name: 'cobblestone', count: 64 }))
+    for (const name of ['raw_iron', 'iron_pickaxe', 'diamond_pickaxe', 'bread', 'torch', 'coal', 'oak_log', 'diamond_sword', 'shield', 'bucket',
+      'water_bucket', 'iron_ingot', 'gold_ingot', 'lapis_lazuli', 'redstone', 'emerald', 'obsidian', 'ender_pearl', 'book', 'arrow',
+      'bow', 'crafting_table', 'furnace', 'white_bed', 'iron_axe', 'iron_shovel', 'flint_and_steel', 'compass', 'clock', 'shears', 'leather', 'diamond']) stacks.push({ name, count: 1 })
+    const slots = (): any[] => {
+      const out: any[] = new Array(46).fill(null)
+      stacks.forEach((st, i) => { if (st.count > 0) out[9 + i] = { name: st.name, count: st.count, type: registry.itemsByName[st.name].id, slot: 9 + i } })
+      return out
+    }
+    bot.inventory = { get slots () { return slots() }, inventoryStart: 9, inventoryEnd: 45, items: () => slots().slice(9, 45).filter(x => x != null) }
+    bot.tossed = []
+    // a toss takes the stacks of the item one by one
+    bot.toss = async (type: number, _meta: unknown, n: number) => {
+      const name = registry.items[type].name
+      bot.tossed.push(`${n} ${name}`)
+      for (const st of stacks) { if (st.name !== name || n <= 0) continue; const k = Math.min(n, st.count); st.count -= k; n -= k }
+    }
+    bot.blockAt = () => null
+    bot._client = new EventEmitter()
+    bot.entity.yaw = 0
+    bot.entities = {}
+    bot.look = async () => {}
+    return bot
+  }
+  const stocked = fill()
+  const short = fill()
+  const ex = new Executor(stocked, { runners: {}, stocked: name => name === 'cobblestone' })
+  const ticking = setInterval(() => { stocked.emit('physicsTick'); short.emit('physicsTick') }, 2)
+  try {
+    assert.equal(ex.unwantedDrop('cobblestone'), true)
+    assert.equal(ex.unwantedDrop('raw_iron'), false)
+    await ex.makeRoom({}, undefined, false)
+    // 4 slots wanted (2 free and 2 more): the 3 stacks over the one kept
+    assert.deepEqual(stocked.tossed, ['64 cobblestone', '64 cobblestone', '64 cobblestone'])
+    assert.equal(count(stocked, 'cobblestone'), 64)
+    // short of the high mark: kept for the base (none here: none of it goes), and picked up
+    const ex2 = new Executor(short, { runners: {}, stocked: () => false })
+    assert.equal(ex2.unwantedDrop('cobblestone'), false)
+    await ex2.makeRoom({}, undefined, false)
+    assert.deepEqual(short.tossed, [])
+    assert.equal(count(short, 'cobblestone'), 256)
+  } finally {
+    clearInterval(ticking)
+  }
 })

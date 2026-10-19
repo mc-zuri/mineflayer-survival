@@ -159,6 +159,15 @@ export function markUnlocked (mark: StockMark, reached: readonly MilestoneId[]):
   return mark.from == null || reached.includes(mark.from)
 }
 
+/**
+ * Whether the stock has its high mark of an item: each mark that counts it (and applies yet) is at its high mark or
+ * over, carried and stored; an item no mark counts (andesite, dirt) has all it needs
+ */
+export function stockedItem (marks: readonly StockMark[], name: string, inventory: Inventory, stored: Readonly<Record<string, number>>, reached: readonly MilestoneId[]): boolean {
+  const counting = marks.filter(m => markUnlocked(m, reached) && markValue(m, name, inventory.registry) > 0)
+  return stockLevels(counting, inventory, stored).every(l => l.have >= l.mark.high)
+}
+
 /** a level as a log word: "iron 12+20/32-64" (carried + stored / low - high) */
 export function describeLevel (l: StockLevel): string {
   const fmt = (n: number): string => String(Math.floor(n))

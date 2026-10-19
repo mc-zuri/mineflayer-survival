@@ -20,10 +20,10 @@ import { placeBlock } from '../skills/placeBlock'
 import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
 import { tossAway } from '../skills/pickupDrops'
-import { emptySlots, settleInventory, trace } from '../skills/util'
+import { countItems, emptySlots, trace } from '../skills/util'
 import { wornOutTools } from './durability'
-import { defaultKeep, junkToToss, splitInventory, type KeepRule } from './keep'
-import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, type StepContext, type StepOutcome, type StepRunner } from './steps'
+import { defaultKeep, junkToToss, ROUTE_STONE, splitInventory, type KeepRule, type ScaffoldKeep } from './keep'
+import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { noteVillage } from '../skills/village'
 import { rememberAround } from './explore'
@@ -65,6 +65,14 @@ export interface ExecutorOptions {
    * working set while there's no base to store it in; default nothing)
    */
   surplus?: (name: string) => boolean
+  /**
+   * Whether the stock has its high mark of an item (the runner's stock policy, over what's carried and stored): the
+   * route's stone (keep.ts ROUTE_STONE) beyond the keep count is thrown away then, not stored, and not picked up while
+   * the bag carries what's kept of it (default: always, nothing wanting more of it than the working set)
+   */
+  stocked?: (name: string) => boolean
+  /** the building blocks kept whatever is thrown away (default: SCAFFOLD_ITEMS, SCAFFOLD_KEEP of them) */
+  scaffold?: ScaffoldKeep
   /** strategies the plans never use (default: barter, until the nether skills do it) */
   exclude?: StrategyKind[]
   runners?: Partial<Record<PlanStep['kind'], StepRunner<any>>>
@@ -74,6 +82,9 @@ export interface ExecutorOptions {
   /** the spawn or base, where exploring turns around */
   home?: () => Vec3 | null
 }
+
+/** the building blocks (SCAFFOLD_ITEMS) the bag keeps whatever is thrown away: a stack for the pathfinder's bridges and towers */
+export const SCAFFOLD_KEEP = 64
 
 /** what a caller adds to the executor's plans (the night's: undergroundOnly; a stock top-up's: no loot, exclude) */
 export type PlanOptions = Pick<ObtainOptions, 'undergroundOnly' | 'exclude' | 'exactYields'>
@@ -149,6 +160,8 @@ export class Executor {
   /** the tool replacement in progress (it obtains with this executor: no replacing within it) */
   private replacing = false
   private makingRoom = false
+  /** what the requests being obtained need (neededItems): kept by the room made during a step */
+  private needed: Record<string, number> = {}
 
   constructor (readonly bot: Bot, opts: ExecutorOptions = {}) {
     this.memory = opts.memory ?? bot.survival.memory
@@ -160,6 +173,8 @@ export class Executor {
       minToolUses: opts.minToolUses ?? MIN_TOOL_USES,
       minFreeSlots: opts.minFreeSlots ?? 2,
       surplus: opts.surplus ?? (() => false),
+      stocked: opts.stocked ?? (() => true),
+      scaffold: opts.scaffold ?? { items: SCAFFOLD_ITEMS, keep: SCAFFOLD_KEEP },
       exclude: opts.exclude ?? ['barter']
     }
     this.runners = { ...DEFAULT_RUNNERS, ...opts.runners } as any
@@ -270,6 +285,7 @@ export class Executor {
       diag?.planMade(plans, requests.map(describeRequest), plan.steps.map(s => ({ desc: describeStep(s), blocks: s.kind === 'mine' ? s.blocks : undefined })))
       if (plan.steps.length === 0) return { plans, steps }
       const needed = neededItems(requests, plan)
+      this.needed = needed
       for (let i = 0; i < plan.steps.length; i++) {
         throwIfOwnerAborted(signal)
         const step = plan.steps[i]
@@ -405,10 +421,26 @@ export class Executor {
         protect: base?.bounds != null ? inBox(base.bounds) : undefined,
         // the logs for a new axe are cut with the worn one: handed back for a new axe, the plan for one started over
         // 30 times and the milestone failed (seed 5)
-        replacingTools: this.replacing
+        replacingTools: this.replacing,
+        unwanted: name => this.unwantedDrop(name)
       }
       return await runner(step, stepCtx)
     }, signal, { step, desc: describeStep(step) })
+  }
+
+  /** what making room may throw away beyond the keep count: the options' surplus, and the route's stone the stock has enough of */
+  isSurplus (name: string): boolean {
+    return this.options.surplus(name) || (ROUTE_STONE.has(name) && this.options.stocked(name))
+  }
+
+  /**
+   * A drop not gone for while working: the route's stone the stock has enough of (isSurplus), once the bag carries
+   * what's kept of it (the keep count, what the requests need)
+   */
+  unwantedDrop (name: string): boolean {
+    if (!ROUTE_STONE.has(name) || !this.options.stocked(name)) return false
+    const kept = Math.max(this.options.keep(name, this.bot.registry as any) ?? 0, this.needed[name] ?? 0)
+    return countItems(this.bot, name) >= kept
   }
 
   /** before a step: room in the inventory, a tool that won't break during it, the hooks */
@@ -463,7 +495,7 @@ export class Executor {
       }
       const want = this.options.minFreeSlots + 2 - emptySlots(this.bot)
       const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
-      const toss = junkToToss(stacks, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything: force, surplus: this.options.surplus })
+      const toss = junkToToss(stacks, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything: force, surplus: name => this.isSurplus(name), scaffold: this.options.scaffold })
       if (toss.length > 0) this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
       if (toss.length > 0) {
         await this.task('make room', async (s) => {

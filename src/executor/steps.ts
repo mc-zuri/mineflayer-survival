@@ -47,6 +47,8 @@ export interface StepContext {
    * worn one instead of handing back for a new one, which is what it is getting
    */
   replacingTools?: boolean
+  /** drops not gone for (the route's stone the stock has enough of, once the bag carries what's kept of it) */
+  unwanted?: (name: string) => boolean
 }
 
 export interface StepOutcome {
@@ -196,7 +198,7 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
     try {
       // a tool getting low comes back between fewer blocks (the pathfinder's digging on the way wears it too)
       const batch = kind != null && wornOutTools(bot.inventory.items(), { minUses: 64 }).some(w => w.kind === kind) ? 2 : 8
-      const res = await collectBlock(bot, { names, count: Math.min(left, batch), maxDistance: SEARCH_RADIUS, exclude }, signal)
+      const res = await collectBlock(bot, { names, count: Math.min(left, batch), maxDistance: SEARCH_RADIUS, exclude, unwanted: ctx.unwanted }, signal)
       for (const pos of res.positions) ctx.memory.forgetBlock(pos, dimensionOf(bot))
       // a crop taken from a farm (a village's) is sown again from what it dropped: the farm grows back
       if (growsAny(step.blocks)) await resow(bot, res.positions, names, signal)

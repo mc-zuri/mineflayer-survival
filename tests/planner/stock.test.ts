@@ -182,3 +182,18 @@ for (const version of VERSIONS) {
     assert.equal(gunpowder?.budget, 30 * 600)
   })
 }
+
+test('stockedItem: an item is stocked when each mark counting it is at its high mark, carried and stored; one no mark counts always', async () => {
+  const { stockedItem } = await import('../../src/planner/stock')
+  const registry = minecraftData('1.21.11')
+  const reached = ['wood', 'stone', 'food', 'iron'] as any
+  const inv = (items: Record<string, number>): Inventory => new Inventory(registry as any, Object.entries(items).map(([name, count]) => ({ name, count })))
+  // the stone mark: 3 stacks low, 5 high, cobblestone and cobbled deepslate counted
+  assert.equal(stockedItem(STOCK_MARKS, 'cobblestone', inv({ cobblestone: 256 }), {}, reached), false)
+  assert.equal(stockedItem(STOCK_MARKS, 'cobblestone', inv({ cobblestone: 64 }), { cobblestone: 200, cobbled_deepslate: 56 }, reached), true)
+  assert.equal(stockedItem(STOCK_MARKS, 'cobbled_deepslate', inv({ cobblestone: 320 }), {}, reached), true)
+  // andesite no mark counts
+  assert.equal(stockedItem(STOCK_MARKS, 'andesite', inv({}), {}, reached), true)
+  // before the wood milestone the stone mark doesn't apply
+  assert.equal(stockedItem(STOCK_MARKS, 'cobblestone', inv({}), {}, []), true)
+})

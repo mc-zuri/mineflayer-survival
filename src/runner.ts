@@ -15,7 +15,7 @@ import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './co
 import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { comeUp, dayPhase, nightAction, nightGoals, topUpPlaces } from './planner/schedule'
-import { describeLevel, StockPolicy, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
+import { describeLevel, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
 import { onSurface, SURFACE_MIN_Y } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
@@ -336,6 +336,9 @@ export class Runner {
       // and with no base's chests to take the rest, the stock over its working set goes when room is wanted (the
       // tunnels' cobblestone, 160 of it on 26.3 seed 3, the bag full: the diamond pickaxe's craft failed for room)
       surplus: options.executor?.surplus ?? (name => this.stock?.keepCount(name, bot.registry as any) != null && (baseRecord(this.memory)?.chests.length ?? 0) === 0),
+      // the route's stone over the working set is thrown away once the stock has its high mark (stored before: a 26.3
+      // bag down the diamonds' mine held 433 cobblestone)
+      stocked: options.executor?.stocked ?? (name => this.stock == null || this.bot.entity == null || stockedItem(this.stock.marks, name, ownedInventory(this.bot), this.stockStored(), this.reached.map(r => r.id))),
       hooks: {
         ...options.executor?.hooks,
         beforeStep: async (step) => {
