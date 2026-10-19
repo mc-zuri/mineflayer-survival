@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
 import { breathZone, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
-import { EAT_CLEAR_PERCHED, RETREAT_DISTANCE, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, hurtingContact, retreatSpot, safeToEat, takeoffStepBack } from '../../src/end/skills/fightDragon'
+import { ARROW_FLIGHT_TICKS, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, hurtingContact, retreatSpot, safeToEat, takeoffStepBack } from '../../src/end/skills/fightDragon'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
 
@@ -239,4 +239,13 @@ test('fightDragon steps back from a dragon taking off, out to TAKEOFF_CLEARANCE 
   await assert.rejects(fightDragon(bot, { destroyCrystals: false, bow: false, maxTicks: 3 }), /alive after 3 ticks/)
   assert.deepEqual(looks, [])
   assert.notEqual(bot.controls.forward, true)
+})
+
+test('arrowHit: a health drop in flight within ARROW_FLIGHT_TICKS of a shot; none on the perch (arrows do nothing there) or long after', () => {
+  assert.equal(arrowHit(200, 191, 'holding_pattern', 20), true)
+  assert.equal(arrowHit(200, 191, 'strafe_player', ARROW_FLIGHT_TICKS), true)
+  assert.equal(arrowHit(200, 191, 'holding_pattern', ARROW_FLIGHT_TICKS + 1), false)
+  assert.equal(arrowHit(200, 191, 'sitting_scanning', 5), false)
+  assert.equal(arrowHit(191, 192, 'holding_pattern', 5), false)
+  assert.equal(arrowHit(200, 191, null, 5), false)
 })

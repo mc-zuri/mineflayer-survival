@@ -1016,7 +1016,7 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
     })
   }
   const fight = await executor.task('fight the dragon', async (s) => await fightDragon(bot, { signal: s, log: line => log(`dragon: ${line}`) }), signal)
-  log(`dragon ${fight.killed ? 'killed' : 'not killed'} in ${fight.ticks} ticks (${fight.meleeHits} hits, ${fight.arrows} arrows)`)
+  log(`dragon ${fight.killed ? 'killed' : 'not killed'} in ${fight.ticks} ticks (${fight.meleeHits} hits, ${fight.arrows} arrows, ${fight.arrowHits} of them hits)`)
   if (!fight.killed) return
   // the milestone's check: vanilla's end/kill_dragon advancement
   bot.survival.advancements.add('end/kill_dragon')

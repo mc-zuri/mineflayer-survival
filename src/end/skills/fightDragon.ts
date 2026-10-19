@@ -216,6 +216,8 @@ export interface FightDragonResult {
   ticks: number
   meleeHits: number
   arrows: number
+  /** the arrows seen to hit (the dragon's health down in flight soon after a shot) */
+  arrowHits: number
   /** the perches seen (melee windows opened) */
   perches: number
   /** the dragon's health when last seen */
@@ -223,6 +225,13 @@ export interface FightDragonResult {
 }
 
 const ARROW_NAMES = ['arrow', 'spectral_arrow', 'tipped_arrow']
+/** a health drop in flight this soon after a shot counts as the arrow's (aimAtDragon's flights are 60 ticks at most) */
+export const ARROW_FLIGHT_TICKS = 60
+
+/** the dragon's health went down while it flew, within ARROW_FLIGHT_TICKS of a shot: the arrow hit */
+export function arrowHit (before: number, after: number, phase: DragonPhase | null, ticksSinceShot: number): boolean {
+  return after < before && phase != null && !isSitting(phase) && ticksSinceShot <= ARROW_FLIGHT_TICKS
+}
 
 /**
  * Fights the Ender Dragon until it dies and the exit portal opens. Each tick it reads the dragon (phase from its
@@ -241,7 +250,7 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   // not in the End (resumed after the exit portal carried it out): won when the server says so
   if (normalizeDimension(bot.game?.dimension) !== 'the_end') {
     const won = bot.survival?.advancements?.has('end/kill_dragon') === true
-    return { killed: won, ticks: 0, meleeHits: 0, arrows: 0, perches: 0, health: won ? 0 : 200 }
+    return { killed: won, ticks: 0, meleeHits: 0, arrows: 0, arrowHits: 0, perches: 0, health: won ? 0 : 200 }
   }
   // the podium's chunk may still be on its way when the bot has just come to the island
   let foundY = findPortalY(get)
@@ -278,6 +287,9 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
   let meleeHits = 0
   let crits = 0
   let arrows = 0
+  /** the dragon's health went down in flight within ARROW_FLIGHT_TICKS of a shot */
+  let arrowHits = 0
+  let lastShot = -Infinity
   let perches = 0
   let wasOpen = false
   let drawing: number | null = null
@@ -320,8 +332,8 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         stopDraw()
         bot.clearControlStates()
         const won = killed || bot.survival?.advancements?.has('end/kill_dragon') === true
-        log(`out of the End after ${tick} ticks: the dragon ${won ? 'dead' : 'alive'}`)
-        return { killed: won, ticks: tick, meleeHits, arrows, perches, health: won ? 0 : health }
+        log(`out of the End after ${tick} ticks: the dragon ${won ? 'dead' : 'alive'}; ${meleeHits} hits, ${arrows} arrows (${arrowHits} hit)`)
+        return { killed: won, ticks: tick, meleeHits, arrows, arrowHits, perches, health: won ? 0 : health }
       }
       if (tick++ > maxTicks) throw new TaskError('TIMEOUT', `the dragon is alive after ${maxTicks} ticks (health ${health})`)
       const dragon = Object.values(bot.entities).find(e => e.name === 'ender_dragon') ?? null
@@ -332,7 +344,16 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         const view = { position: dragon.position.clone(), yaw: vanillaYaw(dragon.yaw) }
         tracker.update({ tick, phase: typeof phase === 'number' ? phase : 0, ...view })
         const h = metadataValue(bot, dragon, 'health')
-        if (typeof h === 'number') { health = h; tracker.updateHealth(h) }
+        if (typeof h === 'number') {
+          // a drop in flight soon after a shot: the arrow's (no melee reaches it up there)
+          if (arrowHit(health, h, tracker.phase, tick - lastShot)) {
+            arrowHits++
+            log(`arrow hit: the dragon at ${h.toFixed(1)} (${arrowHits} of ${arrows})`)
+          }
+          health = h
+          tracker.updateHealth(h)
+        }
+        if (tick % 1200 === 0) log(`tick ${tick}: the dragon at ${health.toFixed(1)} (${String(tracker.phase)}), the bot at ${bot.health.toFixed(1)}; ${meleeHits} hits (${crits} crits), ${arrows} arrows (${arrowHits} hit), ${perches} perches`)
         if (health <= 0 || tracker.phase === 'dying') killed = true
       }
       if (killed || (dragon == null && exitPortalOpen(get, portal))) {
@@ -342,8 +363,8 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         if (foundY == null) portal = exitPortal(findPortalY(get) ?? portalY)
         for (let t = 0; t < 600 && !exitPortalOpen(get, portal); t++) await waitTicks(bot, 1, signal)
         if (!exitPortalOpen(get, portal)) throw new TaskError('TIMEOUT', 'the dragon died but the exit portal stayed shut')
-        log(`dragon dead after ${tick} ticks: ${meleeHits} hits (${crits} crits), ${arrows} arrows, ${perches} perches`)
-        return { killed: true, ticks: tick, meleeHits, arrows, perches, health: 0 }
+        log(`dragon dead after ${tick} ticks: ${meleeHits} hits (${crits} crits), ${arrows} arrows (${arrowHits} hit), ${perches} perches`)
+        return { killed: true, ticks: tick, meleeHits, arrows, arrowHits, perches, health: 0 }
       }
 
       const me = bot.entity.position
@@ -539,6 +560,8 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
             bot.deactivateItem()
             drawing = null
             arrows++
+            lastShot = tick
+            log(`arrow ${arrows} at the dragon (${String(window.phase)}, ${dragon.position.distanceTo(me).toFixed(0)} off, ${solution.ticks} ticks of flight, the dragon at ${health.toFixed(1)})`)
           } else if (tick - drawing > 80) {
             stopDraw()
           }
