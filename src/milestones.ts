@@ -895,9 +895,10 @@ async function makeKitSpares (bot: Bot, executor: Executor, signal: AbortSignal,
 
 /**
  * The trip kit left by the bot (skills/tripKit) unless one with something in it is known: a chest got (and a bed when
- * cheap), the spares put in, the respawn point set by it
+ * cheap), the spares put in, the respawn point set by it. `beforeStash` runs once the chest and bed are got, before
+ * they are put down (back to where the kit belongs: the bed's sheep may be hunted far off)
  */
-export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, beforeStash?: () => Promise<void>): Promise<void> {
   const known = executor.memory.getPois(TRIP_KIT, { dimension: 'overworld', near: bot.entity.position })[0]
   if (known != null && Object.values(executor.memory.chestAt(known, 'overworld')?.items ?? {}).some(n => n > 0)) return
   // the kit's chest a respawn emptied, by: filled again (a 26.3 bot respawned by the stronghold went 68000 ticks up
@@ -928,6 +929,7 @@ export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortS
       })
     }
     await makeKitSpares(bot, executor, signal, log)
+    await beforeStash?.()
     const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s), signal)
     log(`trip kit at ${kit.chest.toString()}: ${Object.entries(kit.stored).map(([n, c]) => `${c} ${n}`).join(', ')}${kit.bed != null ? ', the respawn point by it' : `; no respawn point by it: ${kit.noBed ?? '?'}`}`)
   } catch (err) {
@@ -1043,8 +1045,16 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
         log(`End: no carved pumpkin: ${(err as Error).message}`)
       })
     }
-    // a spare kit by the portal room and the respawn point by it, before the End (a death there was the game lost)
-    await leaveTripKit(bot, executor, signal, log)
+    // a spare kit by the portal room and the respawn point by it, before the End (a death there was the game lost);
+    // the kit's chest and bed got (a bed's sheep hunted 80 blocks off), back to the room before they are put down,
+    // and again after: enterEnd reads the frames within 12 blocks ('no end portal frame around', 26.3 twice in two)
+    const backToRoom = async (): Promise<void> => {
+      if (portalRoomNear(bot)) return
+      log('back to the portal room')
+      await executor.task('to the portal room', async (s) => await strongholdToPortalRoom(bot, {}, s), signal)
+    }
+    await leaveTripKit(bot, executor, signal, log, backToRoom)
+    await backToRoom()
     await executor.task('into the End', async (s) => await enterEnd(bot, { signal: s }), signal)
   }
   // the drops of a death on the island, while they last and lie on ground

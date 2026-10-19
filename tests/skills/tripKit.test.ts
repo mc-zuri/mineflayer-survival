@@ -90,6 +90,25 @@ test('leaveTripKit fills the kit\'s emptied chest again, making no new chest or 
   assert.deepStrictEqual(calls, ['leave a trip kit'])
 })
 
+test('leaveTripKit: the chest and bed got, beforeStash (back to the portal room) runs before they are put down', async () => {
+  const { leaveTripKit } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(2320.5, 27, 936.5) })
+  bot.game.dimension = 'overworld'
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    plan: () => ({ ok: true, cost: 0 }),
+    obtain: async (want: any) => { calls.push(`obtain ${String(want[0].item)}`) },
+    task: async (name: string) => { calls.push(name); return { chest: new Vec3(2352, -22, 1016), stored: {}, bed: null } }
+  }
+  await leaveTripKit(bot, executor, new AbortController().signal, () => {}, async () => { calls.push('back to the room') })
+  assert.deepStrictEqual(calls.filter(c => !c.startsWith('obtain')).slice(-2), ['back to the room', 'leave a trip kit'])
+  assert.ok(calls.indexOf('obtain chest') < calls.indexOf('back to the room'))
+})
+
 test('nearPortal: a cell 2 or fewer blocks from a portal\'s blocks is not for the kit', async () => {
   const { nearPortal } = await import('../../src/skills/tripKit')
   const { Vec3 } = await import('vec3')
