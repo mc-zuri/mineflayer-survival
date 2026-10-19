@@ -19,11 +19,11 @@ import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd, readPortalRoom
 import { collectBlock } from './skills/collectBlock'
 import { countBookshelves, enchant, enchantGear, findEnchantingTable } from './skills/enchant'
 import { applyBooks } from './skills/anvil'
-import { experience } from './skills/xp'
+import { experience, gainLevels } from './skills/xp'
 import { BREEDING_FOOD, breedAnimals, isAdult, releaseAnimals } from './skills/husbandry'
 import { plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
-import { countItems } from './skills/util'
+import { countItems, waitTicks } from './skills/util'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
@@ -39,6 +39,64 @@ export function netherNeeds (inv: { count: (name: string) => number }): { rods: 
   const powder = inv.count('blaze_powder') + 2 * inv.count('blaze_rod')
   const wanted = Math.max(0, EYES_TARGET - eyes)
   return { rods: Math.max(0, Math.ceil((wanted - powder) / 2)), pearls: Math.max(0, wanted - inv.count('ender_pearl')) }
+}
+
+/** ticks the enchanting milestone may spend growing its herd for the books' leather (lockstep: days of game time) */
+export const HERD_BUDGET_TICKS = 150000
+/** a wait between the herd's chores: levels gained meanwhile (mining, smelting), or the time let pass */
+export const HERD_CHORE_TICKS = 3000
+
+/**
+ * The herd's next chore for `want` leather: kill the surplus adults when they (beyond the breeders) cover the leather
+ * still wanted, else breed (the cows, the wheat and the cooldown permitting) and wait for the calves to grow
+ * (24000 ticks, AgeableMob.BABY_START_AGE)
+ */
+export function herdChore (state: { leather: number, want: number, adults: number, calves: number, wheat: number }): 'done' | 'kill' | 'breed' {
+  const needed = state.want - state.leather
+  if (needed <= 0) return 'done'
+  if (state.adults - BREEDERS_KEPT >= needed) return 'kill'
+  return 'breed'
+}
+
+/**
+ * Leather from the bot's own herd until `want` are held or HERD_BUDGET_TICKS are gone: every pair bred as its cooldown
+ * ends, the calves waited for while levels are gained, the wheat farm harvested for their food (not baked), and the
+ * surplus adults killed once they cover what's wanted (two kept to breed on)
+ */
+export async function leatherFromHerd (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const start = executor.tasks.tick
+  const near = (e: any): boolean => e.position.distanceTo(bot.entity.position) <= 48
+  for (;;) {
+    if (signal.aborted) throw signal.reason
+    const cows = Object.values(bot.entities).filter(e => (e.name === 'cow' || e.name === 'mooshroom') && near(e))
+    const state = { leather: countItems(bot, 'leather'), want, adults: cows.filter(e => isAdult(bot, e)).length, calves: cows.filter(e => !isAdult(bot, e)).length, wheat: countItems(bot, 'wheat') }
+    const chore = herdChore(state)
+    if (chore === 'done' || executor.tasks.tick - start > HERD_BUDGET_TICKS) {
+      log(`herd: ${state.leather} leather of ${want} (${state.adults} cows, ${state.calves} calves) after ${executor.tasks.tick - start} ticks`)
+      return state.leather
+    }
+    if (chore === 'kill') {
+      await executor.obtain([{ item: 'leather', count: state.leather + 1 }], signal).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`herd: no leather: ${(err as Error).message}`)
+      })
+      continue
+    }
+    // the farm's wheat for the herd, and the pairs ready
+    await harvestGrownFarms(bot, executor, signal, log, false).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+    if (countItems(bot, 'wheat') >= 2 && state.adults >= 2) {
+      await executor.task('breed the cows', async (s) => await breedAnimals(bot, { mob: 'cow', pairs: Math.floor(state.adults / 2) }, s), signal)
+        .then(r => log(`herd: ${r.fed} fed (${state.adults} cows, ${state.calves} calves, ${state.leather} leather of ${want})`))
+        .catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+    }
+    // the calves grow meanwhile: levels gained (the table's top offer wants 30), or the time let pass
+    try {
+      await executor.task('levels while the calves grow', async (s) => await gainLevels(bot, { level: 30, maxTicks: HERD_CHORE_TICKS }, s), signal)
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      await executor.task('wait for the calves', async (s) => { await waitTicks(bot, HERD_CHORE_TICKS / 3, s) }, signal)
+    }
+  }
 }
 
 /** books kept out of the shelves, to enchant and put on the gear at an anvil */
@@ -154,7 +212,15 @@ export async function enchantBooksAndApply (bot: Bot, executor: Executor, signal
 
 export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {
   await keepFarms(bot, executor, signal, log)
+  // the wheat farm the herd is fed from (seeds held, water near)
+  await startFarm(bot, executor, signal, log).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
   await executor.obtain(milestone.goals(state), signal)
+  // the herd grown for the 15 shelves' books (45, a leather each) and the anvil's book, when the bot keeps cows
+  const kept = Object.values(bot.entities).filter(e => e.name === 'cow' && e.position.distanceTo(bot.entity.position) <= 48).length
+  if (kept >= 2) {
+    const books = 3 * BOOKSHELVES + BOOKS_KEPT
+    await leatherFromHerd(bot, executor, Math.max(0, books - countItems(bot, 'book') - 3 * countItems(bot, 'bookshelf')), signal, log)
+  }
   const table = findEnchantingTable(bot, { memory: executor.memory, maxDistance: 16 })
   const around = table != null ? countBookshelves(pos => bot.blockAt(pos) as any, table.position) : 0
   // as many shelves as the leather at hand makes books for: what's held and the adult cows about (two kept to breed);
@@ -415,7 +481,7 @@ export const FARM_RANGE = 96
  * The renewable food first: a farm the bot sowed that has grown (Executor.farmCost: nothing left to wait), within
  * FARM_RANGE, harvested and sown again, and its wheat baked into bread. Resolves the bread made.
  */
-export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, bake = true): Promise<number> {
   const dimension = normalizeDimension(bot.game?.dimension)
   let bread = 0
   for (const farm of knownFarms(executor.memory, dimension)) {
@@ -427,7 +493,7 @@ export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: A
     await executor.runStep({ kind: 'farm', item, count: farm.cells.length, crop: farm.crop, seed: SEED_OF[farm.crop], plots: 0, cycles: 1, cost }, signal)
   }
   const wheat = countItems(bot, 'wheat')
-  if (wheat >= 3) {
+  if (bake && wheat >= 3) {
     const before = countItems(bot, 'bread')
     await executor.obtain([{ item: 'bread', count: before + Math.floor(wheat / 3) }], signal)
     bread = countItems(bot, 'bread') - before

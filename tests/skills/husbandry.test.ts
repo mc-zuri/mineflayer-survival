@@ -96,3 +96,12 @@ test('releaseSpots and waterHoleSite on a hillside: ground with room over it abo
   assert.ok(site != null)
   assert.strictEqual(hill(site).name, 'grass_block')
 })
+
+test('herdChore: breed and wait while the adults beyond the two breeders fall short of the leather wanted; then kill', async () => {
+  const { herdChore } = await import('../../src/milestones')
+  assert.strictEqual(herdChore({ leather: 0, want: 46, adults: 8, calves: 4, wheat: 60 }), 'breed')
+  assert.strictEqual(herdChore({ leather: 10, want: 46, adults: 38, calves: 6, wheat: 20 }), 'kill')
+  assert.strictEqual(herdChore({ leather: 45, want: 46, adults: 3, calves: 0, wheat: 0 }), 'kill')
+  assert.strictEqual(herdChore({ leather: 45, want: 46, adults: 2, calves: 0, wheat: 0 }), 'breed')
+  assert.strictEqual(herdChore({ leather: 46, want: 46, adults: 2, calves: 0, wheat: 0 }), 'done')
+})
