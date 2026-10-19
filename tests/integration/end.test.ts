@@ -33,6 +33,19 @@ const KIT = [
   'item replace entity survivor armor.feet with netherite_boots[enchantments={protection:4,feather_falling:4}]'
 ]
 
+/** the e2e's End kit: diamond armor and sword, unenchanted */
+const DIAMOND_KIT = [
+  'give survivor diamond_sword',
+  'give survivor bow',
+  'give survivor arrow 64',
+  'give survivor cobblestone 64',
+  'give survivor cooked_beef 32',
+  'item replace entity survivor armor.head with diamond_helmet',
+  'item replace entity survivor armor.chest with diamond_chestplate',
+  'item replace entity survivor armor.legs with diamond_leggings',
+  'item replace entity survivor armor.feet with diamond_boots'
+]
+
 async function commands (server: TestServer, list: string[]): Promise<void> {
   for (const c of list) await server.command(c)
 }
@@ -181,6 +194,49 @@ describe(`the End on ${DEFAULT_VERSION}: into the End through a frame of /setblo
     assert.ok(isInEnd(bot))
     assert.strictEqual(bot.inventory.items().filter(i => i.name === 'ender_eye').reduce((n, i) => n + i.count, 0), 3)
     assert.ok(await passes(server, `execute in minecraft:the_end if entity @a[name=${USER},distance=0..]`), 'the server has the bot elsewhere')
+  })
+
+  test('a perched dragon with the ground a block up round the podium: hit in melee with no touches of its head or neck (diamond kit, unenchanted)', async (t) => {
+    await reset(server, bot)
+    await commands(server, DIAMOND_KIT)
+    await toTheIsland(server, bot)
+    const portalY = findPortalY(blockGetter(bot))
+    assert.ok(portalY != null)
+    // the 26.3 run's island: the ground round the podium a block over the portal's level (no room under the zones)
+    await commands(server, [
+      `execute in minecraft:the_end run fill -12 ${portalY} -12 12 ${portalY} -4 minecraft:end_stone replace air`,
+      `execute in minecraft:the_end run fill -12 ${portalY} 4 12 ${portalY} 12 minecraft:end_stone replace air`,
+      `execute in minecraft:the_end run fill -12 ${portalY} -3 -4 ${portalY} 3 minecraft:end_stone replace air`,
+      `execute in minecraft:the_end run fill 4 ${portalY} -3 12 ${portalY} 3 minecraft:end_stone replace air`,
+      'execute in minecraft:the_end run kill @e[type=minecraft:end_crystal]',
+      // full health, and down to the podium (DragonLandingPhase, then the sitting phases)
+      'execute in minecraft:the_end run data merge entity @e[type=minecraft:ender_dragon,limit=1] {Health:200f,DragonPhase:3}'
+    ])
+    await bot.waitForTicks(5)
+    let touches = 0
+    let hurts = 0
+    const onHurt = (entity: any, source: any): void => {
+      if (entity !== bot.entity) return
+      hurts++
+      if (source?.name === 'ender_dragon') touches++
+    }
+    bot.on('entityHurt', onHurt)
+    const lines: string[] = []
+    try {
+      await timed(t, bot, 'fightDragon (a perch)', async () => await fightDragon(bot, { seed: parseSeed(SEED), destroyCrystals: false, bow: false, maxTicks: 1500, log: line => lines.push(line) }).catch(err => {
+        if (!/alive after 1500 ticks/.test((err as Error).message)) throw err
+      }))
+    } finally {
+      bot.off('entityHurt', onHurt)
+    }
+    t.diagnostic(lines.filter(l => /perched|hurt|under the dragon|tick/.test(l)).join('\n'))
+    const health = await server.command('execute in minecraft:the_end run data get entity @e[type=minecraft:ender_dragon,limit=1] Health')
+    const left = Number(/(\d+(\.\d+)?)f/.exec(health.join(' '))?.[1] ?? 'NaN')
+    t.diagnostic(`dragon at ${left}, ${touches} hurts by the dragon, ${hurts} in all`)
+    assert.ok(lines.some(l => /perched/.test(l)), 'it never perched')
+    assert.ok(left < 200, `no melee hit landed (${health.join(' ')})`)
+    // a touch at the landing or the takeoff may come; not one after another under the head
+    assert.ok(touches <= 2, `${touches} hurts by the dragon`)
   })
 
   test('a dragon brought down to 40 health and no crystals: the bot kills it and leaves', async (t) => {
