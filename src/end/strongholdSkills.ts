@@ -17,7 +17,7 @@ import { TOO_FAR_DISTANCE, inferThrowDirection, type ThrowDirection, type Vec } 
 import { secondThrowPoint, triangulate, type EyeRay, type Triangulation, type XZ } from './triangulate'
 import { guessFromOneThrow } from './stronghold'
 import { analyzePortalRoom, findPortalFrames, type PortalRoom } from './portalRoom'
-import { inWater, toShore } from '../executor/explore'
+import { ensureSurface, inWater, onTheSurface, toShore } from '../executor/explore'
 
 // ---- eyes
 
@@ -233,7 +233,7 @@ export async function locateStronghold (bot: Bot, args: LocateStrongholdArgs = {
     }
     const side = secondThrowPoint(firstRay, args.sideways ?? 500)
     trace('locateStronghold: second throw from', side)
-    await travel(bot, { target: new Vec3(side.x, bot.entity.position.y, side.z), range: 8, hop: args.hop }, signal)
+    await onTheSurface(bot, async () => await travel(bot, { target: new Vec3(side.x, bot.entity.position.y, side.z), range: 8, hop: args.hop }, signal))
     const second = await throwReadable(bot, signal)
     throws.push(second)
     if (second.near != null) return done(bot, null, second.near, throws, ticks)
@@ -250,13 +250,23 @@ export async function locateStronghold (bot: Bot, args: LocateStrongholdArgs = {
 }
 
 /**
+ * Out to where a thrown eye can be had back: out of the water to the shore, and up to the open sky from a cave or a
+ * mine (an eye flies through the rock, EyeOfEnder having no collision, and came down out of reach in the rock over
+ * the bot: 8 eyes lost on 26.3 seed 2, thrown from y -22 to -2 by the stronghold)
+ */
+export async function toThrowingSpot (bot: Bot, signal?: AbortSignal): Promise<void> {
+  if (inWater(bot)) await toShore(bot, signal)
+  await ensureSurface(bot, signal)
+}
+
+/**
  * A throw whose flight could be read (the bot settled first; another eye when one wasn't seen to fly), 3 tries. From
  * the shore when the bot is in the water (a point 500 blocks off is often out at sea): swimming, it never settles, and
  * the eyes drop into the sea round it.
  */
 async function throwReadable (bot: Bot, signal?: AbortSignal): Promise<ThrowEyeResult> {
   let last: ThrowEyeResult | null = null
-  if (inWater(bot)) await toShore(bot, signal)
+  await toThrowingSpot(bot, signal)
   for (let i = 0; i < 3; i++) {
     await waitUntil(bot, () => bot.entity.onGround && bot.entity.velocity.norm() < 0.1, 40, signal)
     last = await throwEnderEye(bot, {}, signal)
@@ -307,13 +317,14 @@ export async function reachStronghold (bot: Bot, args: ReachStrongholdArgs = {},
       if (d > 6) {
         trace('reachStronghold: to', target, Math.round(d), 'blocks')
         try {
-          await travel(bot, { target: new Vec3(target.x, bot.entity.position.y, target.z), range: 4, hop: args.hop }, signal)
+          const to = new Vec3(target.x, bot.entity.position.y, target.z)
+          await onTheSurface(bot, async () => await travel(bot, { target: to, range: 4, hop: args.hop }, signal))
         } catch (err) {
           if (isAbort(err)) throw err
           trace('reachStronghold: travel stopped:', (err as Error).message)
         }
       }
-      if (inWater(bot)) await toShore(bot, signal)
+      await toThrowingSpot(bot, signal)
       const t = await throwEnderEye(bot, {}, signal)
       if (t.near != null) {
         bot.survival?.memory.addPoi(STRONGHOLD_SPOT, { x: t.near.x, y: 0, z: t.near.z }, 'overworld', 'eye came down')

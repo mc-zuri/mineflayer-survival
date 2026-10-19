@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, EYE_RAY } from '../../src/end/strongholdSkills'
+import { STRONGHOLD_BLOCKS, craftEyes, overWater, rememberRay, rememberedRays, toThrowingSpot, EYE_RAY } from '../../src/end/strongholdSkills'
 import { isSkillError } from '../../src/skills/errors'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
@@ -37,4 +37,21 @@ test('the throws\' rays are remembered and come back from a save: the search goe
   assert.deepStrictEqual(rays[0], { origin: { x: -27, z: 11 }, direction: { x: 0.12963, z: -0.99156 } })
   assert.deepStrictEqual(rays[1].direction, { x: -0.87773, z: 0.47917 })
   assert.strictEqual(back.getPois(EYE_RAY).length, 2)
+})
+
+test('toThrowingSpot: a bot on dry ground under the open sky throws where it stands; one in a cave goes up first', async () => {
+  const { Vec3 } = require('vec3')
+  const used: string[] = []
+  const pathfinder = new Proxy({}, { get: (_t, k) => { used.push(String(k)); return () => { throw new Error('no pathfinder here') } } })
+  const surface = fakeBot({ position: new Vec3(0.5, 70, 0.5), world: (p: any) => p.y < 70 ? 'stone' : 'air' })
+  surface.game.dimension = 'overworld'
+  surface.pathfinder = pathfinder
+  await toThrowingSpot(surface)
+  assert.deepStrictEqual(used, [])
+  // underground: a roof of rock over a cave at y -20
+  const cave = fakeBot({ position: new Vec3(0.5, -20, 0.5), world: (p: any) => p.y >= -20 && p.y <= -18 ? 'air' : 'stone' })
+  cave.game.dimension = 'overworld'
+  cave.pathfinder = pathfinder
+  await toThrowingSpot(cave).catch(() => {})
+  assert.ok(used.length > 0, 'no way up was looked for')
 })
