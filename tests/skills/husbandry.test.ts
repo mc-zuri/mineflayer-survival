@@ -228,3 +228,12 @@ test('leatherFromHerd gets the pen\'s fences outside the pen\'s task (an obtain 
   assert.equal(calls, 2)
   assert.deepEqual(log.filter(l => /fences/.test(l)), ['out obtain #wooden_fences,#fence_gates'])
 })
+
+test('shelvesForPaper: the shelves the paper and canes at hand make books for', async () => {
+  const { shelvesForPaper } = await import('../../src/milestones')
+  const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
+  // 64 paper and 21 canes: 28 books, one kept, the table made: 9 shelves
+  assert.strictEqual(shelvesForPaper(inv({ enchanting_table: 1, paper: 64, sugar_cane: 21 })), 9)
+  assert.strictEqual(shelvesForPaper(inv({ enchanting_table: 1, paper: 200 })), 15)
+  assert.strictEqual(shelvesForPaper(inv({})), 0)
+})

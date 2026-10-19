@@ -179,6 +179,15 @@ export function shelvesForLeather (inv: { count: (name: string) => number }, adu
   return Math.min(BOOKSHELVES, around + inv.count('bookshelf') + Math.max(0, Math.floor(books / 3)))
 }
 
+/**
+ * The shelves the paper at hand makes books for (3 a book: the paper and the sugar cane held; the table's book first,
+ * and BOOKS_KEPT), plus the shelves held and round the table; at most BOOKSHELVES
+ */
+export function shelvesForPaper (inv: { count: (name: string) => number }, around = 0, reserve = BOOKS_KEPT): number {
+  const books = inv.count('book') + Math.floor((inv.count('paper') + inv.count('sugar_cane')) / 3) - (inv.count('enchanting_table') > 0 || around > 0 ? 0 : 1) - reserve
+  return Math.min(BOOKSHELVES, around + inv.count('bookshelf') + Math.max(0, Math.floor(books / 3)))
+}
+
 /** ticks the enchanting milestone's bookshelves may cost (the plan's estimate): a day's work */
 export const SHELF_BUDGET_TICKS = 24000
 
@@ -332,7 +341,9 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   // as many shelves as the leather at hand makes books for: what's held and the adult cows about (two kept to breed);
   // the plan's estimate for 44 cows sent the bot exploring for cows and pigs 100 blocks out for 20000 ticks (26.3)
   const cows = Object.values(bot.entities).filter(e => (e.name === 'cow' || e.name === 'mooshroom') && isAdult(bot, e) && e.position.distanceTo(bot.entity.position) <= 32).length
-  const cap = shelvesForLeather({ count: (n: string) => countItems(bot, n) }, cows, around)
+  // (and the paper: the leather of 41 books with the canes of 21 had the shelves' plan fail whole, 'short of 84
+  // sugar_cane', and none made, 26.3)
+  const cap = Math.min(shelvesForLeather({ count: (n: string) => countItems(bot, n) }, cows, around), shelvesForPaper({ count: (n: string) => countItems(bot, n) }, around))
   for (let attempt = 0; attempt < 2; attempt++) {
     const held = countItems(bot, 'bookshelf')
     const want = shelvesWithin(n => {
