@@ -85,10 +85,13 @@ export const HERD_CHORE_TICKS = 3000
  * still wanted, else breed (the cows, the wheat and the cooldown permitting) and wait for the calves to grow
  * (24000 ticks, AgeableMob.BABY_START_AGE)
  */
-export function herdChore (state: { leather: number, want: number, adults: number, calves: number, wheat: number, timeUp?: boolean }): 'done' | 'kill' | 'breed' {
+export function herdChore (state: { leather: number, want: number, adults: number, calves: number, wheat: number, timeUp?: boolean }): 'done' | 'kill' | 'breed' | 'grow' {
   const needed = state.want - state.leather
   if (needed <= 0) return 'done'
   if (state.adults - BREEDERS_KEPT >= needed) return 'kill'
+  // the wheat gone with calves still growing: they're waited for first (killing the herd then left 14 calves and
+  // 8 leather of 46, 26.3); the farm's next wheat may come meanwhile
+  if (state.wheat < 2 && state.timeUp !== true && state.calves > 0) return 'grow'
   // no more breeding (the wheat gone, the time up): the surplus the herd has is what there is
   if ((state.wheat < 2 || state.timeUp === true) && state.adults > BREEDERS_KEPT) return 'kill'
   if (state.wheat < 2 || state.timeUp === true) return 'done'
@@ -165,6 +168,11 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
     if (chore === 'done' || executor.tasks.tick - start > HERD_BUDGET_TICKS * 1.5) {
       log(`herd: ${state.leather} leather of ${want} (${state.adults} cows, ${state.calves} calves) after ${executor.tasks.tick - start} ticks`)
       return state.leather
+    }
+    if (chore === 'grow') {
+      await harvestGrownFarms(bot, executor, signal, log, false).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+      await executor.task('wait for the calves', async (s) => { await waitTicks(bot, HERD_CHORE_TICKS, s) }, signal)
+      continue
     }
     if (chore === 'kill') {
       // room for the leather and the beef first (a full bag left the drops on the ground: 'hunt killed the cow drops

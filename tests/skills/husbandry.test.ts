@@ -107,9 +107,12 @@ test('herdChore: breed and wait while the adults beyond the two breeders fall sh
   assert.strictEqual(herdChore({ leather: 45, want: 46, adults: 2, calves: 0, wheat: 10 }), 'breed')
   assert.strictEqual(herdChore({ leather: 46, want: 46, adults: 2, calves: 0, wheat: 0 }), 'done')
   // the wheat gone or the time up: the surplus killed, then done
-  assert.strictEqual(herdChore({ leather: 1, want: 46, adults: 33, calves: 3, wheat: 1 }), 'kill')
+  assert.strictEqual(herdChore({ leather: 1, want: 46, adults: 33, calves: 3, wheat: 1 }), 'grow')
+  assert.strictEqual(herdChore({ leather: 1, want: 46, adults: 33, calves: 0, wheat: 1 }), 'kill')
   assert.strictEqual(herdChore({ leather: 1, want: 46, adults: 33, calves: 3, wheat: 20, timeUp: true }), 'kill')
-  assert.strictEqual(herdChore({ leather: 30, want: 46, adults: 2, calves: 3, wheat: 0 }), 'done')
+  // the calves waited for, then done with the breeders kept
+  assert.strictEqual(herdChore({ leather: 30, want: 46, adults: 2, calves: 3, wheat: 0 }), 'grow')
+  assert.strictEqual(herdChore({ leather: 30, want: 46, adults: 2, calves: 0, wheat: 0 }), 'done')
 })
 
 test('gatherHerd: nothing to do without the food or with the herd all by home', async () => {
