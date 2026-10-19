@@ -58,13 +58,21 @@ export interface TripKitResult {
  * Leaves the trip kit (tripKitItems) in a chest put down by the bot, and a bed beside it used to set the respawn
  * point when one is held; remembered as a TRIP_KIT point with the chest's items. Throws MISSING_ITEMS without a chest.
  */
-export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: AbortSignal): Promise<TripKitResult> {
+export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: AbortSignal, opts: { chest?: Vec3 } = {}): Promise<TripKitResult> {
   throwIfAborted(signal)
-  if (!bot.inventory.items().some(i => i.name === 'chest')) throw new SkillError('MISSING_ITEMS', 'no chest for a trip kit')
   const lookup = (p: Vec3): any => bot.blockAt(p)
-  const pos = findPlacement(lookup, bot.entity.position)
-  if (pos == null) throw new SkillError('CANNOT_PLACE', 'no room for a chest')
-  await placeBlock(bot, { pos, item: 'chest' }, signal)
+  // a kit's chest there already (the one a respawn emptied): filled again, no chest nor bed made
+  const reuse = opts.chest != null && bot.blockAt(opts.chest)?.name === 'chest'
+  let pos: Vec3
+  if (reuse) {
+    pos = opts.chest as Vec3
+  } else {
+    if (!bot.inventory.items().some(i => i.name === 'chest')) throw new SkillError('MISSING_ITEMS', 'no chest for a trip kit')
+    const at = findPlacement(lookup, bot.entity.position)
+    if (at == null) throw new SkillError('CANNOT_PLACE', 'no room for a chest')
+    pos = at
+    await placeBlock(bot, { pos, item: 'chest' }, signal)
+  }
   const stored: Record<string, number> = {}
   for (const it of tripKitItems(bot.inventory.items().map(i => ({ name: i.name, count: i.count })))) {
     throwIfAborted(signal)
@@ -81,7 +89,9 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
   // the respawn point by the kit
   let bed: Vec3 | null = null
   const held = bot.inventory.items().find(i => isBed(i.name))
-  if (held != null) {
+  const bedThere = memory.getPois('spawn_bed', { dimension: 'overworld', near: pos }).find(b => new Vec3(b.x, b.y, b.z).distanceTo(pos) <= 4 && isBed(bot.blockAt(new Vec3(b.x, b.y, b.z))?.name ?? ''))
+  if (bedThere != null) bed = new Vec3(bedThere.x, bedThere.y, bedThere.z)
+  if (held != null && bedThere == null) {
     const at = findPlacement(lookup, pos)
     if (at != null) {
       try {

@@ -41,3 +41,27 @@ test('after a death the runner goes to a trip kit that still holds something, an
   assert.deepStrictEqual(await runner.tripRekit(), { iron_sword: 1, arrow: 64 })
   assert.deepStrictEqual(tasks, ['the trip kit'])
 })
+
+test('leaveTripKit fills the kit\'s emptied chest again, making no new chest or bed', async () => {
+  const { leaveTripKit } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(2351.5, -22, 1016.5) })
+  bot.game.dimension = 'overworld'
+  const chest = new Vec3(2352, -22, 1016)
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => p.equals?.(chest) ? { name: 'chest', position: chest } : realAt(p)) as any
+  const memory = new WorldMemory()
+  memory.addPoi('trip_kit', chest, 'overworld', 'spare kit')
+  memory.rememberChest(chest, { arrow: 0 }, 'overworld')
+  const calls: string[] = []
+  const executor: any = {
+    memory,
+    plan: () => { calls.push('plan'); return { ok: true, cost: 0 } },
+    obtain: async () => { calls.push('obtain') },
+    task: async (name: string) => { calls.push(name); return { chest, stored: { arrow: 32 }, bed: null } }
+  }
+  await leaveTripKit(bot, executor, new AbortController().signal, () => {})
+  assert.deepStrictEqual(calls, ['leave a trip kit'])
+})

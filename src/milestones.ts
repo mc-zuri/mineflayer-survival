@@ -626,6 +626,19 @@ export const TRIP_KIT_TICKS = 3000
 export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
   const known = executor.memory.getPois(TRIP_KIT, { dimension: 'overworld', near: bot.entity.position })[0]
   if (known != null && Object.values(executor.memory.chestAt(known, 'overworld')?.items ?? {}).some(n => n > 0)) return
+  // the kit's chest a respawn emptied, by: filled again (a 26.3 bot respawned by the stronghold went 68000 ticks up
+  // for the logs of a new chest and the wool of a new bed)
+  const chest = known != null ? new Vec3(known.x, known.y, known.z) : null
+  if (chest != null && chest.distanceTo(bot.entity.position) <= 32 && bot.blockAt(chest)?.name === 'chest') {
+    try {
+      const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s, { chest }), signal)
+      log(`trip kit again at ${kit.chest.toString()}: ${Object.entries(kit.stored).map(([n, c]) => `${c} ${n}`).join(', ')}`)
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`no trip kit: ${(err as Error).message}`)
+    }
+    return
+  }
   try {
     const beds = bot.registry.itemsArray.map(i => i.name).filter(n => n.endsWith('_bed'))
     const hasBed = bot.inventory.items().some(i => i.name.endsWith('_bed'))
