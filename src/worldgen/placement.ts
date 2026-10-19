@@ -142,3 +142,12 @@ export function ringPositions (placement: ConcentricRingsPlacement, levelSeed: S
 export function locatePos (chunk: ChunkXZ): { x: number, y: number, z: number } {
   return { x: chunk.x * 16, y: 0, z: chunk.z * 16 }
 }
+
+/**
+ * data/minecraft/worldgen/structure_set/end_cities.json (StructureSets: RandomSpreadStructurePlacement(20, 11,
+ * TRIANGULAR, 10387313), the same in 1.21.11 and 26.3)
+ */
+export const END_CITIES: StructureSet<RandomSpreadPlacement> = {
+  placement: { spacing: 20, separation: 11, salt: 10387313, spreadType: 'triangular' },
+  structures: [{ structure: 'end_city', weight: 1 }]
+}
