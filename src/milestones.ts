@@ -75,6 +75,7 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
   const home = executor.memory.getPois(HERD, { dimension: 'overworld', near: bot.entity.position })[0]
   const at = home != null ? new Vec3(home.x, home.y, home.z) : bot.entity.position.clone()
   const near = (e: any): boolean => e.position.distanceTo(at) <= 48
+  let lastLine = ''
   for (;;) {
     if (signal.aborted) throw signal.reason
     // back to the herd for its chores (the levels' mining between takes the bot off: 120 blocks off and 60 down, the
@@ -88,6 +89,8 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
     const cows = Object.values(bot.entities).filter(e => (e.name === 'cow' || e.name === 'mooshroom') && near(e))
     const state = { leather: countItems(bot, 'leather'), want, adults: cows.filter(e => isAdult(bot, e)).length, calves: cows.filter(e => !isAdult(bot, e)).length, wheat: countItems(bot, 'wheat') }
     const chore = herdChore(state)
+    const line = `herd: ${chore} (${state.adults} cows, ${state.calves} calves, ${state.leather} of ${want} leather, ${state.wheat} wheat)`
+    if (line !== lastLine) { log(line); lastLine = line }
     if (chore === 'done' || executor.tasks.tick - start > HERD_BUDGET_TICKS) {
       log(`herd: ${state.leather} leather of ${want} (${state.adults} cows, ${state.calves} calves) after ${executor.tasks.tick - start} ticks`)
       return state.leather
