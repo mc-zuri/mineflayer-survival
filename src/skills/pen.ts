@@ -12,6 +12,7 @@ import { countItems, findInventoryItem, trace, waitTicks, waitUntil, type Block 
 import { BREEDING_FOOD } from './husbandry'
 import { dig } from '../core/actions'
 import { itemTags } from '../core/tags'
+import type { WorldMemory } from '../core/memory'
 
 export type Side = 'north' | 'south' | 'east' | 'west'
 
@@ -382,3 +383,101 @@ export async function leavePen (bot: Bot, pen: PenPlan, signal?: AbortSignal): P
   if ((bot.blockAt(pen.gate)?.getProperties() as any)?.open === true) await useGate(bot, pen.gate, false, signal)
 }
 
+/** the point of interest a pen is remembered by (its middle; its note the plan's size, side, ring and fillers) */
+export const PEN = 'pen'
+
+/** a pen as remembered (memory's PEN point of interest), null for none near `near` within `range` */
+export function penFromMemory (memory: WorldMemory, near: Vec3, range = 64): PenPlan | null {
+  for (const poi of memory.getPois(PEN, { dimension: 'overworld', near })) {
+    if (Math.hypot(poi.x - near.x, poi.z - near.z) > range) break
+    try {
+      const n = JSON.parse(poi.note ?? '') as { size: number, side: Side, fences: number[][], fillers: number[][] }
+      const center = new Vec3(poi.x, poi.y, poi.z)
+      const out = SIDE_DIRS[n.side]
+      const gate = center.plus(out.scaled(Math.floor(n.size / 2)))
+      const v = (a: number[]): Vec3 => new Vec3(a[0], a[1], a[2])
+      return { center, size: n.size, side: n.side, gate, inside: gate.minus(out), outside: gate.plus(out), fences: n.fences.map(v), fillers: n.fillers.map(v), clear: [] }
+    } catch {}
+  }
+  return null
+}
+
+/** remembers the pen (penFromMemory) */
+export function rememberPen (memory: WorldMemory, pen: PenPlan): void {
+  const note = JSON.stringify({ size: pen.size, side: pen.side, fences: pen.fences.map(p => p.toArray()), fillers: pen.fillers.map(p => p.toArray()) })
+  memory.addPoi(PEN, pen.center, 'overworld', note)
+}
+
+/**
+ * Where a pen of `size` goes near `home`: the middle of the flattest ground 6 to 16 blocks off it (the fewest holes to
+ * fill, blocks to clear and steps to fence on top), with a floor and room for the herd over every inside cell and no
+ * water or lava in it; null when there's none
+ */
+export function choosePenSite (lookup: Lookup, home: Vec3, size: number): { center: Vec3, side: Side } | null {
+  const r = Math.floor(Math.max(MIN_PEN_SIZE, size) / 2)
+  let best: { center: Vec3, side: Side, score: number } | null = null
+  const h = home.floored()
+  for (let dx = -16; dx <= 16; dx += 2) {
+    for (let dz = -16; dz <= 16; dz += 2) {
+      const d = Math.max(Math.abs(dx), Math.abs(dz))
+      if (d < 6 + r - 2) continue
+      for (const dy of [0, 1, -1, 2, -2]) {
+        const center = h.offset(dx, dy, dz)
+        // the inside: a floor, the herd's room over it
+        let ok = true
+        for (let ix = -r + 1; ix < r && ok; ix++) {
+          for (let iz = -r + 1; iz < r && ok; iz++) {
+            const cell = center.offset(ix, 0, iz)
+            ok = isSolid(lookup(cell.offset(0, -1, 0)) as any) && isFree(lookup(cell) as any) && isFree(lookup(cell.offset(0, 1, 0)) as any)
+          }
+        }
+        if (!ok) continue
+        const side = nearestSide(center, h)
+        const plan = planPen(lookup, center, size, side)
+        const steps = plan.fences.filter(p => p.y !== center.y).length
+        const score = plan.fillers.length * 3 + plan.clear.length * 2 + steps + d * 0.1
+        if (best == null || score < best.score) best = { center, side, score }
+        break
+      }
+    }
+  }
+  return best == null ? null : { center: best.center, side: best.side }
+}
+
+export interface HerdPenArgs {
+  /** where the herd lives (the HERD point of interest): the pen is built near it */
+  home: Vec3
+  memory: WorldMemory
+  /** the executor's obtain, for the fences and the gate (BuildPenArgs.obtain) */
+  obtain?: BuildPenArgs['obtain']
+  /** the animal (default cow) */
+  mob?: string
+  /** the pen's size (default 9) */
+  size?: number
+}
+
+/**
+ * The herd's pen, the hook for the enchanting milestone's herd: the pen remembered near home (kept from the
+ * pathfinder's digs again), else one built near home (choosePenSite, buildPen) and remembered; then the herd led in
+ * with its food and shut in (leadIntoPen), when the bot holds the food. Resolves the pen and the animals in it.
+ */
+export async function herdPen (bot: Bot, args: HerdPenArgs, signal?: AbortSignal): Promise<{ pen: PenPlan, inside: number, built: boolean }> {
+  let pen = penFromMemory(args.memory, args.home)
+  let built = false
+  if (pen != null) {
+    protectPen(bot, pen)
+  } else {
+    const size = args.size ?? 9
+    const site = choosePenSite(p => bot.blockAt(p) as any, args.home, size)
+    if (site == null) throw new SkillError('NOT_FOUND', `no ground for a pen of ${size} near ${args.home.toString()}`)
+    pen = await buildPen(bot, { center: site.center, size, side: site.side, obtain: args.obtain }, signal)
+    rememberPen(args.memory, pen)
+    built = true
+  }
+  const mob = args.mob ?? 'cow'
+  const hasFood = (BREEDING_FOOD[mob] ?? []).some(f => countItems(bot, f) > 0)
+  const inside = hasFood
+    ? await leadIntoPen(bot, pen, { mob }, signal)
+    : Object.values(bot.entities).filter(e => e.name === mob && inPen(pen as PenPlan, e.position)).length
+  return { pen, inside, built }
+}

@@ -4,7 +4,8 @@ import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import minecraftData from 'minecraft-data'
-import { inPen, nearestSide, penCells, planPen } from '../../src/skills/pen'
+import { choosePenSite, inPen, nearestSide, penCells, penFromMemory, planPen, rememberPen } from '../../src/skills/pen'
+import { WorldMemory } from '../../src/core/memory'
 import { itemTags } from '../../src/core/tags'
 import { VERSIONS } from '../versions'
 
@@ -72,3 +73,23 @@ for (const version of VERSIONS) {
   })
 }
 
+test('choosePenSite: flat ground near home, not over the pond; a pen remembered comes back as planned', () => {
+  // a pond west of home: x -20..-1 water at y 63
+  const pond = (p: Vec3): Cell | null => (p.y === 63 && p.x < 0 ? { name: 'water', boundingBox: 'empty' } : null)
+  const lookup = (p: Vec3): Cell => pond(p) ?? ground()(p)
+  const site = choosePenSite(lookup, new Vec3(0, 64, 0), 7)
+  assert.ok(site != null)
+  const plan = planPen(lookup, site.center, 7, site.side)
+  assert.ok(site.center.x - 3 >= 0, `the pen at ${site.center.toString()} is over the pond`)
+  assert.deepStrictEqual(plan.fillers, [])
+  // the gate faces home
+  assert.ok(plan.gate.distanceTo(new Vec3(0, 64, 0)) < site.center.distanceTo(new Vec3(0, 64, 0)))
+
+  const memory = new WorldMemory()
+  rememberPen(memory, plan)
+  const back = penFromMemory(memory, new Vec3(0, 64, 0))
+  assert.ok(back != null)
+  assert.deepStrictEqual(back.gate.toArray(), plan.gate.toArray())
+  assert.deepStrictEqual(back.fences.map(key), plan.fences.map(key))
+  assert.strictEqual(penFromMemory(memory, new Vec3(500, 64, 0)), null, 'none near another place')
+})

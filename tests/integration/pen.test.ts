@@ -10,7 +10,8 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { countItems, navigate, waitUntil } from '../../src/skills/gather'
-import { buildPen, inPen, leadIntoPen } from '../../src/skills/pen'
+import { buildPen, herdPen, inPen, leadIntoPen } from '../../src/skills/pen'
+import { WorldMemory } from '../../src/core/memory'
 import { Executor } from '../../src/executor/executor'
 
 const USERNAME = 'penbot'
@@ -113,6 +114,25 @@ describe(`a pen and a door on a ${DEFAULT_VERSION} server`, { timeout: 15 * 60 *
     await bot.waitForTicks(200)
     const still = Object.values(bot.entities).filter(e => e.name === 'cow' && inPen(pen, e.position)).length
     assert.strictEqual(still, inside)
+  })
+
+  it('herdPen: a pen built near the herd home and remembered, the cows led in; again, the same pen', async () => {
+    await give('oak_fence', 32)
+    await give('oak_fence_gate', 1)
+    await give('wheat', 8)
+    const memory = new WorldMemory()
+    const home = at(0, 0, 0)
+    for (let i = 0; i < 2; i++) await run(`summon cow ${xyz(at(-3 + 6 * i, 0, 3))}`)
+    assert.ok(await waitUntil(bot, () => Object.values(bot.entities).filter(e => e.name === 'cow').length === 2, 40))
+    const first = await herdPen(bot, { home, memory })
+    assert.strictEqual(first.built, true)
+    assert.ok(first.inside >= 1, `${first.inside} cows in the pen`)
+    assert.strictEqual(open(first.pen.gate), false)
+    assert.ok(first.pen.center.distanceTo(home) <= 20)
+    const again = await herdPen(bot, { home, memory })
+    assert.strictEqual(again.built, false)
+    assert.deepStrictEqual(again.pen.gate.toArray(), first.pen.gate.toArray())
+    assert.ok(again.inside >= first.inside)
   })
 
   it('walks into a house by its door and out again; the door is shut behind it by night', async () => {
