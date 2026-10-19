@@ -129,3 +129,44 @@ test('junkToToss: the route\'s stone over the keep count goes when `surplus` say
   assert.deepEqual(junkToToss(deep, 4, { surplus, scaffold }), [{ name: 'cobbled_deepslate', count: 64 }, { name: 'dirt', count: 10 }])
   assert.deepEqual(junkToToss(deep, 4, { surplus }).length, 4)
 })
+
+for (const version of VERSIONS) {
+  test(`protectedCounts (${version}): the best of each tool kind, a shield, a bow and its arrows, a water bucket, the food's working set; the hoe when farming`, async () => {
+    const { protectedCounts, storable, FOOD_WORKING_SET } = await import('../../src/executor/keep')
+    const registry = minecraftData(version)
+    const bag = [
+      { name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 1 }, { name: 'stone_axe', count: 1 },
+      { name: 'iron_sword', count: 1 }, { name: 'diamond_sword', count: 1 }, { name: 'wooden_hoe', count: 1 },
+      { name: 'shield', count: 2 }, { name: 'bow', count: 1 }, { name: 'arrow', count: 64 }, { name: 'water_bucket', count: 1 },
+      { name: 'cooked_beef', count: 10 }, { name: 'bread', count: 20 }, { name: 'cobblestone', count: 64 }
+    ]
+    const kept = protectedCounts(bag, registry)
+    assert.deepEqual({ ...kept, cooked_beef: undefined }, { diamond_pickaxe: 1, stone_axe: 1, diamond_sword: 1, shield: 1, bow: 1, arrow: 32, water_bucket: 1, cooked_beef: undefined })
+    // the most filling first: 5 cooked beef (8 each) make the 40
+    assert.equal(FOOD_WORKING_SET, 40)
+    assert.equal(kept.cooked_beef, 5)
+    assert.equal(kept.bread, undefined)
+    assert.equal(protectedCounts(bag, registry, { farming: true }).wooden_hoe, 1)
+    // no bow: no arrows kept
+    assert.equal(protectedCounts([{ name: 'arrow', count: 10 }], registry).arrow, undefined)
+    // a store of everything leaves them; the spare pickaxe goes
+    const moved = Object.fromEntries(storable(bag, bag, registry).map(i => [i.name, i.count]))
+    assert.equal(moved.diamond_pickaxe, undefined)
+    assert.equal(moved.iron_pickaxe, 1)
+    assert.equal(moved.shield, 1)
+    assert.equal(moved.arrow, 32)
+    assert.equal(moved.cooked_beef, 5)
+    assert.equal(moved.cobblestone, 64)
+  })
+}
+
+test('splitInventory and junkToToss never put away the protected items, whatever the keep rule (a stock policy\'s count of 0)', () => {
+  const registry = minecraftData('26.3')
+  const bag = [{ name: 'diamond_pickaxe', count: 1 }, { name: 'water_bucket', count: 1 }, { name: 'bread', count: 30 }, { name: 'cobblestone', count: 64 }]
+  const nothing = (): number => 0
+  const { keep, store } = splitInventory(bag, { keep: nothing, registry })
+  assert.deepEqual(keep, [{ name: 'diamond_pickaxe', count: 1 }, { name: 'water_bucket', count: 1 }, { name: 'bread', count: 8 }])
+  assert.deepEqual(store, [{ name: 'bread', count: 22 }, { name: 'cobblestone', count: 64 }])
+  const toss = junkToToss(bag, 4, { keep: nothing, registry, anything: true })
+  assert.deepEqual(toss.map(t => t.name).sort(), ['cobblestone'])
+})

@@ -92,3 +92,40 @@ test('roomFor: a store takes no more than the chest\'s empty slots and its stack
   // the inventory's side: 36 empty slots
   assert.strictEqual(roomFor(window, iron, 64, false), 36 * 64)
 })
+
+test('storeItems leaves the bag its protected items (keep.ts protectedCounts): the best pickaxe and the water bucket stay, the spare pickaxe goes; a shield in the off hand frees the bag\'s', async () => {
+  // (26.3 whole game: the bot's diamond pickaxe was no pickaxe for the obsidian, 160 blocks from the base)
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe'), item('iron_pickaxe'), item('water_bucket'), item('shield'), item('cobblestone', 64)], offhand: item('shield'), world: (pos: Vec3) => pos.equals(new Vec3(2, 64, 0)) ? 'chest' : pos.y < 64 ? 'stone' : 'air' })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => {
+    const b = blockAt(pos)
+    b.type = registry.blocksByName[b.name].id
+    if (b.name === 'chest') b.getProperties = () => ({ facing: 'west', type: 'single', waterlogged: false })
+    return b
+  }
+  bot._client = new EventEmitter()
+  bot.pathfinder = { world: {} }
+  const chestItems: any[] = []
+  bot.openContainer = async () => ({
+    slots: new Array(63).fill(null),
+    inventoryStart: 27,
+    inventoryEnd: 63,
+    items: () => bot.inventory.items(),
+    containerItems: () => chestItems,
+    deposit: async (type: number, _meta: unknown, count: number) => {
+      const slot = bot.inventory.items().find((i: any) => i.type === type)
+      slot.count -= count
+      if (slot.count <= 0) bot.inventory.slots[slot.slot] = null
+      chestItems.push(item(registry.items[type].name, count))
+    },
+    close: () => {}
+  })
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    const res = await storeItems(bot, { chest: new Vec3(2, 64, 0) })
+    assert.deepStrictEqual(res.moved, { iron_pickaxe: 1, shield: 1, cobblestone: 64 })
+    assert.deepStrictEqual(bot.inventory.items().map((i: any) => i.name).sort(), ['diamond_pickaxe', 'water_bucket'])
+  } finally {
+    clearInterval(ticker)
+  }
+})

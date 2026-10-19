@@ -1,6 +1,6 @@
 // What the bot carries on a trip and what goes into the base's chests, and what it may throw away when the
 // inventory is full far from the base. Pure, over item names and counts.
-import { isBed, isSafeFood, parseTool, type ToolKind } from '../core/items'
+import { foodInfo, isBed, isSafeFood, parseTool, TOOL_MATERIALS, type ToolKind } from '../core/items'
 import type { Inventory, ItemCount } from '../core/inventory'
 import type { RegistryLike } from '../core/registry'
 import { heldFor, unitValue, type ObtainRequest } from '../planner/obtain'
@@ -145,18 +145,94 @@ export interface SplitOptions {
   registry?: RegistryLike
   /** what the current goals need: never stored or thrown (on top of what `keep` keeps) */
   needed?: Record<string, number>
+  /** what's never put away beside (protectedCounts): the farm's hoe, the arrows the stock wants */
+  protect?: ProtectOptions
 }
 
-/** how many of each item to keep and how many to put away, from the inventory's counts */
+/** the tiers of the tools, the best first (a tool kind's best carried is never put away) */
+const TOOL_ORDER = Object.entries(TOOL_MATERIALS).sort((a, b) => (b[1].tier - a[1].tier) || (b[1].speed - a[1].speed)).map(([m]) => m)
+
+/** food points a bag keeps whatever is put away: the stock's food low mark (stock.ts: food 40-80) */
+export const FOOD_WORKING_SET = 40
+
+/** arrows a bag with a bow keeps whatever is put away */
+export const ARROWS_KEPT = 32
+
+export interface ProtectOptions {
+  /** the bot farms: its best hoe kept too (default false) */
+  farming?: boolean
+  /** arrows kept with a bow (default ARROWS_KEPT; 0 when the stock wants none) */
+  arrows?: number
+  /** food points kept (default FOOD_WORKING_SET) */
+  foodPoints?: number
+}
+
+/**
+ * What a store, a stash, a depot or a throw for room never takes from the bag, whatever the keep rule says (a stock
+ * policy's keep count over it): the best of each tool kind (pickaxe, axe, shovel, sword; the hoe when farming), a
+ * shield, a bow and ARROWS_KEPT arrows with it, a water bucket, and food up to FOOD_WORKING_SET points, the most
+ * filling first. (Worn armor and the off hand aren't in the bag's slots: no store moves them.) The obsidian of a 26.3
+ * whole game was made by a bot whose diamond pickaxe a store could have left at the base 160 blocks off.
+ */
+export function protectedCounts (items: readonly ItemCount[], registry?: RegistryLike, opts: ProtectOptions = {}): Record<string, number> {
+  const totals = new Map<string, number>()
+  for (const it of items) totals.set(it.name, (totals.get(it.name) ?? 0) + it.count)
+  const out: Record<string, number> = {}
+  const keep = (name: string, n: number): void => { const c = Math.min(n, totals.get(name) ?? 0); if (c > 0) out[name] = Math.max(out[name] ?? 0, c) }
+  const kinds: ToolKind[] = opts.farming === true ? ['pickaxe', 'axe', 'shovel', 'sword', 'hoe'] : ['pickaxe', 'axe', 'shovel', 'sword']
+  for (const kind of kinds) {
+    const best = [...totals.keys()].map(n => ({ n, t: parseTool(n) })).filter(x => x.t?.kind === kind)
+      .sort((a, b) => TOOL_ORDER.indexOf(a.t!.material) - TOOL_ORDER.indexOf(b.t!.material))[0]
+    if (best != null) keep(best.n, 1)
+  }
+  keep('shield', 1)
+  keep('water_bucket', 1)
+  if ((totals.get('bow') ?? 0) > 0) {
+    keep('bow', 1)
+    keep('arrow', opts.arrows ?? ARROWS_KEPT)
+  }
+  if (registry != null) {
+    const foods = [...totals.keys()].filter(n => isSafeFood(registry, n))
+      .map(n => ({ n, points: foodInfo(registry, n)?.nutrition ?? 0 }))
+      .sort((a, b) => b.points - a.points)
+    let left = opts.foodPoints ?? FOOD_WORKING_SET
+    for (const f of foods) {
+      if (left <= 0 || f.points <= 0) break
+      const n = Math.min(totals.get(f.n) ?? 0, Math.ceil(left / f.points))
+      keep(f.n, n)
+      left -= n * f.points
+    }
+  }
+  return out
+}
+
+/**
+ * The counts that may go into a chest of what's asked, leaving the bag what protectedCounts protects (`bag`: what it
+ * carries now)
+ */
+export function storable (asked: readonly ItemCount[], bag: readonly ItemCount[], registry?: RegistryLike, opts: ProtectOptions = {}): ItemCount[] {
+  const kept = protectedCounts(bag, registry, opts)
+  const held = new Map<string, number>()
+  for (const it of bag) held.set(it.name, (held.get(it.name) ?? 0) + it.count)
+  const out: ItemCount[] = []
+  for (const it of asked) {
+    const n = Math.min(it.count, Math.max(0, (held.get(it.name) ?? 0) - (kept[it.name] ?? 0)))
+    if (n > 0) out.push({ name: it.name, count: n })
+  }
+  return out
+}
+
+/** how many of each item to keep and how many to put away, from the inventory's counts (never what protectedCounts protects) */
 export function splitInventory (items: readonly ItemCount[], opts: SplitOptions = {}): { keep: ItemCount[], store: ItemCount[] } {
   const keepRule = opts.keep ?? defaultKeep
   const totals = new Map<string, number>()
   for (const it of items) totals.set(it.name, (totals.get(it.name) ?? 0) + it.count)
+  const guarded = protectedCounts(items, opts.registry, opts.protect)
   const keep: ItemCount[] = []
   const store: ItemCount[] = []
   for (const [name, count] of totals) {
     const rule = keepRule(name, opts.registry) ?? 0
-    const kept = Math.min(count, Math.max(rule, opts.needed?.[name] ?? 0))
+    const kept = Math.min(count, Math.max(rule, opts.needed?.[name] ?? 0, guarded[name] ?? 0))
     if (kept > 0) keep.push({ name, count: kept })
     if (count - kept > 0) store.push({ name, count: count - kept })
   }
@@ -177,6 +253,7 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number,
   // the stacks beyond what's kept, smallest stacks last so a toss frees whole slots
   const left = new Map<string, number>()
   for (const s of stacks) left.set(s.name, (left.get(s.name) ?? 0) + s.count)
+  const guarded = protectedCounts(stacks, opts.registry, opts.protect)
   const scaffoldItems = new Set(opts.scaffold?.items ?? [])
   let scaffoldLeft = [...left].reduce((n, [name, c]) => n + (scaffoldItems.has(name) ? c : 0), 0)
   const pick = (filter: (name: string) => boolean): void => {
@@ -191,7 +268,7 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number,
     for (const s of candidates) {
       if (out.length >= slots) return
       const total = left.get(s.name) ?? 0
-      const keep = Math.max(keepRule(s.name, opts.registry) ?? 0, needed[s.name] ?? 0)
+      const keep = Math.max(keepRule(s.name, opts.registry) ?? 0, needed[s.name] ?? 0, guarded[s.name] ?? 0)
       // a stack may go when what's left of the item without it still covers what's kept
       if (total - s.count < Math.min(keep, total)) continue
       // and the building blocks left cover the pathfinder's bridges and towers (the dirt and andesite are, with no

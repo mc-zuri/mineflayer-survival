@@ -7,6 +7,7 @@ import { SkillError, throwIfAborted } from './errors'
 import { navigateToReach } from './navigate'
 import { collectBlock } from './collectBlock'
 import { blockAtOrThrow, countsDelta, itemMatcher, settleInventory, trace, type Block, type ItemCounts, type ItemFilter } from './util'
+import { protectedCounts, type ProtectOptions } from '../executor/keep'
 
 export interface ChestArgs {
   chest: Vec3
@@ -14,6 +15,11 @@ export interface ChestArgs {
   filter?: ItemFilter
   /** at most this many items of each kind (default: all of them) */
   count?: number
+  /**
+   * A store leaves the bag what keep.ts protectedCounts protects (the best tool of each kind, the shield, the bow and
+   * arrows, the water bucket, the food's working set), with these options; false: anything asked goes
+   */
+  protect?: ProtectOptions | false
 }
 
 export interface ChestResult {
@@ -116,6 +122,17 @@ async function transfer (bot: Bot, args: ChestArgs, direction: 'store' | 'retrie
   try {
     const source = direction === 'store' ? window.items() : window.containerItems()
     const wanted = countBy(source.filter(matches))
+    // (a store leaves the bag its protected items: the bot's only diamond pickaxe in a base's chest 160 blocks off
+    // was no pickaxe for the obsidian)
+    if (direction === 'store' && args.protect !== false) {
+      const bag = window.items().map(i => ({ name: i.name, count: i.count }))
+      // (the off hand's counts with the bag's: a shield held there leaves the bag's spare free to go)
+      const offhand = bot.inventory?.slots?.[45]
+      if (offhand != null) bag.push({ name: offhand.name, count: offhand.count })
+      const kept = protectedCounts(bag, bot.registry as any, args.protect ?? {})
+      if (offhand != null && kept[offhand.name] != null) kept[offhand.name] = Math.max(0, kept[offhand.name] - offhand.count)
+      for (const name of Object.keys(wanted)) wanted[name] = Math.max(0, wanted[name] - (kept[name] ?? 0))
+    }
     for (const [name, total] of Object.entries(wanted)) {
       throwIfAborted(signal, { chest: block.position, moved: countsDelta(before, countBy(window.items())) })
       const type = bot.registry.itemsByName[name].id

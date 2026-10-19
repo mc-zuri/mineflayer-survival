@@ -24,7 +24,7 @@ import { tossAway } from '../skills/pickupDrops'
 import { holdBag, type BagKeeper } from '../skills/bag'
 import { countItems, emptySlots, trace } from '../skills/util'
 import { wornOutTools } from './durability'
-import { defaultKeep, JUNK, junkToToss, ROUTE_STONE, splitInventory, type KeepRule, type ScaffoldKeep } from './keep'
+import { defaultKeep, JUNK, junkToToss, ROUTE_STONE, splitInventory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { noteVillage } from '../skills/village'
@@ -468,6 +468,11 @@ export class Executor {
     }, signal, { step, desc: describeStep(step) })
   }
 
+  /** what no store or throw takes from the bag beyond keep.ts protectedCounts' own: the best hoe while the bot keeps a farm */
+  protect (): ProtectOptions {
+    return { farming: knownFarms(this.memory, normalizeDimension(this.bot.game?.dimension)).length > 0 }
+  }
+
   /** what making room may throw away beyond the keep count: the options' surplus, and the route's stone the stock has enough of */
   isSurplus (name: string): boolean {
     return this.options.surplus(name) || (ROUTE_STONE.has(name) && this.options.stocked(name))
@@ -576,7 +581,7 @@ export class Executor {
     const want = this.options.minFreeSlots + 2 + (lava() != null ? LAVA_ROOM : 0) - emptySlots(this.bot)
     if (want <= 0) return true
     const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
-    const toss = junkToToss(stacks, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.options.scaffold })
+    const toss = junkToToss(stacks, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.options.scaffold, protect: this.protect() })
     if (toss.length > 0) {
       this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
       await run('make room', async (s) => {
@@ -603,7 +608,7 @@ export class Executor {
    */
   async stashNearby (needed: Record<string, number> = {}, signal?: AbortSignal, run: RoomRunner = async (name, fn) => await this.task(name, fn, signal, { room: false })): Promise<Record<string, number>> {
     const moved: Record<string, number> = {}
-    const { store } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed })
+    const { store } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed, protect: this.protect() })
     const worth = store.filter(it => !JUNK.has(it.name) && !this.isSurplus(it.name))
     if (worth.length === 0) return moved
     const dimension = normalizeDimension(this.bot.game?.dimension)
@@ -630,7 +635,7 @@ export class Executor {
     for (const it of worth) {
       throwIfOwnerAborted(signal)
       try {
-        const res = await run(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: at, filter: [it.name], count: it.count }, s))
+        const res = await run(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: at, filter: [it.name], count: it.count, protect: this.protect() }, s))
         const n = res.moved[it.name] ?? 0
         this.rememberStored(at, it.name, n, dimension)
         if (n > 0) moved[it.name] = (moved[it.name] ?? 0) + n
@@ -665,7 +670,7 @@ export class Executor {
   async storeAtBase (needed: Record<string, number> = {}, signal?: AbortSignal): Promise<Record<string, number>> {
     const base = this.base
     if (base == null || base.chests.length === 0) return {}
-    const { store: toStore } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed })
+    const { store: toStore } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed, protect: this.protect() })
     const moved: Record<string, number> = {}
     if (toStore.length === 0) return moved
     const dimension = this.memory.base?.dimension ?? 'overworld'
@@ -693,7 +698,7 @@ export class Executor {
     }
     const store = async (pos: { x: number, y: number, z: number }, filter: string[], count?: number): Promise<boolean> => {
       try {
-        const res = await this.task(`store ${filter.join(', ')}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter, count }, s), signal, { room: false })
+        const res = await this.task(`store ${filter.join(', ')}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter, count, protect: this.protect() }, s), signal, { room: false })
         record(pos, res.moved)
         return true
       } catch (err) {
@@ -731,7 +736,7 @@ export class Executor {
         if (left <= 0) break
         throwIfOwnerAborted(signal)
         try {
-          const res = await this.task(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter: [it.name], count: left }, s), signal, { room: false })
+          const res = await this.task(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter: [it.name], count: left, protect: this.protect() }, s), signal, { room: false })
           const n = res.moved[it.name] ?? 0
           this.rememberStored(pos, it.name, n, dimension)
           moved[it.name] = (moved[it.name] ?? 0) + n
