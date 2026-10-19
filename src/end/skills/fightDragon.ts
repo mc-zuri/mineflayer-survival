@@ -9,7 +9,7 @@ import { attackStrengthOf } from '../../skills/weapons'
 import { bestFoodInInventory, eat } from '../../skills/eat'
 import { steerToward } from '../../skills/steer'
 import { type Entity, TaskError, type SkillOptions, throwIfAborted, waitTicks, metadataIndex, metadataValue, eyePosition, yawPitchOf, distanceToBox } from '../../skills/combatUtil'
-import { DragonPhaseTracker, activityOf, dragonZones, isSitting, phaseName, type DragonActivity, type DragonPhase, meleeSpots, neckTakesFullDamage, partBox, touchedZone, vanillaYaw, CONTACT_MARGIN, JUMP_HEIGHT, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
+import { DragonPhaseTracker, activityOf, dragonZones, isSitting, type DragonZone, phaseName, type DragonActivity, type DragonPhase, meleeSpots, neckTakesFullDamage, partBox, touchedZone, vanillaYaw, CONTACT_MARGIN, JUMP_HEIGHT, MELEE_REACH, type DragonView, type MeleeWindow, DRAGON_PHASE_METADATA } from '../dragon'
 import { exitPortal } from '../spikes'
 import { destroyCrystals } from './destroyCrystals'
 import { blockGetter, groundY, isOpenAt, VoidGuard, findPortalY, exitPortalOpen, worldMinY, type BlockGetter } from './world'
@@ -58,9 +58,19 @@ export function chooseMeleeSpot (get: BlockGetter, view: DragonView, portalY: nu
     }
   }
   spots.sort((a, b) => a.score - b.score)
-  const best = spots[0]
+  // the walk there under the head or neck (over the rim, a bump) is a touch or two on the way: worth a long way round
+  // (WALK_UNDER_COST), looked at for the best spots only
+  let best: (MeleeChoice & { score: number }) | null = null
+  for (const s of spots) {
+    if (best != null && s.score >= best.score) break
+    const score = from != null && !walkClear(get, from, s.spot, zones) ? s.score + WALK_UNDER_COST : s.score
+    if (best == null || score < best.score) best = { ...s, score }
+  }
   return best == null ? null : { spot: best.spot, target: best.target, crit: best.crit }
 }
+
+/** what a walk to a melee spot under the dragon's head or neck counts for, against the spots' scores */
+export const WALK_UNDER_COST = 6
 
 /** at or below this health the bot leaves the perched dragon to eat out of its reach (the emergency apple is at 8) */
 export const RETREAT_HEALTH = 10
@@ -201,6 +211,22 @@ export function awayFrom (from: Vec3, threat: Pos, distance: number): Vec3 {
   const away = new Vec3(from.x - threat.x, 0, from.z - threat.z)
   const len = Math.hypot(away.x, away.z)
   return len < 1e-6 ? from.offset(distance, 0, 0) : from.plus(away.scaled(distance / len))
+}
+
+/**
+ * The straight walk from `from` to `to` keeps the body out of the zones that hurt: the ground under each half block of
+ * it (the rim, a bump of end stone) clear of them
+ */
+export function walkClear (get: BlockGetter, from: Pos, to: Pos, zones: DragonZone[]): boolean {
+  const steps = Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / 0.5)
+  for (let i = 1; i <= steps; i++) {
+    const x = from.x + (to.x - from.x) * i / steps
+    const z = from.z + (to.z - from.z) * i / steps
+    const y = groundY(get, x, z, Math.max(from.y, to.y) + 2, Math.min(from.y, to.y) - 3)
+    if (y == null) continue
+    if (touchedZone({ x, y, z }, zones.filter(zone => zone.hurts), 0, 0.1) != null) return false
+  }
+  return true
 }
 
 export interface FightDragonOptions extends SkillOptions {

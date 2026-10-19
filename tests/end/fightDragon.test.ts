@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { exitPortal } from '../../src/end/spikes'
 import { breathZone, CONTACT_MARGIN, DragonPhaseTracker, DRAGON_PHASES, JUMP_HEIGHT, dragonZones, headPosition, touchedZone } from '../../src/end/dragon'
-import { ARROW_FLIGHT_TICKS, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, hurtContext, hurtingContact, retreatSpot, safeToEat, takeoffStepBack } from '../../src/end/skills/fightDragon'
+import { ARROW_FLIGHT_TICKS, EAT_CLEAR_PERCHED, RETREAT_DISTANCE, arrowHit, TAKEOFF_CLEARANCE, canHeal, chooseMeleeSpot, dragonPartId, fightDragon, foodToEat, hurtContext, hurtingContact, retreatSpot, safeToEat, takeoffStepBack, walkClear } from '../../src/end/skills/fightDragon'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
 import { endIsland, world } from './endWorld'
 
@@ -260,4 +260,31 @@ test('hurtContext: where the bot was hurt, the dragon\'s place and phase, the pa
   const line = hurtContext(bot, 62, tracker)
   assert.match(line, /bot at 7\.5 63\.00 0\.5/)
   assert.match(line, /dragon at 0\.5 66\.00 0\.5 yaw 90 \(sitting_scanning\), touching its head/)
+})
+
+test('walkClear: a straight walk over a bump under the perched dragon\'s head touches it; one round it doesn\'t', () => {
+  const blocks = endIsland([], 40)
+  // a bump of end stone a block over the ground under the head (facing +x: the head over x 7)
+  for (let x = 4; x <= 10; x++) for (let z = -3; z <= 3; z++) blocks.set(`${x},62,${z}`, 'end_stone')
+  const get = world(blocks)
+  const perch = exitPortal(62).perch
+  const zones = dragonZones({ position: perch, yaw: 90 })
+  assert.equal(walkClear(get, { x: 12.5, y: 62, z: 0.5 }, { x: 0.5, y: 62, z: 6.5 }, zones), false)
+  assert.equal(walkClear(get, { x: 12.5, y: 62, z: 5.5 }, { x: 12.5, y: 62, z: -5.5 }, zones), true)
+  // without the bump the ground under the head is clear of it
+  assert.equal(walkClear(world(endIsland([], 40)), { x: 12.5, y: 62, z: 0.5 }, { x: 0.5, y: 62, z: 6.5 }, zones), true)
+})
+
+test('chooseMeleeSpot: from the far side of a bump under the head, a spot the walk to keeps out from under it', () => {
+  const blocks = endIsland([], 40)
+  for (let x = 4; x <= 10; x++) for (let z = -3; z <= 3; z++) blocks.set(`${x},62,${z}`, 'end_stone')
+  const get = world(blocks)
+  const perch = exitPortal(62).perch
+  const view = { position: new Vec3(perch.x, perch.y, perch.z), yaw: 90 }
+  const tracker = new DragonPhaseTracker(perch)
+  tracker.update({ tick: 0, phase: DRAGON_PHASES.indexOf('sitting_scanning'), position: view.position, yaw: 90 })
+  const from = { x: 13.5, y: 62, z: 0.5 }
+  const choice = chooseMeleeSpot(get, view, 62, tracker.window(5), [], null, true, from)
+  assert.ok(choice != null)
+  assert.equal(walkClear(get, from, choice.spot, dragonZones(view)), true)
 })
