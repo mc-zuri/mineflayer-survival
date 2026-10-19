@@ -178,15 +178,23 @@ export function findBedPlacementNear (lookup: BlockLookup, near: Vec3, radius = 
 const NOT_DUG = new Set(['bedrock', 'end_portal_frame', 'end_portal', 'nether_portal', 'obsidian', 'crying_obsidian', 'reinforced_deepslate', 'spawner', 'chest', 'barrier'])
 const LIQUIDS = new Set(['water', 'lava'])
 
+/** blocks that fall into a cell dug under them (FallingBlock) */
+const FALLING = /^(sand|red_sand|gravel|suspicious_sand|suspicious_gravel|anvil|chipped_anvil|damaged_anvil|dragon_egg|pointed_dripstone|scaffolding|.*_concrete_powder)$/
+
 /**
  * Room for a bed dug out beside the bot where none is free (a kit's chest in the 1-wide tunnel the bot came by to the
- * stronghold): the two cells straight out from the bot's feet, foot then head, with solid ground under them and no
- * water or lava against them; the way with the fewest blocks to dig first. The bot stands where it is to put it down,
- * facing along it.
+ * stronghold, a 1-wide staircase): the two cells straight out from the bot's feet, foot then head, with solid ground
+ * under them, and the head room over both (ServerPlayer.bedBlocked: a suffocating block over the bed's head or foot
+ * is OBSTRUCTED, no sleep and no respawn point set); no water or lava against any cell dug, and nothing that falls
+ * over the head room. The way with the fewest blocks to dig first. The bot stands where it is to put it down, facing
+ * along it.
  */
 export function bedRoomToDig (lookup: BlockLookup, feet: Vec3, avoid?: (pos: Vec3) => boolean): (BedPlacement & { stand: Vec3, dig: Vec3[] }) | null {
   const at = feet.floored()
   let best: (BedPlacement & { stand: Vec3, dig: Vec3[] }) | null = null
+  // nothing to flow in once it's dug
+  const wet = (cell: Vec3): boolean => [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, 1, 0)].some(d => LIQUIDS.has(lookup(cell.plus(d))?.name ?? ''))
+  const diggable = (b: BlockView): boolean => b.boundingBox === 'block' && !NOT_DUG.has(b.name) && !isInteractive(b.name)
   for (const facing of CARDINALS) {
     const foot = at.plus(facing)
     const head = foot.plus(facing)
@@ -196,11 +204,17 @@ export function bedRoomToDig (lookup: BlockLookup, feet: Vec3, avoid?: (pos: Vec
       const b = lookup(cell)
       const below = lookup(cell.offset(0, -1, 0))
       if (b == null || !isSolid(below) || isInteractive(below?.name ?? '') || avoid?.(cell) === true) { ok = false; break }
-      if (isFree(b)) continue
-      if (b.boundingBox !== 'block' || NOT_DUG.has(b.name) || isInteractive(b.name)) { ok = false; break }
-      // nothing to flow in once it's dug
-      if ([new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, 1, 0)].some(d => LIQUIDS.has(lookup(cell.plus(d))?.name ?? ''))) { ok = false; break }
-      dig.push(cell)
+      if (!isFree(b)) {
+        if (!diggable(b) || wet(cell)) { ok = false; break }
+        dig.push(cell)
+      }
+      // the head room: not suffocating (open, a torch), else dug
+      const up = cell.offset(0, 1, 0)
+      const over = lookup(up)
+      if (over == null || LIQUIDS.has(over.name)) { ok = false; break }
+      if (over.boundingBox !== 'block') continue
+      if (!diggable(over) || wet(up) || FALLING.test(lookup(up.offset(0, 1, 0))?.name ?? '')) { ok = false; break }
+      dig.push(up)
     }
     if (ok && (best == null || dig.length < best.dig.length)) best = { foot, head, facing, stand: at, dig }
   }

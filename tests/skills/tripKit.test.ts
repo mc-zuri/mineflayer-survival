@@ -209,7 +209,8 @@ test('roomToDigNear: the bot walled in by its chest in a 1-wide tunnel digs the 
   const room = roomToDigNear(lookup, new Vec3(0.5, 64, 1.5), new Vec3(0, 64, 0), () => false)
   assert.ok(room != null)
   assert.deepStrictEqual(room.stand, new Vec3(0, 64, -1))
-  assert.strictEqual(room.dig.length, 2)
+  // (the bed's cells and the head room over them)
+  assert.strictEqual(room.dig.length, 4)
   assert.ok(room.dig.every((c: any) => lookup(c).name === 'stone'))
 })
 

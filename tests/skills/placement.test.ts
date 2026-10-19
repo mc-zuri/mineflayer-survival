@@ -142,21 +142,30 @@ test('findBedPlacementNear and bedRoomToDig: no bed over a chest (the trip kit c
   assert.ok(room != null && room.facing.x !== 1)
 })
 
-test('bedRoomToDig: in a 1-wide tunnel, the two cells straight out from the bot dug for a bed; never next to lava or through bedrock', () => {
+test('bedRoomToDig: in a 1-wide tunnel, the two cells straight out from the bot and the head room over them dug for a bed; never next to lava or through bedrock', () => {
   // stone all round from -64 to -55, a tunnel cell at the bot's feet and head (0, -60, 0), (0, -59, 0)
   const solid = (extra: Record<string, string> = {}) => (pos: Vec3): BlockView => {
     const k = `${pos.x},${pos.y},${pos.z}`
     const name = extra[k] ?? ((pos.x === 0 && pos.z === 0 && (pos.y === -60 || pos.y === -59)) ? 'air' : 'stone')
-    return { name, boundingBox: ['air', 'lava', 'water'].includes(name) ? 'empty' : 'block' }
+    return { name, boundingBox: ['air', 'lava', 'water', 'wall_torch'].includes(name) ? 'empty' : 'block' }
   }
   const feet = new Vec3(0.5, -60, 0.5)
   assert.strictEqual(findBedPlacementNear(solid(), feet, 5), null)
   const room = bedRoomToDig(solid(), feet)
   assert.ok(room != null)
-  assert.strictEqual(room.dig.length, 2)
+  // the bed's two cells and the head room over them (ServerPlayer.bedBlocked: a block over the bed is OBSTRUCTED)
+  assert.strictEqual(room.dig.length, 4)
   assert.deepStrictEqual(room.stand, new Vec3(0, -60, 0))
   assert.deepStrictEqual(room.foot, room.stand.plus(room.facing))
   assert.deepStrictEqual(room.head, room.foot.plus(room.facing))
+  assert.deepStrictEqual(room.dig.map(String).sort(), [room.foot, room.head, room.foot.offset(0, 1, 0), room.head.offset(0, 1, 0)].map(String).sort())
+  // the head room open already (a torch on the wall is no block over the bed): the bed's cells alone
+  const open: Record<string, string> = {}
+  for (const facing of [[1, 0], [-1, 0], [0, 1], [0, -1]]) for (const d of [1, 2]) open[`${facing[0] * d},-59,${facing[1] * d}`] = d === 1 ? 'wall_torch' : 'air'
+  assert.strictEqual(bedRoomToDig(solid(open), feet)?.dig.length, 2)
+  // gravel over the head room every way but -z (it would fall in over the bed): that way
+  const gravel: Record<string, string> = { '1,-58,0': 'gravel', '2,-58,0': 'gravel', '-1,-58,0': 'gravel', '-2,-58,0': 'gravel', '0,-58,1': 'sand', '0,-58,2': 'sand' }
+  assert.deepStrictEqual(bedRoomToDig(solid(gravel), feet)?.facing, new Vec3(0, 0, -1))
   // lava behind every way but +x, bedrock that way: no room
   const lava: Record<string, string> = { '0,-60,-3': 'lava', '0,-60,3': 'lava', '-3,-60,0': 'lava', '2,-60,0': 'bedrock' }
   assert.strictEqual(bedRoomToDig(solid(lava), feet), null)
