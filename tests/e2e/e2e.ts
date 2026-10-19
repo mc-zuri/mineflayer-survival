@@ -7,7 +7,7 @@
 // (<checkpoints>/<n>-<milestone>/: world/ and save.json), and --resume <that directory> starts a server on the copy
 // and play from that save: a later stage tried again from where a real run got to it.
 //
-//   pnpm e2e [--seed 2] [--max-ticks 3000000] [--until <milestone>] [--resume <checkpoint dir>]
+//   pnpm e2e [--seed 2] [--max-ticks 3000000] [--until <milestone>] [--resume <checkpoint dir>] [--stage dragon]
 //            [--checkpoints <dir>] [--version 1.21.11] [--username player] [--server-log <file>]
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -16,6 +16,7 @@ import { createPlugin } from '../../src'
 import type { MilestoneEvent, PlayResult } from '../../src/runner'
 import type { MilestoneId } from '../../src/planner/progression'
 import { connectLockstepBot, copyWorld, quitBot, startServer, DEFAULT_VERSION, type TestServer } from '../harness'
+import { STAGES, giveKit, stageSave } from '../integration/stageKits'
 
 export interface E2EOptions {
   seed: string
@@ -24,6 +25,8 @@ export interface E2EOptions {
   maxTicks: number
   until?: MilestoneId
   resume?: string
+  /** start from a late stage's kit on the fresh world (tests/integration/stageKits.ts STAGES) */
+  stage?: string
   checkpoints: string
   serverLog?: string
   /** a status line every this many wall ms (default 60000) */
@@ -53,6 +56,7 @@ export function parseArgs (argv: string[]): E2EOptions {
       case '--max-ticks': opts.maxTicks = Number(value()); break
       case '--until': opts.until = value() as MilestoneId; break
       case '--resume': opts.resume = value(); break
+      case '--stage': opts.stage = value(); break
       case '--checkpoints': opts.checkpoints = value(); break
       case '--server-log': opts.serverLog = value(); break
       case '--status-ms': opts.statusMs = Number(value()); break
@@ -120,6 +124,13 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
     bot = await connectLockstepBot(server, { username: opts.username, op: false, timeoutMs: 120000 })
     const b = bot
     await b.waitForChunksToLoad()
+    if (opts.stage != null && opts.resume == null) {
+      const stage = STAGES[opts.stage]
+      if (stage == null) throw new Error(`no stage ${opts.stage} (${Object.keys(STAGES).join(', ')})`)
+      log(`stage ${opts.stage}: the kit given, play from ${stage.from}`)
+      await giveKit(server, b, opts.username, stage)
+      fs.writeFileSync(saveFile, stageSave(stage.from))
+    }
     b.loadPlugin(createPlugin())
     log(`the advancement check at the start: ${(await server.command(`execute if entity @a[name=${opts.username},advancements={minecraft:end/kill_dragon=true}]`)).join(' | ')}`)
     const k0 = b.lockstep.ticks

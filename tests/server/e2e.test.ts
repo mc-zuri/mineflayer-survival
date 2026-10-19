@@ -10,7 +10,8 @@ import { copyWorld } from '../harness/server'
 
 describe('pnpm e2e', () => {
   test('options: a seed, a tick budget, a milestone to stop at, a checkpoint to resume from', () => {
-    const o = parseArgs(['--seed', '7', '--max-ticks=500000', '--until', 'nether', '--resume', 'cp/06-diamonds', '--checkpoints', 'out'])
+    const o = parseArgs(['--seed', '7', '--max-ticks=500000', '--until', 'nether', '--resume', 'cp/06-diamonds', '--checkpoints', 'out', '--stage', 'dragon'])
+    assert.strictEqual(o.stage, 'dragon')
     assert.strictEqual(o.seed, '7')
     assert.strictEqual(o.maxTicks, 500000)
     assert.strictEqual(o.until, 'nether')
