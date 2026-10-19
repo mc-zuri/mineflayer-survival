@@ -121,3 +121,33 @@ test('frameStandSpot: no platform outside the ring, the floor 2 under the frames
   blocks.delete('13,62,9'); blocks.delete('13,63,9')
   assert.deepStrictEqual(frameStandSpot(get, new Vec3(11, 64, 10), { x: 0, z: 1 }), { x: 10, y: 65, z: 10 })
 })
+
+test('enterEnd: an eye that didn\'t go in is tried again with the eye taken in hand again, not the stage failed', async () => {
+  const frames = new Map<string, { facing: string, eye: boolean }>()
+  let i = 0
+  for (let t = -1; t <= 1; t++) {
+    for (const [x, z, facing] of [[6 + t, 6, 'south'], [6 + t, 10, 'north'], [4, 8 + t, 'east'], [8, 8 + t, 'west']] as Array<[number, number, string]>) {
+      frames.set(`${x},64,${z}`, { facing, eye: i++ !== 0 })
+    }
+  }
+  const bot = fakeBot({ position: new Vec3(5.5, 64, 4.5), items: [item('ender_eye', 3)] })
+  bot.game.dimension = 'minecraft:overworld'
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => {
+    const p = pos.floored()
+    const f = frames.get(`${p.x},${p.y},${p.z}`)
+    if (f == null) return blockAt(p)
+    return { name: 'end_portal_frame', position: p, boundingBox: 'block', getProperties: () => ({ facing: f.facing, eye: f.eye }) }
+  }
+  let equips = 0
+  bot.equip = async (it: any) => { equips++; bot.heldItem = it }
+  let clicks = 0
+  bot.activateBlock = async (b: any) => { if (++clicks === 2) frames.get(`${b.position.x},64,${b.position.z}`)!.eye = true }
+  bot.lookAt = async () => {}
+  bot.waitForTicks = async () => { bot.emit('physicsTick') }
+  // the portal never lights in this fake world: the walk in fails after, which is past what's tested here
+  await enterEnd(bot).catch(() => {})
+  assert.strictEqual(clicks, 2)
+  assert.strictEqual(equips, 2)
+  assert.strictEqual([...frames.values()].every(f => f.eye), true)
+})

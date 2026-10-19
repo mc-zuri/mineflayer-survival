@@ -62,14 +62,15 @@ function framePos (p: { x: number, y: number, z: number }): Vec3 {
  * a block to the side of that, on ground at the frame's level or over it (the platform, where its top face is in
  * sight); else 2 out on whatever ground is there
  */
-export function frameStandSpot (get: BlockGetter, pos: Vec3, out: { x: number, z: number }): { x: number, y: number, z: number } {
+export function frameStandSpot (get: BlockGetter, pos: Vec3, out: { x: number, z: number }, not?: Vec3): { x: number, y: number, z: number } {
+  const taken = (x: number, z: number): boolean => not != null && Math.floor(not.x) === x && Math.floor(not.z) === z
   const side = { x: out.z, z: out.x }
   for (const d of [2, 1]) {
     for (const s of [0, 1, -1]) {
       const x = pos.x - out.x * d + side.x * s
       const z = pos.z - out.z * d + side.z * s
       const y = groundY(get, x, z, pos.y + 3, pos.y - 4)
-      if (y != null && y >= pos.y && y <= pos.y + 1) return { x, y, z }
+      if (y != null && y >= pos.y && y <= pos.y + 1 && !taken(x, z)) return { x, y, z }
     }
   }
   // no platform outside it: any ground within 3 at the frame's level or a block over (the ring's other frames, the
@@ -82,7 +83,7 @@ export function frameStandSpot (get: BlockGetter, pos: Vec3, out: { x: number, z
       const x = pos.x + dx
       const z = pos.z + dz
       const y = groundY(get, x, z, pos.y + 3, pos.y - 4)
-      if (y == null || y < pos.y || y > pos.y + 1) continue
+      if (y == null || y < pos.y || y > pos.y + 1 || taken(x, z)) continue
       const d = Math.hypot(x + 0.5 - (pos.x + 0.5), y + 1.62 - (pos.y + 13 / 16), z + 0.5 - (pos.z + 0.5))
       // on another frame only when nothing else will do (the portal's pit beside it)
       const score = d + (get(new Vec3(x, y - 1, z))?.name === 'end_portal_frame' ? 3 : 0)
@@ -123,15 +124,27 @@ export async function enterEnd (bot: Bot, opts: EnterEndOptions = {}): Promise<E
     const block = bot.blockAt(pos)
     if (block == null || readPortalFrame(block as any, pos) == null) throw new TaskError('NOT_FOUND', `the frame at ${pos.toString()} is gone`)
     if (readPortalFrame(block as any, pos)?.eye === true) continue
-    const eye = bot.inventory.items().find(i => i.name === 'ender_eye')
-    if (eye == null) throw new TaskError('MISSING_ITEMS', 'out of eyes of ender')
-    if (bot.heldItem?.name !== 'ender_eye') await bot.equip(eye, 'hand')
-    await bot.lookAt(top, true)
-    await bot.activateBlock(block, new Vec3(0, 1, 0), new Vec3(0.5, 13 / 16, 0.5))
-    const filled = await waitUntil(bot, () => {
-      const b = bot.blockAt(pos)
-      return b != null && readPortalFrame(b as any, pos)?.eye === true
-    }, 20, signal)
+    // three tries: the eye taken in hand again (the held item the client shows may not be the server's, after the kit's
+    // chest and bed: a 1.21.11 bot's eye went into no frame five times over from a spot the same click works from), and
+    // the last from the next spot to stand at
+    let filled = false
+    for (let attempt = 0; attempt < 3 && !filled; attempt++) {
+      const eye = bot.inventory.items().find(i => i.name === 'ender_eye')
+      if (eye == null) throw new TaskError('MISSING_ITEMS', 'out of eyes of ender')
+      if (attempt === 2) {
+        const out = FACING_STEP[frame.facing]
+        await gotoBlock(bot, frameStandSpot(blockGetter(bot), pos, out, bot.entity.position), { signal })
+      }
+      if (bot.heldItem?.name !== 'ender_eye' || attempt > 0) await bot.equip(eye, 'hand')
+      if (attempt > 0) await waitTicks(bot, 5, signal)
+      await bot.lookAt(top, true)
+      await bot.activateBlock(block, new Vec3(0, 1, 0), new Vec3(0.5, 13 / 16, 0.5))
+      filled = await waitUntil(bot, () => {
+        const b = bot.blockAt(pos)
+        return b != null && readPortalFrame(b as any, pos)?.eye === true
+      }, 20, signal)
+      if (!filled) trace(`enterEnd: no eye in ${pos.toString()} (try ${attempt + 1}) from ${bot.entity.position.toString()}, holding ${bot.heldItem?.name ?? 'nothing'}`)
+    }
     if (!filled) throw new TaskError('NO_PATH', `the eye didn't go into the frame at ${pos.toString()}`)
     placed++
   }
