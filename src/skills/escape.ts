@@ -1,6 +1,7 @@
 import type { Bot } from 'mineflayer'
 import { dig } from '../core/actions'
 import { isAbort } from './errors'
+import { trace } from './util'
 import { Vec3 } from 'vec3'
 import { creeperSwelling, lowerShield, raiseShield, SwellCounter } from './fight'
 import { isDangerBlock, steerAway, steerToward, fleeHeading } from './steer'
@@ -205,15 +206,24 @@ export function hotFloorStep (bot: Bot): Vec3 | null {
  */
 export async function coverHotFloor (bot: Bot, signal?: AbortSignal): Promise<boolean> {
   const feet = bot.entity.position.floored()
-  try {
-    const { towerUp } = await import('../end/skills/world')
-    await towerUp(bot, feet.y + 1, { signal })
-  } catch (err) {
-    if (isAbort(err)) throw err
-    return false
+  const { towerUp } = await import('../end/skills/world')
+  // (a jump cut short is tried again: on 1.21.11 the first jump off the magma came straight back down, the server's
+  // position put on it a tick in, and towerUp's 12 ticks ran out before the next one cleared the block)
+  for (let attempt = 1; attempt <= COVER_TRIES; attempt++) {
+    try {
+      await towerUp(bot, feet.y + 1, { signal })
+      break
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('coverHotFloor: no block put on the magma:', (err as Error).message)
+      if (attempt === COVER_TRIES || bot.blockAt(feet)?.boundingBox === 'block') break
+    }
   }
   return Math.floor(bot.entity.position.y + 1e-6) > feet.y && !onHotFloor(bot)
 }
+
+/** pillar jumps coverHotFloor tries */
+export const COVER_TRIES = 3
 
 export interface EscapeHazardOptions extends SkillOptions {
   searchRadius?: number
@@ -271,7 +281,7 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
       // block put on the magma under the feet (a pillar's jump) to stand on. In seed 2's basalt delta a 26.3 bot stood
       // on a magma block with the lava sea on two sides and a wall two high on the others for 170 ticks, the reflex
       // steering at a stand it couldn't climb to, the floor hurting it every 12 and the magma cubes about, till it died
-      if (onHotFloor(bot) && !inLava(bot)) {
+      if ((onHotFloor(bot) || (bot.entity.onGround && nameAt(bot, bot.entity.position.offset(0, -0.2, 0).floored()) === 'magma_block')) && !inLava(bot)) {
         hotTicks++
         const step = hotFloorStep(bot)
         if ((step == null || hotTicks > HOT_FLOOR_STEP_TICKS) && !covered) {
@@ -284,6 +294,12 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
           await waitTicks(bot, 1, opts.signal)
           continue
         }
+        // no step and no block put: sneaking where it is (MagmaBlock.stepOn spares a player stepping carefully), not
+        // a run across the lava at a stand past it (a 1.21.11 bot so jumped a lava strip)
+        bot.clearControlStates()
+        bot.setControlState('sneak', true)
+        await waitTicks(bot, 1, opts.signal)
+        continue
       }
       if (target == null || t % 10 === 0 || !isSafeStand(bot, target)) {
         // the near ground first, then any within farRadius: in the nether's lava sea none was within 6 and the bot

@@ -86,3 +86,26 @@ test('escapeHazard on the bridge wall\'s magma steps off onto the ground beside 
     stop()
   }
 })
+
+test('escapeHazard in the delta\'s magma pocket with no block put sneaks where it is (no hot floor hurts it), never across the lava', { timeout: 60000 }, async () => {
+  const { bot, stop } = await rigAt('nether-seed2-east.json.gz', new Vec3(89.5, 32, -545.5))
+  let lava = 0
+  const onTick = (): void => {
+    const feet = bot.entity.position.floored()
+    if (bot.blockAt(feet)?.name === 'lava' || bot.blockAt(feet.offset(0, -1, 0))?.name === 'lava' || bot.entity.isInLava === true) lava++
+  }
+  bot.on('physicsTick', onTick)
+  let sneaking = 0
+  const onSneak = (): void => { if (bot.getControlState('sneak') === true) sneaking++ }
+  bot.on('physicsTick', onSneak)
+  try {
+    await assert.rejects(escapeHazard(bot, { searchRadius: 6, waterRadius: 0, maxTicks: 30, cover: async () => false }), /still in lava or fire/)
+    assert.equal(lava, 0)
+    assert.ok(sneaking >= 20, `${sneaking} ticks sneaking`)
+    assert.equal(bot.blockAt(bot.entity.position.offset(0, -0.2, 0).floored())?.name, 'magma_block')
+  } finally {
+    bot.off('physicsTick', onTick)
+    bot.off('physicsTick', onSneak)
+    stop()
+  }
+})

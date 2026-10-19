@@ -5,6 +5,7 @@
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
+import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { escapeHazard, onHotFloor } from '../../src/skills/escape'
@@ -64,7 +65,8 @@ describe(`off a magma block on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 
     }).finally(() => bot.off('physicsTick', onTick))
     assert.equal(lava, 0, 'in the lava')
     assert.ok(!onHotFloor(bot), `still on the magma at ${bot.entity.position.toString()}`)
-    assert.equal(bot.blockAt(bot.entity.position.offset(0, -0.2, 0).floored())?.name, 'cobblestone')
+    const at = bot.entity.position
+    assert.equal(bot.blockAt(at.offset(0, -0.2, 0).floored())?.name, 'cobblestone', `at ${at.toString()}, the magma at ${o.x} ${o.y - 1} ${o.z}: ${bot.blockAt(new Vec3(o.x, o.y - 1, o.z))?.name ?? '?'}`)
     assert.equal(countItems(bot, 'cobblestone'), 15)
     assert.ok(hits <= 2, `${hits} hits`)
   })
