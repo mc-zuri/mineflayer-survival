@@ -24,7 +24,7 @@ import { baseRecord } from './base/pois'
 import { DEPOT_POI, Executor, describeRequest, ownedInventory, type ExecutorOptions, type PlanOptions } from './executor/executor'
 import { SPARE_FOOD_POINTS, spareKitGoals, stockKeepRule, tripSpareGoals } from './executor/keep'
 import { isAbort } from './skills/errors'
-import { navigate, navigateNear } from './skills/navigate'
+import { navigate, navigateNear, pickaxeForTheWay } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
@@ -1181,6 +1181,7 @@ export class Runner {
     this.log('to the base for a kit')
     if (base.entrance != null) {
       const e = base.entrance
+      await pickaxeForTheWay(bot, signal)
       // (a search that timed out 10 blocks from the dug-in base left the bot with no kit at all, its diamond tools in
       // the chest: the walk then, by hops and a stair down when the path doesn't come, 26.3)
       await this.executor.task('to the base', async (s) => await navigate(bot, { goal: new goals.GoalNear(e.x, e.y, e.z, 2) }, s).catch(async err => {

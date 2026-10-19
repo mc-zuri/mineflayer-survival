@@ -18,7 +18,7 @@ import { retrieveItems } from '../skills/chest'
 import { fillBucket, isSource } from '../skills/bucket'
 import { hunt, nearestOfType } from '../skills/hunt'
 import type { Entity } from '../skills/combatUtil'
-import { navigate, navigateNear } from '../skills/navigate'
+import { navigate, navigateNear, pickaxeForTheWay } from '../skills/navigate'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { countItems, trace, waitUntil } from '../skills/util'
 import { findPlacementNear } from '../skills/placement'
@@ -441,6 +441,7 @@ export const runLoot: StepRunner<LootStep> = async (step, ctx) => {
     if (bot.blockAt(chest) == null || bot.entity.position.distanceTo(chest) > 48) {
       // (the base's by its entrance: travel's stair down from over a dug-in base ends on its roof)
       const door = baseWayIn(ctx.memory, chest, bot.entity.position, step.from.dimension)
+      if (door != null) await pickaxeForTheWay(bot, signal)
       const target = door != null ? new Vec3(door.x, door.y, door.z) : chest
       await travel(bot, { target, range: door != null ? 1 : 3, exactY: true }, signal).catch(err => { if (isAbort(err)) throw err })
     }

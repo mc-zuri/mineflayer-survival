@@ -502,15 +502,20 @@ test('the loot step walks to a dug-in base by its entrance, not down onto its ro
   const calls: string[] = []
   const realTravel = travelModule.travel
   const realRetrieve = chestModule.retrieveItems
+  const exploreModule = require('../../src/executor/explore')
+  const realEnsure = exploreModule.ensurePickaxe
   travelModule.travel = async (_b: unknown, a: any) => { calls.push(`travel ${a.target.toString()} ${a.range}`) }
   chestModule.retrieveItems = async () => { calls.push('retrieve'); return { moved: {} } }
+  // no pickaxe in the bag (it's the one in the chest): one made first, for the stone on the way in
+  exploreModule.ensurePickaxe = async () => { calls.push('ensurePickaxe'); return 'stone_pickaxe' }
   try {
     await runLoot({ kind: 'loot', item: 'diamond_pickaxe', count: 1, from: { x: -56, y: 60, z: -16, dimension: 'overworld' } } as any, { bot, signal: new AbortController().signal, log: () => {}, state: {}, memory } as any)
   } finally {
     travelModule.travel = realTravel
     chestModule.retrieveItems = realRetrieve
+    exploreModule.ensurePickaxe = realEnsure
   }
-  assert.deepEqual(calls, [`travel ${new Vec3(-51, 60, -20).toString()} 1`, 'retrieve'])
+  assert.deepEqual(calls, ['ensurePickaxe', `travel ${new Vec3(-51, 60, -20).toString()} 1`, 'retrieve'])
 })
 
 test('baseWayIn: the entrance for a target in the base box from outside it, none from inside, for one outside, or elsewhere', async () => {

@@ -535,6 +535,9 @@ test('rekit gets to a dug-in base the long way (hops, a stair down) when the pat
   strongholdModule.overland = async (_b: unknown, a: any) => { calls.push(`overland ${a.target.toString()}`) }
   chestModule.retrieveItems = async () => { calls.push('retrieve'); return { moved: { diamond_pickaxe: 1, diamond_sword: 1 } } }
   runner.executor.task = (async (_name: string, fn: any) => await fn(new AbortController().signal)) as any
+  const exploreModule = require('../../src/executor/explore')
+  const realEnsure = exploreModule.ensurePickaxe
+  exploreModule.ensurePickaxe = async () => { calls.push('ensurePickaxe'); return 'stone_pickaxe' }
   try {
     const took = await runner.rekit()
     assert.deepEqual(took, { diamond_pickaxe: 1, diamond_sword: 1 })
@@ -542,8 +545,10 @@ test('rekit gets to a dug-in base the long way (hops, a stair down) when the pat
     navModule.navigate = realNav
     strongholdModule.overland = realOver
     chestModule.retrieveItems = realGet
+    exploreModule.ensurePickaxe = realEnsure
   }
-  assert.deepEqual(calls.slice(0, 2), ['navigate', `overland ${new Vec3(-52, 60, -19).toString()}`])
+  // a pickaxe made for the stone on the way first (the bot back from a death has none)
+  assert.deepEqual(calls.slice(0, 3), ['ensurePickaxe', 'navigate', `overland ${new Vec3(-52, 60, -19).toString()}`])
   assert.ok(calls.includes('retrieve'))
 })
 

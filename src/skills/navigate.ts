@@ -317,6 +317,29 @@ export class GoalReachBlock extends goals.Goal {
   }
 }
 
+/**
+ * A pickaxe made from what's carried (ensurePickaxe: stone, else wood) when the bag has none, before a way that digs
+ * through stone: into a buried base, every way in some 8 blocks of stone, by hand some 150 ticks each, so the 5 s
+ * search ran out and a 26.3 bot never got to the chest its diamond pickaxe was in. Not again from within (the craft's
+ * own walk to a table).
+ */
+export async function pickaxeForTheWay (bot: Bot, signal?: AbortSignal): Promise<void> {
+  if (bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))) return
+  const b = bot as any
+  if (b.__pickaxeForTheWay === true) return
+  b.__pickaxeForTheWay = true
+  try {
+    const { ensurePickaxe } = await import('../executor/explore')
+    const made = await ensurePickaxe(bot, signal)
+    trace('pickaxeForTheWay:', made ?? 'none made')
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('pickaxeForTheWay: none made:', (err as Error).message)
+  } finally {
+    b.__pickaxeForTheWay = false
+  }
+}
+
 /** navigate to where the bot can click the block at `pos` (no trip when it already can) */
 export async function navigateToReach (bot: Bot, pos: Vec3, signal?: AbortSignal, opts: { reach?: number, outside?: boolean } = {}): Promise<NavigateResult> {
   const goal = new GoalReachBlock(pos.floored(), opts.reach ?? 4, eyeHeight(bot), opts.outside ?? true)
@@ -326,6 +349,7 @@ export async function navigateToReach (bot: Bot, pos: Vec3, signal?: AbortSignal
   const door = memory != null ? baseWayIn(memory, pos, bot.entity.position, normalizeDimension(bot.game?.dimension)) : null
   if (door != null) {
     trace('navigateToReach: into the base by its entrance at', door)
+    await pickaxeForTheWay(bot, signal)
     await navigate(bot, { goal: new goals.GoalNear(door.x, door.y, door.z, 1) }, signal).catch(err => {
       if (isAbort(err)) throw err
       trace('navigateToReach: not to the entrance:', (err as Error).message)
