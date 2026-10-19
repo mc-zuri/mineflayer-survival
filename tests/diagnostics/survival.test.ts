@@ -128,6 +128,20 @@ test('diagnosis: a milestone planned again and again with no progress', () => {
   assert.equal(diagnoseSurvival(failed), 'milestone nether: re-planned 12× in 8000 ticks; last failure: mine obsidian: no path: enclosed by unbreakable bedrock: no way out')
 })
 
+test('diagnosis: no progress with an old inventory-full failure tells the free slots the bag had then, and how long ago', () => {
+  // (26.3: a stall 3000 ticks after a NO_SPACE read 'inventory full (13 free slots)', the bag stored at the base since)
+  const r = report({
+    trigger: { rule: 'no_progress', key: '', count: 6000, since: 3000, tick: 9000 },
+    work: { ...report().work, milestone: { id: 'enchanting', title: 'Enchanting', goals: [], since: 1000, failures: 2 } },
+    errors: [{ tick: 6000, what: 'milestone enchanting', code: 'INVENTORY_FULL', reason: 'NO_SPACE', message: 'NO_SPACE: the inventory is full', freeSlots: 0 }]
+  })
+  assert.equal(r.bot.freeSlots, 30)
+  assert.equal(diagnoseSurvival(r), 'milestone enchanting: no progress in 6000 ticks; last failure 3000 ticks ago: milestone enchanting: inventory full (0 free slots): the inventory is full')
+  // an entry from before the field: the report's own count
+  const { freeSlots: _, ...old } = r.errors[0]
+  assert.match(diagnoseSurvival({ ...r, errors: [old] }), /inventory full \(30 free slots\)/)
+})
+
 test('plain: a partial result as JSON, items and blocks by name, cut when long', () => {
   const item = { name: 'cobblestone', type: 35, count: 12, nbt: { big: true } }
   assert.deepEqual(plain({ moved: { cobblestone: 3 }, items: [item], at: new Vec3(1, 2, 3) }), { moved: { cobblestone: 3 }, items: [{ name: 'cobblestone', count: 12 }], at: { x: 1, y: 2, z: 3 } })
@@ -193,6 +207,8 @@ test('the executor tells the diagnostics: a step failing over obtains makes a st
     assert.equal(stall.errors.length, 5)
     assert.deepEqual(stall.errors[0].partial, { explored: 4 })
     assert.equal(stall.errors[0].reason, 'NOT_FOUND')
+    // the bag's free slots as they were when it failed (an iron pickaxe in 36 slots)
+    assert.equal(stall.errors[0].freeSlots, 35)
     assert.deepEqual(Object.keys(stall.memory?.needed ?? {}).sort(), ['deepslate_diamond_ore', 'diamond_ore'])
     assert.equal(stall.bot.time?.day, 2)
     // the skill's failures in the same tick: one report, the rest counted on it

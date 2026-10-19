@@ -439,6 +439,11 @@ export class Diagnostics {
   }
 
   private noteError (entry: ErrorEntry): void {
+    if (entry.freeSlots == null) {
+      try {
+        if (typeof this.bot.inventory?.emptySlotCount === 'function') entry.freeSlots = this.bot.inventory.emptySlotCount()
+      } catch {}
+    }
     this.errors.push(entry)
     if (this.errors.length > this.keepErrors) this.errors.splice(0, this.errors.length - this.keepErrors)
   }

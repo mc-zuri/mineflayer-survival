@@ -58,6 +58,11 @@ export interface ErrorEntry {
   partial?: unknown
   /** the failures of the step in a row */
   n?: number
+  /**
+   * The bag's free slots when it failed: a stall's last failure is told with the slots it had then, not the report's
+   * (a 26.3 stall's NO_SPACE from 3000 ticks before read 'inventory full (13 free slots)', the bag long emptied)
+   */
+  freeSlots?: number
 }
 
 export interface MilestoneTrace {
@@ -361,7 +366,7 @@ export function causeOf (r: SurvivalReport, s: StepFacts | null | undefined, e: 
     return `no path${movement != null ? `: ${movement}` : message !== '' ? ` (${cut(message)})` : ''}`
   }
   if (code === 'NO_TOOL') return `no tool: ${cut(message)}`
-  if (code === 'NO_SPACE' || code === 'INVENTORY_FULL') return `inventory full (${String(r.bot.freeSlots ?? '?')} free slots): ${cut(message)}`
+  if (code === 'NO_SPACE' || code === 'INVENTORY_FULL') return `inventory full (${String(e?.freeSlots ?? r.bot.freeSlots ?? '?')} free slots): ${cut(message)}`
   if (e != null) return `${code ?? 'error'}: ${cut(message)}`
   return 'no error yet'
 }
@@ -394,7 +399,7 @@ export function diagnoseSurvival (r: SurvivalReport): string {
     }
     const s = r.work.step
     const e = s != null ? lastErrorOf(r, s.key) : r.errors[r.errors.length - 1] ?? null
-    const on = s != null ? `; ${stepName(s)}: ${causeOf(r, s, e != null && e.tick >= s.since ? e : null)}` : e != null ? `; last failure: ${e.what}: ${causeOf(r, e.step, e)}` : ''
+    const on = s != null ? `; ${stepName(s)}: ${causeOf(r, s, e != null && e.tick >= s.since ? e : null)}` : e != null ? `; last failure ${t.tick - e.tick} ticks ago: ${e.what}: ${causeOf(r, e.step, e)}` : ''
     return `milestone ${milestone}: no progress in ${t.count} ticks${on}`
   }
   if (r.kind === 'skill_failed' && r.skill != null) {
