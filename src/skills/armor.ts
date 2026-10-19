@@ -118,6 +118,8 @@ export function armorUpgrades (bot: Bot): Partial<Record<ArmorSlot, Item>> {
     if (piece == null || !wearable(item)) continue
     const slot = piece.slot
     if (slot === keep && !item.name.startsWith('golden_')) continue
+    // a carved pumpkin on the head stays on in the End (the endermen's gaze disguise, skills/pumpkin.ts)
+    if (slot === 'head' && bot.inventory.slots[bot.getEquipmentDestSlot('head')]?.name === 'carved_pumpkin' && /the_end/.test(String(bot.game?.dimension ?? ''))) continue
     const current = worn[slot]
     const best = upgrades[slot] ?? current
     if (best == null || armorScore(item, worn) > armorScore(best, worn)) upgrades[slot] = item

@@ -20,6 +20,7 @@ import { applyBooks } from './skills/anvil'
 import { experience } from './skills/xp'
 import { BREEDING_FOOD, breedAnimals, isAdult, releaseAnimals } from './skills/husbandry'
 import { plantSugarCane } from './skills/caneFarm'
+import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
 import { countItems } from './skills/util'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
@@ -308,6 +309,9 @@ export function portalRoomNear (bot: Bot): boolean {
   return room != null && room.unseen.length === 0
 }
 
+/** ticks a pumpkin and shears for the End's carved pumpkin may cost (the plan's estimate) */
+export const PUMPKIN_TICKS = 2000
+
 /** blocks to have for the crystals' pillars (the caged ones are 76 to 103 high, the ground at 64) */
 export const END_BLOCKS = 64
 
@@ -327,8 +331,27 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
       log('back to the portal room')
       await executor.task('to the portal room', async (s) => await strongholdToPortalRoom(bot, {}, s), signal)
     }
+    // a carved pumpkin on for the island's endermen (carved from a pumpkin and shears held, got when cheap: a pumpkin
+    // in sight or remembered, shears from 2 iron)
+    if (countItems(bot, 'carved_pumpkin') === 0) {
+      const want = [{ item: 'pumpkin', count: 1 }, { item: 'shears', count: 1 }]
+      const plan = executor.plan(want)
+      if (plan.ok && plan.cost <= PUMPKIN_TICKS) {
+        await executor.obtain(want, signal).catch(err => {
+          if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+          log(`End: no pumpkin: ${(err as Error).message}`)
+        })
+      }
+    }
+    if (countItems(bot, 'carved_pumpkin') > 0 || (countItems(bot, 'pumpkin') > 0 && countItems(bot, 'shears') > 0)) {
+      await executor.task('a carved pumpkin', async (s) => await carvePumpkin(bot, s), signal).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`End: no carved pumpkin: ${(err as Error).message}`)
+      })
+    }
     await executor.task('into the End', async (s) => await enterEnd(bot, { signal: s }), signal)
   }
+  if (isInEnd(bot) && countItems(bot, 'carved_pumpkin') > 0) await executor.task('wear the pumpkin', async (s) => await wearPumpkin(bot, s), signal)
   // off the arrival platform over the void to the island first (the fight goes for the podium in a straight line)
   await executor.task('over to the island', async (s) => await crossToIsland(bot, { signal: s }), signal)
   // blocks for the crystals' pillars: the island's end stone dug when the bag runs short of them
