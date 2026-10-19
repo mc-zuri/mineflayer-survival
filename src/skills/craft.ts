@@ -129,9 +129,18 @@ export async function craft (bot: Bot, args: CraftArgs, signal?: AbortSignal): P
     } catch (err) {
       throw new SkillError('VERIFY_FAILED', `crafting ${resultName} x${step.recipeApplications} failed: ${(err as Error).message}`, result(), { cause: err })
     }
-    const gained = countItems(bot, resultName) - made
-    if (gained < recipe.result.count * step.recipeApplications) {
-      throw new SkillError('VERIFY_FAILED', `crafting ${resultName} x${step.recipeApplications} gave ${gained} of ${recipe.result.count * step.recipeApplications}`, result())
+    const wanted = recipe.result.count * step.recipeApplications
+    let gained = countItems(bot, resultName) - made
+    if (gained < wanted) {
+      // the server's answers to the clicks can still be on their way: a click behind the menu's state id is answered
+      // with the whole menu as it was then (broadcastFullState), which undoes the clicks' prediction until the later
+      // answers come (a pickup's slot update between two clicks). Short by what the server has, not the prediction.
+      await settleInventory(bot, signal)
+      await resyncInventory(bot, signal)
+      gained = countItems(bot, resultName) - made
+    }
+    if (gained < wanted) {
+      throw new SkillError('VERIFY_FAILED', `crafting ${resultName} x${step.recipeApplications} gave ${gained} of ${wanted}`, result())
     }
   }
 
