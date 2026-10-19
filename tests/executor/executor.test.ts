@@ -396,3 +396,27 @@ test('stashNearby puts a depot chest down when no chest is near, stores what isn
   assert.deepEqual(ex.memory.chestAt(depot)?.items, { raw_iron: 30, leather: 3 })
   assert.equal(count(bot, 'andesite'), 20)
 })
+
+test('the loot step walks to a chest out of the loaded chunks before it opens it', async () => {
+  const travelModule = require('../../src/skills/travel')
+  const chestModule = require('../../src/skills/chest')
+  const { runLoot } = await import('../../src/executor/steps')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(97.5, -54, 64.5) })
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => (Math.abs(p.x - 97) > 64 ? null : realAt(p))) as any
+  const calls: string[] = []
+  const realTravel = travelModule.travel
+  const realRetrieve = chestModule.retrieveItems
+  travelModule.travel = async (_b: unknown, a: any) => { calls.push(`travel ${a.target.toString()}`) }
+  chestModule.retrieveItems = async () => { calls.push('retrieve'); return { moved: {} } }
+  try {
+    await runLoot({ kind: 'loot', item: 'diamond_pickaxe', count: 1, from: { x: -56, y: 60, z: -16, dimension: 'overworld' } } as any, { bot, signal: new AbortController().signal, log: () => {}, state: {}, memory: new WorldMemory() } as any)
+  } finally {
+    travelModule.travel = realTravel
+    chestModule.retrieveItems = realRetrieve
+  }
+  assert.deepEqual(calls, [`travel ${new Vec3(-56, 60, -16).toString()}`, 'retrieve'])
+})

@@ -1,6 +1,7 @@
 // One runner per kind of plan step, each over the skills: mine → collectBlock (finding or exploring for the block
 // first), craft, smelt, kill → hunt, loot → retrieveItems, fill → fillBucket; barter waits for the nether skills.
 // A runner keeps its starting count in the task's state, so a step a reflex preempted picks up where it was.
+import { travel } from '../skills/travel'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { TaskError } from '../core/errors'
@@ -434,6 +435,11 @@ export const runLoot: StepRunner<LootStep> = async (step, ctx) => {
   const want = start + step.count - countItems(bot, step.item)
   if (want > 0) {
     const chest = new Vec3(step.from.x, step.from.y, step.from.z)
+    // a chest out of the loaded chunks (the base's, from 160 blocks off down a mine) walked to first: 'the chunk
+    // isn't loaded' three times and the step failed (26.3)
+    if (bot.blockAt(chest) == null || bot.entity.position.distanceTo(chest) > 48) {
+      await travel(bot, { target: chest, range: 3, exactY: true }, signal).catch(err => { if (isAbort(err)) throw err })
+    }
     const res = await retrieveItems(bot, { chest, filter: step.item, count: want }, signal)
     const known = ctx.memory.chestAt(chest, step.from.dimension)
     if (known != null) {
