@@ -47,6 +47,19 @@ export const STAGES: Record<string, Stage> = {
       ['flint_and_steel', 1], ['iron_pickaxe', 1]
     ]
   },
+  // the nether: the enchanted gear, no eyes yet; a portal cast from lava with the buckets (or the obsidian carried),
+  // a fortress found from where the portal comes out, blaze rods, pearls by bartering the gold or from endermen,
+  // then the eyes and the dragon as above
+  nether: {
+    from: 'nether',
+    until: 'end',
+    kit: [
+      ...ENCHANTED_GEAR,
+      ['arrow', 128], ['cobblestone', 128], ['cooked_beef', 48], ['bread', 16], ['golden_apple', 2],
+      ['water_bucket', 1], ['bucket', 2], ['flint_and_steel', 1], ['gold_ingot', 32], ['golden_boots', 1],
+      ['torch', 32], ['oak_log', 64], ['crafting_table', 1], ['iron_ingot', 16], ['coal', 16], ['iron_pickaxe', 1]
+    ]
+  },
   // the epoch before: farming and enchanting. The diamond gear plain, the eyes made already (the nether's done), and
   // what a farm and a table are made from: cows from eggs bred with wheat for the books' leather, canes by water for
   // their paper, the table's diamonds and obsidian, lapis, iron for an anvil; then on to the dragon as above
