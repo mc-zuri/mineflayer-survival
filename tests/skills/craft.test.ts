@@ -80,3 +80,16 @@ test('craft: a step whose result comes after the clicks\' prediction was undone 
     clearInterval(ticking2)
   }
 })
+
+test('craft: a result with no room for it in a full bag is NO_SPACE, for the executor to make room', async () => {
+  const { craft } = require('../../src/skills/craft')
+  const full = fakeCraftBot({ oak_planks: 2 })
+  full.craft = async () => {}
+  full.inventory.emptySlotCount = () => 0
+  const ticking = setInterval(() => full.emit('physicsTick'), 5)
+  try {
+    await assert.rejects(craft(full, { item: 'stick', count: 4 }), (err: any) => err.code === 'NO_SPACE' || /NO_SPACE|inventory is full/.test(String(err.message)))
+  } finally {
+    clearInterval(ticking)
+  }
+})

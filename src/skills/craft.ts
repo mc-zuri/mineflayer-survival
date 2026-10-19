@@ -140,7 +140,10 @@ export async function craft (bot: Bot, args: CraftArgs, signal?: AbortSignal): P
       gained = countItems(bot, resultName) - made
     }
     if (gained < wanted) {
-      throw new SkillError('VERIFY_FAILED', `crafting ${resultName} x${step.recipeApplications} gave ${gained} of ${wanted}`, result())
+      // a full bag has nowhere to put the result: NO_SPACE, which the executor makes room for (a VERIFY_FAILED it
+      // took for a bad craft, three times over, and the step failed: 26.3's planks, paper and books)
+      const full = (bot.inventory.emptySlotCount?.() ?? 1) === 0
+      throw new SkillError(full ? 'NO_SPACE' : 'VERIFY_FAILED', `crafting ${resultName} x${step.recipeApplications} gave ${gained} of ${wanted}${full ? ': the inventory is full' : ''}`, result())
     }
   }
 
