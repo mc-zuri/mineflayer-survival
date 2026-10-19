@@ -79,3 +79,14 @@ test('portalSiteWork: the frame, its inside and a row each side dug, the ground 
   assert.equal(work.dig.length, 4 * 3 * 5 - 3 * 2)
   assert.deepEqual(work.fill.map(p => `${p.x},${p.y},${p.z}`).sort(), ['1,63,-1', '1,63,0', '1,63,1'])
 })
+
+test('chooseDigSite: the site with no liquid in it, the least work first', async () => {
+  const { chooseDigSite } = await import('../../src/nether/portalSkills')
+  // stone all round, water at z 2 - 4 (the first site's) 
+  const get = (p: Pos): BlockInfo => ({ name: p.y < 64 ? 'stone' : (p.z >= 1 && p.z <= 4 && p.y < 67 ? 'water' : 'stone') })
+  const site = chooseDigSite(get, new Vec3(0, 64, 0))
+  assert.ok(site != null)
+  assert.ok(!(site.axis === 'x' && site.origin.z === 2), JSON.stringify(site.origin))
+  const wet = (p: Pos): BlockInfo => ({ name: p.y < 64 ? 'stone' : 'water' })
+  assert.equal(chooseDigSite(wet, new Vec3(0, 64, 0)), null)
+})

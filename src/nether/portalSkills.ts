@@ -131,6 +131,22 @@ export function portalSiteWork (getBlock: BlockGetter, origin: Pos, axis: Axis):
 }
 
 /**
+ * The site to dig a frame's room out of by the bot's feet: of the four along each axis on each side of it, the one with
+ * no liquid in it (the liquids aren't dug into: a cave's water by the first site failed it, 26.3) and the least work
+ */
+export function chooseDigSite (getBlock: BlockGetter, feet: Vec3): { origin: Vec3, axis: Axis, work: { dig: Pos[], fill: Pos[] } } | null {
+  const sites: Array<{ origin: Vec3, axis: Axis }> = [
+    { origin: feet.offset(-1, 0, 2), axis: 'x' }, { origin: feet.offset(-1, 0, -2), axis: 'x' },
+    { origin: feet.offset(2, 0, -1), axis: 'z' }, { origin: feet.offset(-2, 0, -1), axis: 'z' }
+  ]
+  const fluid = (b: { name: string } | null | undefined): boolean => /lava|water/.test(b?.name ?? '')
+  return sites
+    .map(site => ({ ...site, work: portalSiteWork(getBlock, site.origin, site.axis) }))
+    .filter(site => !site.work.dig.some(p => fluid(getBlock(p))) && !site.work.fill.some(p => fluid(getBlock(p))))
+    .sort((a, b) => (a.work.dig.length + a.work.fill.length) - (b.work.dig.length + b.work.fill.length))[0] ?? null
+}
+
+/**
  * Makes a site for a placed frame where the bot stands when there is no flat clear ground near (a cave, a slope):
  * the frame's cells and a row each side dug out, the ground under them filled; resolves the origin, along x
  * (a cave's bot with 11 obsidian found 'no flat clear ground' and the milestone failed five times at once, 26.3)
@@ -138,11 +154,9 @@ export function portalSiteWork (getBlock: BlockGetter, origin: Pos, axis: Axis):
 export async function preparePortalSite (bot: Bot, signal?: AbortSignal): Promise<{ origin: Vec3, axis: Axis }> {
   const getBlock = blockGetter(bot)
   const feet = bot.entity.position.floored()
-  const origin = feet.offset(-1, 0, 2)
-  const axis: Axis = 'x'
-  const work = portalSiteWork(getBlock, origin, axis)
-  // the liquids aren't dug into
-  if (work.dig.some(p => /lava|water/.test(getBlock(p)?.name ?? ''))) throw new SkillError('CANNOT_PLACE', `liquid where a portal site would be at ${origin.toString()}`)
+  const site = chooseDigSite(getBlock, feet)
+  if (site == null) throw new SkillError('CANNOT_PLACE', `liquid where a portal site would be about ${feet.toString()}`)
+  const { origin, axis, work } = site
   // top down, so nothing falls into a dug cell; a few passes, each cell on its own (one out of reach from where the
   // bot stands is reached once the cells by it are dug)
   let dig = [...work.dig].sort((a, b) => b.y - a.y).map(v3)
