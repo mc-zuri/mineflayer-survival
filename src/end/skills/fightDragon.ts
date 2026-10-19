@@ -180,8 +180,11 @@ export function hurtingContact (view: DragonView, feet: Pos, phase: DragonPhase 
   return zone?.hurts === true ? zone.part : null
 }
 
-/** how far from the body a takeoff is waited out (the head turning round 6.5 out with its 1-block zone, the wings' 6) */
-export const TAKEOFF_CLEARANCE = 10
+/**
+ * how far from the body a takeoff is waited out: the wings' zones reach 4.5 + 2 + 4 to the side (EnderDragon.knockBack's
+ * inflate(4, 2, 4)), past the head turning round 6.5 out; at 10 a 26.3 bot on ground a block up was still hit by them
+ */
+export const TAKEOFF_CLEARANCE = 12
 /** after a hit that may have sent it off: kept back this long (DragonTakeoffPhase leaves within 10 of the podium) */
 export const TAKEOFF_STEP_BACK_TICKS = 30
 
