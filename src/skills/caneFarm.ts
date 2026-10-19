@@ -94,17 +94,14 @@ export async function plantSugarCane (bot: Bot, args: { count?: number, center?:
     await collectBlock(bot, { positions: [hole], pickup: false }, signal)
     const bucket = findInventoryItem(bot, 'water_bucket')
     if (bucket == null) break
-    await navigateNear(bot, hole, 3, signal).catch(err => { if (isAbort(err)) throw err })
+    // beside the hole, looking down at its floor's top: a bucket is used on what the look hits (BucketItem.use, the
+    // player's ray), not on a block named; from 3 blocks off the ray hit the hole's rim and the water went on top of
+    // the ground beside it (26.3)
+    await navigateNear(bot, hole, 1, signal).catch(err => { if (isAbort(err)) throw err })
     await bot.equip(bucket, 'hand')
-    const floor = bot.blockAt(hole.offset(0, -1, 0))
-    if (floor == null) break
-    await bot.lookAt(hole.offset(0.5, 0.1, 0.5), true)
-    await bot.activateBlock(floor as any, new Vec3(0, 1, 0), new Vec3(0.5, 1, 0.5))
-    if (!await waitUntil(bot, () => bot.blockAt(hole)?.name === 'water', 20, signal)) {
-      // the bucket used on nothing: poured where the crosshair is instead
-      bot.activateItem()
-      await waitUntil(bot, () => bot.blockAt(hole)?.name === 'water', 20, signal)
-    }
+    await bot.lookAt(hole.offset(0.5, 0.02, 0.5), true)
+    bot.activateItem()
+    await waitUntil(bot, () => bot.blockAt(hole)?.name === 'water', 20, signal)
     if (bot.blockAt(hole)?.name !== 'water') throw new SkillError('VERIFY_FAILED', `no water in the hole at ${hole.toString()}`)
     water.push(hole)
   }
