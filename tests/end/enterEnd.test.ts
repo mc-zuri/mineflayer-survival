@@ -103,3 +103,21 @@ test('frameStandSpot: outside the ring on the frames\' level (the platform), not
   for (let x = 5; x <= 15; x++) for (let z = 0; z <= 12; z++) low.set(`${x},61,${z}`, 'obsidian')
   assert.deepStrictEqual(frameStandSpot(world(low), new Vec3(10, 64, 10), { x: 0, z: 1 }), { x: 10, y: 62, z: 8 })
 })
+
+test('frameStandSpot: no platform outside the ring, the floor 2 under the frames: the stairs\' top by it, or the ring\'s next frame', async () => {
+  const { frameStandSpot } = await import('../../src/end/skills/enterEnd')
+  const { world } = await import('./endWorld')
+  const blocks = new Map<string, string>()
+  for (let x = 5; x <= 15; x++) for (let z = 0; z <= 12; z++) blocks.set(`${x},61,${z}`, 'obsidian')
+  // the ring's frames at 64 (9 to 11 along x at z 10), a stair block's top at 64 two to the side outside the ring
+  for (const x of [9, 10, 11]) blocks.set(`${x},64,10`, 'end_portal_frame')
+  for (let y = 62; y <= 63; y++) blocks.set(`13,${y},9`, 'obsidian')
+  const get = (pos: Vec3): any => {
+    const b = world(blocks)(pos)
+    return b != null && b.name === 'end_portal_frame' ? { ...b, boundingBox: 'block' } : b
+  }
+  assert.deepStrictEqual(frameStandSpot(get, new Vec3(11, 64, 10), { x: 0, z: 1 }), { x: 13, y: 64, z: 9 })
+  // no stair: on the next frame
+  blocks.delete('13,62,9'); blocks.delete('13,63,9')
+  assert.deepStrictEqual(frameStandSpot(get, new Vec3(11, 64, 10), { x: 0, z: 1 }), { x: 10, y: 65, z: 10 })
+})

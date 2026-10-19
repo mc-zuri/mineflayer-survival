@@ -72,6 +72,24 @@ export function frameStandSpot (get: BlockGetter, pos: Vec3, out: { x: number, z
       if (y != null && y >= pos.y && y <= pos.y + 1) return { x, y, z }
     }
   }
+  // no platform outside it: any ground within 3 at the frame's level or a block over (the ring's other frames, the
+  // stairs' top), its top face in reach, the nearest
+  let best: { x: number, y: number, z: number } | null = null
+  let bestD = Infinity
+  for (let dx = -3; dx <= 3; dx++) {
+    for (let dz = -3; dz <= 3; dz++) {
+      if (dx === 0 && dz === 0) continue
+      const x = pos.x + dx
+      const z = pos.z + dz
+      const y = groundY(get, x, z, pos.y + 3, pos.y - 4)
+      if (y == null || y < pos.y || y > pos.y + 1) continue
+      const d = Math.hypot(x + 0.5 - (pos.x + 0.5), y + 1.62 - (pos.y + 13 / 16), z + 0.5 - (pos.z + 0.5))
+      // on another frame only when nothing else will do (the portal's pit beside it)
+      const score = d + (get(new Vec3(x, y - 1, z))?.name === 'end_portal_frame' ? 3 : 0)
+      if (d <= 4 && score < bestD) { bestD = score; best = { x, y, z } }
+    }
+  }
+  if (best != null) return best
   const x = pos.x - out.x * 2
   const z = pos.z - out.z * 2
   return { x, y: groundY(get, x, z, pos.y + 3, pos.y - 4) ?? pos.y, z }
