@@ -157,7 +157,7 @@ export class ReflexEngine {
     }
     const entry: Running = { task, cancel }
     this.running = entry
-    this.bot.emit('reflex' as any, task.name)
+    this.bot.emit('reflex' as any, task.name, task.detail)
     settled.then(
       () => { if (this.running === entry) this.running = null },
       (err) => {

@@ -414,11 +414,13 @@ export class Runner {
     this.bot.on('physicsTick', onTick)
     // the reflexes that preempt the work, in the log: one line a reflex, repeats within REFLEX_LOG_TICKS counted
     let last: { name: string, tick: number, repeats: number } | null = null
-    const onReflex = (name: string): void => {
+    const onReflex = (name: string, detail?: string): void => {
       const tick = this.tick
       if (last != null && last.name === name && tick - last.tick < REFLEX_LOG_TICKS) { last.repeats++; last.tick = tick; return }
       if (last != null && last.repeats > 0) this.log(`reflex ${last.name} ${last.repeats} times more`)
-      this.log(`reflex ${name}`)
+      // what it does and where (a fall's start and landing: the falls off the End's pillars said nothing of where)
+      const p = this.bot.entity?.position
+      this.log(`reflex ${name}${detail != null && detail !== '' ? ` (${detail})` : ''}${name === 'fall' && p != null ? ` at ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}` : ''}`)
       last = { name, tick, repeats: 0 }
     }
     this.bot.on('reflex' as any, onReflex)

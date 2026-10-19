@@ -290,13 +290,14 @@ test('the reflexes that fire are logged, a run of the same one counted', async (
       wood: async () => {
         for (let i = 0; i < 5; i++) bot.emit('reflex', 'drowning')
         bot.emit('reflex', 'eat')
+        bot.emit('reflex', 'fall', 'water at (0, 60, 0)')
         bot.give('wooden_pickaxe', 1)
         bot.give('crafting_table', 1)
       }
     }
   })
   await runner.play()
-  assert.deepEqual(lines.filter(l => l.startsWith('reflex')), ['reflex drowning', 'reflex drowning 4 times more', 'reflex eat'])
+  assert.deepEqual(lines.filter(l => l.startsWith('reflex')), ['reflex drowning', 'reflex drowning 4 times more', 'reflex eat', 'reflex fall (water at (0, 60, 0)) at 0.0 64.0 0.0'])
 })
 
 test('the death messages are told from the other system lines about the bot', async () => {
