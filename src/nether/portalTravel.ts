@@ -10,7 +10,8 @@ import { isSolid } from '../skills/placement'
 import { travel } from '../skills/travel'
 import { trace, waitTicks, waitUntil } from '../skills/util'
 import { portalDestination } from './coords'
-import { buildPortal, type BuildPortalArgs } from './portalSkills'
+import { blockGetter, buildPortal, lightPortal, type BuildPortalArgs } from './portalSkills'
+import { checkPortalFrame, portalFrame, type PortalFrame } from './portal'
 import { withNetherSafety } from './safety'
 
 /** NetherPortalBlock.getPortalTransitionTime: a survival player stands in the portal 80 ticks (gamerule players_nether_portal_default_delay) */
@@ -51,6 +52,21 @@ export function findPortal (bot: Bot, maxDistance = 32): Vec3 | null {
     .filter(p => bot.blockAt(p.offset(0, -1, 0))?.type !== id)
     .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
   return found[0] ?? null
+}
+
+/** a whole 4 × 5 obsidian frame round `near` (a portal's remembered cell) with nothing in it, else null */
+export function unlitFrameAt (bot: Bot, near: Vec3): PortalFrame | null {
+  const getBlock = blockGetter(bot)
+  for (const axis of ['x', 'z'] as const) {
+    for (let du = -3; du <= 0; du++) {
+      for (let dv = -2; dv <= 0; dv++) {
+        const origin = axis === 'x' ? { x: near.x + du, y: near.y + dv, z: near.z } : { x: near.x, y: near.y + dv, z: near.z + du }
+        const frame = portalFrame(origin, axis)
+        if (checkPortalFrame(getBlock, frame).valid) return frame
+      }
+    }
+  }
+  return null
 }
 
 /** a cell the bot can stand in: solid below, two cells clear, not a portal, lava or fire */
@@ -262,6 +278,16 @@ async function takePortal (bot: Bot, to: Dimension, args: EnterNetherArgs, signa
       const walk = async (): Promise<unknown> => await travel(bot, { target: at, range: 4, exactY: true }, signal)
       await (here === 'the_nether' ? withNetherSafety(bot, walk) : walk())
       portal = findPortal(bot, 16)
+      // the frame there gone out (no portal blocks in it): lit again with the flint and steel (a 26.3 bot back from
+      // three nights' pearl hunt found its portal out and tried to build another, five times at once)
+      if (portal == null) {
+        const frame = unlitFrameAt(bot, at)
+        if (frame != null) {
+          trace('takePortal: the frame at', at.toString(), 'is out: lighting it')
+          await lightPortal(bot, frame, signal).catch(err => { if (isAbort(err)) throw err; trace('takePortal: not lit:', (err as Error).message) })
+          portal = findPortal(bot, 16)
+        }
+      }
     }
   }
   if (portal == null) {
