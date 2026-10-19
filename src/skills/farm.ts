@@ -263,7 +263,7 @@ export async function boneMealFarm (bot: Bot, farm: { cells: readonly Vec3[], cr
       try {
         await navigateToReach(bot, at, signal)
         await holdItem(bot, 'bone_meal')
-        await bot.activateBlock(crop as Block, new Vec3(0, 1, 0))
+        await bot.activateBlock(crop, new Vec3(0, 1, 0))
         uses++
       } catch (err) {
         if (isAbort(err)) throw err

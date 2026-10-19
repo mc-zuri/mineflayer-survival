@@ -29,6 +29,7 @@ import { pickupDrops } from './skills/pickupDrops'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
 import { MILESTONE_HANDLERS, harvestGrownFarms } from './milestones'
+import { EPOCHS, EPOCH_HANDLERS, isEpoch, nextEpoch } from './epochs'
 import { TRIP_KIT, keepUnbroken, takeTripKit } from './skills/tripKit'
 import { armorPoints, shelter, sleepThroughNight } from './skills/shelter'
 import { overland } from './end/strongholdSkills'
@@ -88,6 +89,11 @@ export interface PlayOptions {
   stopAt?: MilestoneId
   /** milestones treated as done (not worked on) */
   skip?: MilestoneId[]
+  /**
+   * once the dragon is dead, go on with the epochs (src/epochs.ts: a farm kept, an experience farm, mending on the
+   * gear), each left out after maxFailures, play finishing when none is left (default false: play ends at the dragon)
+   */
+  epochs?: boolean
   /** handlers by milestone, over bot.survival.handlers and the defaults */
   handlers?: Partial<Record<MilestoneId, MilestoneHandler>>
   /** the memory and progress are saved here after every milestone and step, and loaded from it at the start */
@@ -161,18 +167,20 @@ export function progressState (bot: Bot, memory: WorldMemory): ProgressState {
   const items: ItemCount[] = bot.inventory.items().map(i => ({ name: i.name, count: i.count }))
   const equipment: string[] = []
   const enchanted: string[] = []
+  const mended: string[] = []
   for (const slot of [5, 6, 7, 8, 45]) {
     const item = bot.inventory.slots[slot]
     if (item != null) equipment.push(item.name)
   }
   for (const item of [...bot.inventory.items(), ...[5, 6, 7, 8, 45].map(s => bot.inventory.slots[s])]) {
     if (item != null && (item.enchants?.length ?? 0) > 0) enchanted.push(item.name)
+    if (item != null && item.name !== 'enchanted_book' && (item.enchants ?? []).some(e => e.name === 'mending')) mended.push(item.name)
   }
   const base = baseRecord(memory)
   const stations: Station[] = []
   if (base?.table != null) stations.push('crafting_table')
   if ((base?.furnaces.length ?? 0) > 0) stations.push('furnace')
-  return { inventory: new Inventory(bot.registry as any, items), equipment, memory, stations, enchanted, advancements: [...((bot as any).survival?.advancements ?? [])] }
+  return { inventory: new Inventory(bot.registry as any, items), equipment, memory, stations, enchanted, mended, advancements: [...((bot as any).survival?.advancements ?? [])] }
 }
 
 /**
@@ -279,7 +287,8 @@ const defaultHandlers: Partial<Record<MilestoneId, MilestoneHandler>> = {
     // creeper-proof base is play's base options' (BASE_BLUEPRINT) for later
     await buildBase(bot, { blueprint: HOUSE_BLUEPRINT, depths: HOUSE_DEPTHS, chests: 2, ...opts, executor, signal, log })
   },
-  ...MILESTONE_HANDLERS
+  ...MILESTONE_HANDLERS,
+  ...EPOCH_HANDLERS
 }
 
 export class Runner {
@@ -390,7 +399,7 @@ export class Runner {
 
   /** the milestones done now that weren't before: their events */
   private noteReached (state: ProgressState): void {
-    for (const m of MILESTONES) {
+    for (const m of [...MILESTONES, ...(this.options.epochs === true ? EPOCHS : [])]) {
       if (this.reached.some(r => r.id === m.id)) continue
       if (!m.done(state)) continue
       const event: MilestoneEvent = { id: m.id, title: m.title, tick: this.tick, wallMs: Date.now() - this.started }
@@ -507,7 +516,8 @@ export class Runner {
         }
         continue
       }
-      const m = nextToWork(state, reachedIds, skip)
+      // the epochs once the milestones are done (the dragon dead), when play's options ask for them
+      const m = nextToWork(state, reachedIds, skip) ?? (this.options.epochs === true ? nextEpoch(state, reachedIds, skip) : null)
       if (m == null) return this.stop(null, 'finished')
       if (this.options.stopAt === m.id) return this.stop(m.id, 'until')
       const handler = this.handlerFor(m.id)
@@ -542,7 +552,7 @@ export class Runner {
         failures.set(m.id, n)
         this.log(`milestone ${m.id} failed (${n}): ${(err as Error).message}`)
         this.diagnostics?.milestoneFailed(m.id, err)
-        if (n >= maxFailures && OPTIONAL_MILESTONES.includes(m.id)) {
+        if (n >= maxFailures && (OPTIONAL_MILESTONES.includes(m.id) || isEpoch(m.id))) {
           // the dragon doesn't need it: the game goes on without
           this.log(`milestone ${m.id} left out after ${n} failures: on to the next`)
           skip.add(m.id)

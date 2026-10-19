@@ -7,7 +7,10 @@ import type { Station } from './steps'
 import { SMELTING } from './sources'
 
 /** the plan's milestones, in order: wood → stone → food → base → iron → diamonds → enchanting → nether → eyes → end */
-export type MilestoneId = 'wood' | 'stone' | 'food' | 'base' | 'iron' | 'diamonds' | 'enchanting' | 'nether' | 'eyes' | 'end'
+export type MilestoneId = 'wood' | 'stone' | 'food' | 'base' | 'iron' | 'diamonds' | 'enchanting' | 'nether' | 'eyes' | 'end' | EpochId
+
+/** the epochs after the dragon (planner/epochs.ts: a farm kept, an experience farm, mending on the gear) */
+export type EpochId = 'farm' | 'xp_farm' | 'mending'
 
 export interface ProgressState {
   /** what the bot carries */
@@ -21,6 +24,8 @@ export interface ProgressState {
   enchanted?: string[]
   /** advancements earned, by vanilla id without the namespace ('end/kill_dragon') */
   advancements?: string[]
+  /** held or worn items with mending on them */
+  mended?: string[]
 }
 
 export interface Milestone {
@@ -29,6 +34,8 @@ export interface Milestone {
   done: (state: ProgressState) => boolean
   /** what to obtain for it, from where the state is */
   goals: (state: ProgressState) => ObtainRequest[]
+  /** whether it can be worked on now (an epoch's: a spawner known for the experience farm); default true */
+  available?: (state: ProgressState) => boolean
 }
 
 /**
