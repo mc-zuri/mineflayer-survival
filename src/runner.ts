@@ -21,7 +21,7 @@ import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
 import { buildBase, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
-import { Executor, describeRequest, ownedInventory, type ExecutorOptions, type PlanOptions } from './executor/executor'
+import { DEPOT_POI, Executor, describeRequest, ownedInventory, type ExecutorOptions, type PlanOptions } from './executor/executor'
 import { SPARE_FOOD_POINTS, spareKitGoals, stockKeepRule } from './executor/keep'
 import { isAbort } from './skills/errors'
 import { navigate, navigateNear } from './skills/navigate'
@@ -643,12 +643,16 @@ export class Runner {
     await this.executor.storeExact(items, signal)
   }
 
-  /** what the base's chests hold, summed (the memory's contents, as seen or stored last) */
+  /**
+   * What the base's chests and the mine depots (DEPOT_POI: chests put down away from the base for what the bag couldn't
+   * carry) hold, summed (the memory's contents, as seen or stored last)
+   */
   stockStored (): Record<string, number> {
     const base = baseRecord(this.memory)
-    if (base == null) return {}
     const dimension = this.memory.base?.dimension ?? 'overworld'
-    return storedAtBase(base.chests.map(c => this.memory.chestAt(c, dimension)))
+    const chests = (base?.chests ?? []).map(c => this.memory.chestAt(c, dimension))
+    for (const d of this.memory.getPois(DEPOT_POI)) chests.push(this.memory.chestAt(d, d.dimension))
+    return storedAtBase(chests)
   }
 
   /** the stock's levels now (carried and at the base), null without a stock policy */

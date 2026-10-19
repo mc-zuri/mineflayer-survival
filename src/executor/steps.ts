@@ -49,6 +49,11 @@ export interface StepContext {
   replacingTools?: boolean
   /** drops not gone for (the route's stone the stock has enough of, once the bag carries what's kept of it) */
   unwanted?: (name: string) => boolean
+  /**
+   * Makes room in the bag when it's short, on the way (Executor.makeRoomDuringStep): before each block a mine step
+   * breaks and each step of a staircase or tunnel it digs
+   */
+  room?: () => Promise<void>
 }
 
 export interface StepOutcome {
@@ -141,7 +146,7 @@ async function findBlocks (bot: Bot, names: string[], ctx: StepContext, alternat
   // the food that grows is looked for no further out than the animals: none there, the plan goes for another food
   const maxRadius = all.some(n => SIGHTED_BLOCKS.includes(n)) ? HUNT_EXPLORE_RADIUS : undefined
   ctx.state.explore ??= { leg: 0 }
-  if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude, maxRadius, progress: ctx.state.explore }, ctx.signal)) {
+  if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude, maxRadius, progress: ctx.state.explore, room: ctx.room }, ctx.signal)) {
     if (near(names)) return names
     if (near(alternatives)) return alternatives
   }
@@ -198,7 +203,7 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
     try {
       // a tool getting low comes back between fewer blocks (the pathfinder's digging on the way wears it too)
       const batch = kind != null && wornOutTools(bot.inventory.items(), { minUses: 64 }).some(w => w.kind === kind) ? 2 : 8
-      const res = await collectBlock(bot, { names, count: Math.min(left, batch), maxDistance: SEARCH_RADIUS, exclude, unwanted: ctx.unwanted }, signal)
+      const res = await collectBlock(bot, { names, count: Math.min(left, batch), maxDistance: SEARCH_RADIUS, exclude, unwanted: ctx.unwanted, room: ctx.room }, signal)
       for (const pos of res.positions) ctx.memory.forgetBlock(pos, dimensionOf(bot))
       // a crop taken from a farm (a village's) is sown again from what it dropped: the farm grows back
       if (growsAny(step.blocks)) await resow(bot, res.positions, names, signal)

@@ -118,13 +118,16 @@ const UNBREAKABLE = new Set(['bedrock', 'barrier', 'end_portal_frame', 'reinforc
 export function nookCell (lookup: Lookup, feet: Vec3): Vec3 | null {
   for (const d of CARDINALS) {
     const cell = feet.plus(d)
-    const b = lookup(cell)
-    if (b == null || b.boundingBox !== 'block' || UNBREAKABLE.has(b.name) || /(chest|furnace|table|barrel|bed|door)/.test(b.name)) continue
-    if (lookup(cell.offset(0, -1, 0))?.boundingBox !== 'block') continue
-    if (liquidAround(lookup, cell) != null) continue
-    return cell
+    if (isNookCell(lookup, cell)) return cell
   }
   return null
+}
+
+function isNookCell (lookup: Lookup, cell: Vec3): boolean {
+  const b = lookup(cell)
+  if (b == null || b.boundingBox !== 'block' || UNBREAKABLE.has(b.name) || /(chest|furnace|table|barrel|bed|door)/.test(b.name)) return false
+  if (lookup(cell.offset(0, -1, 0))?.boundingBox !== 'block') return false
+  return liquidAround(lookup, cell) == null
 }
 
 /**
@@ -143,6 +146,31 @@ export async function digNook (bot: Bot, signal?: AbortSignal): Promise<boolean>
     trace('explore: no nook', (err as Error).message)
     return false
   }
+}
+
+/**
+ * A place off the way for a chest (a mine depot): a nook two high dug into the wall beside the bot's feet (nookCell,
+ * and the block over it, so the chest opens: ChestBlock.isChestBlockedAt), or null when there's no wall to dig into.
+ * The chest stands out of the staircase or tunnel, which the way back walks.
+ */
+export async function digDepotNook (bot: Bot, signal?: AbortSignal): Promise<Vec3 | null> {
+  const lookup = lookupOf(bot)
+  const feet = feetOf(bot)
+  for (const d of CARDINALS) {
+    const cell = feet.plus(d)
+    if (!isNookCell(lookup, cell)) continue
+    const over = lookup(cell.offset(0, 1, 0))
+    if (over == null || UNBREAKABLE.has(over.name) || LIQUIDS.has(over.name) || liquidAround(lookup, cell.offset(0, 1, 0)) != null) continue
+    trace('explore: digging a depot nook at', cell.toString())
+    try {
+      await open(bot, [cell.offset(0, 1, 0), cell], signal)
+      return cell
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('explore: no depot nook', (err as Error).message)
+    }
+  }
+  return null
 }
 
 function lookupOf (bot: Bot): Lookup {
@@ -619,6 +647,11 @@ export async function lightBehind (bot: Bot, cell: Vec3, signal?: AbortSignal): 
 export interface DigRouteArgs {
   /** stop early once this holds (checked every step) */
   found?: () => boolean
+  /**
+   * Makes room in the bag when it's short, every step (the executor's: the route's stone over the stock thrown behind,
+   * the rest put in a depot): the route's cells' drops come in as the bot walks into them
+   */
+  room?: () => Promise<void>
   /** most steps (default 160) */
   maxSteps?: number
 }
@@ -638,6 +671,7 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
     if (args.found?.() === true) return true
     const feet = feetOf(bot)
     if (feet.y <= y) return true
+    await args.room?.()
     const turns = [dir, new Vec3(-dir.z, 0, dir.x), new Vec3(dir.z, 0, -dir.x), dir.scaled(-1)]
     let stepped = false
     for (const d of turns) {
@@ -720,6 +754,7 @@ export async function tunnel (bot: Bot, args: DigRouteArgs & { length?: number, 
     for (let i = 0; i < length; i++) {
       throwIfAborted(signal)
       if (args.found?.() === true) return true
+      await args.room?.()
       const feet = feetOf(bot)
       const step = tunnelStep(feet, dir)
       const why = unsafeStep(lookup, step)
@@ -756,6 +791,8 @@ export interface ExploreForBlocksArgs {
   maxRadius?: number
   /** the surface spiral's legs walked so far (ExploreArgs.progress) */
   progress?: { leg: number }
+  /** room made in the bag down the staircase and the tunnels (DigRouteArgs.room) */
+  room?: () => Promise<void>
 }
 
 /** the nearest block of the names in the loaded chunks, within `radius` */
@@ -778,7 +815,7 @@ export async function exploreForBlocks (bot: Bot, args: ExploreForBlocksArgs, si
   if (level == null) return await exploreSurface(bot, { found, center: args.center, memory: args.memory, remember: args.names, maxRadius: args.maxRadius, progress: args.progress }, signal)
   const feet = feetOf(bot)
   // the bot may stand in a hole above or below the level: get to within a few blocks of it
-  if (feet.y > level + 2) await descendTo(bot, level, { found }, signal)
+  if (feet.y > level + 2) await descendTo(bot, level, { found, room: args.room }, signal)
   if (found()) return true
-  return await tunnel(bot, { found }, signal)
+  return await tunnel(bot, { found, room: args.room }, signal)
 }

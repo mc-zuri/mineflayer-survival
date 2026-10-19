@@ -336,3 +336,63 @@ test('makeRoom throws the route\'s cobblestone over a stack away once the stock 
     clearInterval(ticking)
   }
 })
+
+test('makeRoom: what isn\'t kept goes to the base within BASE_STORE_RANGE, farther into a depot chest put down by the bot', async () => {
+  const { BASE_STORE_RANGE } = await import('../../src/executor/executor')
+  const bag: Record<string, number> = {}
+  // 35 slots of what is stored, not thrown (no junk): one free
+  for (const name of ['raw_iron', 'raw_gold', 'leather', 'white_wool', 'gray_wool', 'brown_wool', 'oak_door', 'chest', 'iron_sword', 'beef', 'mutton',
+    'chicken', 'porkchop', 'iron_ingot', 'gold_ingot', 'copper_ingot', 'raw_copper', 'diamond', 'emerald', 'lapis_lazuli', 'redstone', 'quartz',
+    'book', 'paper', 'sugar_cane', 'feather', 'gunpowder', 'slime_ball', 'bone_meal', 'ink_sac', 'oak_planks', 'birch_log', 'spruce_log',
+    'clay_ball', 'brick']) bag[name] = 1
+  const calls: string[] = []
+  const at = (distance: number): any => {
+    const bot = fakeBot(bag)
+    bot.entities = {}
+    bot.blockAt = () => null
+    const ex = new Executor(bot, { runners: {} })
+    ex.memory.setBase({ x: distance, y: 64, z: 0 })
+    ex.memory.rememberChest({ x: distance + 1, y: 64, z: 0 }, {})
+    ;(ex as any).storeAtBase = async () => { calls.push(`base ${distance}`); return {} }
+    ;(ex as any).stashNearby = async () => { calls.push(`depot ${distance}`); return {} }
+    return ex
+  }
+  await at(60).makeRoom()
+  await at(BASE_STORE_RANGE + 50).makeRoom()
+  assert.deepEqual(calls, ['base 60', 'depot 60', `depot ${BASE_STORE_RANGE + 50}`])
+})
+
+test('stashNearby puts a depot chest down when no chest is near, stores what isn\'t kept in it (not the junk) and remembers it (DEPOT_POI)', async () => {
+  const { DEPOT_POI } = await import('../../src/executor/executor')
+  const bot = fakeBot({ raw_iron: 30, leather: 3, andesite: 20, cobblestone: 64, iron_pickaxe: 1 })
+  bot.entities = {}
+  bot.entity.yaw = 0
+  bot.entity.eyeHeight = 1.62
+  const depot = new Vec3(1, 64, 0)
+  let placed = false
+  bot.blockAt = (pos: Vec3) => placed && pos.equals(depot) ? { name: 'chest', type: registry.blocksByName.chest.id, position: depot, boundingBox: 'block' } : { name: 'air', position: pos, boundingBox: 'empty' }
+  bot._client = new EventEmitter()
+  const inChest: Record<string, number> = {}
+  bot.openContainer = async () => ({
+    slots: new Array(63).fill(null),
+    inventoryStart: 27,
+    inventoryEnd: 63,
+    items: () => bot.inventory.items(),
+    containerItems: () => Object.entries(inChest).map(([name, count]) => ({ name, count, type: registry.itemsByName[name].id })),
+    deposit: async (type: number, _meta: unknown, n: number) => { const name = registry.items[type].name; bot.take(name, n); inChest[name] = (inChest[name] ?? 0) + n },
+    close: () => {}
+  })
+  const ex = new Executor(bot, { runners: {} })
+  ;(ex as any).putDownDepot = async () => { placed = true; return depot }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    const moved = await ex.stashNearby({}, undefined, async (_name: string, fn: any) => await fn(new AbortController().signal))
+    assert.deepEqual(moved, { raw_iron: 30, leather: 3 })
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.deepEqual(inChest, { raw_iron: 30, leather: 3 })
+  assert.deepEqual(ex.memory.getPois(DEPOT_POI).map(p => [p.x, p.y, p.z]), [[1, 64, 0]])
+  assert.deepEqual(ex.memory.chestAt(depot)?.items, { raw_iron: 30, leather: 3 })
+  assert.equal(count(bot, 'andesite'), 20)
+})

@@ -8,7 +8,7 @@ import { harvestToolFor } from './equipBest'
 import { navigate } from './navigate'
 import { nearbyDrops, pickupDrops } from './pickupDrops'
 import {
-  blockIds, countsDelta, eyeHeight, trace, inventoryCounts, inventoryItems, settleInventory, sumPositive, vecKey, waitTicks, waitUntil, withinReach,
+  blockIds, countsDelta, emptySlots, eyeHeight, trace, inventoryCounts, inventoryItems, settleInventory, sumPositive, vecKey, waitTicks, waitUntil, withinReach,
   type Block, type ItemCounts
 } from './util'
 import { dig } from '../core/actions'
@@ -47,6 +47,11 @@ export interface CollectBlockArgs {
   anyTool?: boolean
   /** drops not picked up (the route's stone the stock has enough of) */
   unwanted?: (name: string) => boolean
+  /**
+   * Makes room in the bag when it's short (the executor's: the junk and the route's stone thrown behind, the rest in a
+   * depot): before each block, and before the pickup of a block's drops with no slot free
+   */
+  room?: () => Promise<void>
 }
 
 const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, 1, 0), new Vec3(0, -1, 0)]
@@ -173,6 +178,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
 
   while (!enough()) {
     throwIfAborted(signal, result())
+    await args.room?.()
     const block = nextTarget()
     if (block == null) break
     const pos = block.position
@@ -241,6 +247,8 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       // Block.dropResources: the drops spawn on the break, the bot hears of them a tick or two later
       const centre = pos.offset(0.5, 0.5, 0.5)
       if ((bot.registry.blocks[block.type]?.drops?.length ?? 0) > 0) await waitUntil(bot, () => nearbyDrops(bot, centre, 3).length > 0, 10, signal)
+      // the walk here filled the bag (the route's cells' drops): room for the block's own first
+      if (emptySlots(bot) === 0) await args.room?.()
       const picked = await pickupDrops(bot, { near: centre, radius: 6, names: pickupNames([block.type]), unwanted: args.unwanted }, signal)
       trace('collectBlock: picked up', picked.items)
     }

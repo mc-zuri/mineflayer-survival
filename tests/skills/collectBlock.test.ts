@@ -182,3 +182,22 @@ test('collectBlock digs nothing out of reach after a walk that ended short (no "
   }
   assert.strictEqual(dug, 0)
 })
+
+test('collectBlock makes room (args.room) before each block it breaks: the walks to them bring the route\'s stone in', async () => {
+  const registry = require('minecraft-data')('1.21.11')
+  const blocks = new Map<string, string>([['1,64,0', 'stone'], ['-1,64,0', 'stone']])
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (pos: Vec3) => blocks.get(`${pos.x},${pos.y},${pos.z}`) ?? (pos.y < 64 ? 'stone' : 'air') })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; b.harvestTools = registry.blocksByName[b.name].harvestTools; return b }
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: () => null }
+  bot.dig = async (block: any) => { blocks.set(`${block.position.x},${block.position.y},${block.position.z}`, 'air') }
+  let rooms = 0
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    const res = await collectBlock(bot, { positions: [new Vec3(1, 64, 0), new Vec3(-1, 64, 0)], anyTool: true, pickup: false, room: async () => { rooms++ } })
+    assert.strictEqual(res.mined, 2)
+  } finally {
+    clearInterval(ticker)
+  }
+  assert.strictEqual(rooms, 2)
+})

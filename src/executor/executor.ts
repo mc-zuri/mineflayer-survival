@@ -16,17 +16,18 @@ import { toolsAtLeast } from '../planner/progression'
 import { checkPlan, type PlanStep, type Station } from '../planner/steps'
 import { baseRecord, type BaseRecord } from '../base/pois'
 import { storeItems } from '../skills/chest'
+import { craft } from '../skills/craft'
 import { placeBlock } from '../skills/placeBlock'
 import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
 import { tossAway } from '../skills/pickupDrops'
 import { countItems, emptySlots, trace } from '../skills/util'
 import { wornOutTools } from './durability'
-import { defaultKeep, junkToToss, ROUTE_STONE, splitInventory, type KeepRule, type ScaffoldKeep } from './keep'
+import { defaultKeep, JUNK, junkToToss, ROUTE_STONE, splitInventory, type KeepRule, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { noteVillage } from '../skills/village'
-import { rememberAround } from './explore'
+import { digDepotNook, rememberAround } from './explore'
 import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
 import { farmCells, grownPlots, knownFarms } from '../skills/farm'
 import { GROW_TICKS } from '../core/crops'
@@ -82,6 +83,18 @@ export interface ExecutorOptions {
   /** the spawn or base, where exploring turns around */
   home?: () => Vec3 | null
 }
+
+/** how far the base may be for makeRoom to walk there and store (some 500 ticks each way); farther, a depot */
+export const BASE_STORE_RANGE = 96
+
+/** how far a known chest may be for stashNearby to use it rather than put down a depot */
+export const DEPOT_RANGE = 32
+
+/** the memory's point of interest for a chest the bot put down away from the base (a mine depot): its chests count as stock */
+export const DEPOT_POI = 'mine_depot'
+
+/** runs a part of making room: as a foreground task, or straight in the task it's made in (a step's) */
+type RoomRunner = <T>(name: string, fn: (signal: AbortSignal) => Promise<T>) => Promise<T>
 
 /** the building blocks (SCAFFOLD_ITEMS) the bag keeps whatever is thrown away: a stack for the pathfinder's bridges and towers */
 export const SCAFFOLD_KEEP = 64
@@ -422,7 +435,8 @@ export class Executor {
         // the logs for a new axe are cut with the worn one: handed back for a new axe, the plan for one started over
         // 30 times and the milestone failed (seed 5)
         replacingTools: this.replacing,
-        unwanted: name => this.unwantedDrop(name)
+        unwanted: name => this.unwantedDrop(name),
+        room: async () => await this.makeRoomDuringStep(taskSignal)
       }
       return await runner(step, stepCtx)
     }, signal, { step, desc: describeStep(step) })
@@ -478,33 +492,28 @@ export class Executor {
   }
 
   /**
-   * Frees slots: stores what isn't kept in the base's chests when the base is within reach (or `force`), else throws
-   * the junk away, the least worth first (and, when that isn't enough and `force`, the rest of what storing would take,
-   * never a valuable: keep.ts's isValuable). When `force` and there's no room still, what isn't kept goes into a chest
-   * near (stashNearby), else it fails INVENTORY_FULL: a forced room had thrown an enchanting table and a diamond away
-   * (26.3).
+   * Frees slots, the cheapest way first: throws away the junk and what's surplus (the route's stone the stock has
+   * enough of), behind the bot (tossAway); then stores what isn't kept in the base's chests when the base is within
+   * BASE_STORE_RANGE (or `force`); then puts it in a chest near (stashNearby: a known one, or a mine depot put down
+   * here). When `force` and there's no room still, it throws the rest of what storing would take, never a valuable
+   * (keep.ts's isValuable), and with nothing left to throw fails INVENTORY_FULL: a forced room had thrown an
+   * enchanting table and a diamond away (26.3). `inTask`: the signal of the task it runs in (a step's, room made on the
+   * way: makeRoomDuringStep), whose skills it calls straight, with no walk to the base.
    */
-  async makeRoom (needed: Record<string, number> = {}, signal?: AbortSignal, force = false): Promise<void> {
+  async makeRoom (needed: Record<string, number> = {}, signal?: AbortSignal, force = false, inTask?: AbortSignal): Promise<void> {
     if (this.makingRoom) return
     this.makingRoom = true
+    const run: RoomRunner = inTask != null ? async (_name, fn) => await fn(inTask) : async (name, fn) => await this.task(name, fn, signal)
     try {
+      if (await this.tossJunk(needed, false, run)) return
       const base = this.base
-      if (base != null && base.chests.length > 0 && (force || this.nearBase(base, 256))) {
+      if (inTask == null && base != null && base.chests.length > 0 && (force || this.nearBase(base, BASE_STORE_RANGE))) {
         await this.storeAtBase(needed, signal)
         if (emptySlots(this.bot) >= this.options.minFreeSlots) return
       }
-      const want = this.options.minFreeSlots + 2 - emptySlots(this.bot)
-      const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
-      const toss = junkToToss(stacks, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything: force, surplus: name => this.isSurplus(name), scaffold: this.options.scaffold })
-      if (toss.length > 0) this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
-      if (toss.length > 0) {
-        await this.task('make room', async (s) => {
-          // behind the bot, and never gone back for (tossAway)
-          for (const t of toss) await tossAway(this.bot, t.name, t.count, s).catch(err => { if (isAbort(err)) throw err })
-        }, signal)
-      }
+      await this.stashNearby(needed, signal, run)
       if (!force || emptySlots(this.bot) >= this.options.minFreeSlots) return
-      await this.stashNearby(needed, signal)
+      await this.tossJunk(needed, true, run)
       if (emptySlots(this.bot) === 0) {
         throw new TaskError('INVENTORY_FULL', 'no room: nothing to throw away but what is kept or valuable, and no chest near to put it in')
       }
@@ -514,49 +523,106 @@ export class Executor {
   }
 
   /**
-   * Puts what the keep rule doesn't keep (nor the needed) into a chest near the bot: a known one within 32 blocks, else
-   * a carried one put down here (room over it: ChestBlock.isChestBlockedAt); the chest remembered with what went in, for
-   * the planner to fetch it from. What was stored.
+   * Room made during a step (StepContext.room), when the bag is short of minFreeSlots: the route's drops come in as the
+   * bot walks a staircase or a tunnel, and a mine step for 5 diamonds may dig hundreds of blocks of it before it ends
+   * and the room before the next step is made. The junk and the surplus thrown, the rest in a depot; never a walk to
+   * the base, never a failure (the step's own pickups say NO_SPACE)
    */
-  async stashNearby (needed: Record<string, number> = {}, signal?: AbortSignal): Promise<Record<string, number>> {
+  async makeRoomDuringStep (signal: AbortSignal): Promise<void> {
+    if (emptySlots(this.bot) >= this.options.minFreeSlots) return
+    try {
+      await this.makeRoom(this.needed, signal, false, signal)
+    } catch (err) {
+      if (isAbort(err) || TaskError.is(err, 'DIED', 'ABORTED') || signal.aborted) throw err
+      this.log(`no room made on the way: ${(err as Error).message}`)
+    }
+  }
+
+  /**
+   * Throws away the junk and the surplus (and with `anything`, what storing would take) for room: whole stacks, the
+   * least worth first (junkToToss), behind the bot. Whether there's room now.
+   */
+  private async tossJunk (needed: Record<string, number>, anything: boolean, run: RoomRunner): Promise<boolean> {
+    const want = this.options.minFreeSlots + 2 - emptySlots(this.bot)
+    if (want <= 0) return true
+    const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
+    const toss = junkToToss(stacks, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.options.scaffold })
+    if (toss.length > 0) {
+      this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
+      await run('make room', async (s) => {
+        // behind the bot, and never gone back for (tossAway)
+        for (const t of toss) await tossAway(this.bot, t.name, t.count, s).catch(err => { if (isAbort(err)) throw err })
+      })
+    }
+    return emptySlots(this.bot) >= this.options.minFreeSlots
+  }
+
+  /**
+   * Puts what the keep rule doesn't keep (nor the needed) into a chest near the bot: a known one within DEPOT_RANGE
+   * (a depot put down before, the base's), else a mine depot put down here: a carried chest (one crafted from the
+   * bag's wood when none is), in a nook dug into the wall beside the bot, off the way back (digDepotNook), or on the
+   * floor beside it with room over it (ChestBlock.isChestBlockedAt). The chest is remembered with what went in (the
+   * planner fetches from it, the stock counts it: DEPOT_POI); the junk and the stone the stock has enough of are
+   * thrown, not stored. What was stored.
+   */
+  async stashNearby (needed: Record<string, number> = {}, signal?: AbortSignal, run: RoomRunner = async (name, fn) => await this.task(name, fn, signal)): Promise<Record<string, number>> {
     const moved: Record<string, number> = {}
     const { store } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed })
-    if (store.length === 0) return moved
+    const worth = store.filter(it => !JUNK.has(it.name) && !this.isSurplus(it.name))
+    if (worth.length === 0) return moved
     const dimension = normalizeDimension(this.bot.game?.dimension)
     const here = this.bot.entity.position
     const near = this.memory.knownChests(dimension)
       .map(c => vec(c))
-      .filter(p => p.distanceTo(here) <= 32 && ['chest', 'trapped_chest', 'barrel'].includes(this.bot.blockAt(p)?.name ?? ''))
+      .filter(p => p.distanceTo(here) <= DEPOT_RANGE && ['chest', 'trapped_chest', 'barrel'].includes(this.bot.blockAt(p)?.name ?? ''))
       .sort((a, b) => a.distanceTo(here) - b.distanceTo(here))
     let chest: Vec3 | null = near[0] ?? null
     if (chest == null) {
-      if (!this.bot.inventory.items().some(i => i.name === 'chest')) return moved
-      const at = findPlacement(p => this.bot.blockAt(p) as any, here, { radius: 3, freeAbove: true })
-      if (at == null) return moved
       try {
-        await this.task('put down a chest', async (s) => await placeBlock(this.bot, { pos: at, item: 'chest' }, s), signal)
+        chest = await run('put down a depot', async (s) => await this.putDownDepot(s))
       } catch (err) {
-        if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true) throw err
+        if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true || isAbort(err)) throw err
+        this.log(`no depot put down: ${(err as Error).message}`)
         return moved
       }
-      chest = at
+      if (chest == null) return moved
       this.memory.rememberChest(chest, {}, dimension)
+      this.memory.addPoi(DEPOT_POI, chest, dimension)
+      this.log(`a depot chest put down at ${chest.toString()}`)
     }
-    for (const it of store) {
+    const at = chest
+    for (const it of worth) {
       throwIfOwnerAborted(signal)
       try {
-        const res = await this.task(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest, filter: [it.name], count: it.count }, s), signal)
+        const res = await run(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: at, filter: [it.name], count: it.count }, s))
         const n = res.moved[it.name] ?? 0
-        this.rememberStored(chest, it.name, n, dimension)
+        this.rememberStored(at, it.name, n, dimension)
         if (n > 0) moved[it.name] = (moved[it.name] ?? 0) + n
       } catch (err) {
-        if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true) throw err
+        if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true || isAbort(err)) throw err
         // a full chest, or one that won't open: the rest stays
+        const partial = ((err as TaskError).partial as { moved?: Record<string, number> } | undefined)?.moved?.[it.name] ?? 0
+        this.rememberStored(at, it.name, partial, dimension)
         break
       }
     }
-    if (Object.keys(moved).length > 0) this.log(`stashed ${Object.entries(moved).map(([n, c]) => `${c} ${n}`).join(', ')} in a chest at ${chest.toString()}`)
+    if (Object.keys(moved).length > 0) this.log(`stashed ${Object.entries(moved).map(([n, c]) => `${c} ${n}`).join(', ')} in a chest at ${at.toString()}`)
     return moved
+  }
+
+  /** a chest put down by the bot for a depot (crafted first when none is carried), or null when there's no way to */
+  private async putDownDepot (signal: AbortSignal): Promise<Vec3 | null> {
+    const bot = this.bot
+    if (countItems(bot, 'chest') === 0) {
+      // 8 planks (2 logs) at the carried table
+      await craft(bot, { item: 'chest', pickUpTable: true }, signal)
+      if (countItems(bot, 'chest') === 0) return null
+    }
+    const nook = await digDepotNook(bot, signal)
+    const at = nook ?? findPlacement(p => bot.blockAt(p) as any, bot.entity.position, { radius: 3, freeAbove: true })
+    if (at == null) return null
+    await placeBlock(bot, { pos: at, item: 'chest' }, signal)
+    return bot.blockAt(at)?.name === 'chest' ? at : null
   }
 
   /** takes everything the keep rule doesn't keep (nor the needed) to the base's chests, the remembered contents updated */
