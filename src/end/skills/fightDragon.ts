@@ -224,6 +224,8 @@ export function escapeSpot (get: BlockGetter, from: Vec3, zones: DragonZone[], d
       const p = walkable(get, from, a, d)
       if (p == null) continue
       if (touchedZone(p, zones, 0, CONTACT_MARGIN) != null || inDanger(p, dangers, 0.5) != null || guard?.risky(p) === true) continue
+      // nor a step up on the way into a wing's push
+      if (!walkClear(get, from, p, zones, true)) continue
       // level ground first
       const score = Math.abs(p.y - from.y)
       if (score < bestScore) { bestScore = score; best = p }
@@ -263,14 +265,16 @@ export function awayFrom (from: Vec3, threat: Pos, distance: number): Vec3 {
  * The straight walk from `from` to `to` keeps the body out of the zones that hurt: the ground under each half block of
  * it (the rim, a bump of end stone) clear of them
  */
-export function walkClear (get: BlockGetter, from: Pos, to: Pos, zones: DragonZone[]): boolean {
+export function walkClear (get: BlockGetter, from: Pos, to: Pos, zones: DragonZone[], pushing = false): boolean {
   const steps = Math.ceil(Math.hypot(to.x - from.x, to.z - from.z) / 0.5)
   for (let i = 1; i <= steps; i++) {
     const x = from.x + (to.x - from.x) * i / steps
     const z = from.z + (to.z - from.z) * i / steps
     const y = groundY(get, x, z, Math.max(from.y, to.y) + 2, Math.min(from.y, to.y) - 3)
     if (y == null) continue
-    if (touchedZone({ x, y, z }, zones.filter(zone => zone.hurts), 0, 0.1) != null) return false
+    // pushing: the wings' zones too, where the ground steps up on the way (the start may be in one: it is being left)
+    if (pushing && y <= Math.floor(from.y + 1e-6)) continue
+    if (touchedZone({ x, y, z }, pushing ? zones : zones.filter(zone => zone.hurts), 0, 0.1) != null) return false
   }
   return true
 }
@@ -514,7 +518,8 @@ export async function fightDragon (bot: Bot, opts: FightDragonOptions = {}): Pro
         if (!wasInContact) log(`under the dragon's ${contact}: out from under it; ${hurtContext(bot, portalY, tracker)}`)
         wasInContact = true
         const view = { position: dragon.position, yaw: vanillaYaw(dragon.yaw), ...tracker.flight() }
-        const zones = dragonZones(view, window.phase != null && isSitting(window.phase)).filter(z => z.hurts)
+        // the wings' push too (a step up into it from the portal's pit threw a 26.3 bot off the island)
+        const zones = dragonZones(view, window.phase != null && isSitting(window.phase))
         // the nearest ground out of them the bot can walk to (straight away from the body may be a wall, or a step up
         // further into them)
         steerToward(bot, escapeSpot(get, me, zones, dangers, guard) ?? awayFrom(me, dragon.position, 6), { sprint: true })

@@ -352,3 +352,19 @@ test('fightDragon fights on when a crystal left can\'t be reached at all (destro
     crystals.destroyCrystals = real
   }
 })
+
+test('escapeSpot: out of the exit portal\'s pit, not up the rim into a wing\'s push (it threw a 26.3 bot off the island)', () => {
+  const blocks = endIsland([], 40)
+  const get = world(blocks)
+  const perch = exitPortal(62).perch
+  // sat low: its wings' zones reach 2 under its feet, down to 63.2: the rim (feet 63) is in them, the pit (62) under
+  const view = { position: new Vec3(perch.x, perch.y + 0.2 - 1, perch.z), yaw: -51 }
+  const zones = dragonZones(view)
+  const me = new Vec3(-1.1, 62, 0.6)
+  const to = escapeSpot(get, me, zones, [], null)
+  if (to != null) {
+    assert.equal(touchedZone(to, zones, 0, CONTACT_MARGIN), null)
+    assert.ok(walkClear(get, me, to, zones, true))
+    assert.equal(to.y, 62, 'kept down in the pit, off the rim')
+  }
+})
