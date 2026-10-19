@@ -10,7 +10,11 @@ import { buildPortal, collectBlazeRods, enterNether, findFortress, obtainPearls,
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, strongholdToPortalRoom } from './end/strongholdSkills'
 import { crossToIsland, enterEnd, fightDragon, isInEnd, leaveEnd } from './end/skills'
-import { countBookshelves, enchantGear, findEnchantingTable } from './skills/enchant'
+import { countBookshelves, enchant, enchantGear, findEnchantingTable } from './skills/enchant'
+import { applyBooks } from './skills/anvil'
+import { experience } from './skills/xp'
+import { BREEDING_FOOD, breedAnimals, releaseAnimals } from './skills/husbandry'
+import { plantSugarCane } from './skills/caneFarm'
 import { countItems } from './skills/util'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
@@ -50,7 +54,75 @@ export function shelvesWithin (cost: (shelves: number) => number | null, budget:
  * SHELF_BUDGET_TICKS (planned again with what the first try found: a source explored for in vain costs more after),
  * then the table set up with those and the gear enchanted
  */
+/** the kept animals' spawn eggs and the canes a farm is planted with */
+export const KEPT_ANIMAL_EGGS = ['cow_spawn_egg', 'mooshroom_spawn_egg', 'sheep_spawn_egg', 'pig_spawn_egg', 'chicken_spawn_egg', 'rabbit_spawn_egg']
+export const CANE_FARM_CANES = 8
+
+/**
+ * The renewable materials of the enchanting by the base: animals let out of the eggs held and bred with their food
+ * (the leather of the books), and a cane farm by water (their paper). None of it stops the milestone: what fails is
+ * logged and the materials come from elsewhere.
+ */
+export async function keepFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  const tryIt = async (what: string, fn: (s: AbortSignal) => Promise<string>): Promise<void> => {
+    try {
+      log(`${what}: ${await executor.task(what, fn, signal)}`)
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`${what}: ${(err as Error).message}`)
+    }
+  }
+  for (const egg of KEPT_ANIMAL_EGGS) {
+    if (countItems(bot, egg) > 0) await tryIt(`let out the ${egg.replace('_spawn_egg', '')}s`, async (s) => `${await releaseAnimals(bot, { egg }, s)} let out`)
+  }
+  for (const mob of ['cow', 'mooshroom', 'sheep', 'pig'] as const) {
+    if (!BREEDING_FOOD[mob].some(f => countItems(bot, f) >= 2)) continue
+    if (Object.values(bot.entities).filter(e => e.name === mob && e.position.distanceTo(bot.entity.position) <= 24).length < 2) continue
+    await tryIt(`breed the ${mob}s`, async (s) => { const r = await breedAnimals(bot, { mob }, s); return `${r.fed} fed, ${r.pairs} pairs` })
+  }
+  if (countItems(bot, 'sugar_cane') >= CANE_FARM_CANES && executor.memory.getPois('cane_farm').length === 0) {
+    await tryIt('plant a cane farm', async (s) => { const r = await plantSugarCane(bot, { count: CANE_FARM_CANES, memory: executor.memory }, s); return `${r.planted.length} canes, ${r.water.length} water holes` })
+  }
+}
+
+/** enchanted books made at the table from the levels left after the gear, put on the gear at an anvil (at most) */
+export const BOOKS_TO_ENCHANT = 3
+
+/**
+ * After the gear: books enchanted with the levels and lapis left, an anvil got (its iron) and the books put on the
+ * gear, and the gear still plain enchanted again: the second round of the enchanting
+ */
+export async function enchantBooksAndApply (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  for (let i = 0; i < BOOKS_TO_ENCHANT && countItems(bot, 'book') > 0 && countItems(bot, 'lapis_lazuli') > 0 && experience(bot).level >= 1; i++) {
+    try {
+      const r = await executor.task('enchant a book', async (s) => await enchant(bot, { item: 'book', memory: executor.memory }, s), signal)
+      log(`enchanting: a book with ${r.enchants.map(e => `${e.name} ${e.lvl}`).join(', ')}`)
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`enchanting: no book: ${(err as Error).message}`)
+      break
+    }
+  }
+  if (countItems(bot, 'enchanted_book') === 0) return
+  try {
+    if (countItems(bot, 'anvil') === 0 && bot.findBlock?.({ matching: (b: any) => /anvil$/.test(b.name), maxDistance: 16 }) == null) await executor.obtain([{ item: 'anvil', count: 1 }], signal)
+    const applied = await executor.task('the books on the gear', async (s) => await applyBooks(bot, {}, s), signal)
+    log(`anvil: ${applied.map(a => `${a.item} (${a.cost} levels)`).join(', ') || 'nothing took a book'}`)
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`anvil: ${(err as Error).message}`)
+  }
+  // the gear still plain, at the table again
+  try {
+    await executor.task('enchant the gear again', async (s) => await enchantGear(bot, { executor, signal: s, targetLevel: 0, bookshelves: 0 }), signal)
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`enchanting again: ${(err as Error).message}`)
+  }
+}
+
 export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {
+  await keepFarms(bot, executor, signal, log)
   await executor.obtain(milestone.goals(state), signal)
   const table = findEnchantingTable(bot, { memory: executor.memory, maxDistance: 16 })
   const around = table != null ? countBookshelves(pos => bot.blockAt(pos) as any, table.position) : 0
@@ -73,6 +145,7 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   }
   const shelves = Math.min(BOOKSHELVES, countItems(bot, 'bookshelf') + around)
   await executor.task('enchant the gear', async (s) => await enchantGear(bot, { executor, signal: s, bookshelves: shelves }), signal)
+  await enchantBooksAndApply(bot, executor, signal, log)
 }
 
 /**
