@@ -215,3 +215,11 @@ test('placeBlock against a chest: sneaking, and a menu its use opened anyway is 
   assert.strictEqual(closed.length, 1)
   assert.strictEqual(bot.currentWindow, null)
 })
+
+test('placeBlock puts no chest under a solid block (it would never open)', async () => {
+  const { placeBlock } = await import('../../src/skills/placeBlock')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('chest', 1)], world: (p: any) => p.y < 64 ? 'stone' : (p.x === 2 && p.y === 65 && p.z === 0 ? 'stone' : 'air') })
+  await assert.rejects(placeBlock(bot, { pos: new Vec3(2, 64, 0), item: 'chest' }), /won't open/)
+})

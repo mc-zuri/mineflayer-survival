@@ -85,6 +85,11 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
     throw new SkillError('CANNOT_PLACE', `${current.name} is at ${pos.toString()}`)
   }
   if (findInventoryItem(bot, args.item) == null) throw new SkillError('MISSING_ITEMS', `no ${args.item} in the inventory`)
+  // a chest under a solid block won't open (ChestBlock.isChestBlockedAt): not put there (the base's chest under the
+  // stone its dig left, every store timed out, 26.3)
+  if ((args.item === 'chest' || args.item === 'trapped_chest') && isSolid(bot.blockAt(pos.offset(0, 1, 0)))) {
+    throw new SkillError('CANNOT_PLACE', `${bot.blockAt(pos.offset(0, 1, 0))?.name ?? 'a block'} over ${pos.toString()}: a chest there won't open`)
+  }
 
   const against = args.against != null ? blockAtOrThrow(bot, args.against.floored()) : chooseAgainst(bot, pos)
   if (against == null || !isSolid(against)) throw new SkillError('CANNOT_PLACE', `nothing solid to place against at ${pos.toString()}`)

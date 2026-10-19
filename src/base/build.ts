@@ -271,7 +271,9 @@ export async function buildBase (bot: Bot, opts: BuildBaseOptions): Promise<Buil
       const block = bot.blockAt(pos)
       if (block == null || isFree(block)) continue
       try {
-        await executor.task(`dig ${pos.toString()}`, async (s) => await collectBlock(bot, { positions: [pos] }, s), signal)
+        // (with no harvest tool too: the room's cells only need to be gone; a stone left over a chest's cell for want
+        // of a pickaxe kept the chest shut, 26.3)
+        await executor.task(`dig ${pos.toString()}`, async (s) => await collectBlock(bot, { positions: [pos], anyTool: true }, s), signal)
         dug++
       } catch (err) {
         if (isAbort(err) || TaskError.is(err, 'DIED')) throw err

@@ -140,3 +140,16 @@ test('the house of day 1: the smallest room the furniture fits, one block of she
   const shell = (b: typeof bp): number => b.placements.filter(p => p.stage !== 'furniture').length
   assert.ok(shell(bp) * 2 < shell(generateBlueprint(BASE_BLUEPRINT)), `${shell(bp)} vs ${shell(generateBlueprint(BASE_BLUEPRINT))}`)
 })
+
+test('every chest of the base and the house designs has air (or a chest) over it, so it opens', async () => {
+  const { generateBlueprint } = await import('../../src/base/blueprint')
+  const { BASE_BLUEPRINT, HOUSE_BLUEPRINT } = await import('../../src/base/build')
+  for (const opts of [BASE_BLUEPRINT, HOUSE_BLUEPRINT, { ...BASE_BLUEPRINT, chestLayers: 2 }]) {
+    const bp = generateBlueprint({ ...opts, origin: { x: 0, y: 64, z: 0 } })
+    const world = bp.world()
+    for (const c of bp.storage) {
+      const above = world({ x: c.x, y: c.y + 1, z: c.z })
+      assert.ok(above == null || above.name === 'air' || above.name === 'chest', `${JSON.stringify(c)}: ${above?.name ?? '?'} over it`)
+    }
+  }
+})
