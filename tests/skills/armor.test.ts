@@ -54,7 +54,11 @@ test('gold armor: worn, and kept on by armorUpgrades once required', () => {
   const bot = fakeBot({ armor: { feet: item('golden_boots') }, items: [item('iron_boots'), item('iron_helmet')] })
   assert.deepEqual(Object.keys(armorUpgrades(bot)).sort(), ['feet', 'head'])
   requireGoldArmor(bot, true)
+  bot.game.dimension = 'the_nether'
   assert.deepEqual(Object.keys(armorUpgrades(bot)), ['head'])
+  // out of the nether the better boots go back on
+  bot.game.dimension = 'overworld'
+  assert.deepEqual(Object.keys(armorUpgrades(bot)).sort(), ['feet', 'head'])
   requireGoldArmor(bot, false)
 })
 

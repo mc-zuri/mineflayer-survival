@@ -104,10 +104,11 @@ export function requireGoldArmor (bot: Bot, on = true): void {
 }
 
 export function goldArmorRequired (bot: Bot): boolean {
-  return goldWanted.get(bot) === true
+  // in the nether only, where the piglins are: back out, the better boots go back on (the golden ones put on for the
+  // nether stayed on through the End)
+  return goldWanted.get(bot) === true && /nether/.test(String(bot.game?.dimension ?? ''))
 }
 
-/** For each slot, the inventory piece better than the worn one, if any (the last golden piece kept when requireGoldArmor). */
 /** bots whose armor is off on purpose for a while (at the enchanting table, the anvil): no upgrades offered */
 const armorHeld = new WeakSet<object>()
 
@@ -125,6 +126,7 @@ export async function withArmorHeld<T> (bot: Bot, fn: () => Promise<T>): Promise
   }
 }
 
+/** For each slot, the inventory piece better than the worn one, if any (the last golden piece kept when requireGoldArmor). */
 export function armorUpgrades (bot: Bot): Partial<Record<ArmorSlot, Item>> {
   if (armorHeld.has(bot)) return {}
   const worn = wornArmor(bot)
