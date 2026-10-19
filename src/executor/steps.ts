@@ -1,7 +1,6 @@
 // One runner per kind of plan step, each over the skills: mine → collectBlock (finding or exploring for the block
 // first), craft, smelt, kill → hunt, loot → retrieveItems, fill → fillBucket; barter waits for the nether skills.
 // A runner keeps its starting count in the task's state, so a step a reflex preempted picks up where it was.
-import { isAdult } from '../skills/husbandry'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { TaskError } from '../core/errors'
@@ -377,8 +376,7 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
   let substituted = 0
   // animals the bot couldn't get to (across a ravine, up a cliff): passed over for the others
   const passed = new Set<number>()
-  // (the young passed over too: a calf drops nothing, and a herd's calves killed for leather gave none, 26.3)
-  const nearest = (mobs: string[], range: number): Entity | null => nearestOfType(bot, mobs, range, e => passed.has(e.id) || !isAdult(bot, e) || outOfTheWay(bot, e.position))
+  const nearest = (mobs: string[], range: number): Entity | null => nearestOfType(bot, mobs, range, e => passed.has(e.id) || outOfTheWay(bot, e.position))
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     let mob = step.mob

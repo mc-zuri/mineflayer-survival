@@ -237,25 +237,3 @@ test('shelvesForPaper: the shelves the paper and canes at hand make books for', 
   assert.strictEqual(shelvesForPaper(inv({ enchanting_table: 1, paper: 200 })), 15)
   assert.strictEqual(shelvesForPaper(inv({})), 0)
 })
-
-test('the kill step for leather passes over the calves (a calf drops nothing) for the adults', async () => {
-  const huntModule = require('../../src/skills/hunt')
-  const { runKill } = await import('../../src/executor/steps')
-  const { fakeBot } = await import('../reflexes/fakeBot')
-  const { Vec3 } = await import('vec3')
-  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
-  const keys: string[] = (bot.registry.entitiesByName as any).cow.metadataKeys
-  const baby: any[] = []
-  baby[keys.indexOf('baby')] = true
-  bot.entities[1] = { id: 1, name: 'cow', type: 'animal', position: new Vec3(2, 64, 0), metadata: baby } as any
-  bot.entities[2] = { id: 2, name: 'cow', type: 'animal', position: new Vec3(8, 64, 0), metadata: [] } as any
-  const hunted: number[] = []
-  const real = huntModule.hunt
-  huntModule.hunt = async (_bot: unknown, prey: any) => { hunted.push(prey.id); bot.inventory.items = () => [{ name: 'leather', count: 1, type: bot.registry.itemsByName.leather.id }] as any; return { killed: true, drops: { leather: 1 } } }
-  try {
-    await runKill({ kind: 'kill', mob: 'cow', item: 'leather', count: 1, kills: 1 } as any, { bot, signal: new AbortController().signal, log: () => {}, state: {}, memory: null, home: null } as any)
-  } finally {
-    huntModule.hunt = real
-  }
-  assert.deepStrictEqual(hunted, [2])
-})
