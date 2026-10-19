@@ -580,6 +580,26 @@ export const PEARL_ROUNDS = 200
 /** game ticks the overworld's night hunt for endermen may take (3 days) */
 export const PEARL_NIGHTS_TICKS = 72000
 
+/** blocks of a warped forest (the endermen's nether biome) and of a bastion (its piglins) */
+const WARPED_BLOCKS = ['warped_nylium', 'warped_wart_block', 'warped_stem']
+const BASTION_BLOCKS = ['gilded_blackstone', 'polished_blackstone_bricks', 'cracked_polished_blackstone_bricks']
+
+/**
+ * Where the nether's pearls are, by the blocks in the loaded chunks: the nearest warped forest's (more than 8 of its
+ * blocks), else with gold a bastion's; null when neither is in sight
+ */
+export function pearlGround (bot: Bot, gold: boolean): { kind: 'warped forest' | 'bastion', at: Vec3 } | null {
+  if (typeof bot.findBlocks !== 'function') return null
+  const ids = (names: string[]): number[] => names.map(n => bot.registry.blocksByName[n]?.id).filter((id): id is number => id != null)
+  const warped = bot.findBlocks({ matching: ids(WARPED_BLOCKS), maxDistance: 128, count: 16 })
+  if (warped.length > 8) return { kind: 'warped forest', at: warped[0].offset(0, 1, 0) }
+  if (gold) {
+    const bastion = bot.findBlocks({ matching: ids(BASTION_BLOCKS), maxDistance: 128, count: 16 })
+    if (bastion.length > 8) return { kind: 'bastion', at: bastion[0] }
+  }
+  return null
+}
+
 /**
  * Pearls in the nether up to `want`: gold bartered with the adult piglins in sight, endermen hunted where they are
  * (the warped forest, the soul sand valleys), the nether walked on in legs of PEARL_LEG blocks to find either, a few
@@ -587,12 +607,15 @@ export const PEARL_NIGHTS_TICKS = 72000
  */
 export async function pearlsInTheNether (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
   const count = (name: string): number => countItems(bot, name)
-  for (let leg = 0; leg < 4 && count('ender_pearl') < want; leg++) {
+  let legs = 4
+  for (let leg = 0; leg < legs && count('ender_pearl') < want; leg++) {
     if (signal.aborted) throw signal.reason
     const piglin = Object.values(bot.entities).some(e => isAdultPiglin(bot, e) && e.position.distanceTo(bot.entity.position) <= 48)
     const enderman = Object.values(bot.entities).some(e => e.name === 'enderman' && e.position.distanceTo(bot.entity.position) <= 48)
     try {
       if (piglin && count('gold_ingot') > 0) {
+        // room for what the piglins throw (a full bag ended the bartering at once: NO_SPACE, 26.3)
+        await executor.makeRoom?.({ gold_ingot: count('gold_ingot') }, signal)
         await executor.task('barter for pearls', async (s) => await barterForPearls(bot, { pearls: want, range: 48 }, s), signal)
         continue
       }
@@ -604,11 +627,24 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`ender pearls: ${(err as Error).message}`)
     }
-    // on to find piglins or endermen: a leg along the next of the fortress search's walks
-    const route = fortressRoute(executor.memory, bot.entity.position)
-    const dir = route.axis === 'x' ? new Vec3(route.direction as number, 0, 0) : new Vec3(0, 0, route.direction as number)
-    const to = bot.entity.position.plus(dir.scaled(PEARL_LEG))
-    log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for piglins or endermen`)
+    // on to find piglins or endermen: to a warped forest in sight (its nylium: the endermen's biome), or a bastion's
+    // blocks with gold held (its piglins), else a leg along the next of the fortress search's walks
+    const seen = pearlGround(bot, count('gold_ingot') > 0)
+    let to: Vec3
+    if (seen != null) {
+      to = seen.at
+      if (seen.kind === 'warped forest') legs = Math.max(legs, Math.min(leg + 3, 12))
+      if (to.distanceTo(bot.entity.position) <= 16) {
+        // in it: the endermen spawn about (a warped forest's spawns are mostly theirs)
+        await executor.task('wait for endermen', async (s) => { await waitTicks(bot, 400, s) }, signal)
+        continue
+      }
+    } else {
+      const route = fortressRoute(executor.memory, bot.entity.position)
+      const dir = route.axis === 'x' ? new Vec3(route.direction as number, 0, 0) : new Vec3(0, 0, route.direction as number)
+      to = bot.entity.position.plus(dir.scaled(PEARL_LEG))
+    }
+    log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for ${seen?.kind ?? 'piglins or endermen'}`)
     await executor.task('a leg for pearls', async (s) => await withNetherSafety(bot, async () => await travel(bot, {
       target: to,
       range: 8,

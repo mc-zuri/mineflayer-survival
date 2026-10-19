@@ -144,3 +144,25 @@ test('in the nether with few blocks the milestone mines netherrack for its bridg
   await assert.rejects(netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }), /stop here/)
   assert.equal(calls[0], `obtain ${NETHER_BLOCKS - 8} netherrack`)
 })
+
+test('pearls in the nether: a warped forest in sight is gone to, and waited in for its endermen', async () => {
+  const { pearlsInTheNether, pearlGround } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  bot.game.dimension = 'the_nether'
+  const nylium = bot.registry.blocksByName.warped_nylium.id
+  let forestAt = new Vec3(60, 63, 0)
+  bot.findBlocks = (opts: any) => (Array.isArray(opts.matching) ? opts.matching : [opts.matching]).includes(nylium) ? Array.from({ length: 12 }, (_, i) => forestAt.offset(i, 0, 0)) : []
+  assert.equal(pearlGround(bot, false)?.kind, 'warped forest')
+  const tasks: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    task: async (name: string) => { tasks.push(name); if (name === 'a leg for pearls') bot.entity.position = new Vec3(60.5, 64, 0.5) }
+  }
+  await pearlsInTheNether(bot, executor, 4, new AbortController().signal, () => {})
+  assert.equal(tasks[0], 'a leg for pearls')
+  assert.equal(tasks[1], 'wait for endermen')
+  forestAt = new Vec3(0, 0, 0)
+})
