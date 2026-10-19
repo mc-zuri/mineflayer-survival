@@ -206,6 +206,13 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       }
     }
 
+    // a walk that ended out of reach (the pathfinder's goal held 6 blocks off, 60 over a diamond) is no dig: the
+    // server refuses a break out of reach, and 'still there after digging it' failed the step 77 times (26.3)
+    if (!gone() && !withinReach(bot, pos)) {
+      lastFailure = new SkillError('NO_PATH', `${block.name} at ${pos.toString()} is out of reach from ${bot.entity.position.floored().toString()}`)
+      if (++unreachable >= (args.maxUnreachable ?? 3)) break
+      continue
+    }
     if (!gone()) {
       const current = bot.blockAt(pos)
       if (current == null) continue

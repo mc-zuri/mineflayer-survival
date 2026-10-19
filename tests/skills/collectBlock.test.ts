@@ -157,3 +157,28 @@ test('waterBeside: an ore with water or a water plant against a face; not one wi
   assert.equal(waterBeside(at({ '1,40,0': 'seagrass' }), ore), true)
   assert.equal(waterBeside(at({ '1,41,1': 'water' }), ore), false)
 })
+
+test('collectBlock digs nothing out of reach after a walk that ended short (no "still there after digging it")', async () => {
+  const navModule = require('../../src/skills/navigate')
+  const registry = require('minecraft-data')('1.21.11')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('iron_pickaxe')], world: (pos: Vec3) => (pos.x === 20 && pos.y === 63 && pos.z === 0) ? 'stone' : (pos.y < 64 ? 'dirt' : 'air') })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; b.harvestTools = registry.blocksByName[b.name].harvestTools; return b }
+  bot.findBlocks = () => [new Vec3(20, 63, 0)]
+  bot._client = { on: () => {}, off: () => {} }
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: () => null }
+  bot.pathfinder = { world: {} }
+  bot.equip = async () => {}
+  let dug = 0
+  bot.dig = async () => { dug++ }
+  const real = navModule.navigate
+  navModule.navigate = async () => {}
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlock(bot, { names: ['stone'], count: 1 }), (err: any) => /out of reach|NO_PATH|no more/.test(String(err.message)))
+  } finally {
+    clearInterval(ticker)
+    navModule.navigate = real
+  }
+  assert.strictEqual(dug, 0)
+})
