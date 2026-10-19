@@ -451,3 +451,32 @@ test('fightFromNook: a rod on the floor is gone for between draws while no blaze
 
 /** ticks for a volley's last fireball's flight and the fetch's quiet to go by */
 const FETCH_WAIT = 60
+
+test('fightFromNook gives the nook up (CANNOT_PLACE) when its front won\'t shut, low, SEAL_FAILS times', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, nookAround, SEAL_FAILS } = await import('../../src/nether/blazeFight')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  // a blaze resting off in front, the bot low, every placement turned down by the server
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 65, 2.5), meta: { health: 20, flags: 0 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), health: 8, items: [item('diamond_sword'), item('cobblestone', 32)], offhand: item('shield'), entities: [blaze], world: name })
+  bot.world = { raycast: () => null }
+  bot.placeBlock = async () => { throw new Error('No block has been placed : the block is still air') }
+  bot.equip = async (it: any, dest: string) => { if (dest === 'hand') bot.heldItem = it }
+  bot.activateItem = () => { bot.usingHeldItem = true }
+  bot.deactivateItem = () => { bot.usingHeldItem = false }
+  bot.lookAt = async () => {}
+  bot.look = async () => {}
+  bot.attack = () => {}
+  bot.game.dimension = 'the_nether'
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const done = fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 4000 }).catch(err => err)
+  let settled: any = null
+  void done.then(r => { settled = r })
+  for (let i = 0; i < 1500 && settled == null; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  assert.ok(settled instanceof Error, String(settled))
+  assert.match(settled.message, /front .* won't shut/)
+  assert.ok(SEAL_FAILS > 1)
+})

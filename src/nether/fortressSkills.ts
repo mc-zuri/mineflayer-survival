@@ -353,6 +353,14 @@ function keepNook (bot: Bot, spawner: Vec3, nook: BlazeNook): void {
   m.set(spawner.toString(), nook)
 }
 
+const badStands = new WeakMap<Bot, Vec3[]>()
+/** the nooks whose front wouldn't shut (fightFromNook's CANNOT_PLACE), not planned again */
+function badNooks (bot: Bot): Vec3[] {
+  let list = badStands.get(bot)
+  if (list == null) badStands.set(bot, list = [])
+  return list
+}
+
 /** the nook kept for the spawner, its blocks to put again looked at afresh (null when it can't be had now) */
 function keptNook (bot: Bot, spawner: Vec3, lookup: NookLookup): BlazeNook | null {
   const kept = nooks.get(bot)?.get(spawner.toString())
@@ -454,7 +462,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
    * The fight from a nook by the spawner (planBlazeNook: the one built before, else the cheapest), built and fought
    * from; null when there's no nook to be had (too few blocks, no site, its building failed), the camp's fight then
    */
-  const fightFromCover = async (spawner: Vec3): Promise<BlazeRodsResult | null> => {
+  const fightFromCover = async (spawner: Vec3, retried = false): Promise<BlazeRodsResult | null> => {
     if (nookBlocks(bot) < NOOK_MIN_BLOCKS) { trace('collectBlazeRods: too few blocks for a nook,', nookBlocks(bot)); return null }
     if (farFrom(spawner)) {
       await travel(bot, { target: spawner, range: 16, exactY: true }, signal).catch(err => {
@@ -467,8 +475,10 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     await spareShield(bot, signal)
     const lookup = (p: Vec3): any => bot.blockAt(p)
     const kept = keptNook(bot, spawner, lookup)
-    // the one built before, else the cheapest three in turn (one the bot finds no way to, the next)
-    const candidates = kept != null ? [kept] : planBlazeNooks(lookup, spawner, { from: bot.entity.position }, 3)
+    // the one built before, else the cheapest three in turn (one the bot finds no way to, the next), not one whose
+    // front wouldn't shut
+    const bad = badNooks(bot)
+    const candidates = kept != null ? [kept] : planBlazeNooks(lookup, spawner, { from: bot.entity.position }, 3 + bad.length).filter(n => !bad.some(b => b.equals(n.stand))).slice(0, 3)
     let nook: BlazeNook | null = null
     for (const c of candidates) {
       trace('collectBlazeRods: the nook at', c.stand.toString(), 'facing', c.facing.toString(), c.build.length, 'blocks')
@@ -494,6 +504,12 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         throw err
       }
       trace('collectBlazeRods: the fight from the nook:', (err as Error).message)
+      // a front that wouldn't shut: another nook, once
+      if (isSkillError(err, 'CANNOT_PLACE') && /won't shut/.test((err as Error).message) && !retried) {
+        nooks.get(bot)?.delete(spawner.toString())
+        bad.push(nook.stand)
+        return await fightFromCover(spawner, true)
+      }
       return null
     }
     return { rods: countItems(bot, 'blaze_rod'), kills, ticks }

@@ -315,6 +315,9 @@ export interface NookFightResult {
 
 const ARROWS = ['arrow', 'spectral_arrow', 'tipped_arrow']
 
+/** tries at shutting the nook's front, low, before the nook is given up (fightFromNook's CANNOT_PLACE) */
+export const SEAL_FAILS = 5
+
 /** the melee mobs (besides the blazes) the nook's fight meets itself, with the sword once in reach */
 export const NOOK_MELEE = ['magma_cube']
 
@@ -363,6 +366,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   let outside = 0
   let sealAgain = 0
   let shutUntil = 0
+  let sealFails = 0
   const tracked = new Set<number>()
   const dead = new Set<number>()
   const tried = new Map<number, number>()
@@ -470,7 +474,13 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       if (bot.health <= sealAt && tick >= sealAgain && close == null) {
         unblock()
         stopDraw()
-        if (!await sealAndHeal(bot, nook, healTo, signal)) sealAgain = tick + 40
+        if (!await sealAndHeal(bot, nook, healTo, signal)) {
+          sealAgain = tick + 40
+          // a front that won't shut for long is no cover: the nook given up for another (a 26.3 bot low in a nook by
+          // seed 2's spawner at (97, 64, -515) tried its front 50 times in 2000 ticks, 'No block has been placed', and
+          // was shot dead there, twice: run mag-c)
+          if (++sealFails >= SEAL_FAILS) throw new SkillError('CANNOT_PLACE', `the nook's front at ${nook.front[0].toString()} won't shut`, { ...result, ticks: tick })
+        }
         continue
       }
 
