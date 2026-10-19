@@ -51,8 +51,8 @@ const STACK = 64
  * - iron: the iron milestone's 33 and after it a spare pickaxe and sword (5), buckets for water and lava (6), shears
  *   (2), flint and steel (1), rails and an anvil (31);
  * - diamonds: a pickaxe and sword (5), the armor (24) and an enchanting table (2), the armor taken as they come;
- * - gold: golden boots for the piglins (4) and ingots to barter for pearls;
- * - redstone: a compass and a clock (1 each), rails and the odd dispenser;
+ * - gold: golden boots for the piglins (4) and ingots to barter for pearls, from the diamonds on (the nether's);
+ * - redstone: a compass and a clock (1 each), rails and the odd dispenser, from the diamonds on;
  * - lapis: 3 a level-30 enchantment, for the pickaxe, sword, bow and armor and again later;
  * - obsidian: a nether portal (10) and an enchanting table (4);
  * - food: 3 stacks of steak would be some 1500 points, more than a run to the dragon eats: 60 to 120 points;
@@ -64,8 +64,8 @@ export const STOCK_MARKS: readonly StockMark[] = [
   { id: 'torch', counts: { torch: 1 }, gather: 'torch', low: 3 * STACK, high: 5 * STACK, keep: { torch: STACK }, from: 'stone', where: 'underground', ticksPerUnit: 20 },
   { id: 'coal', counts: { coal: 1, charcoal: 1, coal_block: 9 }, gather: ['coal', 'charcoal'], low: 32, high: 96, keep: { coal: 32, charcoal: 32 }, from: 'wood', where: 'underground', ticksPerUnit: 80 },
   { id: 'iron', counts: { iron_ingot: 1, raw_iron: 1, iron_block: 9, raw_iron_block: 9 }, gather: ['raw_iron', 'iron_ingot'], low: 32, high: 64, from: 'stone', where: 'underground', ticksPerUnit: 100 },
-  { id: 'gold', counts: { gold_ingot: 1, raw_gold: 1, gold_block: 9, raw_gold_block: 9, gold_nugget: 1 / 9 }, gather: ['raw_gold', 'gold_ingot'], low: 16, high: 48, from: 'iron', where: 'underground', ticksPerUnit: 150 },
-  { id: 'redstone', counts: { redstone: 1, redstone_block: 9 }, gather: 'redstone', low: 16, high: 64, from: 'iron', where: 'underground', ticksPerUnit: 70 },
+  { id: 'gold', counts: { gold_ingot: 1, raw_gold: 1, gold_block: 9, raw_gold_block: 9, gold_nugget: 1 / 9 }, gather: ['raw_gold', 'gold_ingot'], low: 16, high: 48, from: 'diamonds', where: 'underground', ticksPerUnit: 150 },
+  { id: 'redstone', counts: { redstone: 1, redstone_block: 9 }, gather: 'redstone', low: 16, high: 64, from: 'diamonds', where: 'underground', ticksPerUnit: 70 },
   { id: 'lapis', counts: { lapis_lazuli: 1, lapis_block: 9 }, gather: 'lapis_lazuli', low: 27, high: 64, from: 'iron', where: 'underground', ticksPerUnit: 80 },
   { id: 'diamond', counts: { diamond: 1, diamond_block: 9 }, gather: 'diamond', low: 8, high: 24, from: 'iron', where: 'underground', ticksPerUnit: 900 },
   { id: 'obsidian', counts: { obsidian: 1 }, gather: 'obsidian', low: 14, high: 24, from: 'diamonds', where: 'underground', ticksPerUnit: 450 },

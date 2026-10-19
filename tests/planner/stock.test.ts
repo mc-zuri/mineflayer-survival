@@ -144,3 +144,12 @@ for (const version of VERSIONS) {
     assert.ok((stored.find(u => u.mark.id === 'stone')?.units ?? 0) > 64)
   })
 }
+
+test('the gold and redstone, for the nether and later, are stocked from the diamonds on: the iron\'s nights are its own and the lapis\'', () => {
+  const registry: any = minecraftData('26.3')
+  const ids = (reached: any[]): string[] => new StockPolicy().topUps(new Inventory(registry, {}), {}, reached, ['underground']).map(u => u.mark.id)
+  const afterIron = ids(['wood', 'stone', 'food', 'iron'])
+  assert.ok(afterIron.includes('lapis') && !afterIron.includes('gold') && !afterIron.includes('redstone'), afterIron.join(', '))
+  const afterDiamonds = ids(['wood', 'stone', 'food', 'iron', 'diamonds'])
+  assert.ok(afterDiamonds.includes('gold') && afterDiamonds.includes('redstone'), afterDiamonds.join(', '))
+})
