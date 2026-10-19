@@ -139,6 +139,12 @@ export async function enterEnd (bot: Bot, opts: EnterEndOptions = {}): Promise<E
       // that took the eye in hand went by a stale state and the server's hand held something else, 1.21.11
       if (attempt > 0) await resyncInventory(bot, signal)
       if (bot.heldItem?.name !== 'ender_eye' || attempt > 0) await bot.equip(bot.inventory.items().find(i => i.name === 'ender_eye') ?? eye, 'hand')
+      // and the held slot sent again (setQuickBarSlot sends nothing for the slot it thinks is held already)
+      if (attempt > 0 && typeof bot.setQuickBarSlot === 'function') {
+        const slot = bot.quickBarSlot
+        bot.setQuickBarSlot((slot + 1) % 9)
+        bot.setQuickBarSlot(slot)
+      }
       if (attempt > 0) await waitTicks(bot, 5, signal)
       await bot.lookAt(top, true)
       await bot.activateBlock(block, new Vec3(0, 1, 0), new Vec3(0.5, 13 / 16, 0.5))

@@ -143,6 +143,9 @@ test('enterEnd: an eye that didn\'t go in is tried again with the eye taken in h
   bot.equip = async (it: any) => { equips++; bot.heldItem = it }
   // the server's inventory asked for again before the second try
   let resyncs = 0
+  const slots: number[] = []
+  bot.quickBarSlot = 0
+  bot.setQuickBarSlot = (s: number) => { slots.push(s) }
   bot.supportFeature = () => true
   bot.inventory.id = 0
   bot._client = new (require('node:events').EventEmitter)()
@@ -158,5 +161,7 @@ test('enterEnd: an eye that didn\'t go in is tried again with the eye taken in h
   assert.strictEqual(clicks, 2)
   assert.strictEqual(equips, 2)
   assert.strictEqual(resyncs, 1)
+  // the held slot sent again: away and back
+  assert.deepStrictEqual(slots, [1, 0])
   assert.strictEqual([...frames.values()].every(f => f.eye), true)
 })
