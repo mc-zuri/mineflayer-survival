@@ -7,6 +7,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { navigate, navigateToReach } from './navigate'
 import { findPlacementNear, isInteractive, isSolid } from './placement'
 import { potionOf } from './potion'
+import { breathable, isWaterCell } from './escape'
 import { CARDINALS, FACES, blockAtOrThrow, blockReach, canSee, countItems, eyeHeight, eyePosition, findInventoryItem, settleInventory, waitUntil, withinReach, type Block } from './util'
 
 export type Fluid = 'water' | 'lava'
@@ -77,8 +78,13 @@ async function approachToSee (bot: Bot, pos: Vec3, aim: (eye: Vec3) => Vec3 | nu
   throw new SkillError('NO_PATH', `no spot found to see ${pos.toString()} from`)
 }
 
-/** cells near `pos` the bot can stand in (solid below, two cells free of blocks and lava) whose eyes pass `sees`, nearest the bot first */
-function viewSpots (bot: Bot, pos: Vec3, height: number, sees: (eye: Vec3) => boolean, radius = 4): Vec3[] {
+/**
+ * cells near `pos` the bot can stand in (solid below, two cells free of blocks and lava, the head's out of the water)
+ * whose eyes pass `sees`, nearest the bot first. A stand with its head in the water is none: a 26.3 bot filling its
+ * bucket went to the floor of a pool 3 deep, a 1-wide hole under a tunnel's end it never got out of again, and drowned
+ * there a night later (full-26.3-fresh-z, t23631)
+ */
+export function viewSpots (bot: Bot, pos: Vec3, height: number, sees: (eye: Vec3) => boolean, radius = 4): Vec3[] {
   const out: Array<{ cell: Vec3, d: number }> = []
   const free = (p: Vec3): boolean => { const b = bot.blockAt(p); return b != null && !isSolid(b) && b.name !== 'lava' }
   for (let dx = -radius; dx <= radius; dx++) {
@@ -86,6 +92,7 @@ function viewSpots (bot: Bot, pos: Vec3, height: number, sees: (eye: Vec3) => bo
       for (let dy = -radius - 1; dy <= radius - 1; dy++) {
         const cell = pos.offset(dx, dy, dz)
         if (!free(cell) || !free(cell.offset(0, 1, 0)) || !isSolid(bot.blockAt(cell.offset(0, -1, 0)))) continue
+        if (isWaterCell(bot.blockAt(cell.offset(0, 1, 0)) as any)) continue
         if (!sees(cell.offset(0.5, height, 0.5))) continue
         out.push({ cell, d: cell.offset(0.5, 0, 0.5).distanceTo(bot.entity.position) })
       }
@@ -295,6 +302,15 @@ export function renewableWater (lookup: (pos: Vec3) => { name: string, getProper
   return n >= 2
 }
 
+/**
+ * The source of these (nearest first) keepWaterBucket fills at: a renewable one at the water's top, open to the air
+ * over it (one under the water is gone to through it: a 26.3 bot went down a pool 3 deep for one and never got out of
+ * the hole, full-26.3-fresh-z, t23631)
+ */
+export function keepWaterSource (lookup: (pos: Vec3) => any, sources: Vec3[]): Vec3 | null {
+  return sources.find(p => renewableWater(lookup, p) && breathable(lookup(p.offset(0, 1, 0)))) ?? null
+}
+
 /** how far a renewable water source is looked for to keep the water bucket filled */
 export const KEEP_WATER_RANGE = 32
 
@@ -308,7 +324,7 @@ export async function keepWaterBucket (bot: Bot, signal?: AbortSignal): Promise<
   const water = bot.registry.blocksByName.water?.id
   if (countItems(bot, 'water_bucket') > 0 || findInventoryItem(bot, 'bucket') == null || typeof bot.findBlocks !== 'function' || water == null) return false
   const lookup = (p: Vec3): any => bot.blockAt(p)
-  const source = bot.findBlocks({ matching: water, maxDistance: KEEP_WATER_RANGE, count: 256 }).find(p => renewableWater(lookup, p))
+  const source = keepWaterSource(lookup, bot.findBlocks({ matching: water, maxDistance: KEEP_WATER_RANGE, count: 256 }))
   if (source == null) return false
   try {
     await fillBucket(bot, { fluid: 'water', pos: source }, signal)

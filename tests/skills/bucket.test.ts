@@ -49,3 +49,18 @@ test('keepWaterBucket: only with an empty bucket and no water bucket, at a renew
   empty.blockAt = (p: Vec3) => p.equals(lone) ? { name: 'water', position: p, getProperties: () => ({ level: 0 }) } : { name: 'stone', position: p }
   assert.strictEqual(await keepWaterBucket(empty), false)
 })
+
+test('keepWaterSource: a renewable source at the top of the water, not one under the water (full-26.3-fresh-z); viewSpots: no stand with the head in the water', async () => {
+  const { keepWaterSource, viewSpots } = await import('../../src/skills/bucket')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // a pool x -2 to 2, z -2 to 2, y 60 to 62 of water sources, stone round and under it, air over y 62
+  const name = (p: Vec3): string => (Math.abs(p.x) <= 2 && Math.abs(p.z) <= 2 && p.y >= 60 && p.y <= 62) ? 'water' : p.y <= 62 ? 'stone' : 'air'
+  const lookup = (p: Vec3): any => ({ name: name(p), boundingBox: name(p) === 'stone' ? 'block' : 'empty', getProperties: () => ({ level: 0 }) })
+  assert.deepStrictEqual(keepWaterSource(lookup, [new Vec3(0, 60, 0), new Vec3(0, 61, 0), new Vec3(0, 62, 0)]), new Vec3(0, 62, 0))
+  assert.strictEqual(keepWaterSource(lookup, [new Vec3(0, 60, 0), new Vec3(1, 61, 0)]), null)
+  const bot = fakeBot({ position: new Vec3(4.5, 63, 0.5), world: name })
+  const spots = viewSpots(bot, new Vec3(0, 62, 0), 1.62, () => true)
+  assert.ok(spots.length > 0)
+  for (const spot of spots) assert.notStrictEqual(name(spot.offset(0, 1, 0)), 'water', spot.toString())
+  assert.ok(!spots.some(s => s.y === 60), 'the floor of the pool')
+})
