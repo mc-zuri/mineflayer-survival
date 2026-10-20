@@ -16,7 +16,7 @@ import { nearbyDrops } from '../skills/pickupDrops'
 import { travel } from '../skills/travel'
 import { distanceToBox, entityBox, eyePosition, hasLineOfSight, metadataValue, isAlive, type Entity } from '../skills/combatUtil'
 import { shoot } from '../skills/shoot'
-import { lowerShield, raiseShield } from '../skills/fight'
+import { fight, lowerShield, raiseShield } from '../skills/fight'
 import { attackStrengthOf, bestMeleeWeapon } from '../skills/weapons'
 import { drinkPotion, findPotion, hasEffect } from '../skills/potion'
 import { countItems, trace, waitTicks } from '../skills/util'
@@ -141,13 +141,66 @@ export function creamCube (bot: Bot, e: Entity): boolean {
  * that did, by seed 2's deltas west of its fortress, burned to death in their lava, and the cubes they saw were in its
  * pits and on its pillars, none come within reach in 7200 ticks of holding.
  */
-export async function getMagmaCream (bot: Bot, spawner: Vec3, signal?: AbortSignal): Promise<number> {
+export async function getMagmaCream (bot: Bot, spawner: Vec3, signal?: AbortSignal, waitFor = 0): Promise<number> {
   const lying = nearbyDrops(bot, bot.entity.position, 24, ['magma_cream'])
   if (lying.length > 0) await collectDropsNear(bot, lying[0].position, { radius: 3, signal }).catch(err => { if (isAbort(err)) throw err })
   const me = bot.entity.position
   const near = Object.values(bot.entities).some(e => creamCube(bot, e) && e.position.distanceTo(me) <= 16 && Math.abs(e.position.y - me.y) <= 4 && e.position.distanceTo(spawner) >= CUBE_SPAWNER_CLEAR)
   if (countItems(bot, 'magma_cream') === 0 && near) await holdForCubes(bot, CUBE_HOLD_TICKS, signal)
+  // none near: a fortress's cube in sight gone to and met there (fortressCube: by its bricks, no lava by it), waited
+  // for up to `waitFor` ticks (the fortress spawns them: NetherFortressStructure's magma cubes)
+  let cube = countItems(bot, 'magma_cream') === 0 && countItems(bot, 'slime_ball') === 0 ? fortressCube(bot, spawner) : null
+  for (let t = 0; cube == null && t < waitFor && countItems(bot, 'magma_cream') === 0; t += 20) {
+    // (not in a wall the while: a 26.3 bot put where the runs come in by seed 2's fortress, its head in the netherrack,
+    // suffocated in 400 ticks of waiting)
+    const head = bot.blockAt(bot.entity.position.offset(0, 1.62, 0).floored())
+    if (head != null && head.boundingBox === 'block') await collectBlock(bot, { positions: [head.position], pickup: false }, signal).catch(err => { if (isAbort(err)) throw err })
+    await waitTicks(bot, 20, signal)
+    cube = fortressCube(bot, spawner)
+  }
+  if (cube != null) {
+    trace('getMagmaCream: a fortress cube at', cube.position.floored().toString())
+    await travel(bot, { target: cube.position.floored(), range: CUBE_MEET_RANGE, exactY: true, trail: false }, signal).catch(err => { if (isAbort(err)) throw err; trace('getMagmaCream: the way to it:', (err as Error).message) })
+    // gone after with the sword where it stays off (a cube comes only within 16 and 4 up or down, Slime's target
+    // goal: two 1.21.11 holds by seed 2's fortress saw none come), the split ones met where the bot stands after
+    for (let i = 0; i < CUBE_FIGHTS && countItems(bot, 'magma_cream') === 0 && bot.health > CUBE_HOLD_HEALTH; i++) {
+      const target = fortressCube(bot, spawner, CUBE_MEET_RANGE + 6)
+      if (target == null) break
+      const res = await fight(bot, target, { signal, maxTicks: 600, maxDrop: 2 }).catch(err => { if (isAbort(err)) throw err; trace('getMagmaCream: the fight:', (err as Error).message); return null })
+      const at = res?.lastPosition ?? target.position
+      await collectDropsNear(bot, at, { radius: 4, maxTicks: 120, signal }).catch(err => { if (isAbort(err)) throw err })
+    }
+    if (countItems(bot, 'magma_cream') === 0 && bot.entity.position.distanceTo(spawner) >= CUBE_SPAWNER_CLEAR) await holdForCubes(bot, CUBE_HOLD_TICKS / 2, signal)
+  }
   return countItems(bot, 'magma_cream')
+}
+
+/** a fortress's magma cube is looked for this far off (the chunks the bot has: its spawns, NetherFortressStructure's) */
+export const CUBE_SEEK_RANGE = 64
+/** the fortress cubes fought in turn for the cream (the split ones too) */
+export const CUBE_FIGHTS = 6
+/** with no bow, a fortress's cube is waited for this long for the cream (no fight without fire resistance) */
+export const CUBE_WAIT_TICKS = 3600
+/** and gone to this near: a cube goes for a player within 16 (Slime's target goal) */
+export const CUBE_MEET_RANGE = 10
+
+/**
+ * The nearest magma cube that may drop cream (creamCube) within CUBE_SEEK_RANGE of the bot in a fortress: nether
+ * bricks within 3 of it and no lava within 3 (the basalt deltas' cubes in their pits and lava burned two 26.3 bots),
+ * CUBE_SPAWNER_CLEAR off the spawner; null when there's none
+ */
+export function fortressCube (bot: Bot, spawner: Vec3, range = CUBE_SEEK_RANGE): Entity | null {
+  const bricks = ['nether_bricks', 'nether_brick_fence', 'nether_brick_stairs', 'nether_brick_slab'].map(n => bot.registry.blocksByName[n]?.id).filter((i): i is number => i != null)
+  const lava = bot.registry.blocksByName.lava?.id
+  const me = bot.entity.position
+  return Object.values(bot.entities)
+    .filter(e => creamCube(bot, e) && e.position.distanceTo(me) <= range && e.position.distanceTo(spawner) >= CUBE_SPAWNER_CLEAR)
+    .sort((a, b) => a.position.distanceTo(me) - b.position.distanceTo(me))
+    .find(e => {
+      const at = e.position.floored()
+      return findBlocks(bot, { matching: bricks, point: at, maxDistance: 3, count: 1 }).length > 0 &&
+        (lava == null || findBlocks(bot, { matching: [lava], point: at, maxDistance: 3, count: 1 }).length === 0)
+    }) ?? null
 }
 
 /** a cube is met in this reach of the eyes (its box: the player's interaction range, 3, less a margin) */
@@ -223,7 +276,8 @@ export async function holdForCubes (bot: Bot, ticks: number, signal?: AbortSigna
 export async function getBrewMakings (bot: Bot, from: Vec3, spawner: Vec3, signal?: AbortSignal): Promise<boolean> {
   const state = brewState(bot)
   return await withNetherSafety(bot, async () => {
-    if (countItems(bot, 'magma_cream') === 0 && !state.creamSought) { await getMagmaCream(bot, spawner, signal); state.creamSought = true }
+    // (with no bow the fight waits on the cream: a fortress's cube waited for, CUBE_WAIT_TICKS)
+    if (countItems(bot, 'magma_cream') === 0 && !state.creamSought) { await getMagmaCream(bot, spawner, signal, bowAndArrows(bot) ? 0 : CUBE_WAIT_TICKS); state.creamSought = true }
     // the wart's legs (a fortress's corridors, its lava under them: a 26.3 bot fell in by seed 2's wart room and burned)
     // walked only for a brew that has its cream, or a slime ball for it (made with a blaze powder: creamToMake)
     if (countItems(bot, 'magma_cream') === 0 && countItems(bot, 'slime_ball') === 0) return false

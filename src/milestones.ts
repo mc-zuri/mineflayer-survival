@@ -50,7 +50,7 @@ import { findBlocks } from './core/findBlocks'
 import { nearestBiomeSpot, pearlLeg } from './nether/ground'
 import { endermenFromCover, forgetCover } from './nether/endermanCover'
 import { NetherBiomeSource } from './worldgen/netherBiomes'
-import { blazeRodsWithBrew, creamMakings, resetBrewTries } from './nether/brewing'
+import { blazeRodsWithBrew, resetBrewTries } from './nether/brewing'
 import { waterBottles } from './skills/brew'
 import { fillBottles } from './skills/bucket'
 import { ruinedPortalCandidates } from './worldgen/placement'
@@ -829,10 +829,10 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
     })
   }
   const still = netherGearNeeds(ownedInventory(bot), gate)
-  // without a bow, the water bottles for fire resistance are the gate's (brewKit's, its tries), and the magma cream's
-  // slime ball (the cream of it and a blaze powder: the night's mines take them in the slime chunks, the stock's slime
-  // mark): a 1.21.11 bot with no bow, its bottles and no cream went in, the brew skipped for want of the cream, and
-  // fought seed 2's other throne at (-290, 77, -209) with its sword alone and burned (full-1.21.11-fresh-e)
+  // without a bow, the water bottles for fire resistance are the gate's (brewKit's, its tries); the magma cream is
+  // looked for in there (a fortress's cubes, a slime ball held), and with none the fight isn't fought (blazeRodsWithBrew's
+  // noFireResistance: back out, not ready). Asking for a slime ball here kept a 1.21.11 bot out for good: the slime
+  // chunks spawn none with the mob cap full, and its 40 tries got none (full-1.21.11-fresh-g)
   if (gate.bow === false && still.length === 0) {
     await brewKit(bot, executor, signal, log, true)
     bowlessBrewGate(bot)
@@ -850,12 +850,11 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
 }
 
 /**
- * The gate without a bow: the makings of fire resistance the overworld gives, BREW_BOTTLES water bottles and the magma
- * cream's slime ball (or the cream), else the milestone is not ready (MISSING_ITEMS, notReady)
+ * The gate without a bow: the makings of fire resistance the overworld gives, BREW_BOTTLES water bottles, else the
+ * milestone is not ready (MISSING_ITEMS, notReady); the cream is the nether's to give
  */
 export function bowlessBrewGate (bot: Bot): void {
   if (waterBottles(bot) < BREW_BOTTLES) throw Object.assign(new SkillError('MISSING_ITEMS', `not going into the nether without a bow or ${BREW_BOTTLES} water bottles for fire resistance`), { notReady: true })
-  if (!creamMakings(bot)) throw Object.assign(new SkillError('MISSING_ITEMS', 'not going into the nether without a bow or a slime ball for the magma cream of fire resistance'), { notReady: true })
 }
 
 /** the spares over the nether gate a trip kit by the portal is left with: arrows, food points */

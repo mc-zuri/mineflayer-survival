@@ -63,11 +63,14 @@ test('blazeRodsWithBrew: with the wart and cream held, the rods a rod at a time 
     fight.fillNook = async () => { calls.push('box'); return 0 }
     travelModule.travel = async (_b: unknown, a: any) => { calls.push(`travel ${String(a.target)}`); return {} }
     craftModule.craft = async (_b: unknown, a: any) => { calls.push(`craft ${String(a.item)}`); give(bot, item(a.item)); return {} }
+    // (the ticks the bowless wait for a fortress cube counts: CUBE_WAIT_TICKS)
+    const ticking = setInterval(() => { for (let k = 0; k < 50; k++) bot.emit('physicsTick') }, 1)
     try {
       await blazeRodsWithBrew(bot, { count: 8, spawner: new Vec3(0, 64, 0), away: new Vec3(0.5, 64, 30.5), log: (l: string) => lines.push(l) })
     } catch (err) {
       calls.push(`threw ${(err as Error).message}${(err as any).noFireResistance === true ? ' (noFireResistance)' : ''}`)
     } finally {
+      clearInterval(ticking)
       fortress.collectBlazeRods = real.rods
       brewModule.brew = real.brew
       fight.fillNook = real.fill
@@ -142,4 +145,38 @@ test('blazeRodsWithBrew: its opening line is said once a trip, not again at each
     fortress.collectBlazeRods = real
   }
   assert.deepEqual(lines, ['fire resistance: no water bottles to brew it in', 'fire resistance: no water bottles to brew it in'])
+})
+
+test('getMagmaCream: no cube near, a fortress cube in sight (bricks by it, no lava) is gone to and met there; a delta cube by lava is not', async () => {
+  const { fortressCube, getMagmaCream, CUBE_MEET_RANGE } = await import('../../src/nether/brewing')
+  const { fakeBot, entity } = await import('../reflexes/fakeBot')
+  const travelModule = require('../../src/skills/travel')
+  const real = travelModule.travel
+  const spawner = new Vec3(100, 70, 100)
+  const fort = entity({ name: 'magma_cube', position: new Vec3(40.5, 64, 0.5), meta: { size: 3 } })
+  const delta = entity({ name: 'magma_cube', position: new Vec3(-30.5, 64, 0.5), meta: { size: 3 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), entities: [delta, fort] })
+  bot.game.dimension = 'the_nether'
+  const bricks = bot.registry.blocksByName.nether_bricks.id
+  const lava = bot.registry.blocksByName.lava.id
+  // nether bricks by both, lava by the delta's
+  bot.findBlocks = (o: any) => {
+    const ids = Array.isArray(o.matching) ? o.matching : [o.matching]
+    const p = o.point ?? bot.entity.position
+    if (ids.includes(bricks)) return [p.offset(0, -1, 0)]
+    if (ids.includes(lava) && p.x < 0) return [p.offset(1, -1, 0)]
+    return []
+  }
+  assert.equal(fortressCube(bot, spawner), fort)
+  const walks: string[] = []
+  travelModule.travel = async (_b: unknown, a: any) => { walks.push(`${String(a.target)} ${String(a.range)}`); return {} }
+  try {
+    // (the hold: no cube in reach, its ticks run out)
+    await getMagmaCream(bot, spawner, AbortSignal.timeout(2000)).catch(() => {})
+  } finally {
+    travelModule.travel = real
+  }
+  assert.deepEqual(walks, [`${fort.position.floored().toString()} ${CUBE_MEET_RANGE}`])
+  delete bot.entities[fort.id]
+  assert.equal(fortressCube(bot, spawner), null)
 })

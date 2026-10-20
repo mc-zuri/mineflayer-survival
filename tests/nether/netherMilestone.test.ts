@@ -1082,21 +1082,21 @@ test('the blaze rods with no bow and no fire resistance to be had (blazeRodsWith
   assert.ok(lines.some(l => /fire resistance: no bow and none of it: no fight/.test(l)), lines.join(' | '))
 })
 
-test('netherKit: no bow to be had, the water bottles held but no slime ball nor magma cream for the brew: not ready (the slime chunks of the night mines get one)', async () => {
+test('netherKit: no bow to be had, the water bottles held: ready with no slime ball nor magma cream (the cubes of the nether give the cream; asking for a ball kept full-1.21.11-fresh-g out for good), not ready without the bottles', async () => {
   const { netherKit } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const water = (): any => { const p = item('potion'); p.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: 0, customEffects: [] } }]]); return p }
-  const gear = [...NETHER_GEAR().filter((i: any) => i.name !== 'bow' && i.name !== 'arrow'), water(), water(), water()]
+  const bare = NETHER_GEAR().filter((i: any) => i.name !== 'bow' && i.name !== 'arrow')
   const memory = new WorldMemory()
   const executor: any = { memory, tasks: { tick: 0 }, sightings: { misses: (n: string) => n === 'spider' ? 1 : 0, missing: () => {} }, obtain: async () => {}, task: async () => {} }
-  const bot = fakeBot({ items: gear })
+  const bot = fakeBot({ items: [...bare, water(), water(), water()] })
   bot.game.dimension = 'overworld'
-  const err: any = await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e)
+  assert.equal(await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e), null)
+  const dry = fakeBot({ items: bare })
+  dry.game.dimension = 'overworld'
+  const err: any = await netherKit(dry, executor, new AbortController().signal, () => {}).then(() => null, e => e)
   assert.equal(err?.notReady, true)
-  assert.match(err?.message ?? '', /slime ball/)
-  const ready = fakeBot({ items: [...gear, item('slime_ball', 1)] })
-  ready.game.dimension = 'overworld'
-  assert.equal(await netherKit(ready, executor, new AbortController().signal, () => {}).then(() => null, e => e), null)
+  assert.match(err?.message ?? '', /water bottles/)
 })
 
 test('brewKit: its tries spent, it tries no more unless the gate requires the bottles (no bow to be had)', async () => {
