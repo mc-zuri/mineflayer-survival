@@ -805,6 +805,46 @@ export async function onTheSurface<T> (bot: Bot, fn: () => Promise<T>): Promise<
   }
 }
 
+/** the point of interest where a surface leg ended short of its end (its note: the times it did there) */
+export const STUCK_LEG_POI = 'explore_stuck'
+/** how long a spot a leg got stuck at is remembered (two days) */
+export const STUCK_LEG_TTL = 48000
+/** how near a spot counts as the same one, and how near a leg's way passes it */
+export const STUCK_SPOT_RADIUS = 6
+/** the times a leg got stuck at a spot before the legs that go by it are passed over */
+export const STUCK_LEG_TIMES = 2
+
+type StuckMemory = Pick<WorldMemory, 'now' | 'addPoi' | 'removePoi' | 'getPois'>
+
+/** the spots legs got stuck at STUCK_LEG_TIMES times or more, lately (within STUCK_LEG_TTL) */
+export function stuckSpots (memory: StuckMemory, dimension = 'overworld'): Vec3[] {
+  return memory.getPois(STUCK_LEG_POI, { dimension })
+    .filter(p => memory.now - p.seen < STUCK_LEG_TTL && Number(p.note ?? '0') >= STUCK_LEG_TIMES)
+    .map(p => new Vec3(p.x, p.y, p.z))
+}
+
+/** notes a leg ended short of its end at `pos`: the spot's count goes up (a lapsed one starts again), returned */
+export function noteStuckLeg (memory: StuckMemory, pos: Vec3, dimension = 'overworld'): number {
+  const spot = memory.getPois(STUCK_LEG_POI, { dimension, near: pos })
+    .find(p => Math.hypot(p.x - pos.x, p.y - pos.y, p.z - pos.z) <= STUCK_SPOT_RADIUS)
+  const times = spot != null && memory.now - spot.seen < STUCK_LEG_TTL ? Number(spot.note ?? '0') + 1 : 1
+  if (spot != null) memory.removePoi(STUCK_LEG_POI, spot, dimension)
+  const at = spot ?? pos.floored()
+  memory.addPoi(STUCK_LEG_POI, at, dimension, String(times))
+  return times
+}
+
+/** whether the way from `from` to a leg's end (straight, over the ground) goes within STUCK_SPOT_RADIUS of a spot */
+export function legPassesSpot (from: Vec3, to: { x: number, z: number }, spots: readonly Vec3[]): boolean {
+  const dx = to.x - from.x
+  const dz = to.z - from.z
+  const len2 = dx * dx + dz * dz
+  return spots.some(s => {
+    const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((s.x - from.x) * dx + (s.z - from.z) * dz) / len2))
+    return Math.hypot(from.x + t * dx - s.x, from.z + t * dz - s.z) <= STUCK_SPOT_RADIUS
+  })
+}
+
 /**
  * A square spiral over the surface around `center`, the pathfinder walking each leg (kept out from under a roof:
  * onTheSurface), until `found` holds. Resolves true when found; false when the spiral ran out.
@@ -831,10 +871,25 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
       if (args.progress != null) args.progress.leg = i + 1
       continue
     }
+    // a leg whose way goes by a spot legs got stuck at twice lately goes elsewhere (the next): the hunt's leg for a
+    // spider walked into the same pond at (-131, 61, 47) and was cut off there twice, 160000 ticks apart (26.3 seed 2)
+    const dimension = normalizeDimension(bot.game?.dimension)
+    if (args.memory != null && legPassesSpot(bot.entity.position, wp, stuckSpots(args.memory, dimension))) {
+      trace('explore: leg to', wp.x, wp.z, 'goes by a spot legs got stuck at: passed over')
+      if (args.progress != null) args.progress.leg = i + 1
+      continue
+    }
     trace('explore: surface leg to', wp.x, wp.z)
+    // a leg that ends short of its end (failed, or cut off by a reflex) is noted where it did
+    const short = (): void => {
+      if (args.memory == null || Math.hypot(bot.entity.position.x - wp.x, bot.entity.position.z - wp.z) <= 8) return
+      const times = noteStuckLeg(args.memory, bot.entity.position, dimension)
+      trace('explore: leg to', wp.x, wp.z, 'ended short at', bot.entity.position.floored().toString(), `(${times} times there)`)
+    }
     try {
       await onTheSurface(bot, async () => await navigate(bot, { goal: new goals.GoalNearXZ(wp.x, wp.z, 4) }, signal))
     } catch (err) {
+      short()
       if (isAbort(err)) throw err
       trace('explore: leg failed', (err as Error).message)
     }

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { climbHazard, facingDir, floorHeld, liquidAround, oreLevel, spiralWaypoints, staircaseStep, tunnelStep, unsafeStep } from '../../src/executor/explore'
+import { STUCK_LEG_TTL, climbHazard, facingDir, floorHeld, legPassesSpot, noteStuckLeg, stuckSpots, liquidAround, oreLevel, spiralWaypoints, staircaseStep, tunnelStep, unsafeStep } from '../../src/executor/explore'
 
 const SOLID = new Set(['stone', 'deepslate', 'cobblestone', 'dirt'])
 const world = (blocks: Record<string, string>, fill = 'stone') => (pos: Vec3) => {
@@ -614,4 +614,27 @@ test('climbHazard: a bot in the water already digs its climb by the water, never
   const lava = unsafeStep(world({ '2,20,0': 'lava' }), step)
   assert.equal(climbHazard(lava, true), lava)
   assert.equal(climbHazard(null, true), null)
+})
+
+test('stuck legs: a spot a leg ended short at twice lately is passed by the legs whose way goes by it; once, or long ago, not', async () => {
+  const { WorldMemory } = await import('../../src/core/memory')
+  const memory = new WorldMemory()
+  memory.now = 1000
+  const spot = new Vec3(-131.6, 61, 47.5)
+  assert.equal(noteStuckLeg(memory, spot), 1)
+  assert.deepEqual(stuckSpots(memory), [])
+  // the same pond 160000 ticks on... is long ago: one again
+  memory.now += STUCK_LEG_TTL + 1
+  assert.equal(noteStuckLeg(memory, spot.offset(2, 0, -1)), 1)
+  // and again soon after, a few blocks off: the same spot, twice
+  memory.now += 5000
+  assert.equal(noteStuckLeg(memory, spot.offset(-3, 0, 2)), 2)
+  const spots = stuckSpots(memory)
+  assert.equal(spots.length, 1)
+  // the leg from (-131, 65, 65) to (-136, -96) goes through it; one off to the east doesn't
+  assert.equal(legPassesSpot(new Vec3(-131, 65, 65), { x: -136, z: -96 }, spots), true)
+  assert.equal(legPassesSpot(new Vec3(-131, 65, 65), { x: 40, z: 64 }, spots), false)
+  // two days on, forgotten
+  memory.now += STUCK_LEG_TTL
+  assert.deepEqual(stuckSpots(memory), [])
 })
