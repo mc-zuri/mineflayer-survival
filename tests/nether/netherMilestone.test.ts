@@ -147,7 +147,7 @@ test('in the nether with few blocks the milestone mines netherrack for its bridg
   assert.equal(calls[0], `obtain ${NETHER_BLOCKS - 8} netherrack`)
 })
 
-test('pearls in the nether: a warped forest in sight is gone to, and waited in for its endermen', async () => {
+test('pearls in the nether: a warped forest in sight is gone to, and its endermen fought from cover there', async () => {
   const { pearlsInTheNether, pearlGround } = await import('../../src/milestones')
   const { fakeBot } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
@@ -165,7 +165,7 @@ test('pearls in the nether: a warped forest in sight is gone to, and waited in f
   }
   await pearlsInTheNether(bot, executor, 4, new AbortController().signal, () => {})
   assert.equal(tasks[0], 'a leg for pearls')
-  assert.equal(tasks[1], 'wait for endermen')
+  assert.equal(tasks[1], 'endermen from cover')
   forestAt = new Vec3(0, 0, 0)
 })
 
@@ -450,8 +450,8 @@ test('the blaze rods: a spawner there\'s no way to is left for another of the fo
   ])
 })
 
-test('pearls in the nether with the seed: legs to its nearest warped forest, waits in it for the endermen, another spot in one when none came', async () => {
-  const { pearlsInTheNether, FOREST_IDLE, FOREST_WAIT } = await import('../../src/milestones')
+test('pearls in the nether with the seed: legs to its nearest warped forest, its endermen fought from cover there, another spot in one when none came', async () => {
+  const { pearlsInTheNether, FOREST_IDLE } = await import('../../src/milestones')
   const { NetherBiomeSource } = await import('../../src/worldgen/netherBiomes')
   const { fakeBot } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
@@ -465,7 +465,10 @@ test('pearls in the nether with the seed: legs to its nearest warped forest, wai
     tasks: { tick: 0 },
     task: async (name: string) => {
       tasks.push(name)
-      if (name === 'wait for endermen') executor.tasks.tick += FOREST_WAIT
+      if (name === 'endermen from cover') {
+        executor.tasks.tick += FOREST_IDLE
+        return { pearls: 0, kills: 0, ticks: FOREST_IDLE, reason: 'idle' }
+      }
       if (name === 'a leg for pearls') {
         executor.tasks.tick += 2000
         const m = /on to \((-?\d+), (-?\d+), (-?\d+)\)/.exec(lines[lines.length - 1]) as RegExpExecArray
@@ -478,13 +481,69 @@ test('pearls in the nether with the seed: legs to its nearest warped forest, wai
   // seed 2's nearest warped forest from the portal: south-west, 420 off (the server's biome at -224, 352)
   assert.match(legs[0], /on to \(-224, 64, 352\) for the seed's warped forest, 420 off/)
   const biomes = new NetherBiomeSource(2)
-  // in it: waits till FOREST_IDLE has gone with no enderman, then another spot of a warped forest
-  assert.deepEqual(tasks.slice(1, 1 + FOREST_IDLE / FOREST_WAIT), Array(FOREST_IDLE / FOREST_WAIT).fill('wait for endermen'))
-  assert.equal(tasks[1 + FOREST_IDLE / FOREST_WAIT], 'a leg for pearls')
+  // in it: the cover's fight till FOREST_IDLE has gone with no enderman, then another spot of a warped forest
+  assert.deepEqual(tasks.slice(0, 4), ['a leg for pearls', 'endermen from cover', 'a leg for pearls', 'endermen from cover'])
   const points = legs.map(l => /on to \((-?\d+), -?\d+, (-?\d+)\)/.exec(l) as RegExpExecArray).map(m => ({ x: Number(m[1]), z: Number(m[2]) }))
   assert.ok(points.length >= 2)
   assert.equal(new Set(points.map(p => `${p.x},${p.z}`)).size, points.length, 'no spot twice')
   for (const p of points) assert.equal(biomes.biomeAt(p.x, p.z), 'warped_forest')
+})
+
+test('pearls in the nether: in a warped forest where the cover fails COVER_FAILS times, its endermen waited for and hunted as before', async () => {
+  const { pearlsInTheNether, COVER_FAILS, FOREST_WAIT } = await import('../../src/milestones')
+  const { fakeBot, entity } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  // in seed 2's south-western warped forest
+  const bot = fakeBot({ position: new Vec3(-335.5, 64, 304.5) })
+  bot.game.dimension = 'the_nether'
+  const tasks: string[] = []
+  const lines: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    task: async (name: string) => {
+      tasks.push(name)
+      executor.tasks.tick += name === 'wait for endermen' ? FOREST_WAIT : 100
+      if (name === 'endermen from cover') throw new Error('VERIFY_FAILED: the cover was broken')
+      // one come after the waits: hunted
+      if (tasks.length === 2 * COVER_FAILS + 1) bot.entities[1000] = entity({ id: 1000, name: 'enderman', position: new Vec3(-325.5, 64, 304.5) })
+      if (name === 'endermen for pearls') delete bot.entities[1000]
+    }
+  }
+  await pearlsInTheNether(bot, executor, 4, new AbortController().signal, l => lines.push(l), '2')
+  // each cover that failed: a wait as before; then no cover more, the waits and the hunt
+  assert.deepEqual(tasks.slice(0, 2 * COVER_FAILS), Array(COVER_FAILS).fill(['endermen from cover', 'wait for endermen']).flat())
+  assert.equal(tasks.filter(t => t === 'endermen from cover').length, COVER_FAILS)
+  assert.deepEqual(tasks.slice(2 * COVER_FAILS, 2 * COVER_FAILS + 2), ['wait for endermen', 'endermen for pearls'])
+  assert.match(lines[0], /the cover: VERIFY_FAILED: the cover was broken/)
+})
+
+test('pearls in the nether: no ground for a cover at a spot of the warped forest: on to another spot of it', async () => {
+  const { pearlsInTheNether } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(-335.5, 64, 304.5) })
+  bot.game.dimension = 'the_nether'
+  const tasks: string[] = []
+  const lines: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    task: async (name: string) => {
+      tasks.push(name)
+      executor.tasks.tick += 100
+      if (name === 'endermen from cover') throw new Error('NOT_FOUND: no ground for an enderman cover within 12 blocks')
+      if (name === 'a leg for pearls') {
+        const m = /on to ((-?d+), (-?d+), (-?d+))/.exec(lines[lines.length - 1]) as RegExpExecArray
+        bot.entity.position = new Vec3(Number(m[1]) + 0.5, Number(m[2]), Number(m[3]) + 0.5)
+      }
+    }
+  }
+  await pearlsInTheNether(bot, executor, 4, new AbortController().signal, l => lines.push(l), '2')
+  assert.deepEqual(tasks.slice(0, 4), ['endermen from cover', 'a leg for pearls', 'endermen from cover', 'a leg for pearls'])
+  const legs = lines.filter(l => /on to/.test(l))
+  assert.match(legs[0], /for the seed's warped forest/)
+  assert.notEqual(legs[0], legs[1])
 })
 
 test('pearls by night: an enderman there\'s no way to is passed over for the night\'s legs, not hunted round after round', async () => {

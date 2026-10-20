@@ -41,6 +41,7 @@ import type { Inventory } from './core/inventory'
 import { Vec3 } from 'vec3'
 import { findBlocks } from './core/findBlocks'
 import { nearestBiomeSpot, pearlLeg } from './nether/ground'
+import { endermenFromCover, forgetCover } from './nether/endermanCover'
 import { NetherBiomeSource } from './worldgen/netherBiomes'
 import type { Seed } from './worldgen/random'
 import { excludedSpawner, levelSeed, unreachableSpawners } from './nether/fortressSkills'
@@ -952,6 +953,19 @@ export function pearlGround (bot: Bot, gold: boolean): { kind: 'warped forest' |
   return null
 }
 
+/** ticks a cover's fight goes on for before the pearl search looks round again (a barter, the legs) */
+export const COVER_TICKS = 6000
+/** covers failed in a row (no ground about for one, dug wrong, broken) before the forest's endermen are hunted instead */
+export const COVER_FAILS = 3
+
+/** the bot in a warped forest: the seed's biome there, else its blocks about the bot (pearlGround's, within 16) */
+export function inWarpedForest (bot: Bot, biomes: NetherBiomeSource | null): boolean {
+  const at = bot.entity.position
+  if (biomes != null) return biomes.biomeAt(at.x, at.z) === 'warped_forest'
+  const seen = pearlGround(bot, false)
+  return seen?.kind === 'warped forest' && seen.at.distanceTo(at) <= 16
+}
+
 /** game ticks the nether's pearl search may take in all (its legs, hunts and waits) before the overworld's nights */
 export const PEARL_NETHER_TICKS = 48000
 /** rounds (a barter, a hunt, a wait or a leg each) the nether's pearl search takes at most, ticks or not */
@@ -993,6 +1007,12 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
   // the endermen there was no way to (huntEndermen's), left alone unless they come
   const passOver = new Set<number>()
   let barters = 0
+  // the endermen the cover's fight passed over (a stare that took no hold, one angry that never came), and the covers
+  // that failed (dug wrong, broken, no ground for one) in a row
+  const coverPassOver = new Set<number>()
+  let coverFails = 0
+  let coverTicks = 0
+  let coverPearls = 0
   const goLeg = async (to: Vec3, why: string): Promise<boolean> => {
     legsWalked++
     log(`ender pearls: ${count('ender_pearl')} of ${want}: on to ${to.floored().toString()} for ${why}`)
@@ -1022,6 +1042,36 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
         await executor.makeRoom?.({ gold_ingot: count('gold_ingot') }, signal)?.catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err; log(`ender pearls: no room: ${(err as Error).message}`) })
         await executor.task('barter for pearls', async (s) => await barterForPearls(bot, { pearls: want, range: 48 }, s), signal)
         continue
+      }
+      // in a warped forest: its endermen fought from a cover dug in its floor, not gone after over its ledges and
+      // fungi (an enderman knocked a 26.3 bot off a ledge to its death, run n2-d; one fight ran 13000 ticks against
+      // one beyond a stem, n2-c)
+      if (inWarpedForest(bot, biomes) && coverFails < COVER_FAILS && executor.tasks.tick - lastEnderman < FOREST_IDLE) {
+        try {
+          const res = await executor.task('endermen from cover', async (s) => await endermenFromCover(bot, { pearls: want - count('ender_pearl'), maxTicks: COVER_TICKS, idleTicks: FOREST_IDLE, passOver: coverPassOver }, s), signal)
+          coverFails = 0
+          coverTicks += res.ticks
+          coverPearls += res.pearls
+          log(`ender pearls: ${count('ender_pearl')} of ${want}: ${res.kills} endermen killed from cover in ${res.ticks} ticks${res.reason === 'idle' ? ', then none about' : ''} (${coverPearls} pearls in ${coverTicks} ticks of cover)`)
+          if (res.reason === 'idle') {
+            // none came for FOREST_IDLE: another spot of the forest
+            lastEnderman = executor.tasks.tick - FOREST_IDLE
+            if (forestSpot != null) triedSpots.push(forestSpot)
+            forgetCover(bot)
+          } else lastEnderman = executor.tasks.tick
+          continue
+        } catch (err) {
+          if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+          coverFails++
+          forgetCover(bot)
+          log(`ender pearls: the cover: ${(err as Error).message}`)
+          // no ground for one here: another spot of the forest (with the seed), its waits and hunts meanwhile
+          if (biomes != null && /no ground for an enderman cover/.test((err as Error).message)) {
+            if (forestSpot != null) triedSpots.push(forestSpot)
+            lastEnderman = executor.tasks.tick - FOREST_IDLE
+            continue
+          }
+        }
       }
       if (enderman) {
         await executor.task('endermen for pearls', async (s) => await huntEndermen(bot, { pearls: want - count('ender_pearl'), range: 48, maxTicks: 6000, passOver }, s), signal)
