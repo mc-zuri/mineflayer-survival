@@ -527,3 +527,30 @@ test('holdOffArcher: off a ledge over lava first, then the shield up while the s
   assert.ok(raised >= 1, 'no shield')
   assert.ok(!forward.includes(true), 'it walked at the skeleton')
 })
+
+test('hostiles reflex: cornered (the flee found no way), an armed bot fights where it stands, a creeper too, for CORNERED_TICKS; the creeper reflex leaves that fight be (full-26.3-fresh-d, nether-26.3-q3)', async () => {
+  const { CORNERED_TICKS, wasCornered } = await import('../../src/reflexes/rules')
+  // a tunnel 1 wide along x: stone all round but the cells at y 64 and 65, z 0
+  const tunnel = (p: Vec3): string => (p.z === 0 && (p.y === 64 || p.y === 65) && p.x > -3 && p.x < 3) ? 'air' : 'stone'
+  const skeleton = entity({ name: 'skeleton', position: at(1) })
+  const bot = fakeBot({ health: 4, items: [item('stone_sword')], entities: [skeleton], world: tunnel })
+  ;(bot as any).world = { raycast: () => null }
+  bot.waitForTicks = async () => {}
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const first = hostilesReflex.check(engine.context())
+  assert.strictEqual(first?.detail, 'flee')
+  await assert.rejects(first.run(new AbortController().signal), /cornered/)
+  assert.equal(wasCornered(bot, engine.tick), true)
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'fight skeleton')
+  // a creeper, no shield: fought too
+  delete bot.entities[skeleton.id]
+  const creeper = entity({ name: 'creeper', position: at(2) })
+  bot.entities[creeper.id] = creeper
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'fight creeper')
+  const ctx = { ...engine.context(), running: { name: 'hostiles', priority: 60, detail: 'fight creeper' } }
+  assert.strictEqual(creeperReflex.check(ctx as any), null)
+  // long after: the flee again
+  ;(engine as any).tick += CORNERED_TICKS + 1
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'flee')
+  engine.stop()
+})

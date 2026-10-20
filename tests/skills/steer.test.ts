@@ -82,3 +82,13 @@ test('steerToward with guard and maxDrop 1 keeps a chase on its level: it stops 
   const onMagma = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: magma })
   assert.strictEqual(edgeAhead(onMagma, -Math.PI / 2), true)
 })
+
+test('fleeHeading: in a tunnel shut behind the bot, the way at the threat is none (cornered), not the flee (nether-26.3-q3: fled into a creeper\'s blast)', () => {
+  const tunnel = (p: Vec3): string => (p.z === 0 && (p.y === 64 || p.y === 65) && p.x >= 0 && p.x < 12) ? 'air' : 'stone'
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: tunnel })
+  assert.equal(fleeHeading(bot, new Vec3(8.5, 64, 0.5)), null)
+  // the creeper behind it the other way: on down the tunnel, away
+  const bot2 = fakeBot({ position: new Vec3(4.5, 64, 0.5), world: tunnel })
+  const h = fleeHeading(bot2, new Vec3(1.5, 64, 0.5))
+  assert.ok(h != null && -Math.sin(h) > 0.9, String(h))
+})

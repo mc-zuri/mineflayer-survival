@@ -192,7 +192,8 @@ export const creeperReflex: Reflex = {
     // the hostiles reflex fighting it with a shield: fight() blocks the blast itself once the fuse is along (and hits and
     // backs off); running from it each time it came within 3 blocks kept the bot from ever hitting it, 600 ticks under
     // the skeletons' arrows
-    if (ctx.running?.name === 'hostiles' && ctx.running.detail === 'fight creeper' && hasShield(bot)) return null
+    // (nor one it fights cornered, with no way to run from it: its hits keep it off)
+    if (ctx.running?.name === 'hostiles' && ctx.running.detail === 'fight creeper' && (hasShield(bot) || wasCornered(bot, ctx.tick))) return null
     return {
       name: 'creeper',
       priority: config.creeper.priority,
@@ -319,6 +320,26 @@ export function unarmedOutmatched (bot: Bot, near: Entity[], config: ReflexConfi
   return config.hostiles.fleeUnarmed || near.length > 1 || near.some(e => RANGED_HOSTILES.has(e.name ?? ''))
 }
 
+/**
+ * ticks after a flee found no way (fleeFrom's 'cornered': a tunnel, a pit) the hostiles reflex fights instead, an armed
+ * bot: a 26.3 bot cornered at 4.8 health underground by a skeleton 0.9 off stood there, fleeing and failing every 20
+ * ticks, till it was shot dead (full-26.3-fresh-d); one in a tunnel at y 11 fled a creeper, cornered, and was blown up
+ * (nether-26.3-q3)
+ */
+export const CORNERED_TICKS = 200
+const corneredAt = new WeakMap<Bot, number>()
+
+/** a flee's failure noted when it was cornered; rethrown */
+function noteCornered (bot: Bot, tick: number, err: unknown): never {
+  if (/cornered/.test(String((err as Error)?.message ?? ''))) corneredAt.set(bot, tick)
+  throw err
+}
+
+export function wasCornered (bot: Bot, tick: number): boolean {
+  const at = corneredAt.get(bot)
+  return at != null && tick - at >= 0 && tick - at <= CORNERED_TICKS
+}
+
 /** each bot's door to get in behind (findDoorRefuge), kept till the tick `until` (REFUGE_TICKS, or REFUGE_RETRY_TICKS of none after a way in failed) */
 const refuges = new WeakMap<Bot, { until: number, refuge: DoorRefuge | null }>()
 export const REFUGE_TICKS = 40
@@ -348,7 +369,9 @@ export const hostilesReflex: Reflex = {
     const fightOn = near.length === 1 && armed
     // (an armed and armored bot isn't outnumbered by the cubes of a split slime or magma cube: SWARMERS)
     const outnumbered = (armed ? near.filter(e => !SWARMERS.has(e.name ?? '')) : near).length > config.hostiles.maxFight
-    const flee = (bot.health <= config.hostiles.fleeHealth && !fightOn) || outnumbered || unarmedOutmatched(bot, near, config)
+    // (cornered a while ago, the flee found no way: an armed bot fights where it stands, not stands there struck)
+    const cornered = wasCornered(bot, ctx.tick) && bestMeleeWeapon(bot) != null
+    const flee = !cornered && ((bot.health <= config.hostiles.fleeHealth && !fightOn) || outnumbered || unarmedOutmatched(bot, near, config))
     if (flee) {
       // a door near to get in behind (a house, the base's airlock): in there and shut, not a run in the open under
       // the bolts and arrows
@@ -373,14 +396,15 @@ export const hostilesReflex: Reflex = {
         name: 'hostiles',
         priority: config.hostiles.priority,
         detail: 'flee',
-        run: async (signal) => await fleeFrom(bot, () => hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e)) }), { signal, distance: config.hostiles.fleeDistance })
+        run: async (signal) => await fleeFrom(bot, () => hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e)) }), { signal, distance: config.hostiles.fleeDistance }).catch(err => noteCornered(bot, ctx.tick, err))
       }
     }
     // creepers: shot from a distance when there's a bow; melee only with a shield to take the blast
     const target = near.find(e => {
       if (e.name !== 'creeper') return true
       if (hasBowAndArrows(bot) && distance(bot, e) >= config.hostiles.shootCreepersFrom) return true
-      return hasShield(bot)
+      // (and cornered, no way to run: hit, its knockback keeps it from the 3 blocks its fuse starts at, SwellGoal)
+      return hasShield(bot) || cornered
     })
     if (target == null) {
       // only creepers it can't take on: keep away (past their follow range, Creeper's FOLLOW_RANGE 16)
@@ -388,7 +412,7 @@ export const hostilesReflex: Reflex = {
         name: 'hostiles',
         priority: config.hostiles.priority,
         detail: 'flee',
-        run: async (signal) => await fleeFrom(bot, () => hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e)) }), { signal, distance: config.hostiles.fleeDistance })
+        run: async (signal) => await fleeFrom(bot, () => hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e)) }), { signal, distance: config.hostiles.fleeDistance }).catch(err => noteCornered(bot, ctx.tick, err))
       }
     }
     const useBow = target.name === 'creeper' && hasBowAndArrows(bot) && distance(bot, target) >= config.hostiles.shootCreepersFrom

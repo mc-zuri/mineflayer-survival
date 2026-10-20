@@ -5,7 +5,8 @@ import { trace } from './util'
 import { Vec3 } from 'vec3'
 import { creeperSwelling, lowerShield, raiseShield, SwellCounter } from './fight'
 import { isDangerBlock, steerAway, steerToward, fleeHeading } from './steer'
-import { type Entity, eyePosition, isAlive, type SkillOptions, TaskError, throwIfAborted, waitTicks, yawPitchOf } from './combatUtil'
+import { type Entity, distanceToBox, entityBox, eyePosition, isAlive, type SkillOptions, TaskError, throwIfAborted, waitTicks, yawPitchOf } from './combatUtil'
+import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { hotFloorCell, noteHazardLeft } from './hazardCells'
 
 // The escapes the reflexes run: out of lava and fire, up for air, away from a creeper or a crowd.
@@ -494,6 +495,17 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
         void bot.look(yaw, pitch, true)
         if (!blocking) blocking = await raiseShield(bot)
         blocked = blocked || blocking
+      } else if (cornered && !hasShield) {
+        // nowhere to run and no shield (a tunnel): hit it, each hit's knockback putting it back from the bot (its
+        // fuse runs within 7 of it, SwellGoal; a kill stops it); stood still, a 26.3 bot at y 11 was blown up
+        // (nether-26.3-q3)
+        bot.clearControlStates()
+        const weapon = bestMeleeWeapon(bot, 'creeper')
+        if (weapon != null && bot.heldItem?.type !== weapon.type) await bot.equip(weapon, 'hand')
+        const { yaw, pitch } = yawPitchOf(creeper.position.offset(0, 0.9, 0).minus(eyePosition(bot)))
+        await bot.look(yaw, pitch, true)
+        const strength = attackStrengthOf(bot)
+        if (distanceToBox(eyePosition(bot), entityBox(creeper)) <= 2.9 && strength.scale(0.5) >= 1) strength.attack(creeper)
       } else {
         if (blocking) { lowerShield(bot); blocking = false }
         steerAway(bot, creeper.position)

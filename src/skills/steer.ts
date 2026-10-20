@@ -119,6 +119,9 @@ export function steerToward (bot: Bot, point: Vec3, opts: SteerOptions = {}): bo
   return true
 }
 
+/** the most a flee's heading may turn toward the threat (the cosine to the way straight away from it): across, not at */
+export const FLEE_TOWARD = -0.25
+
 /** The heading (mineflayer yaw) that leads furthest from the threat over safe ground, or null if every way is shut. */
 export function fleeHeading (bot: Bot, threat: Vec3, samples = 16): number | null {
   const pos = bot.entity.position
@@ -132,6 +135,9 @@ export function fleeHeading (bot: Bot, threat: Vec3, samples = 16): number | nul
     const angle = (i / samples) * Math.PI * 2
     const dx = -Math.sin(angle)
     const dz = -Math.cos(angle)
+    // never at the threat: in a tunnel shut behind it, the one open way led a 26.3 bot fleeing a creeper toward it,
+    // into its blast (nether-26.3-q3); none open but that way is no way (cornered)
+    if (dx * ax + dz * az < FLEE_TOWARD) continue
     let cost = 0
     for (let step = 1; step <= 3 && cost !== Infinity; step++) cost += stepCost(bot, pos.offset(dx * step, 0, dz * step))
     if (cost === Infinity) continue

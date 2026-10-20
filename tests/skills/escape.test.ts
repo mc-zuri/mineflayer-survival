@@ -146,3 +146,17 @@ test('fleeFrom keeps running from a threat FLEE_MEMORY ticks after it went out o
   assert.ok(bot.entity.position.distanceTo(skeleton.position) >= 15.5, bot.entity.position.toString())
 })
 
+test('evadeCreeper cornered with no shield (a tunnel): hits the creeper as the sword charges, no stand-still (nether-26.3-q3)', async () => {
+  const { evadeCreeper } = await import('../../src/skills/escape')
+  const { entity, item } = await import('../reflexes/fakeBot')
+  const tunnel = (p: Vec3): string => (p.z === 0 && (p.y === 64 || p.y === 65) && p.x > -2 && p.x < 3) ? 'air' : 'stone'
+  const creeper = entity({ name: 'creeper', position: new Vec3(2.2, 64, 0.5), meta: { swell_dir: 1 } })
+  const bot = fakeBot({ items: [item('iron_sword')], entities: [creeper], world: tunnel })
+  bot.heldItem = bot.inventory.slots[9]
+  bot.equip = async () => {}
+  let hits = 0
+  bot.attack = () => { hits++ }
+  bot.waitForTicks = async () => { bot.emit('physicsTick') }
+  await evadeCreeper(bot, creeper as any, { maxTicks: 40 }).catch(() => {})
+  assert.ok(hits >= 2, `${hits} hits`)
+})
