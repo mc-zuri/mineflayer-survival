@@ -422,3 +422,35 @@ export async function sealCaveOpenings (bot: Bot, signal?: AbortSignal, opts: { 
   }
   return placed
 }
+
+/** the most blocks a pocket for the night's wait may take (sealPocket): a tunnel's two ends 4, a staircase's step some 6 */
+export const POCKET_MAX_BLOCKS = 10
+
+/**
+ * The cells to fill to shut the bot in where it stands (sealIn's box: the back, the sides at the feet and the head,
+ * the roof, the front), or null where no box can be put up or it takes more than `maxBlocks`
+ */
+export async function pocketCells (bot: Bot, maxBlocks = POCKET_MAX_BLOCKS): Promise<Vec3[] | null> {
+  const { sealBox, openCells } = await import('./sealIn')
+  const box = sealBox(bot, [])
+  if (box == null) return null
+  const open = openCells(bot, box)
+  return open.length <= maxBlocks ? open : null
+}
+
+/**
+ * Shuts the bot in where it stands for a wait below the surface (the rest of the night down the mine): a sealed pocket,
+ * both ends of its tunnel blocked and no way in from a cave, so nothing the dark spawns comes at it (a spawner near
+ * behind the rock too). Resolves the blocks put, or throws CANNOT_PLACE (no pocket of POCKET_MAX_BLOCKS there) or
+ * MISSING_ITEMS. A 1.21.11 bot waited out the night down an open mine by a spider spawner, and at dawn a zombie and the
+ * spiders killed it at y 9 (ls3-1.21.11, t41183 to t48133).
+ */
+export async function sealPocket (bot: Bot, signal?: AbortSignal): Promise<number> {
+  const cells = await pocketCells(bot)
+  const { SkillError } = await import('./errors')
+  if (cells == null) throw new SkillError('CANNOT_PLACE', `no pocket of ${POCKET_MAX_BLOCKS} blocks at most at ${bot.entity.position.floored().toString()}`)
+  if (cells.length === 0) return 0
+  const { sealIn } = await import('./sealIn')
+  const res = await sealIn(bot, { signal, healTo: 0, maxTicks: 0 })
+  return res.placed
+}

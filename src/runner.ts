@@ -26,6 +26,8 @@ import { SPARE_FOOD_POINTS, milestoneNeeds, spareKitGoals, stockKeepRule, tripSp
 import { isAbort } from './skills/errors'
 import { navigate, navigateNear, pickaxeForTheWay } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
+import { caveRuleOn, sealPocket } from './skills/caves'
+import { SPAWNER_POI } from './skills/spawnerFarm'
 import { keepWaterBucket, waterBucketEmpty } from './skills/bucket'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
@@ -360,6 +362,11 @@ export { isDeathMessage }
 
 /** logs cut at dusk for a night down the mine with no wood carried, if they cost DUSK_WOOD_TICKS or less */
 export const DUSK_LOGS = 4
+/**
+ * how near a spawner known (a dungeon's, a mineshaft's) the night's wait below the surface is logged as behind the rock
+ * (BaseSpawner's requiredPlayerRange 16: it spawns while a player is within)
+ */
+export const SPAWNER_KEEP_OFF = 16
 export const DUSK_WOOD_TICKS = 800
 
 /** the wood carried, in logs (a log is 4 planks, a plank 2 sticks) */
@@ -1512,6 +1519,9 @@ export class Runner {
       const surfaceWork = upNext != null && MILESTONES.indexOf(upNext) < MILESTONES.findIndex(m => m.id === 'iron')
       if (!ctrl.signal.aborted && surfaceWork && typeof bot.blockAt === 'function' && !onSurface(p => bot.blockAt(p) as any, bot.entity.position.floored())) {
         this.log(`night (time ${bot.time.timeOfDay}): the rest of it waited out down the mine`)
+        // in a sealed pocket, for a bot not fit for the caves: its tunnel's ends and any way in from a cave blocked, a
+        // spawner near behind the rock (sealPocket; the caves reflex and the wall-in keep it so)
+        if (caveRuleOn(bot) && !ctrl.signal.aborted) await this.sealForTheNight(ctrl.signal, signal)
         // (a wait, not a stall)
         this.diagnostics?.wait('the rest of the night down the mine')
         await new Promise<void>(resolve => {
@@ -1527,6 +1537,24 @@ export class Runner {
       ;(bot as any).survival.nightWork = false
     }
     this.log(`night's mining over at time ${bot.time.timeOfDay}`)
+  }
+
+  /**
+   * The bot shut in where it waits out the night below the surface (sealPocket), logged with the nearest spawner known
+   * within SPAWNER_KEEP_OFF; a pocket that can't be had is logged and the wait goes on (the reflexes' wall-in then)
+   */
+  private async sealForTheNight (signal: AbortSignal, outer?: AbortSignal): Promise<void> {
+    const bot = this.bot
+    const at = bot.entity.position
+    const spawner = this.memory.getPois(SPAWNER_POI, { dimension: 'overworld', near: at })[0]
+    const near = spawner != null && Math.hypot(spawner.x - at.x, spawner.y - at.y, spawner.z - at.z) < SPAWNER_KEEP_OFF ? `, a ${spawner.note ?? ''} spawner ${Math.round(Math.hypot(spawner.x - at.x, spawner.y - at.y, spawner.z - at.z))} off behind the rock` : ''
+    try {
+      const placed = await this.executor.task('seal in for the night', async (s) => await sealPocket(bot, s), signal)
+      this.log(`night: sealed in for the rest of it (${placed} blocks put${near})`)
+    } catch (err) {
+      if (outer?.aborted === true || TaskError.is(err, 'DIED') || bot.health <= 0) throw err
+      if (!signal.aborted) this.log(`night: no sealed pocket here: ${(err as Error).message}`)
+    }
   }
 
   /** sleeps through the night when a bed is at hand: one held, the base's when near, or one standing nearby */

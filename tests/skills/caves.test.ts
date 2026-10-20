@@ -257,3 +257,33 @@ test('caveOpenings: the holes from the bot\'s tunnel into a cave, by its feet an
   bot.entity.position = new Vec3(4.5, 20, 0.5)
   assert.deepEqual(caveOpenings(bot), [])
 })
+
+test('sealPocket: the night\'s wait down the mine shut in where the bot stands, a tunnel\'s two ends (4 blocks); a room of 10, more than its most is none (ls3-1.21.11)', async () => {
+  const { POCKET_MAX_BLOCKS, pocketCells, sealPocket } = await import('../../src/skills/caves')
+  const tunnelWorld = (p: Vec3): string => p.z === 0 && (p.y === 20 || p.y === 21) && Math.abs(p.x) <= 8 ? 'air' : p.y > 70 ? 'air' : 'stone'
+  const bot = fakeBot({ position: new Vec3(0.5, 20, 0.5), world: tunnelWorld, items: [item('cobblestone', 16)] })
+  assert.deepEqual((await pocketCells(bot))?.map(p => p.toArray()).sort(), [[-1, 20, 0], [-1, 21, 0], [1, 20, 0], [1, 21, 0]])
+  const mod = require('../../src/skills/sealIn')
+  const real = mod.sealIn
+  const calls: any[] = []
+  mod.sealIn = async (_b: any, opts: any) => { calls.push(opts); return { placed: 4, ticks: 0, health: 20 } }
+  try {
+    assert.equal(await sealPocket(bot), 4)
+    assert.equal(calls[0].healTo, 0)
+    // a cave room 9 across: the back, the sides, a block for the roof, the roof and the front, POCKET_MAX_BLOCKS
+    const room = fakeBot({ position: new Vec3(0.5, 20, 0.5), world: (p: Vec3) => Math.abs(p.x) <= 4 && Math.abs(p.z) <= 4 && p.y >= 20 && p.y <= 24 ? 'air' : p.y > 70 ? 'air' : 'stone', items: [item('cobblestone', 16)] })
+    assert.equal((await pocketCells(room))?.length, POCKET_MAX_BLOCKS)
+    assert.equal(await pocketCells(room, 8), null)
+    // in the open air of a ravine's floor 12 wide under the sky: no roof to put up there (sealBox's null), CANNOT_PLACE
+    const open = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('cobblestone', 16)] })
+    const box = await pocketCells(open)
+    if (box == null) {
+      let err: any = null
+      await sealPocket(open).catch(e => { err = e })
+      assert.equal(err?.code ?? err?.reason, 'CANNOT_PLACE')
+    }
+    assert.equal(calls.length, 1)
+  } finally {
+    mod.sealIn = real
+  }
+})
