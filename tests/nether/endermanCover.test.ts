@@ -112,3 +112,18 @@ test('coverView: the clear sight lines from a top, fewer with a wall by it; plan
   const away = planEndermanCovers(lookup, new Vec3(0.5, 64, 0.5), { exclude: t => t.distanceTo(new Vec3(0, 64, 0)) < 10 }, undefined, 5)
   assert.ok(away.length > 0 && away.every(c => c.top.distanceTo(new Vec3(0, 64, 0)) >= 10))
 })
+
+test('coverAt with depth 0: the tunnel dug into a hillside from the ground before it, its mouth the pit; planEndermanCover takes it over a stair', () => {
+  // a hill of netherrack from x 3 on, up to y 67 (its face 4 high over the forest's floor)
+  const lookup = forest(p => p.x >= 3 && p.y <= 67 ? 'netherrack' : null)
+  const cover = coverAt(lookup, new Vec3(2, 64, 0), new Vec3(1, 0, 0), 0)
+  assert.ok(cover != null)
+  assert.deepEqual(cover.steps, [])
+  assert.equal(cover.pit.toString(), '(2, 64, 0)')
+  assert.equal(cover.stand.toString(), '(4, 64, 0)')
+  assert.equal(cover.dig.length, 4)
+  // a hill 1 high: no ceiling over the tunnel, no cover
+  assert.equal(coverAt(forest(p => p.x >= 3 && p.y <= 64 ? 'netherrack' : null), new Vec3(2, 64, 0), new Vec3(1, 0, 0), 0), null)
+  const best = planEndermanCover(lookup, new Vec3(0.5, 64, 0.5))
+  assert.ok(best != null && best.steps.length === 0 && best.dig.length === 4, best?.top.toString())
+})

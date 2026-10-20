@@ -61,7 +61,7 @@ export interface CoverOptions {
   radius?: number
   /** how far up and down (default 5) */
   dy?: number
-  /** how deep the bot's cell goes under the surface at most (default 5; 3 at least) */
+  /** how deep the bot's cell goes under the stair's top at most (default 5; 0 is a tunnel into a hillside from the top) */
   maxDepth?: number
   /** stair tops not to take (a cover from which no enderman was seen) */
   exclude?: (top: Vec3) => boolean
@@ -160,7 +160,7 @@ export function planEndermanCover (lookup: BlockLookup, from: Vec3, opts: CoverO
 export function planEndermanCovers (lookup: BlockLookup, from: Vec3, opts: CoverOptions = {}, reasons?: Map<string, number>, n = 12): EndermanCover[] {
   const radius = opts.radius ?? 12
   const dy = opts.dy ?? 5
-  const maxDepth = Math.max(3, opts.maxDepth ?? 5)
+  const maxDepth = opts.maxDepth ?? 5
   const base = from.floored()
   const found: Array<{ cover: EndermanCover, cost: number }> = []
   for (let x = -radius; x <= radius; x++) {
@@ -174,7 +174,8 @@ export function planEndermanCovers (lookup: BlockLookup, from: Vec3, opts: Cover
         if (opts.exclude?.(top) === true) continue
         let best: { cover: EndermanCover, cost: number } | null = null
         for (const facing of WAYS) {
-          for (let depth = 3; depth <= maxDepth; depth++) {
+          // (from 0: the tunnel dug into a hillside, its mouth on the ground, the stair none)
+          for (let depth = 0; depth <= maxDepth; depth++) {
             const cover = coverAt(lookup, top, facing, depth, reasons)
             if (cover == null) continue
             const cost = cover.dig.length + depth * 2 + flat + Math.abs(y) * 2
@@ -354,7 +355,11 @@ export async function digCover (bot: Bot, cover: EndermanCover, signal?: AbortSi
   const keep = (b: Block): boolean => toDig.has(b.position.toString())
   for (let i = 0; i < line.length; i++) {
     throwIfAborted(signal)
-    if (i === 0) await walkLine(bot, cover, 0, signal)
+    if (i === 0) {
+      await walkLine(bot, cover, 0, signal)
+      // (the pathfinder's goal taken as reached a cell short of it: the walk on into it)
+      if (!inCell(bot, cover.top)) await stepTo(bot, cover.top, signal)
+    }
     else await stepTo(bot, line[i], signal)
     if (!inCell(bot, line[i])) throw new SkillError('NO_PATH', `the cover's stair: not at ${line[i].toString()} (at ${bot.entity.position.floored().toString()})`)
     for (const p of cover.dig) {
@@ -510,7 +515,8 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
           angrySince.set(e.id, ticks)
           // stuck where it is: an arrow sends it off at random (EnderMan.hurtServer: a projectile, teleport), angry
           // still, and from over 16 off it teleports toward the bot (EndermanLookForPlayerGoal), SHOOS times
-          if ((shoos.get(e.id) ?? 0) < SHOOS && canShoot()) { toShoo.add(e.id); continue }
+          // (one not in sight to shoot in a wait more: passed over, not waited for at the top for good, 26.3: 6000 ticks)
+          if (!toShoo.has(e.id) && (shoos.get(e.id) ?? 0) < SHOOS && canShoot()) { toShoo.add(e.id); continue }
           passOver.add(e.id)
           toShoo.delete(e.id)
           trace('fightFromCover: passed over', e.id, 'at', e.position.toString(), e.position.distanceTo(bot.entity.position).toFixed(1), 'off (the bot at', bot.entity.position.floored().toString(), 'the pit', cover.pit.toString(), '), angry', COVER_WAIT, 'ticks and not come')
@@ -624,6 +630,14 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
         await settle(bot, signal)
         continue
       }
+      // one in sight from the stand itself (a cover dug into a hillside looks out over the forest): stared at from
+      // here, where it can't reach the bot
+      const fromStand = all.find(e => !isAngryEnderman(bot, e) && !passOver.has(e.id) && e.position.distanceTo(bot.entity.position) > STARE_TELEPORT && comes(e) && eyesInSight(bot, e))
+      if (fromStand != null) {
+        lastStare = ticks
+        if (!await provokeEnderman(bot, fromStand, signal)) passOver.add(fromStand.id)
+        continue
+      }
       if (mad.some(e => !toShoo.has(e.id)) || ticks < holdUntil) {
         await waitTicks(bot, 2, signal)
         continue
@@ -676,7 +690,9 @@ export async function endermenFromCover (bot: Bot, opts: CoverFightOptions & Cov
       }
       covers.set(bot, { cover, dug: false })
       trace('endermenFromCover: a cover from', cover.top.toString(), 'facing', cover.facing.toString(), 'the stand', cover.stand.toString(), cover.dig.length, 'blocks to dig')
-      await digCover(bot, cover, signal).catch(err => { if (!isAbort(err)) forgetCover(bot); throw err })
+      // (one that couldn't be dug isn't planned again: the same stair's top failed ten times over, 26.3)
+      const failed = cover
+      await digCover(bot, cover, signal).catch(err => { if (!isAbort(err)) { forgetCover(bot); blind.push(failed.top) } throw err })
       covers.set(bot, { cover, dug: true })
     }
     // no way to it (a stair's top the pathfinder found no way back to, 2475 ticks): another cover the next time
@@ -696,7 +712,7 @@ export async function endermenFromCover (bot: Bot, opts: CoverFightOptions & Cov
   }
 }
 
-/** the stair tops each bot saw no enderman from, and how far from them another cover goes */
+/** the stair tops each bot saw no enderman from or failed to dig a cover from, and how far from them another goes */
 const blindTops = new WeakMap<Bot, Vec3[]>()
 export const BLIND_APART = 10
 /** covers dug in a row for one with endermen in sight, at most */
