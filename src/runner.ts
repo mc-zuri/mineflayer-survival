@@ -72,6 +72,9 @@ export const OPTIONAL_MILESTONE_TICKS = 400000
 /** milestones that are a trip across the world, not worked from home: the night's mining waits till they're done */
 /** the times a milestone not ready to go on is tried again before it counts as a failure */
 export const NOT_READY_TRIES = 10
+/** a not-ready back sooner than this got nothing: NOT_READY_WAIT_TICKS waited before the next try */
+export const NOT_READY_MIN_TICKS = 200
+export const NOT_READY_WAIT_TICKS = 1200
 
 /** the ticks the re-equipping after a death may take in all */
 export const REEQUIP_TICKS = 24000
@@ -706,6 +709,12 @@ export class Runner {
           notReady.set(m.id, k)
           if (k < NOT_READY_TRIES) {
             this.log(`milestone ${m.id} not ready (${k}): ${(err as Error).message}`)
+            // back at once (nothing could be got: a bag full of junk that wouldn't go, 26.3, the ten tries and five
+            // failures all in one tick, the game stopped): a while waited first
+            if (this.bot.survival.tasks.tick - begun < NOT_READY_MIN_TICKS) {
+              this.log(`milestone ${m.id}: nothing came of it, waiting ${NOT_READY_WAIT_TICKS} ticks`)
+              await this.waitTicksOrAbort(NOT_READY_WAIT_TICKS, signal)
+            }
             continue
           }
           notReady.delete(m.id)
@@ -1287,6 +1296,17 @@ export class Runner {
   }
 
   /** takes the kit (what the keep rule keeps: tools, armor, food, torches...) out of the base's chests; what it took, null with no base */
+  /** waits `ticks` game ticks, or until the signal aborts */
+  private async waitTicksOrAbort (ticks: number, signal: AbortSignal): Promise<void> {
+    await new Promise<void>(resolve => {
+      let n = 0
+      const done = (): void => { this.bot.off('physicsTick', onTick); signal.removeEventListener('abort', done); resolve() }
+      const onTick = (): void => { if (++n >= ticks) done() }
+      this.bot.on('physicsTick', onTick)
+      signal.addEventListener('abort', done, { once: true })
+    })
+  }
+
   async rekit (signal?: AbortSignal): Promise<Record<string, number> | null> {
     const base = baseRecord(this.memory)
     if (base == null || base.chests.length === 0) return null

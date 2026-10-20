@@ -727,11 +727,19 @@ test('a milestone not ready to go on (notReady) is tried again without counting 
       }
     }
   })
-  const r = await runner.play()
+  // (back at once each time: a while waited before the next, the ticks run here)
+  const ticking = setInterval(() => { for (let i = 0; i < 50; i++) bot.emit('physicsTick') }, 1)
+  let r: any
+  try {
+    r = await runner.play()
+  } finally {
+    clearInterval(ticking)
+  }
   assert.equal(r.reason, 'until', logs.join('\n'))
   assert.equal(calls, 4)
   assert.ok(logs.some(l => /milestone wood not ready \(3\)/.test(l)))
   assert.ok(!logs.some(l => /milestone wood failed/.test(l)))
+  assert.equal(logs.filter(l => /nothing came of it, waiting/.test(l)).length, 3)
 })
 
 test('the death spot: not gone back to bare where an archer shot the bot dead; a death to a mob at night gone back to by day if the items last (full-26.3-fresh-d)', async () => {
