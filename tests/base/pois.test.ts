@@ -69,3 +69,18 @@ test('protectBase: the shell and the blueprint\'s own blocks in the room kept fr
   const place = bot.pathfinder.defaultMoveSettings.exclusionAreasPlace
   assert.ok(place.reduce((n: number, f: any) => n + f({ position: new Vec3(outer.x, outer.y, outer.z) }), 0) >= 1e9)
 })
+
+test('baseBuilt: a base with its door missing is not built till its third build, however few of its blocks are missing (ls-1.21.11: 8 of 175 missing, no door)', async () => {
+  const { baseBuilt, BASE_POI } = await import('../../src/base/pois')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const m = new WorldMemory()
+  m.setBase({ x: -8, y: 74, z: 120 }, 'overworld')
+  m.addPoi(BASE_POI.build, { x: -8, y: 74, z: 120 }, 'overworld', '8/175/1/2')
+  assert.equal(baseBuilt(m), false, 'no door: not built')
+  m.addPoi(BASE_POI.build, { x: -8, y: 74, z: 120 }, 'overworld', '6/175/2/0')
+  assert.equal(baseBuilt(m), true, 'the doors hung')
+  m.addPoi(BASE_POI.build, { x: -8, y: 74, z: 120 }, 'overworld', '8/175/3/2')
+  assert.equal(baseBuilt(m), true, 'the third build: taken as it is')
+  m.addPoi(BASE_POI.build, { x: -8, y: 74, z: 120 }, 'overworld', '8/175/1')
+  assert.equal(baseBuilt(m), true, 'a note from before the doors were counted')
+})

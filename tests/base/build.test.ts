@@ -152,4 +152,5 @@ test('inTheWay: the room\'s and the airlock\'s cells holding what the blueprint 
   assert.equal(cells.get(key(doorTop)), 'air', 'the doorway dug out')
   assert.equal(tasks.filter(t => t === `dig (${outer.x}, ${outer.y + 1}, ${outer.z})`).length, 2, 'tried in the digging, then after the placing')
   assert.ok(res.missing.some(p => p.block.endsWith('_door')))
+  assert.match(executor.memory.getPois('base_build')[0].note, /^\d+\/\d+\/1\/2$/, 'the two doors noted missing')
 })

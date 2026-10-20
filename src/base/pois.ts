@@ -12,7 +12,10 @@ export const BASE_POI = {
   spareChest: 'base_spare_chest',
   /** the box of the base, shell included: min corner, with the max corner in the note as "x,y,z" */
   bounds: 'base_bounds',
-  /** the build as it was left: at the origin, the note "missing/total" of the blueprint's blocks */
+  /**
+   * the build as it was left: at the origin, the note "missing/total/builds/doors" of the blueprint's blocks (doors:
+   * those of them missing)
+   */
   build: 'base_build'
 } as const
 
@@ -23,15 +26,20 @@ export const BASE_BUILD_TRIES = 3
 
 /**
  * Whether the base the memory has is built: no build noted (a save from before it was), or at most BASE_MISSING_SHARE
- * of its blocks missing. hunt2's runs counted 'base built: … 175 missing' a base reached
+ * of its blocks missing and its doors hung; or built BASE_BUILD_TRIES times. hunt2's runs counted 'base built: … 175
+ * missing' a base reached; a 1.21.11 one 'base built: … 8 missing' with no door (its materials lost to a death), and
+ * the milestone was reached (ls-1.21.11 t102744)
  */
 export function baseBuilt (memory: Pick<WorldMemory, 'base' | 'getPois'>): boolean {
   if (memory.base == null) return false
   const note = memory.getPois(BASE_POI.build, { dimension: memory.base.dimension })[0]?.note
-  const m = note != null ? /^(\d+)\/(\d+)(?:\/(\d+))?$/.exec(note) : null
+  const m = note != null ? /^(\d+)\/(\d+)(?:\/(\d+))?(?:\/(\d+))?$/.exec(note) : null
   if (m == null) return true
+  if (Number(m[3] ?? 1) >= BASE_BUILD_TRIES) return true
+  // (a door missing: built again, its next build's materials a door)
+  if (Number(m[4] ?? 0) > 0) return false
   const total = Number(m[2])
-  return total === 0 || Number(m[1]) / total <= BASE_MISSING_SHARE || Number(m[3] ?? 1) >= BASE_BUILD_TRIES
+  return total === 0 || Number(m[1]) / total <= BASE_MISSING_SHARE
 }
 
 export interface BaseRecord {

@@ -392,7 +392,7 @@ export async function buildBase (bot: Bot, opts: BuildBaseOptions): Promise<Buil
   const final = planBuild(blueprint, world, registry)
   const missing = final.placements.filter(p => p.autoPlaced !== true && wanted(p))
   const chests = blueprint.storage.filter(p => bot.blockAt(v(p))?.name === 'chest').map(v)
-  record(bot, executor, blueprint, chests, { missing: missing.length, total: blueprint.placements.filter(p => (p as any).autoPlaced !== true && wanted(p)).length })
+  record(bot, executor, blueprint, chests, { missing: missing.length, total: blueprint.placements.filter(p => (p as any).autoPlaced !== true && wanted(p)).length, doors: missing.filter(p => p.block.endsWith('_door')).length })
   protectBase(bot, blueprint)
   keepBaseUnbroken(bot, executor.memory)
   const safety = checkStorageSafety(world, chests, { bounds: blueprint.bounds, registry })
@@ -417,7 +417,7 @@ async function placeOne (bot: Bot, p: Placement, item: string, signal?: AbortSig
   return true
 }
 
-function record (bot: Bot, executor: Executor, blueprint: Blueprint, chests: Vec3[], build?: { missing: number, total: number }): void {
+function record (bot: Bot, executor: Executor, blueprint: Blueprint, chests: Vec3[], build?: { missing: number, total: number, doors: number }): void {
   const memory = executor.memory
   const dimension = normalizeDimension(bot.game?.dimension)
   const o = blueprint.options.origin
@@ -426,7 +426,7 @@ function record (bot: Bot, executor: Executor, blueprint: Blueprint, chests: Vec
   const tries = Number(before?.note?.split('/')[2] ?? 0) + 1
   for (const kind of Object.values(BASE_POI)) memory.removePoi(kind)
   memory.setBase(o, dimension)
-  if (build != null) memory.addPoi(BASE_POI.build, o, dimension, `${build.missing}/${build.total}/${tries}`)
+  if (build != null) memory.addPoi(BASE_POI.build, o, dimension, `${build.missing}/${build.total}/${tries}/${build.doors}`)
   memory.addPoi(BASE_POI.entrance, blueprint.entrance.outside, dimension)
   const b = blueprint.bounds
   memory.addPoi(BASE_POI.bounds, b.min, dimension, `${b.max.x},${b.max.y},${b.max.z}`)
