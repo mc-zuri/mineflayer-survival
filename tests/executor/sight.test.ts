@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { Sightings, SCARCE_FACTOR, SCARCE_TICKS } from '../../src/executor/sight'
+import { Sightings, GIVE_UP_FACTOR, GIVE_UP_TICKS, SCARCE_FACTOR, SCARCE_TICKS } from '../../src/executor/sight'
 import { obtainAll } from '../../src/planner/obtain'
 import { FOOD_GOAL, FOOD_POINTS } from '../../src/planner/progression'
 
@@ -68,4 +68,27 @@ test('the food plan goes by the sightings: the pigs in sight over cows, berries 
   now += SCARCE_TICKS
   bushes.length = 0
   assert.ok(plan().some(st => st.startsWith('kill')), plan().join(', '))
+})
+
+test('sightings: a source missed twice in a row is given up on for a day (the last resort); a miss a day apart starts the count again', () => {
+  let now = 0
+  const bot = fakeBot([])
+  const s = new Sightings(bot, () => now)
+  const melon = { name: 'melon', kind: 'block' as const, dimension: 'overworld' as const, find: 4000 }
+  s.missing(['melon'])
+  assert.equal(s.cost(melon), 4000 * SCARCE_FACTOR)
+  now += SCARCE_TICKS
+  assert.equal(s.cost(melon), undefined)
+  // explored for again, half a day after: none again
+  s.missing(['melon'])
+  assert.equal(s.cost(melon), 4000 * GIVE_UP_FACTOR)
+  assert.ok(s.givenUp('melon') && s.isScarce('melon'))
+  now += SCARCE_TICKS
+  assert.equal(s.cost(melon), 4000 * GIVE_UP_FACTOR)
+  now += GIVE_UP_TICKS - SCARCE_TICKS
+  assert.equal(s.cost(melon), undefined)
+  // a miss a day and more after the last: one miss again
+  now += 1
+  s.missing(['melon'])
+  assert.equal(s.cost(melon), 4000 * SCARCE_FACTOR)
 })

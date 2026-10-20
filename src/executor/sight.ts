@@ -19,11 +19,19 @@ export const SCARCE_TICKS = 12000
 /** how many times the source's estimate one not found costs */
 export const SCARCE_FACTOR = 8
 
+/** misses in a row (each within GIVE_UP_TICKS of the last) after which a source is given up on for GIVE_UP_TICKS */
+export const GIVE_UP_MISSES = 2
+/** how long a source missed GIVE_UP_MISSES times is given up on (a day) */
+export const GIVE_UP_TICKS = 24000
+/** how many times the source's estimate one given up on costs: the last resort, when nothing else is to be had */
+export const GIVE_UP_FACTOR = 64
+
 /** the blocks whose sighting the plans count on: the food that grows on the surface (the rest go by the memory) */
 export const SIGHTED_BLOCKS = ['sweet_berry_bush', 'melon', 'carrots', 'potatoes', 'wheat', 'beetroots', 'hay_block', 'kelp', 'kelp_plant']
 
 export class Sightings {
-  private readonly missed = new Map<string, number>()
+  /** the tick a name was last looked for and not found, and the misses in a row */
+  private readonly missed = new Map<string, { at: number, misses: number }>()
 
   /**
    * @param now the tick count (the task runner's)
@@ -33,13 +41,28 @@ export class Sightings {
 
   /** the names a step looked for and didn't find */
   missing (names: readonly string[]): void {
-    for (const n of names) this.missed.set(n, this.now())
+    const now = this.now()
+    for (const n of names) {
+      const last = this.missed.get(n)
+      const misses = last != null && now - last.at < GIVE_UP_TICKS ? last.misses + 1 : 1
+      this.missed.set(n, { at: now, misses })
+    }
   }
 
   /** whether a name was looked for and not found within SCARCE_TICKS */
   isScarce (name: string): boolean {
-    const at = this.missed.get(name)
-    return at != null && this.now() - at < SCARCE_TICKS
+    const last = this.missed.get(name)
+    return last != null && (this.now() - last.at < SCARCE_TICKS || this.givenUp(name))
+  }
+
+  /**
+   * whether a name was looked for and not found GIVE_UP_MISSES times in a row, the last within GIVE_UP_TICKS: the
+   * plans take it as the last resort for a day. Seed 2's nether kit explored for melons twice and for berry bushes in
+   * between, 30000 ticks for none, with a wheat farm and animals by the base (full-26.3-fresh-l)
+   */
+  givenUp (name: string): boolean {
+    const last = this.missed.get(name)
+    return last != null && last.misses >= GIVE_UP_MISSES && this.now() - last.at < GIVE_UP_TICKS
   }
 
   /** the find cost for the planner: in sight, a walk; not found lately, SCARCE_FACTOR times the estimate */
@@ -51,6 +74,7 @@ export class Sightings {
       this.missed.delete(t.name)
       return Math.ceil(seen * WALK_TICKS_PER_BLOCK)
     }
+    if (this.givenUp(t.name)) return t.find * GIVE_UP_FACTOR
     if (this.isScarce(t.name)) return t.find * SCARCE_FACTOR
     return undefined
   }
