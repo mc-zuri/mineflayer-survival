@@ -32,7 +32,8 @@ export interface StockMark {
   keep?: Readonly<Record<string, number>>
   /** the mark applies once this milestone is reached (the tool that gets it: the iron after the stone pickaxe) */
   from?: MilestoneId
-  where: StockPlace
+  /** where its source is ('any': either, the plan made for the place: a cobweb's string down a mine, a spider's up there) */
+  where: StockPlace | 'any'
   /**
    * The most a top-up may cost a unit gathered, in ticks: a plan dearer than that waits for a better time (the source
    * near, the bot down at its level), and the top-up stops when it has run that many ticks per unit wanted
@@ -87,10 +88,15 @@ export const STOCK_MARKS: readonly StockMark[] = [
   // the bow's and the arrows' makings, banked as the play goes (the spiders and chickens met, the gravel dug), not only
   // when the nether gate asks for them: seed 2's spiders and chickens were not to be found when it did, a 1.21.11 kit
   // hunted spiders for a bow 100000 ticks and more, and a 26.3 one chickens for the arrows' feathers
-  { id: 'string', counts: { string: 1, bow: 3 }, gather: 'string', low: 3, high: 6, keep: { string: 6 }, from: 'iron', where: 'surface', ticksPerUnit: 600 },
+  { id: 'string', counts: { string: 1, bow: 3 }, gather: 'string', low: 3, high: 6, keep: { string: 6 }, from: 'iron', where: 'any', ticksPerUnit: 600 },
   { id: 'feather', counts: { feather: 1, arrow: 1 / 4 }, gather: 'feather', low: 8, high: 16, keep: { feather: 16 }, from: 'iron', where: 'surface', ticksPerUnit: 300 },
   { id: 'flint', counts: { flint: 1, arrow: 1 / 4 }, gather: 'flint', low: 8, high: 16, keep: { flint: 16 }, from: 'iron', where: 'surface', ticksPerUnit: 100 }
 ]
+
+/** whether a mark's top-up is got at one of the places (its own, or any) */
+export function markAt (mark: Pick<StockMark, 'where'>, places: readonly StockPlace[]): boolean {
+  return mark.where === 'any' ? places.length > 0 : places.includes(mark.where)
+}
 
 /** slots a top-up leaves free for the work's own pickups (the milestone's items, the drops on the way) */
 export const STOCK_RESERVE_SLOTS = 10
@@ -245,7 +251,7 @@ export class StockPolicy {
     const bag = opts.bag ?? inventory
     const levels = this.update(inventory, stored, reached)
     const due = levels
-      .filter(l => this.active.has(l.mark.id) && places.includes(l.mark.where))
+      .filter(l => this.active.has(l.mark.id) && markAt(l.mark, places))
       .sort((a, b) => a.have / a.mark.low - b.have / b.mark.low)
     if (due.length === 0) return []
     const room = Math.max(0, bag.slots - keptSlots(bag) - this.reserveSlots)

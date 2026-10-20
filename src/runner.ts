@@ -15,7 +15,7 @@ import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './co
 import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, MILESTONES, foodGoals, mealGoals, milestonesAhead, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { comeUp, dayPhase, nightAction, nightGoals, topUpPlaces } from './planner/schedule'
-import { describeLevel, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
+import { describeLevel, markAt, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
 import { onSurface, SURFACE_MIN_Y } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
@@ -1048,7 +1048,7 @@ export class Runner {
       const up = this.dueTopUps(places, reached).find(u => !tried.has(u.mark.id))
       if (up == null) {
         // marks under way with nothing to gather this trip: no room in the bag (or at their working set, no base)
-        const waiting = tried.size === 0 ? (this.stock?.marks ?? []).filter(m => this.stock?.active.has(m.id) === true && places.includes(m.where) && (this.stockRetryAt.get(m.id) ?? 0) <= this.bot.survival.tasks.tick) : []
+        const waiting = tried.size === 0 ? (this.stock?.marks ?? []).filter(m => this.stock?.active.has(m.id) === true && markAt(m, places) && (this.stockRetryAt.get(m.id) ?? 0) <= this.bot.survival.tasks.tick) : []
         if (waiting.length > 0) this.log(`stock: no room this trip for ${waiting.map(m => m.id).join(', ')} (${this.bot.inventory.emptySlotCount?.() ?? '?'} slots free)`)
         return
       }

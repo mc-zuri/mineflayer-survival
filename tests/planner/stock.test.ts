@@ -208,3 +208,19 @@ test('the bow\'s and arrows\' makings (string, feathers, flint) are stocked on t
   const armed = ids({ bow: 1, arrow: 64 }, ['wood', 'stone', 'food', 'iron'])
   for (const id of ['string', 'feather', 'flint']) assert.ok(!armed.includes(id), armed.join(', '))
 })
+
+test('the string mark tops up anywhere (where any): up there of the spiders, down the night mine of the cobwebs', async () => {
+  const { markAt } = await import('../../src/planner/stock')
+  const registry = minecraftData('1.21.11')
+  const mark = STOCK_MARKS.find(m => m.id === 'string')
+  assert.equal(mark?.where, 'any')
+  assert.equal(markAt({ where: 'any' }, ['underground']), true)
+  assert.equal(markAt({ where: 'any' }, ['surface']), true)
+  assert.equal(markAt({ where: 'any' }, []), false)
+  assert.equal(markAt({ where: 'surface' }, ['underground']), false)
+  const policy = new StockPolicy()
+  const bag = new Inventory(registry as any, { iron_pickaxe: 1 })
+  for (const places of [['underground'], ['surface']] as const) {
+    assert.ok(policy.topUps(bag, {}, ['wood', 'stone', 'food', 'iron'], places).some(u => u.mark.id === 'string'), places.join())
+  }
+})
