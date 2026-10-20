@@ -2,7 +2,7 @@
 // mining, where the dark is the same at any hour and the surface's monsters aren't. A bed skips the night; with no
 // pickaxe to dig down with the night is waited out in a shelter (the night reflex's), the fallback it always was.
 import { Inventory } from '../core/inventory'
-import { ENCHANTING_LAPIS, FOOD_POINTS, toolsAtLeast, type MilestoneId } from './progression'
+import { diamondTripPickaxes, ENCHANTING_LAPIS, FOOD_POINTS, toolsAtLeast, type MilestoneId } from './progression'
 import type { ObtainRequest } from './obtain'
 import type { StockPlace } from './stock'
 
@@ -111,7 +111,8 @@ export function nightGoals (inv: Inventory, reached: readonly MilestoneId[]): Ob
     return goals
   }
   if (!reached.includes('diamonds') && pickaxe('iron')) {
-    if (inv.count('diamond') < DIAMONDS_FOR_MILESTONE) goals.push({ item: 'diamond', count: DIAMONDS_FOR_MILESTONE, optional: true })
+    // the trip's pickaxes first (diamondTripPickaxes: a spare iron one, from the iron held)
+    if (inv.count('diamond') < DIAMONDS_FOR_MILESTONE) goals.push(...diamondTripPickaxes(inv).map(g => ({ ...g, optional: true })), { item: 'diamond', count: DIAMONDS_FOR_MILESTONE, optional: true })
     return goals
   }
   if (!reached.includes('enchanting') && pickaxe('stone') && inv.count('lapis_lazuli') < ENCHANTING_LAPIS) goals.push({ item: 'lapis_lazuli', count: ENCHANTING_LAPIS, optional: true })

@@ -5,7 +5,7 @@ import type { RegistryLike } from '../../src/core/registry'
 import { Inventory } from '../../src/core/inventory'
 import { WorldMemory } from '../../src/core/memory'
 import { checkPlan } from '../../src/planner/steps'
-import { SPARE_LOGS, FOOD_GOAL, FOOD_POINTS, MILESTONES, RAW_TO_COOKED, foodGoals, milestone, nextMilestone, planMilestone, toolsAtLeast, eyesAvailable, type ProgressState } from '../../src/planner/progression'
+import { SPARE_LOGS, FOOD_GOAL, FOOD_POINTS, MILESTONES, RAW_TO_COOKED, DIAMOND_TRIP_PICKAXES, diamondTripPickaxes, foodGoals, milestone, nextMilestone, planMilestone, toolsAtLeast, eyesAvailable, type ProgressState } from '../../src/planner/progression'
 import { heldFor, unitValue } from '../../src/planner/obtain'
 import { isGrown } from '../../src/core/crops'
 
@@ -174,8 +174,8 @@ test('iron: the armor is iron, not diamond, even with a diamond ore seen nearby 
 })
 
 test('diamonds: the pickaxe and sword, and only the armor the diamonds held beyond them pay for', () => {
-  const kit = { iron_pickaxe: 1, iron_sword: 1, crafting_table: 1, furnace: 1 }
-  const items = (s: ProgressState): string[] => milestone('diamonds').goals(s).map(g => (g.item as string[])[0])
+  const kit = { iron_pickaxe: 2, iron_sword: 1, crafting_table: 1, furnace: 1 }
+  const items = (s: ProgressState): string[] => milestone('diamonds').goals(s).map(g => typeof g.item === 'string' ? g.item : (g.item as string[])[0])
   assert.deepEqual(items(state(kit)), ['diamond_pickaxe', 'diamond_sword'])
   const plan = planMilestone(registry, milestone('diamonds'), state(kit))
   assert.equal(plan.steps.filter(st => st.kind === 'mine' && st.item === 'diamond').reduce((n, st) => n + st.count, 0), 5)
@@ -183,6 +183,28 @@ test('diamonds: the pickaxe and sword, and only the armor the diamonds held beyo
   assert.deepEqual(items(state({ ...kit, diamond: 9 })), ['diamond_pickaxe', 'diamond_sword', 'diamond_boots'])
   // the tools made, 9 held: the boots and the helmet
   assert.deepEqual(items(state({ ...kit, diamond_pickaxe: 1, diamond_sword: 1, diamond: 9 })), ['diamond_pickaxe', 'diamond_sword', 'diamond_boots', 'diamond_helmet'])
+})
+
+test(`diamonds: the trip sets out with ${DIAMOND_TRIP_PICKAXES} iron pickaxes, the spare made from the iron held before the diamonds are mined (rt-1, grim-2)`, () => {
+  const items = (s: ProgressState): string[] => milestone('diamonds').goals(s).map(g => typeof g.item === 'string' ? g.item : (g.item as string[])[0])
+  // one iron pickaxe and the iron stock's raw iron: a spare smelted and made first, no iron ore mined for it
+  const kit = { iron_pickaxe: 1, iron_sword: 1, crafting_table: 1, furnace: 1, raw_iron: 20, coal: 8, stick: 4, cobblestone: 64 }
+  assert.deepEqual(items(state(kit)), ['iron_pickaxe', 'diamond_pickaxe', 'diamond_sword'])
+  assert.deepEqual(diamondTripPickaxes(new Inventory(registry, kit)), [{ item: 'iron_pickaxe', count: DIAMOND_TRIP_PICKAXES }])
+  const plan = planMilestone(registry, milestone('diamonds'), state(kit))
+  assert.equal(plan.ok, true)
+  const steps = plan.steps.map(st => `${st.kind} ${st.item}`)
+  assert.ok(!steps.includes('mine raw_iron'), steps.join(', '))
+  const spare = steps.indexOf('craft iron_pickaxe')
+  assert.ok(spare >= 0 && spare < steps.indexOf('mine diamond'), steps.join(', '))
+  assert.equal(plan.inventory.count('iron_pickaxe'), DIAMOND_TRIP_PICKAXES)
+  // no iron held: the spare's iron mined (above the diamonds' level, on the way down)
+  const bare = planMilestone(registry, milestone('diamonds'), state({ ...kit, raw_iron: 0 }))
+  assert.ok(bare.steps.some(st => st.kind === 'mine' && st.item === 'raw_iron'), bare.steps.map(st => `${st.kind} ${st.item}`).join(', '))
+  // a diamond pickaxe had (the sword left to make): it lasts the trip, no iron one more
+  assert.deepEqual(items(state({ ...kit, diamond_pickaxe: 1 })), ['diamond_pickaxe', 'diamond_sword'])
+  // two iron ones already: nothing more
+  assert.deepEqual(diamondTripPickaxes(new Inventory(registry, { iron_pickaxe: 2 })), [])
 })
 
 test('a crop remembered (maybe not grown: the bot\'s own farm) is no cheaper to the food plan; one seen grown is', () => {

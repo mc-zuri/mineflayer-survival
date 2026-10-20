@@ -298,12 +298,33 @@ export const MILESTONES: readonly Milestone[] = [
 const DIAMOND_COST: Record<string, number> = { pickaxe: 3, sword: 2, helmet: 5, chestplate: 8, leggings: 7, boots: 4 }
 
 /**
- * The diamonds milestone's goals: the pickaxe and the sword, and the armor pieces the diamonds held beyond those pay
- * for, cheapest first, as optional goals; not armor planned from diamonds yet to be found: the plan for all of it mined
- * 14 diamonds, at 600 ticks of strip mining each, where 5 make the milestone
+ * Iron pickaxes the diamonds' trip sets out with (no diamond one yet): the one it digs with and a spare as good, for
+ * the staircase down to the diamonds' level, the strip mine there and the way back (the trip kit's spare, keep.ts
+ * TRIP_TOOLS). In rt-1 and grim-2 (1.21.11) the bot went down with the one iron pickaxe, worn by the iron's mining,
+ * and it broke on the way (y 46 and y 3): back up for iron, a pickaxe made, and down again
+ */
+export const DIAMOND_TRIP_PICKAXES = 2
+
+/**
+ * The pickaxes the diamonds' trip takes, as a request to come before the diamonds' own: DIAMOND_TRIP_PICKAXES iron
+ * ones, made from the iron held first (the iron stock's: a pickaxe's 3 of it; its plan mines iron ore only when there's
+ * none, on the way down); none once a diamond pickaxe or better is had (it lasts the trip)
+ */
+export function diamondTripPickaxes (inv: Inventory): ObtainRequest[] {
+  if (inv.countAny(toolsAtLeast('pickaxe', 'diamond')) > 0) return []
+  return inv.count('iron_pickaxe') >= DIAMOND_TRIP_PICKAXES ? [] : [{ item: 'iron_pickaxe', count: DIAMOND_TRIP_PICKAXES }]
+}
+
+/**
+ * The diamonds milestone's goals: the trip's pickaxes (diamondTripPickaxes), the pickaxe and the sword, and the armor
+ * pieces the diamonds held beyond those pay for, cheapest first, as optional goals; not armor planned from diamonds yet
+ * to be found: the plan for all of it mined 14 diamonds, at 600 ticks of strip mining each, where 5 make the milestone.
+ * The trip's are exact iron pickaxes, not 'iron or better': the diamond pickaxe made at the end would count, and the
+ * plan go down with the one.
  */
 export function diamondGoals (s: ProgressState): ObtainRequest[] {
   const goals: ObtainRequest[] = [
+    ...diamondTripPickaxes(owned(s)),
     { item: toolsAtLeast('pickaxe', 'diamond'), count: 1 },
     { item: toolsAtLeast('sword', 'diamond'), count: 1 }
   ]
