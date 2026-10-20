@@ -460,6 +460,31 @@ test('makeRoom: a part stack thrown THROW_LOOP_REPEATS times within THROW_LOOP_T
   }
 })
 
+test('a step is tried with a slot free when no room is made before it (INVENTORY_FULL), not given up: the craft uses up what it\'s made from; with none free, the obtain fails', async () => {
+  // (26.3 run full-26.3-fresh-f: the nether gate's 'craft 1 shield' with its planks and iron ingot held failed with the
+  // room before it, 48 times in a tick, and the game stopped)
+  const fill = (n: number): Record<string, number> => {
+    const bag: Record<string, number> = { oak_planks: 4 }
+    for (const name of Object.keys(registry.itemsByName).filter(n => !/planks|table|log|air/.test(n)).slice(0, n - 1)) bag[name] = 1
+    return bag
+  }
+  const run = async (slots: number): Promise<{ bot: any, log: string[], out: Promise<unknown> }> => {
+    const bot = fakeBot(fill(slots))
+    const log: string[] = []
+    const ex = new Executor(bot, { runners: honestRunners(bot, log), log: line => log.push(line) })
+    ;(ex as any).makeRoom = async () => { throw new TaskError('INVENTORY_FULL', 'making room loops: 7 rotten_flesh thrown 3 times') }
+    return { bot, log, out: ex.obtain([{ item: 'crafting_table', count: 1 }]) }
+  }
+  const one = await run(35)
+  assert.equal(36 - one.bot.inventory.items().length, 1)
+  await one.out
+  assert.equal(count(one.bot, 'crafting_table'), 1)
+  assert.ok(one.log.some(l => /^no room before craft 1 crafting_table, tried with 1 slots free/.test(l)), one.log.join(' | '))
+  const none = await run(36)
+  await assert.rejects(none.out, (err: any) => TaskError.is(err, 'INVENTORY_FULL'))
+  assert.equal(count(none.bot, 'crafting_table'), 0)
+})
+
 test('makeRoom: what isn\'t kept goes to the base within BASE_STORE_RANGE, farther into a depot chest put down by the bot', async () => {
   const { BASE_STORE_RANGE } = await import('../../src/executor/executor')
   const bag: Record<string, number> = {}

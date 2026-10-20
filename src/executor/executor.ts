@@ -680,7 +680,17 @@ export class Executor {
 
   /** before a step: room in the inventory, a tool that won't break during it, the hooks */
   private async prepare (step: PlanStep, needed: Record<string, number>, signal?: AbortSignal): Promise<void> {
-    if (emptySlots(this.bot) < this.options.minFreeSlots) await this.makeRoom(needed, signal)
+    if (emptySlots(this.bot) < this.options.minFreeSlots) {
+      try {
+        await this.makeRoom(needed, signal)
+      } catch (err) {
+        // the step tries with a slot free (a craft that uses up what it's made from, a smelt into a stack held): it
+        // fails NO_SPACE itself when it can't, and the room is forced then. A 26.3 nether gate's 'craft 1 shield' with
+        // 6 planks and an iron ingot held failed with the room 48 times in a tick (full-26.3-fresh-f)
+        if (!TaskError.is(err, 'INVENTORY_FULL') || emptySlots(this.bot) === 0) throw err
+        this.log(`no room before ${describeStep(step)}, tried with ${emptySlots(this.bot)} slots free: ${(err as Error).message}`)
+      }
+    }
     if (step.kind === 'mine' || step.kind === 'kill') await this.replaceWornTools(signal)
     await this.hooks.beforeStep?.(step)
   }
