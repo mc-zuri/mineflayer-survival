@@ -249,9 +249,14 @@ export function swingVictim (bot: Bot, target: Entity): Entity | null {
   if (under === undefined) return target
   if (under == null || !isAlive(bot, under)) return null
   if (under.id === target.id) return target
-  const name = entityName(under)
-  const hostile = (bot.registry.entitiesByName as any)[name]?.type === 'hostile' || MELEE_MOBS.has(name)
-  return hostile && !NEUTRAL_HOSTILES.has(name) ? under : null
+  const foe = (e: Entity): boolean => {
+    const name = entityName(e)
+    const hostile = (bot.registry.entitiesByName as any)[name]?.type === 'hostile' || MELEE_MOBS.has(name)
+    return hostile && !NEUTRAL_HOSTILES.has(name)
+  }
+  // (and a hostile's mount: a chicken jockey's chicken, a spider jockey's spider, the target's own)
+  const riders: Entity[] = (under as any).passengers ?? []
+  return foe(under) || riders.some(r => r.id === target.id || foe(r)) ? under : null
 }
 
 /** ticks a melee mob is waited for in a passage while it comes no nearer (then it's closed in on) */

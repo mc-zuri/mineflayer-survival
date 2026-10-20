@@ -9,6 +9,8 @@
 //   end, the bot at work in the tunnel 8 blocks off it, the spawner spawning (BaseSpawner: up to 4 a go while fewer
 //   than 6 are about, a player within 16);
 // - the tunnel with the bot at 8 health (the run's was at 10 and less by its last fight), four zombies coming;
+// - a chicken jockey (a baby zombie riding a chicken, as a spawner's zombie may come: Zombie.finalizeSpawn) down the
+//   tunnel at it (the client moved no rider with its mount: the zombie hit the bot from where it mounted, 19 off);
 // - a cave 13 by 13 and 5 high round the bot, a trench 8 deep beside it, four zombies coming at it together, two from the west, two from the north.
 // MINE_RUNS=n repeats each (default 3); NIGHT_VERBOSE=1 logs each hit, kill and reflex.
 import { after, before, describe, test } from 'node:test'
@@ -189,6 +191,20 @@ describe(`full-26.3-fresh-l's zombies in the mine on ${DEFAULT_VERSION} (normal 
       sealed.push(seals)
     }
     report(t, 'hurt down a tunnel', logs, i => `${sealed[i]} shut-ins, health ${logs[i].minHealth.toFixed(1)} at the least, `)
+  })
+
+  test(`a chicken jockey (a baby zombie on a chicken) down the tunnel: killed, alive (${RUNS} runs)`, async (t) => {
+    const logs: RunLog[] = []
+    for (let i = 0; i < RUNS; i++) {
+      const at = await freshTunnel()
+      await giveKit(MINE_KIT)
+      await bot.waitForTicks(20)
+      await run(`summon minecraft:chicken ${at.x + 8.5} ${GROUND} 0.5 {PersistenceRequired:1b,Passengers:[{id:"minecraft:zombie",IsBaby:1b,PersistenceRequired:1b,CanPickUpLoot:0b}]}`)
+      await waitFor(() => zombiesLeft() >= 1, 100)
+      logs.push(await fightFor(1200, () => zombiesLeft() === 0))
+    }
+    report(t, 'a chicken jockey down a tunnel', logs, i => `${logs[i].kills.zombie ?? 0} of 1 killed, `)
+    assert.ok(logs.every(l => (l.kills.zombie ?? 0) >= 1), 'a jockey left alive')
   })
 
   test(`a cave, four zombies coming at the bot together from two sides, a drop of 8 beside it: alive (${RUNS} runs)`, async (t) => {

@@ -276,3 +276,15 @@ test('fight: down a 1-wide tunnel a zombie coming is waited for with the shield,
   assert.strictEqual(open.held, false)
   assert.ok(open.firstStep >= 0 && open.firstStep < 5, `the first step at ${open.firstStep}`)
 })
+
+test('swingVictim: a hostile\'s mount under the crosshair (a chicken jockey\'s chicken) is hit; a chicken alone is not', async () => {
+  const { swingVictim } = await import('../../src/skills/fight')
+  const zombie = entity({ name: 'zombie', position: new Vec3(1.9, 64.7, 0.5) })
+  const chicken = entity({ name: 'chicken', position: new Vec3(1.9, 64, 0.5) })
+  const bot = fakeBot({ entities: [zombie, chicken] })
+  bot.raycastHitResult = () => ({ type: 'entity', entity: chicken })
+  assert.strictEqual(swingVictim(bot, zombie), null)
+  chicken.passengers = [zombie]
+  zombie.vehicle = chicken
+  assert.strictEqual(swingVictim(bot, zombie)?.id, chicken.id)
+})
