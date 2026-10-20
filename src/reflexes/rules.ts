@@ -375,15 +375,26 @@ export function meleeOptions (target: { name?: string }, config: ReflexConfig, n
 }
 
 /**
+ * The mobs a bot with its fists only still fights alone: the weak (a silverfish's or an endermite's 8 health, a slime
+ * split small), the spiders (16 health, 2 a hit on normal: the fist's 1 every 5 ticks wins it) and the ones no run gets
+ * away from (a phantom, a vex: they fly)
+ */
+export const FIST_FIGHTS = new Set(['spider', 'cave_spider', 'silverfish', 'endermite', 'slime', 'magma_cube', 'phantom', 'vex'])
+
+/**
  * Fists only (no weapon carried, bestMeleeWeapon): fled from, not fought, when one of them shoots or there's more than
- * one (or always, with fleeUnarmed). A fist's 1 a hit takes 20 hits to kill a skeleton or 24 a pillager, under their
- * arrows and bolts all the while; a lone zombie is still fought. Three 26.3 bots back from a death with nothing fought
- * a pillager patrol, a skeleton and a spider, and a skeleton by a creeper with their fists, and died each time
- * (full-26.3-m)
+ * one (or always, with fleeUnarmed), and alone too but for FIST_FIGHTS. A fist's 1 a hit takes 20 hits to kill a
+ * skeleton or 24 a pillager, under their arrows and bolts all the while; and 20 a zombie (Zombie: 20 health, 3 a hit on
+ * normal), which loses the bot that fight more often than not, where a sprint (some 5.6 blocks a second) outruns its
+ * walk (some 2.3). Three 26.3 bots back from a death with nothing fought a pillager patrol, a skeleton and a spider,
+ * and a skeleton by a creeper with their fists, and died each time (full-26.3-m); a 1.21.11 bot respawned bare by its
+ * base at night fought a lone zombie with its fists, 20 health to 4 in 140 ticks, and died to it (full-1.21.11-fresh-m,
+ * t134158 to t134432). Cornered (fightTurned), it fights all the same: its fists are the only way left. (A creeper
+ * alone is the reflex's own: shot, met with a shield, or fled.)
  */
 export function unarmedOutmatched (bot: Bot, near: Entity[], config: ReflexConfig): boolean {
   if (bestMeleeWeapon(bot) != null) return false
-  return config.hostiles.fleeUnarmed || near.length > 1 || near.some(e => RANGED_HOSTILES.has(e.name ?? ''))
+  return config.hostiles.fleeUnarmed || near.length > 1 || near.some(e => RANGED_HOSTILES.has(e.name ?? '') || (e.name !== 'creeper' && !FIST_FIGHTS.has(e.name ?? '')))
 }
 
 /**
@@ -408,8 +419,9 @@ export function fightTurned (bot: Bot, near: Entity[], config: ReflexConfig, tic
   if (near.length === 0) return false
   const armed = armorPoints(bot) >= config.hostiles.fightOnArmor && bestMeleeWeapon(bot) != null
   const fightOn = near.length === 1 && armed
-  // (cornered a while ago, the flee found no way: an armed bot fights where it stands, not stands there struck)
-  const cornered = wasCornered(bot, tick) && bestMeleeWeapon(bot) != null
+  // (cornered a while ago, the flee found no way: an armed bot fights where it stands, not stands there struck; a bare
+  // one too, its fists the only way left)
+  const cornered = wasCornered(bot, tick)
   return !cornered && ((bot.health <= config.hostiles.fleeHealth && !fightOn) || unarmedOutmatched(bot, near, config))
 }
 

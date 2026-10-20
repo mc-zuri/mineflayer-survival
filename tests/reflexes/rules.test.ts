@@ -68,7 +68,7 @@ test('eat reflex: at food 14 out of combat, or at low health with no hostile in 
 
 test('hostiles reflex: fight the nearest, flee when hurt or outnumbered', () => {
   const zombie = (x: number, y = 64): any => entity({ name: 'zombie', position: at(x, y) })
-  assert.strictEqual(check(hostilesReflex, { entities: [zombie(5)] }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombie(5)], items: [item('stone_sword')] }), 'fight zombie')
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(10)] }), null)
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(3, 70)] }), null)
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(5)], health: 6 }), 'flee')
@@ -128,7 +128,7 @@ test('hostiles and creeper reflexes leave alone what has no line of sight to the
   // a stone wall at x 2 from y 64 to 66, between the bot (x 0.5) and the mobs further along x
   const wall = (pos: Vec3): string => pos.y < 64 ? 'stone' : pos.x === 2 && pos.y <= 66 ? 'stone' : 'air'
   const zombie = entity({ name: 'zombie', position: at(4) })
-  assert.strictEqual(check(hostilesReflex, { entities: [zombie] }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombie], items: [item('stone_sword')] }), 'fight zombie')
   assert.strictEqual(check(hostilesReflex, { entities: [zombie], world: wall }), null)
   const creeper = (meta?: Record<string, unknown>): any => entity({ name: 'creeper', position: at(2.2), meta })
   assert.strictEqual(check(creeperReflex, { entities: [creeper()], world: (p) => p.y < 64 ? 'stone' : p.x === 1 && p.y <= 66 ? 'stone' : 'air' }), null)
@@ -460,7 +460,7 @@ test('night reflex: no shelter by night nor leave-shelter by day while a shelter
   engine.stop()
 })
 
-test('hostiles reflex: with fists only, the ones that shoot and more than one are fled, a lone zombie fought (26.3 full-26.3-m: a pillager patrol, a skeleton and a spider, fought bare)', () => {
+test('hostiles reflex: with fists only, the ones that shoot, more than one, and a lone zombie are fled; a lone spider fought (26.3 full-26.3-m: a pillager patrol, a skeleton and a spider, fought bare; full-1.21.11-fresh-m: a lone zombie)', () => {
   const mob = (name: string, x: number): any => entity({ name, position: at(x) })
   for (const name of ['pillager', 'skeleton', 'stray', 'witch']) {
     assert.strictEqual(check(hostilesReflex, { entities: [mob(name, 6)] }), 'flee', name)
@@ -469,10 +469,38 @@ test('hostiles reflex: with fists only, the ones that shoot and more than one ar
   assert.strictEqual(check(hostilesReflex, { entities: [mob('spider', 3), mob('skeleton', 6)] }), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: [mob('zombie', 3), mob('zombie', 5)] }), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: [mob('zombie', 3), mob('zombie', 5)], items: [item('wooden_sword')] }), 'fight zombie')
-  assert.strictEqual(check(hostilesReflex, { entities: [mob('zombie', 3)] }), 'fight zombie')
+  // a lone zombie (husk, zombie villager) bare, or with a pickaxe only (fresh-m's bot had a stone one): fled; armed, fought
+  for (const name of ['zombie', 'husk', 'zombie_villager']) {
+    assert.strictEqual(check(hostilesReflex, { entities: [mob(name, 3)] }), 'flee', name)
+    assert.strictEqual(check(hostilesReflex, { entities: [mob(name, 3)], items: [item('stone_pickaxe')] }), 'flee', name)
+    assert.strictEqual(check(hostilesReflex, { entities: [mob(name, 3)], items: [item('stone_sword')] }), `fight ${name}`, name)
+  }
+  // the fist's fights: a lone spider, a silverfish
+  assert.strictEqual(check(hostilesReflex, { entities: [mob('spider', 3)] }), 'fight spider')
+  assert.strictEqual(check(hostilesReflex, { entities: [mob('silverfish', 2)] }), 'fight silverfish')
   // an axe is a weapon; a pickaxe's hits a second are no better than the fist's (3 at 1.2 a second, 1 at 4)
   assert.strictEqual(check(hostilesReflex, { entities: [mob('skeleton', 6)], items: [item('stone_axe')] }), 'fight skeleton')
   assert.strictEqual(check(hostilesReflex, { entities: [mob('skeleton', 6)], items: [item('stone_pickaxe')] }), 'flee')
+})
+
+test('hostiles reflex: a bare bot cornered (its flee from a zombie found no way, a 1-wide tunnel) fights it with its fists for CORNERED_TICKS, then flees again', async () => {
+  const { CORNERED_TICKS } = await import('../../src/reflexes/rules')
+  const tunnel = (p: Vec3): string => (p.z === 0 && (p.y === 64 || p.y === 65) && p.x > -3 && p.x < 3) ? 'air' : 'stone'
+  const zombie = entity({ name: 'zombie', position: at(1) })
+  const bot = fakeBot({ entities: [zombie], world: tunnel })
+  ;(bot as any).world = { raycast: () => null }
+  bot.waitForTicks = async () => {}
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const first = hostilesReflex.check(engine.context())
+  assert.strictEqual(first?.detail, 'flee')
+  await assert.rejects(first.run(new AbortController().signal), /cornered/)
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'fight zombie')
+  // hurt to fleeHealth, still cornered: still fought
+  bot.health = 4
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'fight zombie')
+  ;(engine as any).tick += CORNERED_TICKS + 1
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'flee')
+  engine.stop()
 })
 
 test('hostiles reflex: a bare bot\'s fight with a lone spider is given up once a skeleton comes into sight (until), to flee', async () => {
