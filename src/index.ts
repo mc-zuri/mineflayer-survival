@@ -92,6 +92,8 @@ function useScaffoldItems (bot: Bot): void {
 
 /** ticks before a death the last mob to hurt the bot is taken for its killer */
 export const KILLER_TICKS = 200
+/** ticks between the looks at what the bot carries, and the most a look is taken for the drops of a death after it */
+export const DEATH_CARRIED_TICKS = 20
 
 export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
   const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, ...opts }
@@ -137,17 +139,41 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     bot.on('entityHurt', (entity: any, source?: any) => {
       if (entity === bot.entity && source != null && source !== bot.entity && typeof source.name === 'string') lastAttacker = { name: source.name, tick: tasks.tick }
     })
+    // what the bot carries, worn too (null with no inventory to look at)
+    const carried = (): string[] | null => {
+      const inventory: any = bot.inventory
+      return typeof inventory?.items === 'function'
+        ? [...inventory.items(), ...[5, 6, 7, 8, 45].map(s => inventory.slots?.[s])].filter(i => i != null).map(i => (i as any).name as string)
+        : null
+    }
+    // ...as it was when the server said the bot was killed (ServerPlayer.die sends the combat kill before it drops
+    // everything, and the emptied slots come before the health of 0: the menu's changes are broadcast ahead of the
+    // health in ServerPlayer.doTick), and every DEATH_CARRIED_TICKS before: the death's drops (the death report's
+    // killedState, the same)
+    let carriedAt: { tick: number, names: string[] } | null = null
+    ;(bot as any)._client?.on?.('death_combat_event', (p: any) => {
+      const names = carried()
+      if (p?.playerId === bot.entity?.id && names != null && names.length > 0) carriedAt = { tick: tasks.tick, names }
+    })
+    let lastCarried: string[] | null = null
+    bot.on('physicsTick', () => {
+      if (tasks.tick % DEATH_CARRIED_TICKS !== 0 || bot.health <= 0) return
+      const names = carried()
+      if (names != null && names.length > 0) lastCarried = names
+    })
     bot.on('death', () => {
       // the running and queued tasks can't go on; the death spot is where the items are
       if (bot.entity != null) {
         // (in the overworld: the nether's roof is over everything)
         const dimension = normalizeDimension(bot.game?.dimension)
         const lookup = (p: any): any => bot.blockAt(p)
-        // (what it dropped: unknown with no inventory to look at, and gone back for)
-        const inventory: any = bot.inventory
-        const dropped = typeof inventory?.items === 'function'
-          ? [...inventory.items(), ...[5, 6, 7, 8, 45].map(s => inventory.slots?.[s])].filter(i => i != null).map(i => (i as any).name as string)
-          : null
+        // (what it dropped: unknown with no inventory to look at, and gone back for; the slots emptied already, what
+        // it had a moment before)
+        const now = carried()
+        const recently = carriedAt != null && tasks.tick - carriedAt.tick <= DEATH_CARRIED_TICKS ? carriedAt.names : lastCarried
+        const dropped = now != null && now.length === 0 && recently != null ? recently : now
+        carriedAt = null
+        lastCarried = null
         const killer = lastAttacker != null && tasks.tick - lastAttacker.tick <= KILLER_TICKS ? lastAttacker.name : undefined
         const underground = dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined
         memory.setDeath(bot.entity.position, dimension, underground, dropped == null ? undefined : dropsWorthATrip(dropped, bot.registry as any), killer, {

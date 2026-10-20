@@ -94,3 +94,38 @@ test('a death in the overworld under a roof is remembered as underground (the ru
     assert.strictEqual(bot.survival.memory.death.underground, roofed)
   }
 })
+
+test('a death whose slots the server emptied before its health of 0 came is remembered with what the bot had: at the combat kill, else the last look', async () => {
+  const { Vec3 } = await import('vec3')
+  const setup = (): any => {
+    const bot = fakeBot()
+    bot._client = new EventEmitter()
+    bot.game = { dimension: 'minecraft:overworld' }
+    bot.entity = { id: 7, position: new Vec3(1.5, 64, -2.5) }
+    bot.blockAt = () => ({ name: 'air', boundingBox: 'empty' })
+    let items: any[] = [{ name: 'diamond_sword' }, { name: 'cobblestone' }]
+    bot.inventory.items = () => items
+    bot.inventory.slots = []
+    bot.empty = () => { items = [] }
+    createPlugin()(bot)
+    return bot
+  }
+  // the combat kill's look (ServerPlayer.die), the slots emptied after, then the death
+  const killed = setup()
+  killed._client.emit('death_combat_event', { playerId: 7 })
+  killed.empty()
+  killed.emit('death')
+  assert.strictEqual(killed.survival.memory.death.worth, true)
+  assert.strictEqual(killed.survival.memory.death.dear, true)
+  // no combat kill seen: the last look, every 20 ticks
+  const looked = setup()
+  for (let i = 0; i < 20; i++) looked.emit('physicsTick')
+  looked.empty()
+  looked.emit('death')
+  assert.strictEqual(looked.survival.memory.death.worth, true)
+  // with nothing before either: nothing worth the trip
+  const bare = setup()
+  bare.empty()
+  bare.emit('death')
+  assert.strictEqual(bare.survival.memory.death.worth, false)
+})
