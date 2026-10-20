@@ -1262,6 +1262,8 @@ export async function pearlsByNight (bot: Bot, executor: Executor, want: number,
   const survival = (bot as any).survival ?? {}
   const before = survival.nightWork
   survival.nightWork = true
+  // the nights the ground about held no cover (then the open fight)
+  let nightCoverFails = 0
   try {
     for (let round = 0; round < PEARL_ROUNDS && count('ender_pearl') < want && executor.tasks.tick - start < PEARL_NIGHTS_TICKS; round++) {
       if (signal.aborted) throw signal.reason
@@ -1274,6 +1276,20 @@ export async function pearlsByNight (bot: Bot, executor: Executor, want: number,
         }
         const enderman = Object.values(bot.entities).some(e => huntable(bot, e, passOver) && e.position.distanceTo(bot.entity.position) <= 64)
         if (enderman) {
+          // from a cover (endermenFromCover: a two-high tunnel no enderman gets into, the stare from its stair's top),
+          // the open fight only with no ground about for one: a 26.3 bot fought the overworld's endermen in the open,
+          // 7 a hit, and died (full-26.3-fresh-d; tests/integration/freshDeaths, a night with 3 endermen: 2 of 3 alive)
+          if (nightCoverFails < NIGHT_COVER_FAILS) {
+            try {
+              await executor.task('endermen from cover', async (s) => await endermenFromCover(bot, { pearls: want - count('ender_pearl'), maxTicks: 3000, range: 64, passOver }, s), signal)
+              continue
+            } catch (err) {
+              if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+              log(`ender pearls by night: from cover: ${(err as Error).message}`)
+              if (/no ground for an enderman cover/.test((err as Error).message)) nightCoverFails++
+              else continue
+            }
+          }
           await executor.task('endermen for pearls', async (s) => await huntEndermen(bot, { pearls: want - count('ender_pearl'), range: 64, maxTicks: 3000, passOver }, s), signal)
           continue
         }
@@ -1295,6 +1311,9 @@ export async function pearlsByNight (bot: Bot, executor: Executor, want: number,
   log(`ender pearls: ${count('ender_pearl')} of ${want} after ${executor.tasks.tick - start} ticks of the overworld's nights`)
   return count('ender_pearl')
 }
+
+/** covers found no ground for at night before the night hunt fights in the open */
+export const NIGHT_COVER_FAILS = 3
 
 /** eyes kept for the throws still to come while the portal room isn't found */
 export const EYE_SEARCH_RESERVE = 2

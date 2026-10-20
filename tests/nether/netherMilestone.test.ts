@@ -566,12 +566,53 @@ test('pearls by night: an enderman there\'s no way to is passed over for the nig
     memory: new WorldMemory(),
     tasks: { tick: 0 },
     // the hunt itself runs (the fake bot has no pathfinder: no way to the enderman); the rest is noted
-    task: async (name: string, fn: (s: AbortSignal) => Promise<unknown>) => { tasks.push(name); executor.tasks.tick += 500; if (name === 'endermen for pearls') return await fn(new AbortController().signal) }
+    // (no ground for a cover about: the open hunt after NIGHT_COVER_FAILS tries)
+    task: async (name: string, fn: (s: AbortSignal) => Promise<unknown>) => {
+      tasks.push(name)
+      executor.tasks.tick += 500
+      if (name === 'endermen from cover') throw new Error('NOT_FOUND: no ground for an enderman cover within 12 blocks')
+      if (name === 'endermen for pearls') return await fn(new AbortController().signal)
+    }
   }
   await pearlsByNight(bot, executor, 2, new AbortController().signal, () => {})
-  assert.equal(tasks[0], 'endermen for pearls')
-  assert.equal(tasks.filter(t => t === 'endermen for pearls').length, 1)
-  assert.equal(tasks[1], 'a night leg for endermen')
+  const open = tasks.filter(t => t !== 'endermen from cover')
+  assert.equal(open[0], 'endermen for pearls')
+  assert.equal(open.filter(t => t === 'endermen for pearls').length, 1)
+  assert.equal(open[1], 'a night leg for endermen')
+})
+
+test('pearls by night: the endermen fought from a cover (endermenFromCover), the open hunt where there is no ground for one, and for good after NIGHT_COVER_FAILS such (full-26.3-fresh-d)', async () => {
+  const { pearlsByNight, NIGHT_COVER_FAILS } = await import('../../src/milestones')
+  const { fakeBot, entity } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  bot.game.dimension = 'overworld'
+  ;(bot as any).time = { timeOfDay: 18000 }
+  const e = entity({ name: 'enderman', position: new Vec3(10.5, 64, 0.5) })
+  bot.entities[e.id] = e
+  ;(bot as any).world = { raycast: () => null }
+  const tasks: string[] = []
+  let noGround = true
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    task: async (name: string) => {
+      tasks.push(name)
+      executor.tasks.tick += 500
+      if (name === 'endermen from cover' && noGround) throw new Error('NOT_FOUND: no ground for an enderman cover within 12 blocks')
+      if (tasks.length >= 8) executor.tasks.tick += 1e6
+    }
+  }
+  await pearlsByNight(bot, executor, 2, new AbortController().signal, () => {})
+  // each round with no ground the open hunt instead; NIGHT_COVER_FAILS of them, the cover no more
+  assert.equal(tasks[0], 'endermen from cover')
+  assert.equal(tasks.filter(t => t === 'endermen from cover').length, NIGHT_COVER_FAILS)
+  assert.ok(tasks.slice(2 * NIGHT_COVER_FAILS).every(t => t === 'endermen for pearls'), tasks.join(' | '))
+  tasks.length = 0
+  noGround = false
+  executor.tasks.tick = 0
+  await pearlsByNight(bot, executor, 2, new AbortController().signal, () => {})
+  assert.ok(tasks.length > 0 && tasks.every(t => t === 'endermen from cover'), tasks.join(' | '))
 })
 
 test('pearls in the nether: PEARL_BARTERS barters at most, then the legs, a piglin in sight or not', async () => {
