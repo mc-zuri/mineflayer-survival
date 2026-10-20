@@ -93,14 +93,19 @@ test('playOptions passes the world\'s seed on to play', async () => {
   assert.deepEqual(playOptions(opts, 'save.json'), { saveFile: 'save.json', maxTicks: 1000, until: undefined, seed: '7' })
 })
 
-test('--grim is a real-time run (no lockstep mod) with GrimAC; --seed random a 64-bit seed of its own', async () => {
+test('--grim is a lockstep run with GrimAC, --grim --realtime a real-time one; --seed random a 64-bit seed of its own', async () => {
   const { parseArgs } = await import('../e2e/e2e')
   const d = parseArgs([])
   assert.equal(d.realtime, false)
   assert.equal(d.grim, false)
   const g = parseArgs(['--grim'])
   assert.equal(g.grim, true)
-  assert.equal(g.realtime, true)
+  assert.equal(g.realtime, false)
+  for (const argv of [['--grim', '--realtime'], ['--realtime', '--grim']]) {
+    const gr = parseArgs(argv)
+    assert.equal(gr.grim, true)
+    assert.equal(gr.realtime, true)
+  }
   const r = parseArgs(['--realtime'])
   assert.equal(r.realtime, true)
   assert.equal(r.grim, false)

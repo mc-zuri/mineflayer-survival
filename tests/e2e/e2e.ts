@@ -11,7 +11,9 @@
 //            [--checkpoints <dir>] [--version 1.21.11] [--username player] [--server-log <file>] [--realtime] [--grim]
 //
 // --seed random: a seed of its own (logged). --realtime: no lockstep mod, the server and the bot each on their 50 ms.
-// --grim: --realtime on a server with GrimAC (tests/harness GRIM_MODS), each of its flags counted by check and logged.
+// --grim: a server with GrimAC, each of its flags counted by check and logged, the bot's actions at the start of its
+// ticks (actionsInTick); under lockstep the local Grim build (tests/harness grimModJar: its clock the server's ticks),
+// with --realtime the pinned Modrinth one (GRIM_MODS).
 import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
@@ -19,7 +21,7 @@ import type { Bot } from 'mineflayer'
 import { createPlugin } from '../../src'
 import type { MilestoneEvent, PlayResult } from '../../src/runner'
 import type { MilestoneId } from '../../src/planner/progression'
-import { connectLockstepBot, copyWorld, grimMods, modJars, parseGrimAlert, parseLogLine, quitBot, startServer, DEFAULT_VERSION, GRIM_CONFIG, type TestServer } from '../harness'
+import { connectLockstepBot, copyWorld, grimLockstepMods, grimMods, modJars, parseGrimAlert, parseLogLine, quitBot, startServer, DEFAULT_VERSION, GRIM_CONFIG, type TestServer } from '../harness'
 import { STAGES, giveKit, stageSave } from '../integration/stageKits'
 
 export interface E2EOptions {
@@ -37,7 +39,7 @@ export interface E2EOptions {
   statusMs: number
   /** no lockstep mod: the server ticks every 50 ms, the bot on its own timer */
   realtime: boolean
-  /** GrimAC on the server (realtime) */
+  /** GrimAC on the server: the local build under lockstep (grimLockstepMods), the pinned one in real time (GRIM_MODS) */
   grim: boolean
 }
 
@@ -76,7 +78,7 @@ export function parseArgs (argv: string[]): E2EOptions {
       case '--server-log': opts.serverLog = value(); break
       case '--status-ms': opts.statusMs = Number(value()); break
       case '--realtime': opts.realtime = true; break
-      case '--grim': opts.grim = opts.realtime = true; break
+      case '--grim': opts.grim = true; break
       default: throw new Error(`unknown option ${argv[i]}`)
     }
   }
@@ -148,6 +150,11 @@ export function playOptions (opts: Pick<E2EOptions, 'maxTicks' | 'until' | 'seed
   return { saveFile, maxTicks: opts.maxTicks, until: opts.until, seed: opts.seed }
 }
 
+/** GrimAC's mods for the run: the local build under lockstep, the pinned Modrinth one in real time */
+export async function grimServerMods (opts: Pick<E2EOptions, 'realtime' | 'version'>): Promise<string[]> {
+  return opts.realtime ? await modJars(grimMods(opts.version)) : await grimLockstepMods(opts.version)
+}
+
 /** Grim's alerts so far: the count by check, most first ("Simulation 12, GroundSpoof 3") */
 export class GrimFlags {
   readonly byCheck = new Map<string, number>()
@@ -190,7 +197,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
   const log = (line: string): void => console.log(`[e2e] ${line}`)
   // the stuck reports (bot.survival.diagnostics) next to the checkpoints
   if (process.env.SURVIVAL_STUCK_DIR == null || process.env.SURVIVAL_STUCK_DIR === '') process.env.SURVIVAL_STUCK_DIR = path.join(opts.checkpoints, 'stuck')
-  log(`seed ${opts.seed}, ${opts.version}, normal difficulty, survival, ${opts.maxTicks} ticks at most${opts.resume != null ? `, resumed from ${opts.resume}` : ''}${opts.grim ? ', GrimAC, real time' : opts.realtime ? ', real time' : ''}; checkpoints in ${opts.checkpoints}, stuck reports in ${process.env.SURVIVAL_STUCK_DIR}`)
+  log(`seed ${opts.seed}, ${opts.version}, normal difficulty, survival, ${opts.maxTicks} ticks at most${opts.resume != null ? `, resumed from ${opts.resume}` : ''}${opts.grim ? ', GrimAC' : ''}${opts.realtime ? ', real time' : ''}; checkpoints in ${opts.checkpoints}, stuck reports in ${process.env.SURVIVAL_STUCK_DIR}`)
   const serverLog = opts.serverLog
   // each Grim alert in the e2e log as it comes (the bot set back, or a check to look at), the count by check at the end
   const grim = new GrimFlags()
@@ -200,7 +207,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
     difficulty: 'normal',
     world: resumeWorld,
     lockstep: !opts.realtime,
-    ...(opts.grim ? { mods: await modJars(grimMods(opts.version)), files: GRIM_CONFIG } : {}),
+    ...(opts.grim ? { mods: await grimServerMods(opts), files: GRIM_CONFIG } : {}),
     log: line => {
       if (serverLog != null) fs.appendFileSync(serverLog, `${line}\n`)
       if (opts.grim && grim.add(line)) log(`grim: ${parseLogLine(line)?.message ?? line}`)
@@ -212,7 +219,8 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
   let noTicks: NodeJS.Timeout | null = null
   let blocked: NodeJS.Timeout | null = null
   try {
-    bot = await connectLockstepBot(server, { username: opts.username, op: false, timeoutMs: 120000, realtime: opts.realtime })
+    // (Grim's Post check: the actions at the start of a tick, as the client's keys go)
+    bot = await connectLockstepBot(server, { username: opts.username, op: false, timeoutMs: 120000, realtime: opts.realtime, ...(opts.grim ? { actionsInTick: true } : {}) })
     const b = bot
     await b.waitForChunksToLoad()
     if (opts.stage != null && opts.resume == null) {
