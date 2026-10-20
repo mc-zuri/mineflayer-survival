@@ -33,6 +33,8 @@ import { MILESTONE_HANDLERS, harvestGrownFarms, tendHerd } from './milestones'
 import { EPOCHS, EPOCH_HANDLERS, isEpoch, nextEpoch } from './epochs'
 import { TRIP_KIT, keepUnbroken, takeTripKit } from './skills/tripKit'
 import { armorPoints, shelter, sleepThroughNight, undergroundAtWork } from './skills/shelter'
+import { REFUGE_TRIES, chooseRefuge, describeSituation, findBaseDoor, inBounds, refugeSituation, shutInBase, takeRefuge, waitInBase, type Refuge } from './skills/refuge'
+import { bestMeleeWeapon } from './skills/weapons'
 import { overland } from './end/strongholdSkills'
 import { unstick } from './executor/explore'
 import { slimeBallsShort, toSlimeChunk } from './skills/slimeChunk'
@@ -118,6 +120,9 @@ export function reequipGoals (inv: { count: (name: string) => number, countAny?:
   if (any(['iron_chestplate', 'diamond_chestplate', 'netherite_chestplate']) === 0) out.push({ item: 'iron_chestplate', count: 1 })
   return out
 }
+
+/** each refuge after a respawn in the log's words */
+const REFUGE_WORDS: Record<Refuge, string> = { base: "in behind the base's door", sleep: 'the bed', pillar: 'up a pillar', hole: 'a hole dug', flee: 'a run from them' }
 
 /** deaths in a row while recovering from one before play just goes on */
 export const RECOVERY_DEATHS = 5
@@ -270,7 +275,9 @@ export async function waitOutTheNight (bot: Bot, signal: AbortSignal): Promise<u
   const bed = typeof bot.findBlock === 'function' ? findBlock(bot, { matching: blockIdsNamed(bot, isBed), maxDistance: 16 }) : null
   if (bed != null) {
     try {
-      return await sleepThroughNight(bot, { signal, bedDistance: 16 })
+      // (the monsters by the bed fought only with a weapon: a bare bot loses to a zombie, the hostiles reflex's
+      // unarmedOutmatched; the bed refused, a hole)
+      return await sleepThroughNight(bot, { signal, bedDistance: 16, fight: bestMeleeWeapon(bot) != null })
     } catch (err) {
       if (isAbort(err) || TaskError.is(err, 'DIED')) throw err
       // the night over as it went for the bed (the server's 'not night' at dawn): nothing more to wait out; else a hole
@@ -1225,10 +1232,56 @@ export class Runner {
     const bot = this.bot
     if (bot.time == null || dayPhase(bot.time.timeOfDay) !== 'night' || normalizeDimension(bot.game?.dimension) !== 'overworld' || this.nightGeared()) return
     this.log(`night (time ${bot.time.timeOfDay}) with no weapon or armor: the night waited out before ${what}`)
-    await this.executor.task('wait out the night', async (s) => await waitOutTheNight(bot, s), signal).catch(err => {
+    await this.waitOutNight(signal)
+  }
+
+  /**
+   * The night waited out where the bot is (waitOutTheNight: a bed by, else a hole dug), or in the base's box behind
+   * its shut door when it's in there (waitInBase): not out by the bed or down a hole dug in the base's floor
+   */
+  async waitOutNight (signal?: AbortSignal): Promise<void> {
+    const bot = this.bot
+    const base = this.baseHere()
+    const inBase = shutInBase(bot, base, findBaseDoor(bot, base))
+    await this.executor.task('wait out the night', async (s) => inBase ? await waitInBase(bot, base, { signal: s }) : await waitOutTheNight(bot, s), signal).catch(err => {
       if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
       this.log(`the night: ${(err as Error).message}`)
     })
+  }
+
+  /** the base as the memory has it when it's in this dimension, else null */
+  baseHere (): ReturnType<typeof baseRecord> {
+    const base = baseRecord(this.memory)
+    return base != null && (this.memory.base?.dimension ?? 'overworld') === normalizeDimension(this.bot.game?.dimension) ? base : null
+  }
+
+  /**
+   * After a respawn: safe first, at night or with hostiles within REFUGE_THREAT_RANGE and no weapon and armor at
+   * hand (skills/refuge chooseRefuge: in behind the base's door, the bed, a pillar, a hole, a run), each refuge that
+   * fails not chosen again, up to REFUGE_TRIES; the kit after. The last refuge taken, or null when none was wanted.
+   * A 1.21.11 bot killed at night respawned bare by its base, a zombie there already, went for its base's chest,
+   * fought the zombie with its fists and died 750 ticks after (full-1.21.11-fresh-m, t133707 to t134432).
+   */
+  async refugeFirst (signal?: AbortSignal): Promise<Refuge | null> {
+    const bot = this.bot
+    const base = this.baseHere()
+    const failed = new Set<Refuge>()
+    let taken: Refuge | null = null
+    for (let i = 0; i < REFUGE_TRIES; i++) {
+      const situation = refugeSituation(bot, { base, failed })
+      const refuge = chooseRefuge(situation)
+      if (refuge == null) break
+      this.log(`after the respawn (${describeSituation(situation)}): ${REFUGE_WORDS[refuge]}`)
+      try {
+        await this.executor.task(`refuge: ${refuge}`, async (s) => await takeRefuge(bot, refuge, { signal: s, base }), signal)
+        taken = refuge
+      } catch (err) {
+        if (TaskError.is(err, 'DIED') || isAbort(err) || bot.health <= 0) throw err
+        this.log(`refuge ${refuge}: ${(err as Error).message}`)
+        failed.add(refuge)
+      }
+    }
+    return taken
   }
 
   /**
@@ -1520,6 +1573,15 @@ export class Runner {
     await bot.waitForTicks(20)
     diag?.recovery({})
     this.save()
+    // safe first (refugeFirst); shut in the base, its chests are by: the kit taken there and then, the death spot after
+    await this.refugeFirst(signal)
+    let kitted = false
+    const base = this.baseHere()
+    if (shutInBase(bot, base, findBaseDoor(bot, base))) {
+      const kit = await this.rekit(signal)
+      diag?.recovery({ kit: kit ?? 'no base' })
+      kitted = true
+    }
     const death = this.memory.death
     // a spot the bot died at again on the way back for its items (mobs in a cave, a fall) is left: a third trip
     // there ends the same way
@@ -1544,10 +1606,7 @@ export class Runner {
     }
     if (death != null && worth && timing === 'wait') {
       this.log(`the death spot at ${death.x} ${death.y} ${death.z} by day: killed by a ${death.killer ?? 'mob'} at night, the night waited out first`)
-      await this.executor.task('wait out the night', async (s) => await waitOutTheNight(bot, s), signal).catch(err => {
-        if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
-        this.log(`the night: ${(err as Error).message}`)
-      })
+      await this.waitOutNight(signal)
     }
     if (death != null && worth && timing !== 'skip') {
       this.log(`back to the death spot at ${death.x} ${death.y} ${death.z}`)
@@ -1584,8 +1643,10 @@ export class Runner {
       diag?.recovery({ kit: trip })
       return
     }
-    const kit = await this.rekit(signal)
-    diag?.recovery({ kit: kit ?? 'no base' })
+    if (!kitted) {
+      const kit = await this.rekit(signal)
+      diag?.recovery({ kit: kit ?? 'no base' })
+    }
     // what neither a trip kit nor the base gave back: made again from scratch (a 26.3 bot back from a death with dirt
     // and seeds went on to the nether's portal, every try failing for want of a bucket and a pickaxe)
     await this.reequip(signal)
@@ -1629,10 +1690,7 @@ export class Runner {
     const far = bot.entity.position.distanceTo(at)
     if (waitOutNightFirst(bot.time?.timeOfDay ?? 0, far, armorPoints(bot))) {
       this.log(`night, ${far.toFixed(0)} blocks from the trip kit with no armor: the night waited out first`)
-      await this.executor.task('wait out the night', async (s) => await waitOutTheNight(bot, s), signal).catch(err => {
-        if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
-        this.log(`the night: ${(err as Error).message}`)
-      })
+      await this.waitOutNight(signal)
     }
     try {
       if (this.bot.entity.position.distanceTo(at) > 4) await this.executor.task('to the trip kit', async (s) => { await overland(this.bot, { target: at, range: 2, exactY: true }, s) }, signal)
@@ -1663,7 +1721,8 @@ export class Runner {
     const bot = this.bot
     const dimension = this.memory.base?.dimension ?? 'overworld'
     this.log('to the base for a kit')
-    if (base.entrance != null) {
+    // (in its box already, shut in after a respawn: the walk out to the entrance and back left out)
+    if (base.entrance != null && (base.bounds == null || !inBounds(bot.entity.position, base.bounds))) {
       const e = base.entrance
       await pickaxeForTheWay(bot, signal)
       // nothing to make one from (back from a death with 2 dirt, the dug-in base 5 blocks down, the way in stone and

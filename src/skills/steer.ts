@@ -122,13 +122,22 @@ export function steerToward (bot: Bot, point: Vec3, opts: SteerOptions = {}): bo
 /** the most a flee's heading may turn toward the threat (the cosine to the way straight away from it): across, not at */
 export const FLEE_TOWARD = -0.25
 
-/** The heading (mineflayer yaw) that leads furthest from the threat over safe ground, or null if every way is shut. */
-export function fleeHeading (bot: Bot, threat: Vec3, samples = 16): number | null {
+/** a flee's lean toward a place to run to (fleeHeading's `toward`): its weight against the way straight away's 3 */
+export const FLEE_LEAN = 2
+
+/**
+ * The heading (mineflayer yaw) that leads furthest from the threat over safe ground, or null if every way is shut;
+ * with `toward` (the base, a lit place), the ways nearer it are the better by FLEE_LEAN, still never back at the threat
+ */
+export function fleeHeading (bot: Bot, threat: Vec3, samples = 16, toward?: Vec3): number | null {
   const pos = bot.entity.position
   const away = new Vec3(pos.x - threat.x, 0, pos.z - threat.z)
   const len = Math.hypot(away.x, away.z)
   const ax = len > 1e-6 ? away.x / len : 1
   const az = len > 1e-6 ? away.z / len : 0
+  const tlen = toward == null ? 0 : Math.hypot(toward.x - pos.x, toward.z - pos.z)
+  const tx = toward != null && tlen > 1e-6 ? (toward.x - pos.x) / tlen : 0
+  const tz = toward != null && tlen > 1e-6 ? (toward.z - pos.z) / tlen : 0
   let best: number | null = null
   let bestScore = -Infinity
   for (let i = 0; i < samples; i++) {
@@ -141,7 +150,7 @@ export function fleeHeading (bot: Bot, threat: Vec3, samples = 16): number | nul
     let cost = 0
     for (let step = 1; step <= 3 && cost !== Infinity; step++) cost += stepCost(bot, pos.offset(dx * step, 0, dz * step))
     if (cost === Infinity) continue
-    const score = (dx * ax + dz * az) * 3 - cost
+    const score = (dx * ax + dz * az) * 3 + (dx * tx + dz * tz) * FLEE_LEAN - cost
     if (score > bestScore) {
       bestScore = score
       best = angle
@@ -150,9 +159,9 @@ export function fleeHeading (bot: Bot, threat: Vec3, samples = 16): number | nul
   return best
 }
 
-/** Runs from the threat this tick; false when there's no safe way. */
-export function steerAway (bot: Bot, threat: Vec3): boolean {
-  const heading = fleeHeading(bot, threat)
+/** Runs from the threat this tick (leaning toward `toward`, when given: fleeHeading); false when there's no safe way. */
+export function steerAway (bot: Bot, threat: Vec3, toward?: Vec3): boolean {
+  const heading = fleeHeading(bot, threat, 16, toward)
   if (heading == null) {
     bot.clearControlStates()
     return false

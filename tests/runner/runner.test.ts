@@ -1043,3 +1043,73 @@ test('failureBackoff: a milestone failing at once waits before its next try, dou
   assert.ok(at[2] - at[1] >= 2 * FAILURE_BACKOFF_TICKS, `${at.join(' ')}`)
   assert.equal(logs.filter(l => /ticks before its next try/.test(l)).length, 2, logs.join(' | '))
 })
+
+test('after a respawn bare at night with a zombie by, safe first (refugeFirst): the run from it, then nothing once the day comes; a refuge that fails is not chosen again (full-1.21.11-fresh-m)', async () => {
+  const refuge = require('../../src/skills/refuge')
+  const real = refuge.takeRefuge
+  const bot = fakeBot()
+  bot.time = { timeOfDay: 18000 }
+  bot.blockAt = () => ({ name: 'air', boundingBox: 'empty' })
+  const zombie = { id: 5, name: 'zombie', position: new Vec3(2, 64, 0), metadata: [] }
+  bot.entities = { 5: zombie }
+  const lines: string[] = []
+  const runner = new Runner(bot, { log: l => lines.push(l) })
+  runner.executor.task = (async (_name: string, fn: (s: AbortSignal) => Promise<unknown>) => await fn(new AbortController().signal)) as any
+  const taken: string[] = []
+  try {
+    refuge.takeRefuge = async (_bot: any, r: string) => {
+      taken.push(r)
+      // off out of the zombie's sight, and the night's over
+      zombie.position = new Vec3(40, 64, 0)
+      bot.time = { timeOfDay: 1000 }
+    }
+    assert.equal(await runner.refugeFirst(), 'flee')
+    assert.deepEqual(taken, ['flee'])
+    assert.ok(lines.some(l => /after the respawn \(night, 1 zombie within 16 \(the nearest 2\.0 off\)\): a run from them/.test(l)), lines.join(' | '))
+    // cornered: the run fails, nothing else to choose (the reflexes then)
+    zombie.position = new Vec3(2, 64, 0)
+    bot.time = { timeOfDay: 18000 }
+    taken.length = 0
+    refuge.takeRefuge = async (_bot: any, r: string) => { taken.push(r); throw new TaskError('NO_PATH', 'cornered') }
+    assert.equal(await runner.refugeFirst(), null)
+    assert.deepEqual(taken, ['flee'])
+    assert.ok(lines.some(l => /refuge flee: cornered/.test(l)), lines.join(' | '))
+    // by day with nothing about: none
+    bot.time = { timeOfDay: 1000 }
+    delete bot.entities[5]
+    taken.length = 0
+    assert.equal(await runner.refugeFirst(), null)
+    assert.deepEqual(taken, [])
+  } finally {
+    refuge.takeRefuge = real
+  }
+})
+
+test('a respawn shut in behind the base\'s door takes the kit from its chests there and then, the night waited out in there, the death spot by day after; no second kit', async () => {
+  const refuge = require('../../src/skills/refuge')
+  const real = { shutInBase: refuge.shutInBase, findBaseDoor: refuge.findBaseDoor }
+  const bot = fakeBot()
+  bot.time = { timeOfDay: 18000 }
+  bot.waitForTicks = async () => {}
+  bot.blockAt = () => ({ name: 'air', boundingBox: 'empty' })
+  bot.entities = {}
+  const runner = new Runner(bot, { log: () => {} })
+  const memory = runner.memory
+  memory.setBase({ x: 0, y: 64, z: 4 })
+  // killed by a zombie at night 20 blocks off, its items worth the trip
+  memory.setDeath(new Vec3(20, 64, 0), 'overworld', false, true, 'zombie')
+  const order: string[] = []
+  ;(runner as any).refugeFirst = async () => { order.push('refuge'); return 'base' }
+  ;(runner as any).rekit = async () => { order.push('kit'); return { stone_sword: 1 } }
+  ;(runner as any).tripRekit = async () => null
+  ;(runner as any).waitOutNight = async () => { order.push('night'); bot.time = { timeOfDay: 0 } }
+  runner.executor.task = (async (name: string) => { order.push(name); return { items: { iron_pickaxe: 1 } } }) as any
+  try {
+    refuge.shutInBase = () => true
+    refuge.findBaseDoor = () => null
+    await runner.recoverFromDeath()
+  } finally {
+    Object.assign(refuge, real)
+  }
+  assert.deepEqual(order, ['refuge', 'kit', 'night', 'to the death spot'])
+})

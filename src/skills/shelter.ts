@@ -693,6 +693,11 @@ export interface SleepThroughNightOptions {
    * over them), as below the surface, where the cells about a 1-wide staircase or tunnel are rock (default false)
    */
   digRoom?: boolean
+  /**
+   * the monsters that keep the bot from resting fought (default true); false, the sleep refused (REFUSED) at the first
+   * of them: a bot with its fists only, which loses to a zombie (the hostiles reflex's unarmedOutmatched)
+   */
+  fight?: boolean
 }
 
 /**
@@ -724,6 +729,7 @@ export async function sleepThroughNight (bot: Bot, opts: SleepThroughNightOption
   let moved = false
   let ownBed = false
   const fightOff = async (monster: Bot['entities'][string]): Promise<void> => {
+    if (opts.fight === false) throw new SkillError('REFUSED', `a ${monster.name ?? 'monster'} by the bed, not fought`)
     await fight(bot, monster, { signal, maxTicks: 600 }).catch((e) => { if (isAbort(e)) throw e })
     fought++
   }

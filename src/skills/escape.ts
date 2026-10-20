@@ -901,8 +901,8 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
   }
 }
 
-/** Runs from the threats until none is within distance. */
-export async function fleeFrom (bot: Bot, threats: () => Entity[], opts: SkillOptions & { distance?: number, maxTicks?: number } = {}): Promise<{ ticks: number }> {
+/** Runs from the threats until none is within distance (leaning toward `toward`, the base say, when given: fleeHeading). */
+export async function fleeFrom (bot: Bot, threats: () => Entity[], opts: SkillOptions & { distance?: number, maxTicks?: number, toward?: Vec3 } = {}): Promise<{ ticks: number }> {
   const distance = opts.distance ?? 16
   const maxTicks = opts.maxTicks ?? 300
   // each threat kept FLEE_MEMORY ticks after it was last among `threats` (out of sight behind a tree or a rise)
@@ -914,7 +914,7 @@ export async function fleeFrom (bot: Bot, threats: () => Entity[], opts: SkillOp
       const near = [...seen.values()].filter(s => t - s.at <= FLEE_MEMORY).map(s => s.e).filter(e => isAlive(bot, e) && bot.entities[e.id] != null && e.position.distanceTo(bot.entity.position) < distance)
       if (near.length === 0) return { ticks: t }
       const centroid = near.reduce((sum, e) => sum.plus(e.position), new Vec3(0, 0, 0)).scaled(1 / near.length)
-      if (!steerAway(bot, centroid)) throw new TaskError('NO_PATH', 'cornered')
+      if (!steerAway(bot, centroid, opts.toward)) throw new TaskError('NO_PATH', 'cornered')
       await waitTicks(bot, 1, opts.signal)
     }
     throw new TaskError('TIMEOUT', 'still chased')
