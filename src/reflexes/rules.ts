@@ -23,7 +23,7 @@ import { XP_FARM_POI } from '../skills/spawnerFarm'
 import { SEAL_MAX_BLOCKS, openCells, sealBox, sealIn } from '../skills/sealIn'
 import { sealItem } from '../skills/shelter'
 import { countItems } from '../skills/util'
-import { caveCells, caveOpenings, caveRuleOn, inCaveWall, sealCaveOpenings } from '../skills/caves'
+import { caveCells, caveOpenings, caveRuleOn, inCaveWall, liquidOpenings, sealCaveOpenings } from '../skills/caves'
 import { noteDrowning } from '../skills/breath'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
@@ -1090,11 +1090,13 @@ export const cavesReflex: Reflex = {
     }
     if (ctx.tick < l.letBeUntil && l.letBeUntil - ctx.tick <= CAVE_RESEAL_TICKS) return null
     const holes = caveOpenings(bot)
-    if (holes.length === 0 || sealItem(bot) == null) return null
+    // (and the water or lava a dig of its tunnel opened onto)
+    const wet = liquidOpenings(bot)
+    if (holes.length + wet.length === 0 || sealItem(bot) == null) return null
     return {
       name: 'caves',
       priority: config.caves.priority,
-      detail: `seal ${holes.length} into a cave`,
+      detail: holes.length > 0 ? `seal ${holes.length} into a cave` : `seal ${wet.length} against ${bot.blockAt(wet[0])?.name ?? 'liquid'}`,
       run: async (signal) => await sealCaveOpenings(bot, signal, { sealed: hole => l.sealed.set(hole.toString(), { cell: hole, tick: ctx.tick }) })
     }
   }

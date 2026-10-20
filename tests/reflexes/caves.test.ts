@@ -121,3 +121,24 @@ test('spawner reflex: a cave spider spawner in a mineshaft\'s cave is let be by 
   const kit = READY_KIT()
   assert.strictEqual(run({ ...kit, items: [...(kit.items ?? []), item('torch', 8)] }), 'light spawner')
 })
+
+test('caves reflex: water a dig of the bot\'s tunnel opened onto is sealed against; none with a bucket in hand, outside its own tunnel, or cave-ready', () => {
+  // the tunnel (its cells dug) with water at its east end, at x 1 (a flooded crack)
+  const wet = (p: Vec3): string => p.z === 0 && p.x === 1 && (p.y === 20 || p.y === 21) ? 'water' : caveWorld(p).replace(/^air$/, p.x >= 1 ? 'stone' : 'air')
+  const run = (input: Partial<FakeBotInput>, dug = true): string | null => {
+    const bot = fakeBot({ world: wet, position: new Vec3(0.5, 20, 0.5), ...input })
+    bot.game.dimension = 'overworld'
+    caveCells(bot)
+    if (dug) for (let x = -6; x <= 0; x++) for (const y of [20, 21]) bot.emit('diggingCompleted', { position: new Vec3(x, y, 0) })
+    if (input.items?.[0]?.name === 'water_bucket') bot.heldItem = input.items[0]
+    const engine = new ReflexEngine(bot, { enabled: false })
+    const task = cavesReflex.check(engine.context())
+    engine.stop()
+    return task == null ? null : (task.detail ?? task.name)
+  }
+  assert.strictEqual(run({ items: [item('cobblestone', 16)] }), 'seal 2 against water')
+  assert.strictEqual(run({ items: [item('water_bucket'), item('cobblestone', 16)] }), null)
+  assert.strictEqual(run({ items: [item('cobblestone', 16)] }, false), null)
+  const kit = READY_KIT()
+  assert.strictEqual(run(kit), null)
+})

@@ -400,11 +400,40 @@ export function caveOpenings (bot: Bot): Vec3[] {
 }
 
 /**
- * Seals the holes into a cave by the bot (caveOpenings) with a block each (sealItem: cobblestone first); resolves the
- * blocks put. A hole that won't take one (a mob in it) is left.
+ * The water and lava against the bot's body (its feet's sides, its head's sides and the cell over it) while it stands
+ * dry in a cell it dug itself under the rock (its tunnel, its staircase), under the cave rule: what a dig let in or
+ * opened onto (a pond's shore, a bucket filled under the sky, are no tunnel's; a bucket in hand is a pour meant: the
+ * obsidian's cast, a cane farm's water)
+ */
+export function liquidOpenings (bot: Bot): Vec3[] {
+  if (bot.entity == null || !caveRuleOn(bot)) return []
+  if (/bucket$/.test(bot.heldItem?.name ?? '')) return []
+  const cells = caveCells(bot)
+  const view = cells.view
+  const p = bot.entity.position
+  const feet = new Vec3(Math.floor(p.x), Math.floor(p.y + 1e-6), Math.floor(p.z))
+  const head = feet.offset(0, 1, 0)
+  if (!dugByBot(bot, feet) || !cells.roofed(feet)) return []
+  if ([feet, head].some(c => LIQUIDS.has(view.block(c)?.name ?? ''))) return []
+  const out: Vec3[] = []
+  for (const c of [feet, head]) {
+    for (const d of FACES) {
+      const q = c.plus(d)
+      if (d.y < 0 || q.equals(feet) || q.equals(head)) continue
+      if (LIQUIDS.has(view.block(q)?.name ?? '') && !out.some(o => o.equals(q))) out.push(q)
+    }
+  }
+  return out
+}
+
+/**
+ * Seals the holes into a cave by the bot (caveOpenings) and the water and lava against it in its tunnel
+ * (liquidOpenings) with a block each (sealItem: cobblestone first); resolves the blocks put. A hole that won't take one
+ * (a mob in it) is left.
  */
 export async function sealCaveOpenings (bot: Bot, signal?: AbortSignal, opts: { skip?: (hole: Vec3) => boolean, sealed?: (hole: Vec3) => void } = {}): Promise<number> {
-  const holes = caveOpenings(bot).filter(h => opts.skip?.(h) !== true)
+  const wet = liquidOpenings(bot)
+  const holes = [...caveOpenings(bot), ...wet].filter(h => opts.skip?.(h) !== true)
   if (holes.length === 0) return 0
   const { sealItem } = await import('./shelter')
   const { placeBlock } = await import('./placeBlock')
@@ -413,7 +442,7 @@ export async function sealCaveOpenings (bot: Bot, signal?: AbortSignal, opts: { 
     const item = sealItem(bot)
     if (item == null) break
     try {
-      await placeBlock(bot, { pos: hole, item }, signal)
+      await placeBlock(bot, { pos: hole, item, intoFluid: wet.some(w => w.equals(hole)) }, signal)
       placed++
       opts.sealed?.(hole)
     } catch (err) {
