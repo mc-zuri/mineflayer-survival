@@ -752,7 +752,8 @@ export class Executor {
         notNear: names => this.sightings.notNear(names),
         isNotNear: name => this.sightings.isNotNear(name),
         progress: key => this.exploreProgress.get(key) ?? this.exploreProgress.set(key, { leg: 0 }).get(key) as { leg: number },
-        forgetProgress: key => { this.exploreProgress.delete(key) }
+        forgetProgress: key => { this.exploreProgress.delete(key) },
+        toolMuted: tool => this.wornMuted(tool)
       }
       return await runner(step, stepCtx)
     }, signal, { step, desc: describeStep(step) })
@@ -823,12 +824,16 @@ export class Executor {
         const alts = toolsAtLeast(w.kind, w.material === 'golden' ? 'wooden' : w.material)
         const inv = ownedInventory(this.bot)
         const have = inv.countAny(alts)
+        const tool: WornTool = { kind: w.kind, material: w.material, name: w.item.name, uses: w.uses }
+        if (this.wornMuted(tool)) continue
         this.log(`${w.item.name} has ${w.uses} uses left: making another`)
         try {
           await this.obtain([{ item: alts, count: have + 1 }], signal)
         } catch (err) {
           if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true) throw err
-          this.log(`no new ${w.kind}: ${(err as Error).message}`)
+          // let be a while (muteWorn): the mine steps go on with it till it breaks, not back for one each plan
+          this.log(`no new ${w.kind}: ${(err as Error).message}: the ${w.item.name} is used till it breaks`)
+          this.muteWorn(tool)
         }
       }
     } finally {

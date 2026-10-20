@@ -25,7 +25,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { countItems, trace, waitUntil } from '../skills/util'
 import { findPlacementNear } from '../skills/placement'
 import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, onTheSurface, openSky, oreLevel, unstick } from './explore'
-import { toolKindFor, wornOutTools } from './durability'
+import { toolKindFor, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { growsAny, isGrown } from '../core/crops'
 import { SIGHTED_BLOCKS } from './sight'
 import { herdCensus, herdFromMemory, herdPenOf, herdSpares, herdSupply, herdSurplus, noteHerd } from '../skills/herd'
@@ -73,6 +73,8 @@ export interface StepContext {
   progress?: (key: string) => { leg: number }
   /** forgets an exploration's progress (its spiral ran out) */
   forgetProgress?: (key: string) => void
+  /** a worn tool let be (the executor's: no new one could be made lately), used till it breaks */
+  toolMuted?: (tool: WornTool) => boolean
 }
 
 export interface StepOutcome {
@@ -248,7 +250,50 @@ export async function withinOwnTicks<T> (bot: Bot, state: Record<string, any>, c
   }
 }
 
+/**
+ * A mine step: the blocks found (near, remembered, else explored for: a staircase down to an ore's level and tunnels
+ * there) and broken. Its tool is watched as the step wears it (watchToolWear): about to break (MIN_TOOL_USES left) with
+ * no spare of its tier, the step hands back for a new one (replan; the executor's replaceWornTools makes it), at once,
+ * not only between batches. The pickaxe's wear is mostly the exploring's and the pathfinder's digging on the way, which
+ * a check between batches never saw: in rt-1 and grim-2 (1.21.11) the stone pickaxe broke down the staircase of 'mine
+ * 33 raw_iron' and the iron one down that of 'mine 5 diamond', NO_TOOL at y 46 and y 3, with no warning (the axe's
+ * between its batches of logs did warn).
+ */
 export const runMine: StepRunner<MineStep> = async (step, ctx) => {
+  const kind = toolKindFor(ctx.bot.registry as any, step.block)
+  const muted = (tool: WornTool): boolean => ctx.toolMuted?.(tool) === true
+  if (ctx.replacingTools === true || kind == null || typeof (ctx.bot as any).on !== 'function') return await mineBlocks(step, ctx, muted)
+  const outer = ctx.signal
+  const ctrl = new AbortController()
+  const onOuter = (): void => ctrl.abort(outer.reason)
+  if (outer.aborted) onOuter()
+  outer.addEventListener('abort', onOuter, { once: true })
+  let worn: WornTool | null = null
+  const unwatch = watchToolWear(ctx.bot as any, {
+    minUses: MIN_TOOL_USES,
+    kinds: [kind],
+    active: () => true,
+    muted,
+    stop: tool => {
+      worn = tool
+      ctrl.abort(new TaskError('TOOL_WORN', `the ${tool.name} has ${tool.uses} uses left, no spare of its tier`))
+    }
+  })
+  const start = (): number => ctx.state.start ?? countItems(ctx.bot, step.item)
+  try {
+    return await mineBlocks(step, { ...ctx, signal: ctrl.signal }, muted)
+  } catch (err) {
+    if (worn == null || outer.aborted) throw err
+    const tool: WornTool = worn
+    ctx.log(`mine ${step.item}: the ${tool.name} has ${tool.uses} uses left and no spare: back for another`)
+    return { gained: countItems(ctx.bot, step.item) - start(), replan: true }
+  } finally {
+    unwatch()
+    outer.removeEventListener('abort', onOuter)
+  }
+}
+
+async function mineBlocks (step: MineStep, ctx: StepContext, muted: (tool: WornTool) => boolean): Promise<StepOutcome> {
   const { bot, signal } = ctx
   const start = startCount(ctx, 'start', () => countItems(bot, step.item))
   // stone mined for a plan brings a few more along: the pathfinder towers and bridges with them, and lava is plugged
@@ -285,7 +330,8 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
     const subs = blockSubstitutes(step)
     // the tool about to break: back to the executor, which makes another before the step goes on
     const kind = toolKindFor(bot.registry as any, step.block)
-    if (ctx.replacingTools !== true && kind != null && wornOutTools(bot.inventory.items(), { minUses: MIN_TOOL_USES }).some(w => w.kind === kind)) {
+    // (one muted is used till it breaks: no new one could be made)
+    if (ctx.replacingTools !== true && kind != null && wornOutTools(bot.inventory.items(), { minUses: MIN_TOOL_USES }).some(w => w.kind === kind && !muted({ kind: w.kind, material: w.material, name: w.item.name, uses: w.uses }))) {
       return { gained: countItems(bot, step.item) - start, replan: true }
     }
     // none near the level: deeper after all
