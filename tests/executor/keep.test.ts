@@ -141,6 +141,25 @@ test('junkToToss: the route\'s stone over the keep count goes when `surplus` say
   assert.deepEqual(junkToToss(deep, 4, { surplus }).length, 4)
 })
 
+test("scaffoldKeepIn: NETHER_SCAFFOLD_KEEP building blocks in the nether, the scaffold keep's own elsewhere; junkToToss keeps them all together", async () => {
+  const { NETHER_SCAFFOLD_KEEP, scaffoldKeepIn } = await import('../../src/executor/keep')
+  const { SCAFFOLD_ITEMS } = await import('../../src/executor/steps')
+  const scaffold = { items: SCAFFOLD_ITEMS, keep: 64 }
+  assert.equal(scaffoldKeepIn(scaffold, 'overworld'), scaffold)
+  assert.equal(scaffoldKeepIn(scaffold, 'the_end'), scaffold)
+  assert.deepEqual(scaffoldKeepIn(scaffold, 'the_nether'), { items: SCAFFOLD_ITEMS, keep: NETHER_SCAFFOLD_KEEP })
+  // a keep over it stays
+  assert.equal(scaffoldKeepIn({ items: SCAFFOLD_ITEMS, keep: 200 }, 'the_nether').keep, 200)
+  // the bag of full-26.3-fresh-t at t211310, in the nether: the netherrack thrown first in the overworld, none of the 109
+  // building blocks (of two kinds together) in the nether, the junk drops still; with 203 of three kinds, a stack of
+  // netherrack goes, the rest left under 128
+  const bag = [{ name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 8 }, { name: 'netherrack', count: 37 }, { name: 'rotten_flesh', count: 3 }]
+  assert.deepEqual(junkToToss(bag, 4, { scaffold }), [{ name: 'netherrack', count: 37 }, { name: 'rotten_flesh', count: 3 }])
+  assert.deepEqual(junkToToss(bag, 4, { scaffold: scaffoldKeepIn(scaffold, 'the_nether') }), [{ name: 'rotten_flesh', count: 3 }])
+  const more = [...bag, { name: 'blackstone', count: 30 }, { name: 'netherrack', count: 64 }]
+  assert.deepEqual(junkToToss(more, 4, { scaffold: scaffoldKeepIn(scaffold, 'the_nether') }), [{ name: 'netherrack', count: 64 }, { name: 'rotten_flesh', count: 3 }])
+})
+
 for (const version of VERSIONS) {
   test(`protectedCounts (${version}): the best of each tool kind, a shield, a bow and its arrows, a water bucket, the food's working set; the hoe when farming`, async () => {
     const { protectedCounts, storable, FOOD_WORKING_SET } = await import('../../src/executor/keep')

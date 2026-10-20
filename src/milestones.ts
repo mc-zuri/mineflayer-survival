@@ -42,6 +42,7 @@ import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
 import { findFarmSite, knownFarms, plantFarm, rememberFarm, SEED_OF } from './skills/farm'
 import { describeRequest, ownedInventory, type Executor } from './executor/executor'
+import { NETHER_SCAFFOLD_KEEP } from './executor/keep'
 import { heldFor, type ObtainRequest } from './planner/obtain'
 import type { Inventory } from './core/inventory'
 import { Vec3 } from 'vec3'
@@ -1005,8 +1006,11 @@ export async function goldOnInTheNether (bot: Bot, executor: Executor, signal: A
   })
 }
 
-/** blocks carried for the nether's bridges and pillars (netherrack mined when fewer than half are held) */
-export const NETHER_BLOCKS = 64
+/**
+ * blocks carried for the nether's bridges and pillars (netherrack mined when fewer than half are held): the bag's
+ * nether working set (NETHER_SCAFFOLD_KEEP), the most a room made there leaves
+ */
+export const NETHER_BLOCKS = NETHER_SCAFFOLD_KEEP
 
 /** a lava pool is tried this many times at most (a death or a lost bucket the first time) */
 export const POOL_TRIES = 2

@@ -148,6 +148,20 @@ export interface ScaffoldKeep {
   keep: number
 }
 
+/**
+ * The building blocks kept in the nether whatever is thrown away (of all the scaffold items together): the lava sea
+ * is crossed a block a step, and over it there is nothing to mine more from. A 26.3 bot in the nether threw '37
+ * netherrack, 8 cobblestone' away down to the overworld's stack (SCAFFOLD_KEEP, 64), bridged 60 blocks over the lava
+ * sea at y 44 toward its fortress with it, and sat at the bridge's end with 4 cobblestone 35000 ticks, every path on
+ * refused for want of blocks (full-26.3-fresh-t, t211310)
+ */
+export const NETHER_SCAFFOLD_KEEP = 128
+
+/** the building blocks kept in a dimension: NETHER_SCAFFOLD_KEEP of them at least in the nether, else `scaffold`'s */
+export function scaffoldKeepIn (scaffold: ScaffoldKeep, dimension: string | null | undefined): ScaffoldKeep {
+  return dimension === 'the_nether' && scaffold.keep < NETHER_SCAFFOLD_KEEP ? { items: scaffold.items, keep: NETHER_SCAFFOLD_KEEP } : scaffold
+}
+
 export interface SplitOptions {
   keep?: KeepRule
   /** the version's registry, for the keep rule */

@@ -27,7 +27,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { holdBag, type BagKeeper } from '../skills/bag'
 import { countItems, emptySlots, trace } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
-import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
+import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { herdSpares, herdSupply } from '../skills/herd'
@@ -705,11 +705,22 @@ export class Executor {
   }
 
   /**
+   * The building blocks the bag keeps here whatever is thrown away (the options' scaffold; NETHER_SCAFFOLD_KEEP of them
+   * in the nether: keep.ts scaffoldKeepIn)
+   */
+  scaffoldKeep (): ScaffoldKeep {
+    return scaffoldKeepIn(this.options.scaffold, normalizeDimension(this.bot.game?.dimension))
+  }
+
+  /**
    * A drop not gone for while working: the route's stone the stock has enough of (isSurplus), once the bag carries
-   * what's kept of it (the keep count, what the requests need)
+   * what's kept of it (the keep count, what the requests need) and the building blocks it keeps (scaffoldKeep: the
+   * nether's netherrack dug on the way is picked up till the bag holds its working set)
    */
   unwantedDrop (name: string): boolean {
     if (!ROUTE_STONE.has(name) || !this.options.stocked(name)) return false
+    const scaffold = this.scaffoldKeep()
+    if (scaffold.items.includes(name) && countItems(this.bot, scaffold.items as string[]) < scaffold.keep) return false
     const kept = Math.max(this.options.keep(name, this.bot.registry as any) ?? 0, this.needed[name] ?? 0, this.options.milestoneNeeds()[name] ?? 0)
     return countItems(this.bot, name) >= kept
   }
@@ -849,7 +860,7 @@ export class Executor {
     const want = this.options.minFreeSlots + 2 + (lava() != null ? LAVA_ROOM : 0) - emptySlots(this.bot)
     if (want <= 0) return { room: true, looping: [] }
     const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
-    const pick = (from: typeof stacks): Array<{ name: string, count: number }> => junkToToss(from, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.options.scaffold, protect: this.protect() })
+    const pick = (from: typeof stacks): Array<{ name: string, count: number }> => junkToToss(from, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.scaffoldKeep(), protect: this.protect() })
     let toss = pick(stacks)
     const looping = this.throws.looping(toss, this.tasks.tick, name => this.bot.registry.itemsByName[name]?.stackSize ?? 64)
     let forChest: Array<{ name: string, count: number }> = []

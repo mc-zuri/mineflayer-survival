@@ -347,6 +347,66 @@ test('makeRoom throws the route\'s cobblestone over a stack away once the stock 
   }
 })
 
+test('makeRoom in the nether keeps NETHER_SCAFFOLD_KEEP building blocks, the netherrack among them; the overworld its stack; the netherrack dug there picked up till the bag holds them', async () => {
+  // (full-26.3-fresh-t, t211310: 'throwing away 37 netherrack, 8 cobblestone, 3 rotten_flesh' in the nether, the bag
+  // left with 64 cobblestone, the 60-block bridge over the lava sea after it ended with 4 and the bot sat there)
+  const { NETHER_SCAFFOLD_KEEP } = await import('../../src/executor/keep')
+  const fill = (dimension: string, extra: Array<{ name: string, count: number }> = []): any => {
+    const bot = fakeBot()
+    bot.game.dimension = dimension
+    const stacks: Array<{ name: string, count: number }> = [{ name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 8 }, { name: 'netherrack', count: 37 }, { name: 'rotten_flesh', count: 3 }, ...extra]
+    for (const name of ['raw_iron', 'iron_pickaxe', 'diamond_pickaxe', 'bread', 'torch', 'coal', 'oak_log', 'diamond_sword', 'shield', 'bucket',
+      'water_bucket', 'iron_ingot', 'gold_ingot', 'lapis_lazuli', 'redstone', 'emerald', 'obsidian', 'ender_pearl', 'book', 'arrow',
+      'bow', 'crafting_table', 'furnace', 'white_bed', 'iron_axe', 'iron_shovel', 'flint_and_steel', 'compass', 'clock', 'shears', 'leather', 'diamond'].slice(0, 32 - extra.length)) stacks.push({ name, count: 1 })
+    const slots = (): any[] => {
+      const out: any[] = new Array(46).fill(null)
+      stacks.forEach((st, i) => { if (st.count > 0) out[9 + i] = { name: st.name, count: st.count, type: registry.itemsByName[st.name].id, slot: 9 + i } })
+      return out
+    }
+    bot.inventory = { get slots () { return slots() }, inventoryStart: 9, inventoryEnd: 45, items: () => slots().slice(9, 45).filter(x => x != null) }
+    bot.tossed = []
+    bot.toss = async (type: number, _meta: unknown, n: number) => {
+      const name = registry.items[type].name
+      bot.tossed.push(`${n} ${name}`)
+      for (const st of stacks) { if (st.name !== name || n <= 0) continue; const k = Math.min(n, st.count); st.count -= k; n -= k }
+    }
+    bot.blockAt = () => null
+    bot._client = new EventEmitter()
+    bot.entity.yaw = 0
+    bot.entities = {}
+    bot.look = async () => {}
+    bot.pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
+    return bot
+  }
+  assert.equal(NETHER_SCAFFOLD_KEEP, 128)
+  const overworld = fill('overworld')
+  const nether = fill('the_nether')
+  const ticking = setInterval(() => { overworld.emit('physicsTick'); nether.emit('physicsTick') }, 2)
+  try {
+    // the overworld: as the run threw them, down to a stack of building blocks
+    const exO = new Executor(overworld, { runners: {} })
+    assert.equal(exO.scaffoldKeep().keep, 64)
+    await exO.makeRoom({}, undefined, false)
+    assert.deepEqual(overworld.tossed, ['37 netherrack', '8 cobblestone', '3 rotten_flesh'])
+    // the nether: the 109 blocks are under its working set, none goes
+    const exN = new Executor(nether, { runners: {} })
+    assert.equal(exN.scaffoldKeep().keep, NETHER_SCAFFOLD_KEEP)
+    await exN.makeRoom({}, undefined, false)
+    assert.deepEqual(nether.tossed, ['3 rotten_flesh'])
+    assert.equal(count(nether, 'netherrack') + count(nether, 'cobblestone'), 109)
+    // the netherrack and cobblestone dug on the way are picked up while under it (the stock full of cobblestone)
+    const stocked = new Executor(nether, { runners: {}, stocked: () => true })
+    assert.equal(stocked.unwantedDrop('netherrack'), false)
+    assert.equal(stocked.unwantedDrop('cobblestone'), false)
+    // and not past it
+    const full = fill('the_nether', [{ name: 'netherrack', count: 64 }])
+    const stockedFull = new Executor(full, { runners: {}, stocked: () => true })
+    assert.equal(stockedFull.unwantedDrop('netherrack'), true)
+  } finally {
+    clearInterval(ticking)
+  }
+})
+
 test('makeRoom: a part stack thrown THROW_LOOP_REPEATS times within THROW_LOOP_TICKS, picked up again each time, goes into a chest near instead, the room got from the next junk meanwhile; with none, the bot walks THROW_AWAY_RANGE blocks off and throws it there; INVENTORY_FULL only for what that leaves held', async () => {
   // (26.3 run full-f: '19 dirt, 5 sand, 2 gravel' thrown into a pit the staircase's next step reached, every step for
   // 30 steps; run full-26.3-fresh-f: '23 diorite, 7 andesite, 3 dirt' refused a third throw with no chest near, and the
