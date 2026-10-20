@@ -988,3 +988,23 @@ test('storeAtBase stores nothing from another dimension than the base\'s (its ch
   ;(ex as any).storeChests = () => { throw new Error('went for the chests') }
   assert.deepStrictEqual(await ex.storeAtBase(), {})
 })
+
+test('a hunt for salmon that found none with no water in sight makes the water and the cod dear too; with water in sight the water is not (full-26.3-s31337-h: \'kill 7 salmon\' explored a snowy mountain with no water)', async () => {
+  for (const water of [false, true]) {
+    const bot = fakeBot({ iron_sword: 1, furnace: 1, coal: 8 })
+    bot.entities = { 0: bot.entity }
+    const pond = new Vec3(6, 63, 0)
+    bot.blockAt = (p: Vec3) => water && p.equals(pond)
+      ? { name: 'water', position: p, getProperties: () => ({ level: 0 }) }
+      : { name: p.y < 64 ? 'stone' : 'air', position: p, getProperties: () => ({}) }
+    bot.findBlocks = ({ matching }: { matching: number[] }) => water && matching.includes(registry.blocksByName.water.id) ? [pond] : []
+    const runners: Record<string, StepRunner<any>> = {
+      ...honestRunners(bot, []),
+      kill: async (step) => { throw new TaskError('NOT_FOUND', `no ${step.mob} found exploring`) }
+    }
+    const ex = new Executor(bot, { runners, maxStepFailures: 1, log: () => {} })
+    await ex.obtain([{ item: 'salmon', count: 3 }], undefined, { exclude: ['fish'] }).catch(() => {})
+    assert.ok(ex.sightings.isScarce('salmon') && ex.sightings.isScarce('cod'))
+    assert.equal(ex.sightings.isScarce('water'), !water)
+  }
+})

@@ -110,3 +110,21 @@ test('sightings: a rare source (melons, berry bushes: of one biome) is given up 
   now += GIVE_UP_TICKS
   assert.equal(s.cost(melon), undefined)
 })
+
+test('the fish in the water are as dear as the water once none was found (WATER_MOBS); a fishing that found none makes them dear too', () => {
+  let now = 0
+  const bot = fakeBot([])
+  const s = new Sightings(bot, () => now)
+  const mob = (name: string): any => ({ name, kind: 'mob', dimension: 'overworld', find: 6000 })
+  assert.equal(s.cost(mob('salmon')), undefined)
+  s.missing(['water'])
+  assert.equal(s.cost(mob('salmon')), 6000 * SCARCE_FACTOR)
+  assert.equal(s.cost(mob('cod')), 6000 * SCARCE_FACTOR)
+  // (not the land's animals)
+  assert.equal(s.cost({ name: 'cow', kind: 'mob', dimension: 'overworld', find: 400 }), undefined)
+  now += 100
+  s.missing(['water'])
+  assert.equal(s.cost(mob('salmon')), 6000 * GIVE_UP_FACTOR)
+  now += GIVE_UP_TICKS
+  assert.equal(s.cost(mob('salmon')), undefined)
+})

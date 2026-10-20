@@ -38,6 +38,14 @@ export const GIVE_UP_FACTOR = 64
 /** the animals the sightings watch for (Sightings.look): the meat animals */
 export const WATCHED_MOBS = ['cow', 'pig', 'sheep', 'chicken', 'rabbit']
 
+/**
+ * the fish the hunt kills in the water (MOB_SOURCES' cod and salmon, a river's or the sea's): none is had where no water
+ * is, so the water's miss is theirs and theirs the water's. A 26.3 bot on a snowy mountain with no water in its 96
+ * blocks, every land food given up, planned 'kill 7 salmon' and explored the mountain for them (full-26.3-s31337-h,
+ * t221841)
+ */
+export const WATER_MOBS = ['cod', 'salmon']
+
 /** the blocks whose sighting the plans count on: the food that grows on the surface (the rest go by the memory) */
 export const SIGHTED_BLOCKS = ['sweet_berry_bush', 'melon', 'carrots', 'potatoes', 'wheat', 'beetroots', 'hay_block', 'kelp', 'kelp_plant']
 
@@ -132,8 +140,10 @@ export class Sightings {
       this.away.delete(t.name)
       return Math.ceil(seen * WALK_TICKS_PER_BLOCK)
     }
-    if (this.givenUp(t.name)) return t.find * GIVE_UP_FACTOR
-    if (this.isScarce(t.name) || this.isNotNear(t.name)) return t.find * SCARCE_FACTOR
+    // (the fish in the water: as dear as the water once none was found)
+    const water = t.kind === 'mob' && WATER_MOBS.includes(t.name) ? 'water' : null
+    if (this.givenUp(t.name) || (water != null && this.givenUp(water))) return t.find * GIVE_UP_FACTOR
+    if (this.isScarce(t.name) || this.isNotNear(t.name) || (water != null && this.isScarce(water))) return t.find * SCARCE_FACTOR
     return undefined
   }
 

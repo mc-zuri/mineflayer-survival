@@ -29,7 +29,8 @@ import { countItems, emptySlots, trace } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
-import { SIGHTED_BLOCKS, Sightings } from './sight'
+import { SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, WATER_MOBS } from './sight'
+import { fishableWaterNear } from '../skills/fish'
 import { herdSpares, herdSupply } from '../skills/herd'
 import { noteVillage } from '../skills/village'
 import { digDepotNook, dumpPit, lavaThrow, pitThrow, rememberAround } from './explore'
@@ -500,9 +501,13 @@ export class Executor {
     // an exploring for one food went over the land for the others too: the plants none of which it noted (the
     // memory's), the animals it never saw since the step began (Sightings.look)
     const plants = step.kind === 'mine' ? step.blocks.filter(b => SIGHTED_BLOCKS.includes(b)) : []
+    // (a hunt for the fish in the water that found none with no water in sight: the water's miss too; a fishing that
+    // found no water to fish in: the fish's, WATER_MOBS)
+    const fishHunt = step.kind === 'kill' && WATER_MOBS.includes(step.mob)
+    const dry = fishHunt && this.bot.entity != null && fishableWaterNear(this.bot, this.bot.entity.position, SIGHT_RADIUS) == null
     const names = step.kind === 'kill'
-      ? [step.mob, ...mobSubstitutes(step), ...this.unseenPlants()]
-      : plants.length > 0 ? [...new Set([...plants, ...this.unseenPlants(), ...this.sightings.unseenSince(began)])] : step.kind === 'fish' ? ['water'] : []
+      ? fishHunt ? [...WATER_MOBS, ...(dry ? ['water'] : [])] : [step.mob, ...mobSubstitutes(step), ...this.unseenPlants()]
+      : plants.length > 0 ? [...new Set([...plants, ...this.unseenPlants(), ...this.sightings.unseenSince(began)])] : step.kind === 'fish' ? ['water', ...WATER_MOBS] : []
     if (names.length === 0) return
     this.sightings.missing(names)
     this.log(`none of ${names.join(', ')} found: the plans go for another source for a while`)
