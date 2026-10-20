@@ -173,3 +173,25 @@ test('caves reflex: a bot under the rule lingering in a cave (CAVE_LINGER_TICKS 
   const { dugByBot } = await import('../../src/skills/caves')
   assert.deepStrictEqual(caveExit(cells, new Vec3(3, 20, 0), p => dugByBot(bot, p))?.toArray(), [0, 20, 0])
 })
+
+test('caves reflex: a hole that took no block (a mob in it) is let be CAVE_HOLE_RETRY_TICKS, not tried again every few ticks', async () => {
+  const bot = fakeBot({ world: caveWorld, position: new Vec3(0.5, 20, 0.5), items: [item('cobblestone', 16)] })
+  bot.game.dimension = 'overworld'
+  caveCells(bot)
+  for (let x = -6; x <= 0; x++) for (const y of [20, 21]) bot.emit('diggingCompleted', { position: new Vec3(x, y, 0) })
+  const mod = require('../../src/skills/placeBlock')
+  const real = mod.placeBlock
+  mod.placeBlock = async () => { throw new Error('a zombie in the cell') }
+  const engine = new ReflexEngine(bot, { enabled: false })
+  try {
+    const task = cavesReflex.check(engine.context())
+    assert.strictEqual(await task?.run(new AbortController().signal), 0)
+    ;(engine as any).tick += 20
+    assert.strictEqual(cavesReflex.check(engine.context()), null)
+    ;(engine as any).tick += 600
+    assert.strictEqual(cavesReflex.check(engine.context())?.detail, 'seal 2 into a cave')
+  } finally {
+    mod.placeBlock = real
+    engine.stop()
+  }
+})

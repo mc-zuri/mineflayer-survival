@@ -1062,10 +1062,12 @@ export const CAVE_LOOK_TICKS = 10
  */
 export const CAVE_LINGER_TICKS = 100
 export const CAVE_LINGER_DISTANCE = 4
+/** ticks a hole that took no block (a mob in it, no face to put one against) is let be by the caves reflex */
+export const CAVE_HOLE_RETRY_TICKS = 600
 /** ticks the caves reflex waits after a way out of a cave failed */
 export const CAVE_LEAVE_RETRY_TICKS = 600
 
-const caveLooks = new WeakMap<Bot, { at: number, feet: string, sealed: Map<string, { cell: Vec3, tick: number }>, letBeUntil: number, inCave: { since: number, at: Vec3 } | null, leaveAfter: number }>()
+const caveLooks = new WeakMap<Bot, { at: number, feet: string, sealed: Map<string, { cell: Vec3, tick: number }>, letBeUntil: number, inCave: { since: number, at: Vec3 } | null, leaveAfter: number, failed: Map<string, number> }>()
 
 /**
  * The holes from the bot's tunnel into a cave (caveOpenings: a cave's cells against its feet's or head's cells, the bot
@@ -1083,7 +1085,7 @@ export const cavesReflex: Reflex = {
     const e = bot.entity as any
     if (e.onGround !== true || e.isInWater === true || e.isInLava === true) return null
     let look = caveLooks.get(bot)
-    if (look == null) caveLooks.set(bot, look = { at: -Infinity, feet: '', sealed: new Map(), letBeUntil: -Infinity, inCave: null, leaveAfter: -Infinity })
+    if (look == null) caveLooks.set(bot, look = { at: -Infinity, feet: '', sealed: new Map(), letBeUntil: -Infinity, inCave: null, leaveAfter: -Infinity, failed: new Map() })
     const feet = bot.entity.position.floored().toString()
     if (feet === look.feet && ctx.tick - look.at < CAVE_LOOK_TICKS && ctx.tick >= look.at) return null
     look.at = ctx.tick
@@ -1120,15 +1122,17 @@ export const cavesReflex: Reflex = {
       return null
     }
     l.inCave = null
-    const holes = caveOpenings(bot)
+    // (a hole that took no block lately let be: the reflex went again every few ticks for it, the work cut off each time)
+    const tried = (h: Vec3): boolean => { const at = l.failed.get(h.toString()); return at != null && ctx.tick - at >= 0 && ctx.tick - at < CAVE_HOLE_RETRY_TICKS }
+    const holes = caveOpenings(bot).filter(h => !tried(h))
     // (and the water or lava a dig of its tunnel opened onto)
-    const wet = liquidOpenings(bot)
+    const wet = liquidOpenings(bot).filter(h => !tried(h))
     if (holes.length + wet.length === 0 || sealItem(bot) == null) return null
     return {
       name: 'caves',
       priority: config.caves.priority,
       detail: holes.length > 0 ? `seal ${holes.length} into a cave` : `seal ${wet.length} against ${bot.blockAt(wet[0])?.name ?? 'liquid'}`,
-      run: async (signal) => await sealCaveOpenings(bot, signal, { sealed: hole => l.sealed.set(hole.toString(), { cell: hole, tick: ctx.tick }) })
+      run: async (signal) => await sealCaveOpenings(bot, signal, { skip: tried, sealed: hole => l.sealed.set(hole.toString(), { cell: hole, tick: ctx.tick }), failed: hole => l.failed.set(hole.toString(), ctx.tick) })
     }
   }
 }
