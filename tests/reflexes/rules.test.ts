@@ -612,3 +612,25 @@ test('hostiles reflex: an armed bot\'s fight with one of two zombies is given up
   assert.strictEqual(fleeDue(full, four, DEFAULT_REFLEX_CONFIG, 0), true)
   assert.strictEqual(fightTurned(full, four, DEFAULT_REFLEX_CONFIG, 0), false)
 })
+
+test('hostiles reflex: hurt to sealHealth among two zombies down a tunnel, with the blocks, the bot shuts itself in (seal in); not on open ground (a box of 10), with a creeper about, against a lone zombie over fleeHealth, nor with too few blocks (full-26.3-fresh-l)', async () => {
+  const { sealDue } = await import('../../src/reflexes/rules')
+  const zombies = [entity({ name: 'zombie', position: at(2) }), entity({ name: 'zombie', position: at(3) })]
+  const armor = { head: item('iron_helmet'), torso: item('iron_chestplate'), legs: item('iron_leggings'), feet: item('golden_boots') }
+  // down a 1-wide tunnel along x: its two ends to shut, 4 blocks
+  const tunnel = (p: Vec3): string => p.z === 0 && p.y >= 64 && p.y <= 65 ? 'air' : 'stone'
+  const kit = (stone = 64): any => ({ items: [item('diamond_sword'), item('cobblestone', stone)], armor, world: tunnel })
+  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 9 }), 'seal in')
+  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 11 }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombies[0]], ...kit(), health: 9 }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombies[0]], ...kit(), health: 5 }), 'seal in')
+  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(3), health: 9 }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [...zombies, entity({ name: 'creeper', position: at(5) })], ...kit(), health: 9 }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 9 }, { hostiles: { sealHealth: 0 } }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), world: undefined, health: 9 }), 'fight zombie')
+  // the fight's until: the health falling to it ends the fight, the box next
+  const bot = fakeBot({ entities: zombies, ...kit(), health: 12 })
+  assert.strictEqual(sealDue(bot, zombies, DEFAULT_REFLEX_CONFIG, 0), false)
+  bot.health = 10
+  assert.strictEqual(sealDue(bot, zombies, DEFAULT_REFLEX_CONFIG, 0), true)
+})

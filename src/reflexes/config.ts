@@ -34,6 +34,11 @@ export interface ReflexConfig {
     /** flee instead at or below this health (default 6) */
     fleeHealth: number
     /**
+     * shut in where the bot stands and heal (sealIn) at or below this health with more than one about, or at fleeHealth
+     * with any, when it carries the blocks for it (default 10; 0 off)
+     */
+    sealHealth: number
+    /**
      * but fight on at low health against a single hostile with this many armor points and a weapon (default 10): a
      * zombie is as quick as the bot, and running from it never ended (300 ticks 'still chased', no eating meanwhile)
      */
@@ -174,6 +179,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
     rangedRange: 16,
     maxDy: 4,
     fleeHealth: 6,
+    sealHealth: 10,
     fightOnArmor: 10,
     maxFight: 3,
     fleeDistance: 16,

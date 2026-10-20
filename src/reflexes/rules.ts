@@ -18,6 +18,9 @@ import { breakFall, landingY, shouldBreakFall } from '../skills/fall'
 import { blockIdsNamed, findBlock } from '../core/findBlocks'
 import { findDoorRefuge, retreatIndoors, type DoorRefuge } from '../skills/indoors'
 import { clearOfWarden, escapeWarden, nearestWarden } from '../skills/danger'
+import { SEAL_MAX_BLOCKS, openCells, sealBox, sealIn } from '../skills/sealIn'
+import { sealItem } from '../skills/shelter'
+import { countItems } from '../skills/util'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
 /**
@@ -347,6 +350,36 @@ export function fightTurned (bot: Bot, near: Entity[], config: ReflexConfig, tic
   return !cornered && ((bot.health <= config.hostiles.fleeHealth && !fightOn) || unarmedOutmatched(bot, near, config))
 }
 
+/** a shut-in that failed (no box there, a block that wouldn't go in): not tried again for SEAL_RETRY_TICKS */
+export const SEAL_RETRY_TICKS = 400
+const sealFails = new WeakMap<Bot, number>()
+
+/**
+ * Whether the hostiles reflex shuts the bot in where it stands to heal (sealIn) rather than fight on or flee: hurt to
+ * sealHealth with more than one about, or to fleeHealth with any; no creeper among them (its blast takes the box and
+ * the bot); on its feet out of the water and the lava; a box to be had there of SEAL_MAX_BLOCKS at most (a tunnel's, a passage's)
+ * and the blocks for it. Fleeing zombies in
+ * a cave is a run with them as quick as the bot's walk (Zombie's movement speed 0.23) and the cave's drops on the way:
+ * a 26.3 bot in iron with a diamond sword and 216 cobblestone fought four in the night's mine down to its last health,
+ * fell 8 blocks in it, and died (full-26.3-fresh-l)
+ */
+export function sealDue (bot: Bot, near: Entity[], config: ReflexConfig, tick: number): boolean {
+  const h = config.hostiles
+  if (h.sealHealth <= 0 || near.length === 0 || bot.health <= 0) return false
+  if (!(bot.health <= h.sealHealth && (near.length > 1 || bot.health <= h.fleeHealth))) return false
+  if (near.some(e => e.name === 'creeper')) return false
+  const e = bot.entity as any
+  if (e.onGround !== true || e.isInWater === true || e.isInLava === true) return false
+  const failed = sealFails.get(bot)
+  if (failed != null && tick - failed >= 0 && tick - failed < SEAL_RETRY_TICKS) return false
+  const box = sealBox(bot, near)
+  if (box == null) return false
+  const needed = openCells(bot, box).length
+  if (needed > SEAL_MAX_BLOCKS) return false
+  const item = sealItem(bot)
+  return item != null && countItems(bot, item) >= needed
+}
+
 /**
  * ticks after a flee found no way (fleeFrom's 'cornered': a tunnel, a pit) the hostiles reflex fights instead, an armed
  * bot: a 26.3 bot cornered at 4.8 health underground by a skeleton 0.9 off stood there, fleeing and failing every 20
@@ -393,6 +426,20 @@ export const hostilesReflex: Reflex = {
     const near = hostilesInRange(ctx).filter(e => !nether || !letBeInNether(bot, e, ctx.tick))
     if (near.length === 0) return null
     const cornered = wasCornered(bot, ctx.tick) && bestMeleeWeapon(bot) != null
+    if (sealDue(bot, near, config, ctx.tick)) {
+      return {
+        name: 'hostiles',
+        priority: config.hostiles.priority,
+        detail: 'seal in',
+        run: async (signal) => await sealIn(bot, {
+          signal,
+          threats: () => Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange)
+        }).catch(err => {
+          if (!signal.aborted) sealFails.set(bot, ctx.tick)
+          throw err
+        })
+      }
+    }
     if (fleeDue(bot, near, config, ctx.tick)) {
       // a door near to get in behind (a house, the base's airlock): in there and shut, not a run in the open under
       // the bolts and arrows
@@ -454,7 +501,8 @@ export const hostilesReflex: Reflex = {
     let elapsed = 0
     const turned = (): boolean => {
       const now = hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange) })
-      return now.length > 0 && fightTurned(bot, now, config, ctx.tick + elapsed++)
+      const tick = ctx.tick + elapsed++
+      return now.length > 0 && (fightTurned(bot, now, config, tick) || sealDue(bot, now, config, tick))
     }
     if (nether && !useBow) {
       const f = netherFightsOf(bot)

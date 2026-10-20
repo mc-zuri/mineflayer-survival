@@ -85,9 +85,9 @@ export class NightLog {
         this.note(`DEATH: ${message}`)
       }
     })
-    on(bot, 'reflex', (name: string) => {
+    on(bot, 'reflex', (name: string, detail?: string) => {
       this.log.reflexes[name] = (this.log.reflexes[name] ?? 0) + 1
-      this.note(`reflex ${name}`)
+      this.note(`reflex ${name}${detail != null ? ` (${detail})` : ''}`)
     })
     on(bot, 'reflexFailed', (name: string, err: Error) => {
       if (/PREEMPTED/.test(String((err as any)?.code ?? err?.message))) { this.note(`reflex ${name} preempted: ${err?.message ?? ''}`); return }

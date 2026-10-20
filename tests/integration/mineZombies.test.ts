@@ -8,6 +8,7 @@
 // - a dungeon's zombie spawner (MonsterRoomFeature's room, 7 by 7 inside, 4 high, cobblestone) at the tunnel's east
 //   end, the bot at work in the tunnel 8 blocks off it, the spawner spawning (BaseSpawner: up to 4 a go while fewer
 //   than 6 are about, a player within 16);
+// - the tunnel with the bot at 8 health (the run's was at 10 and less by its last fight), four zombies coming;
 // - a cave 13 by 13 and 5 high round the bot, a trench 8 deep beside it, four zombies coming at it together, two from the west, two from the north.
 // MINE_RUNS=n repeats each (default 3); NIGHT_VERBOSE=1 logs each hit, kill and reflex.
 import { after, before, describe, test } from 'node:test'
@@ -164,6 +165,30 @@ describe(`full-26.3-fresh-l's zombies in the mine on ${DEFAULT_VERSION} (normal 
       logs.push(await fightFor(2400, () => zombiesLeft() === 0))
     }
     report(t, 'four zombies down a tunnel', logs, i => `${logs[i].kills.zombie ?? 0} of 4 killed, `)
+  })
+
+  test(`hurt (8 health) down the tunnel, four zombies coming: shut in, healed and alive (${RUNS} runs)`, async (t) => {
+    const logs: RunLog[] = []
+    const sealed: number[] = []
+    for (let i = 0; i < RUNS; i++) {
+      const at = await freshTunnel()
+      await giveKit(MINE_KIT)
+      // (starving's damage goes past the armor: DamageTypeTags.BYPASSES_ARMOR)
+      await run(`damage ${USER} 12 minecraft:starve`)
+      await waitFor(() => bot.health <= 8.5, 40)
+      for (let k = 0; k < 4; k++) await run(`summon minecraft:zombie ${at.x + 10.5 + k} ${GROUND} 0.5 {PersistenceRequired:1b,CanPickUpLoot:0b}`)
+      await waitFor(() => zombiesLeft() >= 4, 100)
+      let seals = 0
+      const onReflex = (_name: string, detail?: string): void => { if (detail === 'seal in') seals++ }
+      bot.on('reflex' as any, onReflex)
+      try {
+        logs.push(await fightFor(2400))
+      } finally {
+        bot.off('reflex' as any, onReflex)
+      }
+      sealed.push(seals)
+    }
+    report(t, 'hurt down a tunnel', logs, i => `${sealed[i]} shut-ins, health ${logs[i].minHealth.toFixed(1)} at the least, `)
   })
 
   test(`a cave, four zombies coming at the bot together from two sides, a drop of 8 beside it: alive (${RUNS} runs)`, async (t) => {
