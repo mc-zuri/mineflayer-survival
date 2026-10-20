@@ -29,6 +29,7 @@ import { countItems, trace, waitTicks } from '../skills/util'
 import { fireballIncoming } from './safety'
 import { dig } from '../core/actions'
 import { isOnFire } from '../skills/escape'
+import { drinkPotion, findPotion, hasEffect } from '../skills/potion'
 
 /** BlazeAttackGoal: ticks charged before the first of the volley's three fireballs */
 export const BLAZE_CHARGE_TICKS = 60
@@ -385,8 +386,21 @@ export const BURN_HEALTH = 5
  * throne spawner at (-290, 77, -209), fought on, burned to 2, took another fireball and died (full-26.3-fresh-k)
  */
 export function fightHealth (bot: Bot): number {
-  return bot.health - (isOnFire(bot) ? BURN_HEALTH : 0)
+  return bot.health - (isOnFire(bot) && !fireProof(bot) ? BURN_HEALTH : 0)
 }
+
+/**
+ * Whether the bot has fire resistance on: the blazes' fireballs and the fire they light do nothing to it then
+ * (LivingEntity.hurtServer drops a damage of #is_fire, the fireball's and the burning's, with FIRE_RESISTANCE on)
+ */
+export function fireProof (bot: Bot): boolean {
+  return hasEffect(bot, FIRE_RESISTANCE)
+}
+
+/** the potion's effect (skills/potion's name) */
+export const FIRE_RESISTANCE = 'fire_resistance'
+/** a fight's drinks of it that may fail (no effect after, the potion not equipped) before it stops trying */
+export const DRINK_TRIES = 3
 
 /** a blaze's eyes */
 export function blazeEye (blaze: Entity): Vec3 {
@@ -532,6 +546,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   let shutUntil = 0
   let sealFails = 0
   let shutAgain = 0
+  let drinkFails = 0
   const tracked = new Set<number>()
   const dead = new Set<number>()
   const tried = new Map<number, number>()
@@ -614,8 +629,10 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       const seeing = blazes.filter(b => blazeSeesBot(bot, b))
       const me = bot.entity.position
       const near = (a: Entity, b: Entity): number => a.position.distanceTo(me) - b.position.distanceTo(me)
-      const fireball = Object.values(bot.entities).find(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 24))
-      const danger = seeing.filter(b => volleys.dangerous(b.id, tick)).sort(near)
+      // (fire resistant, no fireball nor volley is a danger: the bow and the fetches go on through them)
+      const proof = fireProof(bot)
+      const fireball = proof ? undefined : Object.values(bot.entities).find(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 24))
+      const danger = proof ? [] : seeing.filter(b => volleys.dangerous(b.id, tick)).sort(near)
 
       // fire in the nook (a fireball's on the floor by the feet): out at once
       for (const p of [nook.stand, nook.stand.plus(UP)]) {
@@ -633,7 +650,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // front cell it kept the front from being shut, 26.3, seed 7741's bridge)
       const close = seeing.find(inReach) ?? blazes.find(b => inReach(b) && seenPoint(bot, b) != null) ??
         Object.values(bot.entities).find(e => NOOK_MELEE.includes(e.name ?? '') && isAlive(bot, e) && inReach(e) && hasLineOfSight(bot, e))
-      if (close != null && (danger.length === 0 || !hasShield() || meleeWindow(bot, volleys, tick, seeing, close))) {
+      if (close != null && (danger.length === 0 || proof || !hasShield() || meleeWindow(bot, volleys, tick, seeing, close))) {
         stopDraw()
         await hold(sword())
         if (strength.ticksToFull() <= 0) {
@@ -646,6 +663,22 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
           await look(meleeAimPoint(bot, close))
         }
         await waitTicks(bot, 1, signal)
+        continue
+      }
+
+      // fire resistance on with blazes about, when there's a potion of it, drunk (32 ticks) when nothing can shoot
+      // before it's down, as a meal is (or shut in, sealAndHeal's): the fireballs and their burning are nothing then
+      if (!proof && drinkFails < DRINK_TRIES && blazes.length > 0 && drawn === 0 && findPotion(bot, FIRE_RESISTANCE) != null && seeing.every(b => volleys.quietFor(b.id, tick, 34))) {
+        unblock()
+        try {
+          trace('fightFromNook: fire resistance drunk, health', bot.health)
+          if (!await drinkPotion(bot, FIRE_RESISTANCE, signal)) drinkFails++
+        } catch (err) {
+          if (isAbort(err)) throw err
+          drinkFails++
+          trace('fightFromNook: fire resistance:', (err as Error).message)
+          await waitTicks(bot, 1, signal)
+        }
         continue
       }
 
@@ -719,7 +752,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // FETCH_QUIET: the bow's turn came first and the fetch only with every blaze quiet for 75 ticks, which with two or
       // three about never was, and the nooks at seed 2's spawners at (97, 64, -515) and (925, 64, 123) killed blazes
       // for 20000 ticks with their rods left on the throne (26.3 runs mag-b and mag-d: 0 rods)
-      const drop = drawn === 0 && fightHealth(bot) > sealAt + 4 && seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET))
+      const drop = drawn === 0 && fightHealth(bot) > sealAt + 4 && (proof || seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)))
         ? dropsNear(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES)
         : undefined
       if (drop != null) {
@@ -842,6 +875,8 @@ export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch
   const threat = (): Entity | null => {
     const blazes = Object.values(bot.entities).filter(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(bot.entity.position) <= 48)
     watch.volleys.update(blazes.map(b => ({ id: b.id, charged: blazeCharged(bot, b) })), watch.now())
+    // (fire resistant, the fireballs are nothing to stop for)
+    if (fireProof(bot)) return null
     const danger = blazes.filter(b => blazeSeesBot(bot, b) && watch.volleys.dangerous(b.id, watch.now()))
       .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
     return danger ?? Object.values(bot.entities).find(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 24)) ?? null
@@ -1040,6 +1075,10 @@ export async function sealAndHeal (bot: Bot, nook: BlazeNook, healTo: number, si
   await fillNook(bot, nook.front, signal, false)
   const shut = (): boolean => nook.front.every(p => bot.blockAt(p)?.boundingBox === 'block')
   if (!shut()) { trace('fightFromNook: the front not shut'); return false }
+  // fire resistance on in here, out of their sight, when there's a potion of it and it's off
+  if (!fireProof(bot) && findPotion(bot, FIRE_RESISTANCE) != null) {
+    try { await drinkPotion(bot, FIRE_RESISTANCE, signal) } catch (err) { if (isAbort(err)) throw err; trace('fightFromNook: fire resistance:', (err as Error).message) }
+  }
   for (let t = 0; t < 1200 && bot.health < healTo; t += 10) {
     throwIfAborted(signal)
     if (bot.health <= 0 || !shut()) return true

@@ -969,6 +969,62 @@ test('fillNook unguarded (a box shut in low, sealAndHeal\'s front): the block go
   assert.deepEqual(order, ['place (-1, 64, 0)'])
 })
 
+test('fire resistant (fireProof): no burn off fightHealth; in the nook a charged blaze in sight is no danger, the bow drawn at it, no shield; a potion of it drunk with blazes about', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, fightHealth, fireProof, nookAround } = await import('../../src/nether/blazeFight')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const fireResistance = (bot: any): void => { bot.entity.effects = { [bot.registry.effectsByName.FireResistance.id]: { id: bot.registry.effectsByName.FireResistance.id, amplifier: 0, duration: 3600 } } }
+  const potion = (): any => {
+    const p = item('potion')
+    p.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: 11, customEffects: [] } }]])
+    return p
+  }
+  /** what the bot did in the first ticks: 'shield', 'draw bow', 'drink' */
+  const run = async (opts: { proof: boolean, charged: boolean, potion?: boolean }): Promise<string[]> => {
+    const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 65, 2.5), meta: { health: 20, flags: opts.charged ? 1 : 0 } })
+    const items = [item('diamond_sword'), item('bow'), item('arrow', 32), item('cobblestone', 32), item('cooked_beef', 16)]
+    if (opts.potion === true) items.push(potion())
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), health: 20, items, offhand: item('shield'), entities: [blaze], world: name })
+    bot.entity.effects = {}
+    bot._client = new (require('node:events').EventEmitter)()
+    if (opts.proof) fireResistance(bot)
+    bot.entity.metadata[0] = 1
+    assert.equal(fightHealth(bot), opts.proof ? 20 : 15)
+    assert.equal(fireProof(bot), opts.proof)
+    bot.world = { raycast: () => null }
+    const did: string[] = []
+    bot.equip = async (it: any, dest: string) => { if (dest === 'hand') bot.heldItem = it }
+    bot.activateItem = (off?: boolean) => {
+      bot.usingHeldItem = true
+      const what = off === true ? 'shield' : bot.heldItem?.name === 'bow' ? 'draw bow' : bot.heldItem?.name === 'potion' ? 'drink' : `use ${String(bot.heldItem?.name)}`
+      if (did[did.length - 1] !== what) did.push(what)
+      if (what === 'drink') fireResistance(bot)
+    }
+    bot.deactivateItem = () => { bot.usingHeldItem = false }
+    bot.lookAt = async () => {}
+    bot.attack = () => {}
+    bot.game.dimension = 'the_nether'
+    const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+    assert.ok(nook != null)
+    const ac = new AbortController()
+    const done = fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 1000, eatAt: 0, eatFood: 0 }, ac.signal).catch(err => err)
+    try {
+      for (let i = 0; i < 50; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+    } finally {
+      ac.abort()
+      for (let i = 0; i < 3; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+      await done
+    }
+    return did
+  }
+  assert.deepEqual(await run({ proof: false, charged: true }), ['shield'])
+  assert.deepEqual(await run({ proof: true, charged: true }), ['draw bow'])
+  // a potion with a blaze about and quiet: drunk, then the bow
+  assert.deepEqual(await run({ proof: false, charged: false, potion: true }), ['drink', 'draw bow'])
+})
+
 test('enterNook: a walk that ends on the cell\'s edge, a hair into the next, steps into its middle (26.3 seed 2\'s throne: at (-276.009, 74, -168.4) for the nook at (-276, 74, -169)); one far off doesn\'t', async () => {
   const { fakeBot } = await import('../reflexes/fakeBot')
   const { enterNook, nookAround } = await import('../../src/nether/blazeFight')
