@@ -98,3 +98,58 @@ test('buildBase: a death on the way to the site ends the build (DIED), no diggin
   assert.deepEqual(tasks, ['to the base site'])
   assert.equal(executor.memory.base, null, 'no base recorded')
 })
+
+test('inTheWay: the room\'s and the airlock\'s cells holding what the blueprint doesn\'t put there; buildBase digs them out once the blocks are placed, the doorway open with no door hung (ls-1.21.11)', async () => {
+  const { buildBase, inTheWay, HOUSE_BLUEPRINT } = await import('../../src/base/build')
+  const { TaskError } = await import('../../src/core/errors')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const origin = { x: -8, y: 74, z: 120 }
+  const bp = generateBlueprint({ ...HOUSE_BLUEPRINT, origin })
+  const outer = bp.entrance.outerDoor
+  const doorTop = { ...outer, y: outer.y + 1 }
+  const key = (p: { x: number, y: number, z: number }): string => `${p.x},${p.y},${p.z}`
+  // built but for the doors, the ground left in the outer doorway's upper cell
+  const built = bp.world((x, y, z) => y <= 76 ? 'stone' : null)
+  const world = (x: number, y: number, z: number): any => {
+    if (key({ x, y, z }) === key(doorTop)) return 'dirt'
+    const b = built(x, y, z)
+    return b != null && typeof b !== 'string' && b.name.endsWith('_door') ? null : b
+  }
+  assert.deepEqual(inTheWay(bp, world), [doorTop])
+  assert.deepEqual(inTheWay(bp, built), [], 'all built: nothing in the way')
+
+  // the build: the digging fails at the doorway's top (the bot elsewhere), no door to hang
+  const cells = new Map<string, string>([[key(doorTop), 'dirt']])
+  for (const c of bp.dig) if (key(c) !== key(doorTop)) cells.set(key(c), 'stone')
+  const bot = fakeBot({ world: (p: any) => cells.get(key(p)) ?? (p.y <= 76 ? 'stone' : 'air') })
+  bot.pathfinder = { defaultMoveSettings: { exclusionAreasBreak: [], exclusionAreasPlace: [] }, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+  const tasks: string[] = []
+  let triedTop = 0
+  const executor: any = {
+    memory: new WorldMemory(),
+    log: () => {},
+    obtain: async () => ({ plans: 0, steps: 0 }),
+    storeAtBase: async () => {},
+    task: async (name: string) => {
+      tasks.push(name)
+      const dig = /^dig \((-?\d+), (-?\d+), (-?\d+)\)$/.exec(name)
+      if (dig != null) {
+        const at = `${dig[1]},${dig[2]},${dig[3]}`
+        if (at === key(doorTop) && triedTop++ === 0) throw new TaskError('NO_PATH', 'no path to the goal')
+        cells.set(at, 'air')
+        return undefined
+      }
+      const place = /^place (\S+) (\S+)$/.exec(name)
+      if (place != null) {
+        if (place[1].endsWith('_door')) throw new TaskError('MISSING_ITEMS', `no ${place[1]} in the inventory`)
+        cells.set(place[2], place[1])
+        return true
+      }
+      return undefined
+    }
+  }
+  const res = await buildBase(bot, { blueprint: HOUSE_BLUEPRINT, origin, executor, gather: false, chests: 2 })
+  assert.equal(cells.get(key(doorTop)), 'air', 'the doorway dug out')
+  assert.equal(tasks.filter(t => t === `dig (${outer.x}, ${outer.y + 1}, ${outer.z})`).length, 2, 'tried in the digging, then after the placing')
+  assert.ok(res.missing.some(p => p.block.endsWith('_door')))
+})

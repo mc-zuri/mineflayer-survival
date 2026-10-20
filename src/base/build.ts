@@ -15,7 +15,7 @@ import { placeBlock } from '../skills/placeBlock'
 import { isFree } from '../skills/placement'
 import { AIR_BLOCKS, countItems, trace, waitTicks } from '../skills/util'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
-import { type BlockGetter, type Vec, blockRegistry, posKey } from './blocks'
+import { type BlockGetter, type Vec, BlockRegistry, blockRegistry, posKey } from './blocks'
 import { generateBlueprint, planBuild, SHELL_MATERIALS, type Blueprint, type BlueprintOptions, type Placement } from './blueprint'
 import { checkStorageSafety, type SafetyReport } from './safety'
 import { selectSite, siteCandidates, type SiteScore } from './siteSelection'
@@ -216,6 +216,18 @@ export function keepBaseUnbroken (bot: Bot, memory: WorldMemory): Vec3[] {
   return kept
 }
 
+/**
+ * The cells of the room and the airlock with something in them that the blueprint doesn't put there (the ground left
+ * in a doorway, stone in a spare chest's place): in the way, dug out once the blocks are placed. A 1.21.11 build whose
+ * digging was never done left the ground in the outer doorway's upper cell, no door hung, and the bot was shut in its
+ * house (ls-1.21.11, t102577)
+ */
+export function inTheWay (blueprint: Blueprint, world: BlockGetter, registry: BlockRegistry = blockRegistry(blueprint.options.version)): Vec[] {
+  const own = new Map<string, string>()
+  for (const p of blueprint.placements) own.set(posKey(p.pos.x, p.pos.y, p.pos.z), p.block)
+  return planBuild(blueprint, world, registry).dig.filter(c => BlockRegistry.nameOf(world(c.x, c.y, c.z)) !== own.get(posKey(c.x, c.y, c.z)))
+}
+
 /** chooses the site: the best siteSelection score of a grid of candidates around `around` */
 export function chooseSite (bot: Bot, blueprintOptions: BlueprintOptions, around: Vec, opts: { radius?: number, step?: number, depths?: number[] } = {}): SiteScore | null {
   const world = botWorld(bot)
@@ -305,21 +317,24 @@ export async function buildBase (bot: Bot, opts: BuildBaseOptions): Promise<Buil
     })
 
     // dig out the room and the airlock, from the entrance in
-    for (const cell of planBuild(blueprint, botWorld(bot), registry).dig) {
-      throwIfAborted(signal)
-      const pos = v(cell)
-      const block = bot.blockAt(pos)
-      if (block == null || isFree(block)) continue
-      try {
-        // (with no harvest tool too: the room's cells only need to be gone; a stone left over a chest's cell for want
-        // of a pickaxe kept the chest shut, 26.3)
-        await executor.task(`dig ${pos.toString()}`, async (s) => await collectBlock(bot, { positions: [pos], anyTool: true }, s), signal)
-        dug++
-      } catch (err) {
-        if (isAbort(err) || TaskError.is(err, 'DIED')) throw err
-        trace('buildBase: dig failed', pos.toString(), (err as Error).message)
+    const digOut = async (cells: Vec[]): Promise<void> => {
+      for (const cell of cells) {
+        throwIfAborted(signal)
+        const pos = v(cell)
+        const block = bot.blockAt(pos)
+        if (block == null || isFree(block)) continue
+        try {
+          // (with no harvest tool too: the room's cells only need to be gone; a stone left over a chest's cell for
+          // want of a pickaxe kept the chest shut, 26.3)
+          await executor.task(`dig ${pos.toString()}`, async (s) => await collectBlock(bot, { positions: [pos], anyTool: true }, s), signal)
+          dug++
+        } catch (err) {
+          if (isAbort(err) || TaskError.is(err, 'DIED')) throw err
+          trace('buildBase: dig failed', pos.toString(), (err as Error).message)
+        }
       }
     }
+    await digOut(planBuild(blueprint, botWorld(bot), registry).dig)
 
     // the shell's material that's still short, once digging paid what it paid
     if (opts.gather !== false) {
@@ -364,6 +379,10 @@ export async function buildBase (bot: Bot, opts: BuildBaseOptions): Promise<Buil
       }
       if (!progress) break
     }
+
+    // what's left in the room and the airlock that the blueprint doesn't put there dug out after (inTheWay): the way
+    // in and out open, a door hung or not
+    await digOut(inTheWay(blueprint, botWorld(bot), registry))
   } finally {
     unprotect()
   }
