@@ -127,6 +127,20 @@ test('navigate: a goto that does not return once called off is left behind after
   } finally { bot.stop() }
 })
 
+test('navigate: a goto left behind with a dig still held lets the dig go (the pathfinder\'s end waited on it, and every goto after); none held, none stopped', async () => {
+  for (const held of [true, false]) {
+    const bot = pathBot('hung')
+    let stops = 0
+    bot.targetDigBlock = held ? { position: new Vec3(1, 65, 0) } : null
+    bot.stopDigging = () => { stops++; bot.targetDigBlock = null }
+    try {
+      await assert.rejects(navigate(bot, { goal: new goals.GoalBlock(50, 64, 0), stuckTicks: 10, unstick: 0 }), (err: unknown) => isSkillError(err, 'STUCK'))
+      assert.strictEqual(stops, held ? 1 : 0)
+      assert.strictEqual(bot.targetDigBlock, null)
+    } finally { bot.stop() }
+  }
+})
+
 test('navigate gives a trip up after maxTicks however it moves (bobbing in the sea, searching again and again)', async () => {
   const bot = pathBot('stuck')
   // the bot keeps moving back and forth, more than the stuck check's half block

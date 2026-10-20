@@ -225,7 +225,16 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
     error = err
   } finally {
     stopWaiting.abort()
-    if (hung) trace('navigate: goto did not return', CANCEL_TICKS, 'ticks after it was called off: left behind')
+    if (hung) {
+      trace('navigate: goto did not return', CANCEL_TICKS, 'ticks after it was called off: left behind')
+      // a dig still held then is what it waits on (a GoalMineBlock's dig of a block already broken never ended in
+      // mineflayer, and the pathfinder's next gotos waited behind it: 'no path found in 600 ticks' from where the
+      // bot stood, full-26.3-fresh-j): the key let go (Minecraft.continueAttack's stopDestroyBlock)
+      if ((bot as any).targetDigBlock != null) {
+        trace('navigate: a dig held at', (bot as any).targetDigBlock.position?.toString(), 'let go')
+        try { bot.stopDigging() } catch {}
+      }
+    }
     bot.off('physicsTick', onTick)
     bot.off('physicsTick', onCancelTick)
     bot.off('pathGenerated', onPath)
