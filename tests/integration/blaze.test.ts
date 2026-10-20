@@ -13,7 +13,9 @@
 // put where that run came in. BLAZE_KIT=run7741 gives that run's bag instead of the nether stage's: iron armor and
 // golden boots, a plain diamond sword and bow, 12 arrows, no shield, 3 raw iron, 59 cobblestone, 6 meals; BLAZE_KIT=q3
 // nether-26.3-q3's at s2fortress; BLAZE_KIT=gate the least the nether's gear gate lets in (gateBow with a plain bow and
-// BLAZE_ARROWS arrows, default 16; gateIron in iron with an iron sword).
+// BLAZE_ARROWS arrows, default 16; gateIron in iron with an iron sword; gateIronBow in iron with a bow, BLAZE_ARROWS
+// arrows, default 32, and BLAZE_FOOD cooked porkchops, default 10; gateDiamond in plain diamond, 64 arrows).
+// BLAZE_HURT_LOG=1 logs each hurt: what hurt the bot, where it stood, its health, whether its shield was up.
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import { appendFileSync } from 'node:fs'
@@ -71,6 +73,18 @@ const KITS: Record<string, Array<[string, number]>> = {
   gateIron: [
     ['iron_sword', 1], ['iron_helmet', 1], ['iron_chestplate', 1], ['iron_leggings', 1], ['golden_boots', 1], ['shield', 1],
     ['cooked_porkchop', 5], ['iron_pickaxe', 1], ['netherrack', 64]
+  ],
+  // in iron with a plain bow and BLAZE_ARROWS arrows (default 32), BLAZE_FOOD cooked porkchops (default 10: 80 food points)
+  gateIronBow: [
+    ['iron_sword', 1], ['iron_helmet', 1], ['iron_chestplate', 1], ['iron_leggings', 1], ['golden_boots', 1], ['shield', 1],
+    ['bow', 1], ['arrow', Number(process.env.BLAZE_ARROWS ?? 32)], ['cooked_porkchop', Number(process.env.BLAZE_FOOD ?? 10)],
+    ['iron_pickaxe', 1], ['netherrack', 64]
+  ],
+  // plain diamond (no enchantment) with a plain bow and BLAZE_ARROWS arrows (default 64), 80 food points
+  gateDiamond: [
+    ['diamond_sword', 1], ['diamond_helmet', 1], ['diamond_chestplate', 1], ['diamond_leggings', 1], ['diamond_boots', 1], ['golden_boots', 1],
+    ['shield', 1], ['bow', 1], ['arrow', Number(process.env.BLAZE_ARROWS ?? 64)], ['cooked_porkchop', Number(process.env.BLAZE_FOOD ?? 10)],
+    ['iron_pickaxe', 1], ['netherrack', 64]
   ]
 }
 const KIT = KITS[process.env.BLAZE_KIT ?? 'nether']
@@ -159,7 +173,15 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
     bot.on('entityDead', onKill)
     // what hurt it (the damage event's source: none for the fire's burning) and the reflexes that fired
     const hits = new Map<string, number>()
-    const onHurt = (e: any, source?: any): void => { if (e === bot.entity) { const k = source?.name ?? 'none'; hits.set(k, (hits.get(k) ?? 0) + 1) } }
+    const onHurt = (e: any, source?: any): void => {
+      if (e !== bot.entity) return
+      const k = source?.name ?? 'none'
+      hits.set(k, (hits.get(k) ?? 0) + 1)
+      if (process.env.BLAZE_HURT_LOG != null) {
+        const fire = ['fire', 'soul_fire'].filter(n => [0, 1].some(dy => bot.blockAt(bot.entity.position.offset(0, dy, 0))?.name === n))
+        console.log(`hurt ${bot.lockstep.ticks} ${k} at ${bot.entity.position.toString()} health ${bot.health.toFixed(1)} shield ${String((bot as any).usingHeldItem)} yaw ${bot.entity.yaw.toFixed(2)}${source?.position != null ? ` from ${source.position.toString()}` : ''}${fire.length > 0 ? ' in fire' : ''}`)
+      }
+    }
     const reflexes = new Map<string, number>()
     const onReflex = (name: string, detail?: string): void => { const k = detail != null ? `${name} (${detail})` : name; reflexes.set(k, (reflexes.get(k) ?? 0) + 1) }
     bot.on('entityHurt', onHurt)
