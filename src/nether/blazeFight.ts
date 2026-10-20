@@ -920,6 +920,12 @@ export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch
 export async function enterNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal): Promise<void> {
   if (inNook(bot, nook)) return
   await withNookKept(bot, nook, async () => await moveNear(bot, nook.stand, 0, signal))
+  // the walk ended on its cell's edge, a hair into the next (at (-276.009, 74, -168.4) for the nook at (-276, 74,
+  // -169), 26.3 seed 2's throne at (-277, 77, -159)): stepped into its middle, not the nook given up as not got to
+  const p = bot.entity.position
+  if (!inNook(bot, nook) && Math.abs(p.y - nook.stand.y) < 0.6 && Math.hypot(p.x - nook.stand.x - 0.5, p.z - nook.stand.z - 0.5) <= 1.2) {
+    await walkTo(bot, nook.stand.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal).catch(err => { if (isAbort(err)) throw err })
+  }
 }
 
 /** the pathfinder kept from breaking the nook's walls, roof and floor while `fn` runs */

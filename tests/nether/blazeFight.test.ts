@@ -968,3 +968,28 @@ test('fillNook unguarded (a box shut in low, sealAndHeal\'s front): the block go
   }
   assert.deepEqual(order, ['place (-1, 64, 0)'])
 })
+
+test('enterNook: a walk that ends on the cell\'s edge, a hair into the next, steps into its middle (26.3 seed 2\'s throne: at (-276.009, 74, -168.4) for the nook at (-276, 74, -169)); one far off doesn\'t', async () => {
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { enterNook, nookAround } = await import('../../src/nether/blazeFight')
+  const gridWalk = require('../../src/skills/gridWalk')
+  const navigate = require('../../src/skills/navigate')
+  const realMove = gridWalk.moveNear
+  const realWalk = navigate.walkTo
+  const walks: string[] = []
+  gridWalk.moveNear = async () => {}
+  navigate.walkTo = async (_b: unknown, to: Vec3) => { walks.push(to.toString()) }
+  try {
+    for (const [at, want] of [[new Vec3(-276.009, 74, -168.4), ['(-275.5, 74, -168.5)']], [new Vec3(-271.5, 74, -168.5), []]] as Array<[Vec3, string[]]>) {
+      walks.length = 0
+      const bot = fakeBot({ position: at, world: (p: Vec3) => p.y < 74 ? 'stone' : 'air' })
+      const nook = nookAround((p: Vec3) => bot.blockAt(p), new Vec3(-276, 74, -169), new Vec3(0, 0, 1))
+      assert.ok(nook != null)
+      await enterNook(bot, nook)
+      assert.deepEqual(walks, want)
+    }
+  } finally {
+    gridWalk.moveNear = realMove
+    navigate.walkTo = realWalk
+  }
+})
