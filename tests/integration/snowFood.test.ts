@@ -15,6 +15,7 @@ import { Executor } from '../../src/executor/executor'
 import { FOOD_GOAL } from '../../src/planner/progression'
 import { navigate } from '../../src/skills/navigate'
 import { foodInfo } from '../../src/core/items'
+import { keepWaterBucket } from '../../src/skills/bucket'
 import { ReflexEngine } from '../../src/reflexes/engine'
 import { drowningReflex, fallReflex } from '../../src/reflexes/rules'
 
@@ -176,6 +177,19 @@ describe(`food on a snowy land on a ${DEFAULT_VERSION} server`, { timeout: 60 * 
     assert.ok(!died, 'died of the fall')
     assert.ok(landed && bot.health >= 19, `a 30-block fall: health ${bot.health} at ${bot.entity.position.toString()}`)
     await run(`fill ${xyz(at(-1, 0, -1))} ${xyz(at(1, H - 1, 1))} air`)
+  })
+
+  it('fills the empty bucket again at a pool, never at a lone source (full-26.3-fresh-r: a 35-block fall with the bucket empty)', async () => {
+    await give('bucket', 1)
+    // a lone source 3 blocks off, a pool of 3 x 3 8 blocks off
+    await run(`setblock ${xyz(at(3, -1, 0))} water`)
+    await run(`fill ${xyz(at(-9, -1, -1))} ${xyz(at(-7, -1, 1))} water`)
+    await run(`fill ${xyz(at(-9, 0, -1))} ${xyz(at(3, 0, 1))} air`)
+    assert.ok(await waitUntil(bot, () => bot.blockAt(at(-8, -1, 0))?.name === 'water', 40))
+    assert.strictEqual(await keepWaterBucket(bot, new AbortController().signal), true)
+    assert.strictEqual(countItems(bot, 'water_bucket'), 1)
+    assert.strictEqual(bot.blockAt(at(3, -1, 0))?.name, 'water', 'the lone source left')
+    await run(`fill ${xyz(at(-9, -1, -1))} ${xyz(at(3, -1, 1))} snow_block`)
   })
 
   it('crosses a ravine at 3 health without a jump or a fall', async () => {

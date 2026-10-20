@@ -282,3 +282,44 @@ export async function castObsidian (bot: Bot, args: CastObsidianArgs, signal?: A
   if (!cast) throw new SkillError('VERIFY_FAILED', `${bot.blockAt(lava)?.name ?? 'nothing'} at ${lava.toString()} after pouring water at ${poured.toString()}`, result)
   return result
 }
+
+/**
+ * Whether a water source is one a bucket can take and the water stays: two or more water sources beside it, across
+ * (FlowingFluid.getNewLiquid: an empty cell with two sources beside it and one under or a block under turns to a
+ * source), so the pool fills it again. A lone source, a farm's water hole, is gone once taken.
+ */
+export function renewableWater (lookup: (pos: Vec3) => { name: string, getProperties?: () => Record<string, unknown>, metadata?: number } | null, pos: Vec3): boolean {
+  if (!isSource(lookup(pos), 'water')) return false
+  let n = 0
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (isSource(lookup(pos.offset(dx, 0, dz)), 'water')) n++
+  return n >= 2
+}
+
+/** how far a renewable water source is looked for to keep the water bucket filled */
+export const KEEP_WATER_RANGE = 32
+
+/**
+ * The water bucket kept filled (the fall reflex's, a lava escape's): with an empty bucket and no water bucket, the
+ * empty one filled at a renewable water source within KEEP_WATER_RANGE (renewableWater: never a farm's water hole).
+ * Resolves whether it filled one. A 26.3 bot fell 35 blocks at 14 health with no reflex: its one bucket was empty
+ * (full-26.3-fresh-r, t276348)
+ */
+export async function keepWaterBucket (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  const water = bot.registry.blocksByName.water?.id
+  if (countItems(bot, 'water_bucket') > 0 || findInventoryItem(bot, 'bucket') == null || typeof bot.findBlocks !== 'function' || water == null) return false
+  const lookup = (p: Vec3): any => bot.blockAt(p)
+  const source = bot.findBlocks({ matching: water, maxDistance: KEEP_WATER_RANGE, count: 256 }).find(p => renewableWater(lookup, p))
+  if (source == null) return false
+  try {
+    await fillBucket(bot, { fluid: 'water', pos: source }, signal)
+    return true
+  } catch (err) {
+    if (isAbort(err)) throw err
+    return false
+  }
+}
+
+/** whether keepWaterBucket has something to do: an empty bucket and no water bucket in the bag */
+export function waterBucketEmpty (bot: Bot): boolean {
+  return countItems(bot, 'water_bucket') === 0 && findInventoryItem(bot, 'bucket') != null
+}

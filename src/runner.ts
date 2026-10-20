@@ -26,6 +26,7 @@ import { SPARE_FOOD_POINTS, milestoneNeeds, spareKitGoals, stockKeepRule, tripSp
 import { isAbort } from './skills/errors'
 import { navigate, navigateNear, pickaxeForTheWay } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
+import { keepWaterBucket, waterBucketEmpty } from './skills/bucket'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
 import { MILESTONE_HANDLERS, harvestGrownFarms, tendHerd } from './milestones'
@@ -312,6 +313,9 @@ export const REFLEX_LOG_TICKS = 200
 /** food points under which a bot past the food milestone gets food again (up to FOOD_POINTS) before going on */
 export const FOOD_RESTOCK = FOOD_POINTS / 2
 
+/** ticks after an empty bucket found no pool to fill at before it is looked at again */
+export const WATER_RETRY_TICKS = 1200
+
 /** ticks a meal (mealGoals) may take before the work goes on without it */
 export const MEAL_TICKS = 6000
 /** ticks a meal that came to nothing waits before it is tried again */
@@ -407,6 +411,7 @@ export class Runner {
   private inNightWork = false
   private restockRetryAt = 0
   private mealRetryAt = 0
+  private waterRetryAt = 0
   /** the tick the herd was last tended at between trips (keepHerd) */
   private herdTendedAt = -Infinity
   private readonly store: SaveStore | null
@@ -655,6 +660,21 @@ export class Runner {
           continue
         }
         throw err
+      }
+      // the water bucket kept filled for the fall reflex (keepWaterBucket), at a pool near, in the overworld
+      if (this.bot.survival.tasks.tick >= this.waterRetryAt && normalizeDimension(this.bot.game?.dimension) === 'overworld' && waterBucketEmpty(this.bot)) {
+        let filled = false
+        try {
+          filled = await this.executor.task('fill the water bucket', async (s) => await keepWaterBucket(this.bot, s), signal)
+        } catch (err) {
+          if (stopped()) return this.stop(null, 'aborted', err)
+          if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+            await this.recover(signal)
+            continue
+          }
+        }
+        if (filled) this.log('the water bucket filled again')
+        else this.waterRetryAt = this.bot.survival.tasks.tick + WATER_RETRY_TICKS
       }
       // a meal first when hungry and short of food (mealGoals): what's in sight before a cow somewhere, its own ticks
       // at most; the work it left (untilDusk's hunger watch) after

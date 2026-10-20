@@ -24,3 +24,28 @@ test('surfacePoints: the surface, the sides and the bottom of a source\'s shape,
   for (const p of pts) assert.ok(p.x > 3 && p.x < 4 && p.y > 70 && p.y < 70 + 8 / 9 && p.z > -2 && p.z < -1, p.toString())
   assert.ok(pts.some(p => p.y < 70.05), 'no point on the bottom')
 })
+
+test('renewableWater: a source with two sources beside it fills again once taken; a lone one (a farm\'s water hole) or a pool\'s edge with one does not', async () => {
+  const { renewableWater } = await import('../../src/skills/bucket')
+  const pool = new Set(['0,62,0', '1,62,0', '-1,62,0', '0,62,1', '5,62,5', '6,62,5'])
+  const lookup = (p: Vec3): any => pool.has(`${p.x},${p.y},${p.z}`) ? { name: 'water', getProperties: () => ({ level: 0 }) } : { name: 'stone' }
+  assert.strictEqual(renewableWater(lookup, new Vec3(0, 62, 0)), true)
+  assert.strictEqual(renewableWater(lookup, new Vec3(1, 62, 0)), false)
+  assert.strictEqual(renewableWater(lookup, new Vec3(5, 62, 5)), false)
+  assert.strictEqual(renewableWater(lookup, new Vec3(9, 62, 9)), false)
+})
+
+test('keepWaterBucket: only with an empty bucket and no water bucket, at a renewable source only (full-26.3-fresh-r: a 35-block fall with an empty bucket)', async () => {
+  const { keepWaterBucket, waterBucketEmpty } = await import('../../src/skills/bucket')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const full = fakeBot({ items: [item('water_bucket', 1), item('bucket', 1)] })
+  assert.strictEqual(waterBucketEmpty(full), false)
+  assert.strictEqual(await keepWaterBucket(full), false)
+  const empty = fakeBot({ items: [item('bucket', 1)] })
+  assert.strictEqual(waterBucketEmpty(empty), true)
+  // the only water a lone source: none taken
+  const lone = new Vec3(3, 63, 3)
+  empty.findBlocks = () => [lone]
+  empty.blockAt = (p: Vec3) => p.equals(lone) ? { name: 'water', position: p, getProperties: () => ({ level: 0 }) } : { name: 'stone', position: p }
+  assert.strictEqual(await keepWaterBucket(empty), false)
+})
