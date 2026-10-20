@@ -231,9 +231,20 @@ test('outOfTheWay: an animal in a cave (under a roof) or far below is left alone
   const bot: any = { entity: { position: new Vec3(0.5, 64, 0.5) }, blockAt: lookup }
   assert.equal(outOfTheWay(bot, new Vec3(5.5, 64, 5.5)), false)
   assert.equal(outOfTheWay(bot, new Vec3(10.5, 40, 10.5)), true)
-  // a bot down in the cave goes for the one beside it
+  // a bot down in the cave: under the cave rule (not fit for the caves) not there either; fit for them, it goes for
+  // the one beside it
   bot.entity.position = new Vec3(10.5, 40, 10.5)
-  assert.equal(outOfTheWay(bot, new Vec3(10.5, 41, 10.5)), false)
+  assert.equal(outOfTheWay(bot, new Vec3(10.5, 41, 10.5)), true)
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const prot = [{ name: 'protection', lvl: 1 }]
+  const ready = fakeBot({
+    position: new Vec3(10.5, 40, 10.5),
+    armor: { head: item('iron_helmet', 1, prot), torso: item('iron_chestplate', 1, prot), legs: item('iron_leggings'), feet: item('iron_boots') },
+    items: [item('iron_sword', 1, [{ name: 'sharpness', lvl: 1 }]), item('cooked_beef', 10)]
+  })
+  ready.blockAt = lookup
+  ready.game.dimension = 'overworld'
+  assert.equal(outOfTheWay(ready, new Vec3(10.5, 41, 10.5)), false)
 })
 
 test('dryStart: off a lake\'s shore (water under every side), a place a few blocks off with no liquid under it', async () => {

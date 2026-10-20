@@ -14,7 +14,7 @@ import { FISHING } from '../planner/sources'
 import { farmCells, grownPlots, harvestFarm, knownFarms, nearlyGrownPlots, plantFarm, rememberFarm, SEED_OF, sow } from '../skills/farm'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { collectBlock, waterBeside } from '../skills/collectBlock'
-import { inCaveWall } from '../skills/caves'
+import { caveCells, caveRuleOn, inCaveWall } from '../skills/caves'
 import { drownedNear } from '../skills/breath'
 import { craft } from '../skills/craft'
 import { PARALLEL_MIN_ITEMS, smelt, smeltParallel } from '../skills/smelt'
@@ -557,6 +557,9 @@ export const PREY_BELOW = 12
 export function outOfTheWay (bot: Bot, pos: Vec3): boolean {
   const lookup = (p: Vec3): { name: string, boundingBox: string } | null => bot.blockAt(p) as any
   if (pos.y < bot.entity.position.y - PREY_BELOW) return true
+  // (and under the rock, for a bot not fit for the caves, wherever it is: a hunt for salmon in a flooded cave at y 46
+  // took a 1.21.11 bot in iron onto the magma blocks of its floor, the hazard reflex 8 times, and it burned, grimls-2)
+  if (caveRuleOn(bot) && caveCells(bot).roofed(pos.floored())) return true
   return openSky(lookup, bot.entity.position.floored()) && !openSky(lookup, pos.floored())
 }
 
