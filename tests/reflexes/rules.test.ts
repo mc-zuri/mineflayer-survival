@@ -676,13 +676,16 @@ test('hostiles reflex: hurt to sealHealth among two zombies down a tunnel, with 
   // down a 1-wide tunnel along x: its two ends to shut, 4 blocks
   const tunnel = (p: Vec3): string => p.z === 0 && p.y >= 64 && p.y <= 65 ? 'air' : 'stone'
   const kit = (stone = 64): any => ({ items: [item('diamond_sword'), item('cobblestone', stone)], armor, world: tunnel })
-  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 9 }), 'seal in')
-  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 11 }), 'fight zombie')
-  assert.strictEqual(check(hostilesReflex, { entities: [zombies[0]], ...kit(), health: 9 }), 'fight zombie')
-  assert.strictEqual(check(hostilesReflex, { entities: [zombies[0]], ...kit(), health: 5 }), 'seal in')
+  // (plain iron isn't fit for the caves: in its tunnel the bot walls itself in at any health, wallInDue; off here)
+  const sealOnly = { hostiles: { wallIn: false } }
+  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 11 }), 'wall in')
+  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 9 }, sealOnly), 'seal in')
+  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 11 }, sealOnly), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombies[0]], ...kit(), health: 9 }, sealOnly), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombies[0]], ...kit(), health: 5 }, sealOnly), 'seal in')
   assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(3), health: 9 }), 'fight zombie')
-  assert.strictEqual(check(hostilesReflex, { entities: [...zombies, entity({ name: 'creeper', position: at(5) })], ...kit(), health: 9 }), 'fight zombie')
-  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 9 }, { hostiles: { sealHealth: 0 } }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [...zombies, entity({ name: 'creeper', position: at(5) })], ...kit(), health: 9 }, sealOnly), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 9 }, { hostiles: { sealHealth: 0, wallIn: false } }), 'fight zombie')
   assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), world: undefined, health: 9 }), 'fight zombie')
   // the fight's until: the health falling to it ends the fight, the box next
   const bot = fakeBot({ entities: zombies, ...kit(), health: 12 })
