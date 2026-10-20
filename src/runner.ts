@@ -16,7 +16,7 @@ import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, MILESTONES, foodGoals, meal
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { carriesWeapon, comeUp, dayPhase, nightAction, nightGeared, nightGoals, topUpPlaces } from './planner/schedule'
 import { describeLevel, markAt, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
-import { onSurface, SURFACE_MIN_Y } from './executor/explore'
+import { inWater, onSurface, SURFACE_MIN_Y, toShore } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
 import { buildBase, keepBaseUnbroken, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
@@ -1476,6 +1476,14 @@ export class Runner {
           return null
         })
         this.log(at != null ? `night: the mine in the slime chunk at ${at.x} ${at.z}, for slime balls` : 'night: no slime chunk to mine in')
+      }
+      // the mine starts on dry ground: in the water (a lake over the spot, a pond) the bot goes to the shore first
+      if (!ctrl.signal.aborted && typeof bot.blockAt === 'function' && inWater(bot)) {
+        const dry = await this.executor.task('out of the water', async (s) => await toShore(bot, s), ctrl.signal).catch(err => {
+          if (signal?.aborted === true || TaskError.is(err, 'DIED') || bot.health <= 0) throw err
+          return false
+        })
+        this.log(`night: in the water at the mine's start: ${dry ? 'out on the shore' : 'no shore found'}`)
       }
       for (const goal of goals) {
         if (ctrl.signal.aborted) break

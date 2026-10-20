@@ -52,5 +52,43 @@ export async function toSlimeChunk (bot: Bot, seed: Seed, signal?: AbortSignal):
     trace('toSlimeChunk: the way there:', (err as Error).message)
     return null
   }
+  // (on dry ground: a lake over the chunk's middle is no place to dig down from, nor to smelt and craft in)
+  await toDryGroundIn(bot, Math.floor(target.x / 16), Math.floor(target.z / 16), signal)
   return inSlimeChunk(seed, bot.entity.position.x, bot.entity.position.z) ? bot.entity.position.floored() : null
+}
+
+/**
+ * The chunk's column nearest the bot whose top is dry ground (no water or lava: columnSurface), or null: where the
+ * night's mine starts in a slime chunk with water over its middle
+ */
+export function dryColumnIn (lookup: (p: Vec3) => { name: string, boundingBox: string } | null, chunkX: number, chunkZ: number, from: Vec3): Vec3 | null {
+  const { columnSurface } = require('../executor/explore') as typeof import('../executor/explore')
+  const cols: Vec3[] = []
+  for (let x = chunkX * 16; x < chunkX * 16 + 16; x++) for (let z = chunkZ * 16; z < chunkZ * 16 + 16; z++) cols.push(new Vec3(x, Math.floor(from.y), z))
+  cols.sort((a, b) => Math.hypot(a.x - from.x, a.z - from.z) - Math.hypot(b.x - from.x, b.z - from.z))
+  for (const c of cols) {
+    const top = columnSurface(lookup, c.x, c.z, c.y)
+    if (top != null && !['water', 'lava', 'bubble_column', 'kelp', 'kelp_plant', 'seagrass', 'tall_seagrass', 'ice'].includes(top)) return c
+  }
+  return null
+}
+
+/**
+ * Out of the water onto dry ground in the chunk (dryColumnIn), else to the nearest shore (toShore). A 1.21.11 bot's
+ * night mine in the slime chunk at (151, -90) was started in a lake there: its smelt and craft sank it, the drowning
+ * reflex took it up three times, and it drowned at (147, 57, -89) (grimls-2, t83599 to t85228).
+ */
+export async function toDryGroundIn (bot: Bot, chunkX: number, chunkZ: number, signal?: AbortSignal): Promise<boolean> {
+  const { inWater, toShore } = require('../executor/explore') as typeof import('../executor/explore')
+  if (!inWater(bot)) return true
+  const dry = dryColumnIn(p => bot.blockAt(p) as any, chunkX, chunkZ, bot.entity.position)
+  if (dry != null) {
+    trace('toSlimeChunk: in the water: to dry ground at', dry.x, dry.z)
+    try {
+      await travel(bot, { target: dry, range: 1 }, signal)
+    } catch (err) {
+      if (isAbort(err)) throw err
+    }
+  }
+  return !inWater(bot) || await toShore(bot, signal)
 }
