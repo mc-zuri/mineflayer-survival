@@ -351,3 +351,15 @@ export function keepOutOfCaves (bot: Bot): void {
   ;(brk as any).survivalCaves = true
   pf.setMoveOptions({ ...settings, exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), step], exclusionAreasBreak: [...(settings.exclusionAreasBreak ?? []), brk] })
 }
+
+/**
+ * Whether a block to mine is a cave's for a bot under the rule (caveRuleOn): open to a cave (a cave's cell against a
+ * face: an ore in a cave's wall, a mineshaft's) or in one itself (a cobweb in a mineshaft's corridor). Mined, the bot
+ * stands in the cave or opens its tunnel to it: such a block is passed over, and the tunnels go on to one in the rock.
+ */
+export function inCaveWall (bot: Bot, pos: { x: number, y: number, z: number }): boolean {
+  if (!caveRuleOn(bot)) return false
+  const cells = caveCells(bot)
+  const p = new Vec3(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z))
+  return cells.isCave(p) || cells.beside([p]).length > 0
+}

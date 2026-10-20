@@ -14,6 +14,7 @@ import { FISHING } from '../planner/sources'
 import { farmCells, grownPlots, harvestFarm, knownFarms, nearlyGrownPlots, plantFarm, rememberFarm, SEED_OF, sow } from '../skills/farm'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { collectBlock, waterBeside } from '../skills/collectBlock'
+import { inCaveWall } from '../skills/caves'
 import { craft } from '../skills/craft'
 import { PARALLEL_MIN_ITEMS, smelt, smeltParallel } from '../skills/smelt'
 import { retrieveItems } from '../skills/chest'
@@ -331,7 +332,12 @@ async function mineBlocks (step: MineStep, ctx: StepContext, muted: (tool: WornT
   const underRoof = shallow && SURFACE_BLOCKS.test(step.block) ? (pos: Vec3): boolean => !openSky(lookup, pos) : () => false
   // (and the blocks the steps lately couldn't get to: a 1.21.11 bot shut in its house planned the same log 7 blocks
   // off 48 times, every try 'no path', and the game stopped, ls-1.21.11 t103051)
-  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || ctx.unreachable?.has(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos)
+  // a block in a cave's wall (an ore in sight in a cave, a mineshaft's cobweb) is left by a bot not fit for the caves
+  // (caveReady): mined, it stands in the cave or opens its tunnel to it; the tunnels go on to one in the rock. A 26.3
+  // bot sent down a mineshaft for its cobwebs, and one after diamonds in plain iron, were killed by the cave spiders
+  // and zombies there at y 20 (ls-26.3, t34384 and t100061)
+  const caveWall = (pos: Vec3): boolean => inCaveWall(bot, pos)
+  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || ctx.unreachable?.has(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos) || caveWall(pos)
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     const subs = blockSubstitutes(step)
