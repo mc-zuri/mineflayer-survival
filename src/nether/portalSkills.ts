@@ -27,6 +27,9 @@ const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
  * A findBlock matcher for a lava source outside the frame's cells (`x,y,z` keys). findBlocks first asks it about each
  * section's palette with blocks that have no position: those match on the block alone.
  */
+/** the lava sources a cast's fill tries, the planned one and the pool's others, before it gives up */
+export const FILL_TRIES = 6
+
 export function otherLavaSource (frameCells: ReadonlySet<string>): (b: any) => boolean {
   return b => isSource(b, 'lava') && (b.position == null || !frameCells.has(`${String(b.position.x)},${String(b.position.y)},${String(b.position.z)}`))
 }
@@ -349,14 +352,29 @@ async function castStep (bot: Bot, step: CastStep, frameCells: Set<string>, getB
       // 3 went with 1, the second pour finding 'no lava bucket', 26.3)
       if (countItems(bot, 'lava_bucket') > 0 && countItems(bot, 'bucket') === 0) return
       let pos = v3(step.pos)
-      // the planned source can be gone (taken, or turned by water); any other source of the pool does
-      if (!isSource(bot.blockAt(pos), 'lava')) {
-        const other = bot.findBlock({ matching: otherLavaSource(frameCells), maxDistance: 24 })
-        if (other == null) throw new SkillError('NOT_FOUND', 'no lava source left to fill the bucket from')
-        pos = other.position
+      // the planned source can be gone (taken, or turned by water), or have no spot to reach it from (a deep pool's
+      // sources under a ledge: 'no spot found to see' it ended three casts of a 26.3 whole game): the pool's others,
+      // nearest first, FILL_TRIES in all
+      const tried = new Set<string>()
+      for (let i = 0; i < FILL_TRIES; i++) {
+        if (!isSource(bot.blockAt(pos), 'lava') || tried.has(pos.toString())) {
+          const matching = otherLavaSource(frameCells)
+          const others = (bot.findBlocks({ matching: (b: any) => matching(b), maxDistance: 24, count: 64 }) ?? [])
+            .filter(p => !tried.has(p.toString()) && isSource(bot.blockAt(p), 'lava'))
+            .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
+          if (others.length === 0) throw new SkillError('NOT_FOUND', `no lava source left to fill the bucket from${tried.size > 0 ? ` (${tried.size} out of reach)` : ''}`)
+          pos = others[0]
+        }
+        try {
+          await fillBucket(bot, { fluid: 'lava', pos }, signal)
+          return
+        } catch (err) {
+          if (isAbort(err) || !isSkillError(err, 'NO_PATH')) throw err
+          trace('castFrame: the lava at', pos.toString(), 'out of reach:', (err as Error).message)
+          tried.add(pos.toString())
+        }
       }
-      await fillBucket(bot, { fluid: 'lava', pos }, signal)
-      return
+      throw new SkillError('NO_PATH', `no lava source in reach to fill the bucket from (${tried.size} tried)`)
     }
     case 'place_lava':
       if (getBlock(step.pos)?.name === 'obsidian') return

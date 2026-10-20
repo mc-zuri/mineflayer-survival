@@ -99,3 +99,41 @@ test('portalSiteWork for a cast: 6 high and two rows each side (the mould behind
   assert.equal(placed.dig.length, 4 * 3 * 5)
   assert.equal(cast.dig.length, 4 * 5 * 6)
 })
+
+test('castFrame: a lava source the bucket finds no spot to reach is passed over for the pool\'s next nearest', async () => {
+  const bucketModule = require('../../src/skills/bucket')
+  const { SkillError } = await import('../../src/skills/errors')
+  const { castFrame } = await import('../../src/nether/portalSkills')
+  const { planLavaCast } = await import('../../src/nether/portal')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 2.5), items: [item('water_bucket', 1), item('bucket', 1), item('cobblestone', 64)] })
+  const lavaAt = (p: any): boolean => p.y === 60 && p.x >= 20 && p.x < 24 && p.z >= 0 && p.z < 3
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = (p: any) => lavaAt(p) ? { ...realAt(p), position: new Vec3(p.x, p.y, p.z), name: 'lava', getProperties: () => ({ level: 0 }), metadata: 0 } : realAt(p)
+  bot.findBlocks = (opts: any) => {
+    const out: any[] = []
+    for (let x = 20; x < 24; x++) for (let z = 0; z < 3; z++) { const p = new Vec3(x, 60, z); if (opts.matching(bot.blockAt(p))) out.push(p) }
+    return out
+  }
+  const lava: Pos[] = []
+  for (let x = 20; x < 24; x++) for (let z = 0; z < 3; z++) lava.push({ x, y: 60, z })
+  const plan = planLavaCast((p: Pos) => { const b = bot.blockAt(new Vec3(p.x, p.y, p.z)); return b == null ? null : { name: b.name, properties: { level: 0 } } }, lava, { origin: { x: 0, y: 64, z: 0 }, axis: 'x' })
+  // the plan's first fill alone (the rest is the cast's own tests')
+  const first = plan?.steps.find(s => s.kind === 'fill_lava') as any
+  assert.ok(first != null)
+  const tried: string[] = []
+  const real = bucketModule.fillBucket
+  bucketModule.fillBucket = async (_b: unknown, a: any) => {
+    tried.push(a.pos.toString())
+    if (tried.length === 1) throw new SkillError('NO_PATH', 'no spot found to see it from')
+    throw new Error('done')
+  }
+  try {
+    await assert.rejects(castFrame(bot, { ...(plan as any), stand: [bot.entity.position.floored()], steps: [first] }), /done/)
+  } finally {
+    bucketModule.fillBucket = real
+  }
+  assert.equal(tried.length, 2)
+  assert.equal(tried[0], new Vec3(first.pos.x, first.pos.y, first.pos.z).toString())
+  assert.notEqual(tried[1], tried[0])
+})
