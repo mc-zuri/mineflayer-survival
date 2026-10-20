@@ -718,16 +718,24 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
 const GOLD_PIECES = ['golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots']
 const SWORDS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'golden_sword', 'wooden_sword']
 
-/** the food points the bot goes into the nether with at the least */
-export const NETHER_FOOD_POINTS = 40
-/** the arrows a bow goes into the nether with at the least */
-export const NETHER_ARROWS = 16
+/**
+ * the food points the bot goes into the nether with at the least: the blaze nook's fight heals on them (a 26.3 bot in
+ * iron with a bow, 64 arrows and 80 points ran out of food in the hall's nook under seed 2's throne at (-277, 77, -159)
+ * two runs of three, 3 to 5 rods got; with 120, two of three still, tests/integration/blaze BLAZE_KIT gateIronBow, gate2)
+ */
+export const NETHER_FOOD_POINTS = 120
+/**
+ * the arrows the bow goes into the nether with at the least: the blazes are shot from the nook (a full draw of a plain
+ * bow takes 3 or so a blaze, the misses lost in the throne, and 8 rods are 16 kills or so; with 16 a 26.3 bot shot 3
+ * and was out, then went in among them with its sword and died)
+ */
+export const NETHER_ARROWS = 64
 /** the ticks the gear for the nether may take to get, when it's missing */
 export const NETHER_GEAR_TICKS = 48000
 
 /**
- * What the bot doesn't go into the nether without (worn or carried): a sword, an iron chestplate or better, a golden
- * piece (or the 4 ingots for boots) for the piglins, a shield, NETHER_ARROWS for a bow carried, and NETHER_FOOD_POINTS of
+ * What the bot doesn't go into the nether without (worn or carried): a sword, an iron helmet, chestplate and leggings or better, a golden
+ * piece (or the 4 ingots for boots) for the piglins, a shield, a bow and NETHER_ARROWS, and NETHER_FOOD_POINTS of
  * food. After a death the bot went back
  * in bare, no gold and no armor, and died to the piglins, the blazes or the lava again (26.3).
  */
@@ -735,11 +743,22 @@ export function netherGearNeeds (inv: Inventory): ObtainRequest[] {
   const out: ObtainRequest[] = []
   if (inv.countAny(SWORDS.filter(s => s !== 'wooden_sword' && s !== 'golden_sword')) === 0) out.push({ item: 'stone_sword', count: 1 })
   if (inv.countAny(['iron_chestplate', 'diamond_chestplate', 'netherite_chestplate']) === 0) out.push({ item: 'iron_chestplate', count: 1 })
+  // and the helmet and leggings (the boots golden): the blazes' fireballs past the shield in the bow's nook burn on, and
+  // a 26.3 bot with only the chestplate, a bow, 64 arrows and 120 food points died in the hall's nook under seed 2's
+  // throne at (-277, 77, -159) six runs of six; with the helmet and leggings too, alive three of three (BLAZE_KIT gateBow
+  // BLAZE_ARROWS=64 BLAZE_FOOD=15, gate2)
+  if (inv.countAny(['iron_helmet', 'diamond_helmet', 'netherite_helmet']) === 0) out.push({ item: 'iron_helmet', count: 1 })
+  if (inv.countAny(['iron_leggings', 'diamond_leggings', 'netherite_leggings']) === 0) out.push({ item: 'iron_leggings', count: 1 })
   if (inv.countAny(GOLD_PIECES) === 0 && inv.count('gold_ingot') < 4) out.push({ item: 'golden_boots', count: 1 })
   // a shield for the blazes' fireballs (the raw iron smelted for it), and a bow's arrows: a 26.3 bot with neither shield
   // nor arrows left got no rods at the spawner, and starved (blaze2)
   if (inv.count('shield') === 0) out.push({ item: 'shield', count: 1 })
-  if (inv.count('bow') > 0 && inv.count('arrow') < NETHER_ARROWS) out.push({ item: 'arrow', count: NETHER_ARROWS })
+  // a bow and NETHER_ARROWS, a bow carried or not: with a sword alone the blazes of a throne walled in (seed 2's at
+  // (-277, 77, -159), the whole game's from its portal) were fought among them, in their spawn volume, and 26.3 bots
+  // with a stone sword (the gate's least, nether-26.3-q3's bag) died there 6 runs of 6 for 0 to 1 rods, one in iron with
+  // an iron sword got 0 to 1 rods in 16000 ticks; the fight gives such a spawner up now (tests/integration/blaze)
+  if (inv.count('bow') === 0) out.push({ item: 'bow', count: 1 })
+  if (inv.count('arrow') < NETHER_ARROWS) out.push({ item: 'arrow', count: NETHER_ARROWS })
   const food = heldFor(inv, FOOD_GOAL, { unit: 'nutrition' })
   if (food < NETHER_FOOD_POINTS) out.push({ item: FOOD_GOAL, count: NETHER_FOOD_POINTS, unit: 'nutrition' })
   return out
