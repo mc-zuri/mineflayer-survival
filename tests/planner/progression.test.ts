@@ -125,11 +125,20 @@ test('done predicates read inventory, worn equipment, memory and advancements', 
 
   assert.equal(milestone('enchanting').done(state()), false)
   // the table and the lapis: the bookshelves are the handler's, as many as the world gives
-  assert.deepEqual(milestone('enchanting').goals(state()), [{ item: 'enchanting_table', count: 1 }, { item: 'lapis_lazuli', count: 9 }])
+  assert.deepEqual(milestone('enchanting').goals(state()), [{ item: 'enchanting_table', count: 1 }, { item: 'lapis_lazuli', count: 12 }])
   const table = state({}, { enchanted: ['diamond_pickaxe'] })
   table.memory.addPoi('enchanting_table', { x: 1, y: 40, z: 1 })
   assert.equal(milestone('enchanting').done(table), true)
-  assert.deepEqual(milestone('enchanting').goals(table), [{ item: 'lapis_lazuli', count: 9 }])
+  assert.deepEqual(milestone('enchanting').goals(table), [{ item: 'lapis_lazuli', count: 12 }])
+  // the iron armor held or worn enchanted too (the golden boots aside): a plain chestplate worn, not done
+  const armor = (enchanted: string[]): ProgressState => {
+    const s = state({ iron_leggings: 1 }, { enchanted: ['diamond_pickaxe', ...enchanted], equipment: ['iron_chestplate', 'iron_helmet', 'golden_boots'] })
+    s.memory.addPoi('enchanting_table', { x: 1, y: 40, z: 1 })
+    return s
+  }
+  assert.equal(milestone('enchanting').done(armor([])), false)
+  assert.equal(milestone('enchanting').done(armor(['iron_chestplate', 'iron_leggings'])), false)
+  assert.equal(milestone('enchanting').done(armor(['iron_chestplate', 'iron_leggings', 'iron_helmet'])), true)
 
   assert.equal(milestone('end').done(state({}, { advancements: ['end/kill_dragon'] })), true)
   assert.deepEqual(toolsAtLeast('pickaxe', 'stone'), ['stone_pickaxe', 'copper_pickaxe', 'iron_pickaxe', 'diamond_pickaxe', 'netherite_pickaxe'])

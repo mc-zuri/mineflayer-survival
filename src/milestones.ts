@@ -4,7 +4,7 @@
 // through, the dragon fought, out by the exit portal). Each skill runs as one foreground task, so the reflexes still
 // preempt it (it starts over after).
 import type { Bot } from 'mineflayer'
-import { BOOKSHELVES, EYES_FOR_FRAME, EYES_TARGET, FOOD_GOAL, eyesForPortal } from './planner/progression'
+import { BOOKSHELVES, ENCHANTED_ARMOR, EYES_FOR_FRAME, EYES_TARGET, FOOD_GOAL, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
 import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, huntable, isAdultPiglin, returnOverworld, wearGold, wearingGold, withNetherSafety } from './nether/skills'
 import { travel } from './skills/travel'
@@ -337,6 +337,16 @@ export async function enchantBooksAndApply (bot: Bot, executor: Executor, signal
   }
 }
 
+/**
+ * The levels the enchanting milestone gets before the table: the top offer's (offerCostRange: 8 with no shelves, 30
+ * with 15) and the 3 each the armor's enchants after the pickaxe's take (EnchantmentMenu: the slot's 1 to 3), so the
+ * last piece still has the top offer; 30 at most (a 1.21.11 run at 14 levels and no shelves had the pickaxe, the sword,
+ * the chestplate and the leggings enchanted, and the helmet left plain)
+ */
+export function enchantingLevels (shelves: number): number {
+  return Math.min(30, offerCostRange(2, shelves).max + 3 * ENCHANTED_ARMOR.length)
+}
+
 /** levels to go from which the enchanting builds an experience farm at a spawner it knows */
 export const XP_FARM_WORTH = 10
 /** how far off a spawner may be for that */
@@ -445,7 +455,7 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   // the levels of the table's top offer first (30 with 15 shelves), the deep ores and the tunnels' after the near
   // ones run out (gainLevels alone stopped at 26 of 29: 'no ore, smelt, kill left within 32 blocks', 26.3)
   const workplace = bot.entity.position.clone()
-  await levelsToward(bot, executor, offerCostRange(2, shelves).max, signal, log)
+  await levelsToward(bot, executor, enchantingLevels(shelves), signal, log)
   // back to the table (the one remembered), or where the bot was to set it up, from the ores' tunnels
   const poi = executor.memory.getPois('enchanting_table', { dimension: 'overworld', near: workplace })[0]
   const tableAt = poi != null ? new Vec3(poi.x, poi.y, poi.z) : workplace

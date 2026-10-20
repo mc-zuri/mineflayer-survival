@@ -52,7 +52,7 @@ test('kindsFor: a book goes to the gear in its order (the pickaxe before a hoe, 
   assert.equal(kindsFor('sharpness')[0], 'sword')
 })
 
-test('kindsFor: a book of mending goes on the pickaxe, then the sword, then the chestplate', async () => {
+test('kindsFor: a book of mending goes on the pickaxe, then the armor (chestplate, leggings, helmet), then the sword (GEAR_ORDER)', async () => {
   const { kindsFor } = await import('../../src/skills/anvil')
-  assert.deepEqual(kindsFor('mending').slice(0, 3), ['pickaxe', 'sword', 'chestplate'])
+  assert.deepEqual(kindsFor('mending').slice(0, 5), ['pickaxe', 'chestplate', 'leggings', 'helmet', 'sword'])
 })

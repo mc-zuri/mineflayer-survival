@@ -393,3 +393,9 @@ test('setupEnchanting: the room cells a dig stops short of are dug again from wh
   assert.equal(calls.length, 2)
   assert.equal(calls[1], 2)
 })
+
+test('enchantingLevels: the top offer\'s levels and 3 for each of the armor\'s enchants after the pickaxe\'s, 30 at most', async () => {
+  const { enchantingLevels } = await import('../../src/milestones')
+  assert.strictEqual(enchantingLevels(0), 17)
+  assert.strictEqual(enchantingLevels(15), 30)
+})

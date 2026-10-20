@@ -114,6 +114,27 @@ function hasStation (state: ProgressState, station: Station): boolean {
   return state.stations?.includes(station) === true || state.inventory.has(station)
 }
 
+/** the armor the enchanting milestone enchants besides the pickaxe (the golden boots worn in the nether aside) */
+export const ENCHANTED_ARMOR = ['helmet', 'chestplate', 'leggings'] as const
+
+/**
+ * the lapis the enchanting milestone gets: the top offer's 3 for the pickaxe and each of ENCHANTED_ARMOR (9 had the
+ * helmet left plain, the sword's enchant before it, full-1.21.11-fresh-b)
+ */
+export const ENCHANTING_LAPIS = 3 * (1 + ENCHANTED_ARMOR.length)
+
+/**
+ * Whether each piece of ENCHANTED_ARMOR the bot has (iron or better) has an enchanted one: the milestone done with only
+ * the pickaxe enchanted left the armor plain (full-26.3-fresh-e: the bag full, the worn pieces not taken off), and the
+ * blazes' fireballs burn through plain armor
+ */
+export function armorEnchanted (state: ProgressState): boolean {
+  return ENCHANTED_ARMOR.every(slot => {
+    const names = armorAtLeast(slot, 'iron')
+    return !ownsAny(state, names) || (state.enchanted ?? []).some(n => names.includes(n))
+  })
+}
+
 /** eyes the bot has or can craft from what it has */
 export function eyesAvailable (state: ProgressState): number {
   const inv = state.inventory
@@ -199,11 +220,12 @@ export const MILESTONES: readonly Milestone[] = [
   {
     id: 'enchanting',
     title: 'an enchanting table with 15 bookshelves, and enchanted gear',
-    done: s => s.memory.getPois('enchanting_table').length > 0 && (s.enchanted ?? []).some(n => parseTool(n)?.kind === 'pickaxe'),
+    done: s => s.memory.getPois('enchanting_table').length > 0 && (s.enchanted ?? []).some(n => parseTool(n)?.kind === 'pickaxe') &&
+      armorEnchanted(s),
     // (the bookshelves are the handler's: as many as the world gives within a budget, up to BOOKSHELVES)
     goals: s => [
       ...(s.memory.getPois('enchanting_table').length > 0 ? [] : [{ item: 'enchanting_table', count: 1 }]),
-      { item: 'lapis_lazuli', count: 9 }
+      { item: 'lapis_lazuli', count: ENCHANTING_LAPIS }
     ]
   },
   {

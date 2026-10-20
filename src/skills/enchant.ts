@@ -663,8 +663,12 @@ async function enchantHeld (bot: Bot, args: EnchantArgs, signal?: AbortSignal): 
 // ---------------------------------------------------------------------------------------------------------------------
 // The milestone
 
-/** the gear enchanted first: the pickaxe (the milestone's own check), then the sword and the armor */
-export const GEAR_ORDER: readonly ItemKind[] = ['pickaxe', 'sword', 'chestplate', 'leggings', 'helmet', 'boots', 'bow', 'axe']
+/**
+ * the gear enchanted first: the pickaxe (the milestone's own check), then the armor the blazes' fireballs burn through
+ * (its protection), then the sword. With the sword before the armor a 1.21.11 run's 9 lapis went on the pickaxe, the
+ * sword, the chestplate and the leggings, and the helmet was left plain (full-1.21.11-fresh-b)
+ */
+export const GEAR_ORDER: readonly ItemKind[] = ['pickaxe', 'chestplate', 'leggings', 'helmet', 'sword', 'boots', 'bow', 'axe']
 
 /** the best unenchanted item of a kind, held or worn */
 export function gearToEnchant (bot: Bot, kind: ItemKind): Item | null {
