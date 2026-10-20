@@ -44,6 +44,8 @@ export interface Death extends Located {
   underground?: boolean
   /** false when what it dropped is worth no trip back (dropsWorthATrip: a few blocks of dirt) */
   worth?: boolean
+  /** the mob that killed the bot (the last to hurt it, within a few seconds of the death) */
+  killer?: string
 }
 
 export interface WorldMemoryJSON {
@@ -236,8 +238,8 @@ export class WorldMemory {
     return opts.count != null ? out.slice(0, opts.count) : out
   }
 
-  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean, worth?: boolean): void {
-    this.death = { ...at(pos, dimension), seen: this.now, ...(underground != null ? { underground } : {}), ...(worth != null ? { worth } : {}) }
+  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean, worth?: boolean, killer?: string): void {
+    this.death = { ...at(pos, dimension), seen: this.now, ...(underground != null ? { underground } : {}), ...(worth != null ? { worth } : {}), ...(killer != null ? { killer } : {}) }
   }
 
   toJSON (): WorldMemoryJSON {

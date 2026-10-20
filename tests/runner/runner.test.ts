@@ -733,3 +733,20 @@ test('a milestone not ready to go on (notReady) is tried again without counting 
   assert.ok(logs.some(l => /milestone wood not ready \(3\)/.test(l)))
   assert.ok(!logs.some(l => /milestone wood failed/.test(l)))
 })
+
+test('the death spot: not gone back to bare where an archer shot the bot dead; a death to a mob at night gone back to by day if the items last (full-26.3-fresh-d)', async () => {
+  const { deathSpotTiming } = await import('../../src/runner')
+  const air = (): { name: string } => ({ name: 'air' })
+  const now = { tick: 2000, dimension: 'overworld', position: new Vec3(0, 64, 0), minY: -64, blockAt: air }
+  const death = { x: 20, y: 64, z: 0, dimension: 'overworld', seen: 1900 }
+  assert.equal(deathSpotWorthIt({ ...death, killer: 'skeleton' }, { ...now, bare: true }, 6000), false)
+  assert.equal(deathSpotWorthIt({ ...death, killer: 'skeleton' }, { ...now, bare: false }, 6000), true)
+  assert.equal(deathSpotWorthIt({ ...death, killer: 'zombie' }, { ...now, bare: true }, 6000), true)
+  // by day: go; at night with the day 3540 off: wait, the items last; at 13000 (10460 to the day): skip
+  assert.equal(deathSpotTiming({ seen: 1900, killer: 'zombie' }, { tick: 2000, timeOfDay: 6000, dimension: 'overworld' }, 100, 6000), 'go')
+  assert.equal(deathSpotTiming({ seen: 1900, killer: 'skeleton' }, { tick: 2000, timeOfDay: 19920, dimension: 'overworld' }, 100, 6000), 'wait')
+  assert.equal(deathSpotTiming({ seen: 1900, killer: 'skeleton' }, { tick: 2000, timeOfDay: 13000, dimension: 'overworld' }, 100, 6000), 'skip')
+  // a fall (no killer) or the nether: go
+  assert.equal(deathSpotTiming({ seen: 1900 }, { tick: 2000, timeOfDay: 13000, dimension: 'overworld' }, 100, 6000), 'go')
+  assert.equal(deathSpotTiming({ seen: 1900, killer: 'blaze' }, { tick: 2000, timeOfDay: 13000, dimension: 'the_nether' }, 100, 6000), 'go')
+})

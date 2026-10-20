@@ -37,6 +37,7 @@ import { unstick } from './executor/explore'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { Diagnostics, ReportSummary, WatchdogOptions } from './diagnostics'
 import { isDeathMessage } from './diagnostics/death'
+import { RANGED_HOSTILES } from './reflexes/rules'
 import { blockIdsNamed, findBlock } from './core/findBlocks'
 import type { Seed } from './worldgen'
 
@@ -245,8 +246,11 @@ export async function waitOutTheNight (bot: Bot, signal: AbortSignal): Promise<u
 }
 
 /** whether a death spot is worth going back to: in this dimension, not underground, in lava or the void, the items not gone yet */
-export function deathSpotWorthIt (death: { x: number, y: number, z: number, dimension: string, seen: number, underground?: boolean, worth?: boolean } | null, now: { tick: number, dimension: string, position: Vec3, minY: number, blockAt: (pos: Vec3) => { name: string } | null }, maxTicks: number): boolean {
+export function deathSpotWorthIt (death: { x: number, y: number, z: number, dimension: string, seen: number, underground?: boolean, worth?: boolean, killer?: string } | null, now: { tick: number, dimension: string, position: Vec3, minY: number, blockAt: (pos: Vec3) => { name: string } | null, bare?: boolean }, maxTicks: number): boolean {
   if (death == null || death.dimension !== now.dimension) return false
+  // shot dead, and back bare (no armor, no shield): the archer is likely where it was (a skeleton in a tree's shade by
+  // day), and shoots again; a 26.3 bot went back so to its spot by a skeleton and was shot dead again (full-26.3-fresh-d)
+  if (death.killer != null && RANGED_HOSTILES.has(death.killer) && now.bare === true) return false
   // nothing dropped worth the trip (dropsWorthATrip): the mobs that killed the bot are likely still there
   if (death.worth === false) return false
   // a death in a cave or down a mine is left: the mobs that killed the bot in the dark are still there (and a trip
@@ -265,6 +269,19 @@ export function deathSpotWorthIt (death: { x: number, y: number, z: number, dime
     }
   }
   return true
+}
+
+/**
+ * Whether the trip back to a death spot waits for the day first, or is given up: a death to a mob at night in the
+ * overworld, the night not over, is gone back to by day (the mobs that killed the bot are about it all night; they burn
+ * or go off by day) if the items would still be there by then and the way there (`travel` ticks), else not at all.
+ * 'go' otherwise.
+ */
+export function deathSpotTiming (death: { seen: number, killer?: string } | null, now: { tick: number, timeOfDay: number, dimension: string }, travel: number, maxTicks: number): 'go' | 'wait' | 'skip' {
+  if (death == null || death.killer == null || now.dimension !== 'overworld' || !canSleepNow(now.timeOfDay, false)) return 'go'
+  // (the night's end: the undead burn from about 23460, VanillaTime's sunrise)
+  const toDay = (24000 + 23460 - now.timeOfDay) % 24000
+  return now.tick - death.seen + toDay + travel <= maxTicks ? 'wait' : 'skip'
 }
 
 /** a system message about the player that isn't an advancement or a join: a death message (DeathMessageType's) */
@@ -1160,10 +1177,24 @@ export class Runner {
       dimension: normalizeDimension(bot.game?.dimension),
       position: bot.entity.position,
       minY: (bot.game as any)?.minY ?? -64,
-      blockAt: pos => bot.blockAt(pos)
+      blockAt: pos => bot.blockAt(pos),
+      bare: armorPoints(bot) === 0 && bot.inventory.items().every(i => i.name !== 'shield') && bot.inventory.slots[45]?.name !== 'shield'
     }, this.options.deathItemTicks ?? 6000)
     if (!deadly && !worth) diag?.recovery({ deathSpot: death == null ? 'skipped: no death spot' : 'skipped: not worth it (nothing worth the trip, another dimension, underground, lava, the void, or the items gone first)' })
-    if (death != null && worth) {
+    // a death to a mob at night: back by day, the night waited out (indoors, in the base, a hole) where the bot is
+    const timing = death == null || !worth ? 'go' : deathSpotTiming(death, { tick: this.memory.now, timeOfDay: bot.time?.timeOfDay ?? 0, dimension: normalizeDimension(bot.game?.dimension) }, bot.entity.position.distanceTo(new Vec3(death.x, death.y, death.z)) * 5, this.options.deathItemTicks ?? 6000)
+    if (death != null && worth && timing === 'skip') {
+      this.log(`not back to the death spot at ${death.x} ${death.y} ${death.z}: killed by a ${death.killer ?? 'mob'} at night, the items gone by the day`)
+      diag?.recovery({ deathSpot: 'skipped: killed at night, the items gone by the day' })
+    }
+    if (death != null && worth && timing === 'wait') {
+      this.log(`the death spot at ${death.x} ${death.y} ${death.z} by day: killed by a ${death.killer ?? 'mob'} at night, the night waited out first`)
+      await this.executor.task('wait out the night', async (s) => await waitOutTheNight(bot, s), signal).catch(err => {
+        if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+        this.log(`the night: ${(err as Error).message}`)
+      })
+    }
+    if (death != null && worth && timing !== 'skip') {
       this.log(`back to the death spot at ${death.x} ${death.y} ${death.z}`)
       try {
         const spot = new Vec3(death.x, death.y, death.z)

@@ -83,6 +83,9 @@ function useScaffoldItems (bot: Bot): void {
   pf.setMoveOptions({ ...pf.defaultMoveSettings, scaffoldingBlocks: [...SCAFFOLD_ITEMS] })
 }
 
+/** ticks before a death the last mob to hurt the bot is taken for its killer */
+export const KILLER_TICKS = 200
+
 export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
   const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, ...opts }
   return function (bot: Bot): void {
@@ -114,6 +117,11 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     ;(bot as any)._client?.on?.('advancements', (packet: AdvancementProgressPacket) => {
       for (const id of advancementsDone(packet)) bot.survival.advancements.add(id)
     })
+    // the last mob to hurt the bot, and when: the death's killer (the death spot's trip judged by it)
+    let lastAttacker: { name: string, tick: number } | null = null
+    bot.on('entityHurt', (entity: any, source?: any) => {
+      if (entity === bot.entity && source != null && source !== bot.entity && typeof source.name === 'string') lastAttacker = { name: source.name, tick: tasks.tick }
+    })
     bot.on('death', () => {
       // the running and queued tasks can't go on; the death spot is where the items are
       if (bot.entity != null) {
@@ -125,7 +133,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
         const dropped = typeof inventory?.items === 'function'
           ? [...inventory.items(), ...[5, 6, 7, 8, 45].map(s => inventory.slots?.[s])].filter(i => i != null).map(i => (i as any).name as string)
           : null
-        memory.setDeath(bot.entity.position, dimension, dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined, dropped == null ? undefined : dropsWorthATrip(dropped, bot.registry as any))
+        const killer = lastAttacker != null && tasks.tick - lastAttacker.tick <= KILLER_TICKS ? lastAttacker.name : undefined
+        memory.setDeath(bot.entity.position, dimension, dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined, dropped == null ? undefined : dropsWorthATrip(dropped, bot.registry as any), killer)
         if (dimension === 'the_nether') {
           rememberNetherDeath(memory, bot.entity.position)
           pruneTrail(memory, bot.entity.position)
