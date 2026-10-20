@@ -404,11 +404,13 @@ async function castStep (bot: Bot, step: CastStep, frameCells: Set<string>, getB
       // nearest first, FILL_TRIES in all
       const tried = new Set<string>()
       for (let i = 0; i < FILL_TRIES; i++) {
-        if (!isSource(bot.blockAt(pos), 'lava') || tried.has(pos.toString())) {
+        if (!isSource(bot.blockAt(pos), 'lava') || tried.has(pos.toString()) || bot.blockAt(pos.offset(0, 1, 0))?.name === 'lava') {
           const matching = otherLavaSource(frameCells)
+          // (open to the air above first: a deep pool's sources under its top layer, or a ledge, aren't reached)
+          const open = (p: Vec3): number => /^(air|cave_air)$/.test(bot.blockAt(p.offset(0, 1, 0))?.name ?? '') ? 0 : 1
           const others = (bot.findBlocks({ matching: (b: any) => matching(b), maxDistance: 24, count: 64 }) ?? [])
-            .filter(p => !tried.has(p.toString()) && isSource(bot.blockAt(p), 'lava'))
-            .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
+            .filter(p => !tried.has(p.toString()) && isSource(bot.blockAt(p), 'lava') && bot.blockAt(p.offset(0, 1, 0))?.name !== 'lava')
+            .sort((a, b) => open(a) - open(b) || a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
           if (others.length === 0) throw new SkillError('NOT_FOUND', `no lava source left to fill the bucket from${tried.size > 0 ? ` (${tried.size} out of reach)` : ''}`)
           pos = others[0]
         }

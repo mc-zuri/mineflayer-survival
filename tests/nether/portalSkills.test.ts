@@ -186,3 +186,34 @@ test('preparePortalSite fills the ground holes its own digging walks made, not o
   assert.ok(first != null)
   assert.ok(placed.length > 0, 'the hole the dig made filled')
 })
+
+test('castFrame: a deep pool\'s fill takes a source open to the air, not one under its top layer', async () => {
+  const bucketModule = require('../../src/skills/bucket')
+  const { castFrame } = await import('../../src/nether/portalSkills')
+  const { planLavaCast } = await import('../../src/nether/portal')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 2.5), items: [item('water_bucket', 1), item('bucket', 1), item('cobblestone', 64)] })
+  const lavaAt = (p: any): boolean => (p.y === 60 || p.y === 61) && p.x >= 20 && p.x < 24 && p.z >= 0 && p.z < 3
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = (p: any) => lavaAt(p) ? { ...realAt(p), position: new Vec3(p.x, p.y, p.z), name: 'lava', getProperties: () => ({ level: 0 }), metadata: 0 } : realAt(p)
+  bot.findBlocks = (opts: any) => {
+    const out: any[] = []
+    for (let x = 20; x < 24; x++) for (let z = 0; z < 3; z++) for (const y of [60, 61]) { const p = new Vec3(x, y, z); if (opts.matching(bot.blockAt(p))) out.push(p) }
+    return out
+  }
+  // the plan's sources the bottom layer's (as the nearest to the site might be)
+  const bottom: Pos[] = []
+  for (let x = 20; x < 24; x++) for (let z = 0; z < 3; z++) bottom.push({ x, y: 60, z })
+  const plan = planLavaCast((p: Pos) => { const b = bot.blockAt(new Vec3(p.x, p.y, p.z)); return b == null ? null : { name: b.name, properties: { level: 0 } } }, bottom, { origin: { x: 0, y: 64, z: 0 }, axis: 'x' })
+  const first = plan?.steps.find(s => s.kind === 'fill_lava') as any
+  assert.ok(first != null && first.pos.y === 60)
+  const tried: any[] = []
+  const real = bucketModule.fillBucket
+  bucketModule.fillBucket = async (_b: unknown, a: any) => { tried.push(a.pos); throw new Error('done') }
+  try {
+    await assert.rejects(castFrame(bot, { ...(plan as any), stand: [bot.entity.position.floored()], steps: [first] }), /done/)
+  } finally {
+    bucketModule.fillBucket = real
+  }
+  assert.equal(tried[0].y, 61)
+})
