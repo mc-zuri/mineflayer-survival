@@ -197,3 +197,14 @@ test('stockedItem: an item is stocked when each mark counting it is at its high 
   // before the wood milestone the stone mark doesn't apply
   assert.equal(stockedItem(STOCK_MARKS, 'cobblestone', inv({}), {}, []), true)
 })
+
+test('the bow\'s and arrows\' makings (string, feathers, flint) are stocked on the surface from the iron on, a bow counting for its string and arrows for their feathers and flint', () => {
+  const registry: any = minecraftData('26.3')
+  const ids = (items: Record<string, number>, reached: any[]): string[] => new StockPolicy().topUps(new Inventory(registry, items), {}, reached, ['surface']).map(u => u.mark.id)
+  assert.ok(!ids({}, ['wood', 'stone', 'food']).some(i => ['string', 'feather', 'flint'].includes(i)))
+  const afterIron = ids({}, ['wood', 'stone', 'food', 'iron'])
+  for (const id of ['string', 'feather', 'flint']) assert.ok(afterIron.includes(id), afterIron.join(', '))
+  // a bow held is its 3 string; 64 arrows are 16 feathers and 16 flint
+  const armed = ids({ bow: 1, arrow: 64 }, ['wood', 'stone', 'food', 'iron'])
+  for (const id of ['string', 'feather', 'flint']) assert.ok(!armed.includes(id), armed.join(', '))
+})

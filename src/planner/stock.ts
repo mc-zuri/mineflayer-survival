@@ -63,6 +63,7 @@ const STACK = 64
  * - paper and gunpowder: the elytra's rockets after the dragon (a paper and a gunpowder make 3 of flight duration 1),
  *   the paper from the cane farm's sugar cane, the gunpowder from creepers hunted at night (a top-up's plan for it is
  *   dear till a creeper is in sight, so it waits for the night's).
+ * - string, feathers and flint: the bow and the arrows of the nether gate, banked as the play goes (a few each);
  * - slime balls: the magma cream of the nether's fire resistance (a blaze powder and a slime ball), from the slimes of
  *   the night's mines (slime chunks under y 40) and swamps, a plan dear till one is in sight; the magma cubes that drop
  *   the cream itself are in the basalt deltas' pits and lava, where a 26.3 bot hunting them burned to death twice.
@@ -82,7 +83,13 @@ export const STOCK_MARKS: readonly StockMark[] = [
   { id: 'arrow', counts: { arrow: 1 }, gather: 'arrow', low: 32, high: 64, keep: { arrow: Infinity }, from: 'diamonds', where: 'surface', ticksPerUnit: 150 },
   { id: 'paper', counts: { paper: 1, sugar_cane: 1 }, gather: 'paper', low: 16, high: 48, keep: { paper: 16 }, from: 'end', where: 'surface', ticksPerUnit: 60 },
   { id: 'gunpowder', counts: { gunpowder: 1 }, gather: 'gunpowder', low: 8, high: 32, keep: { gunpowder: 16 }, from: 'end', where: 'surface', ticksPerUnit: 600 },
-  { id: 'slime', counts: { slime_ball: 1, magma_cream: 1 }, gather: 'slime_ball', low: 1, high: 2, keep: { slime_ball: 2 }, from: 'iron', where: 'underground', ticksPerUnit: 600 }
+  { id: 'slime', counts: { slime_ball: 1, magma_cream: 1 }, gather: 'slime_ball', low: 1, high: 2, keep: { slime_ball: 2 }, from: 'iron', where: 'underground', ticksPerUnit: 600 },
+  // the bow's and the arrows' makings, banked as the play goes (the spiders and chickens met, the gravel dug), not only
+  // when the nether gate asks for them: seed 2's spiders and chickens were not to be found when it did, a 1.21.11 kit
+  // hunted spiders for a bow 100000 ticks and more, and a 26.3 one chickens for the arrows' feathers
+  { id: 'string', counts: { string: 1, bow: 3 }, gather: 'string', low: 3, high: 6, keep: { string: 6 }, from: 'iron', where: 'surface', ticksPerUnit: 600 },
+  { id: 'feather', counts: { feather: 1, arrow: 1 / 4 }, gather: 'feather', low: 8, high: 16, keep: { feather: 16 }, from: 'iron', where: 'surface', ticksPerUnit: 300 },
+  { id: 'flint', counts: { flint: 1, arrow: 1 / 4 }, gather: 'flint', low: 8, high: 16, keep: { flint: 16 }, from: 'iron', where: 'surface', ticksPerUnit: 100 }
 ]
 
 /** slots a top-up leaves free for the work's own pickups (the milestone's items, the drops on the way) */
