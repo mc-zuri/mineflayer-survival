@@ -420,3 +420,8 @@ test('AttackStrength.attack refuses a charged sword swing whose sweep would hit 
   assert.deepEqual(sent, [8])
   s.detach()
 })
+
+test('FIGHT_REACH: the fight swings from 2.75 of the eye, under the 3 the server measures (Grim Reach: 3.048 from a swing at 2.9, grim-2: the zombie had moved on the server)', async () => {
+  const { FIGHT_REACH } = await import('../../src/skills/fight')
+  assert.ok(FIGHT_REACH <= 2.75 && FIGHT_REACH > 2.5, String(FIGHT_REACH))
+})

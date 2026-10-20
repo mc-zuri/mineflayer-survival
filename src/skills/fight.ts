@@ -381,9 +381,17 @@ function lookAt (bot: Bot, point: Vec3): void {
  * blow. Returns once the target is dead or gone; throws noTarget if it's gone before the first hit, timeout or
  * noPath if it can't finish it.
  */
+/**
+ * The reach the fight swings from, eye to the target's box as the client shows it: Player.entityInteractionRange 3,
+ * less the target's move between where the client has it and where the server does (its interpolation, a tick or so:
+ * a zombie walks 0.15). Grim's Reach measures the server's box from the eye at the attack: 2.9 was 3.048 there once
+ * (pnpm e2e --grim, grim-2, a zombie)
+ */
+export const FIGHT_REACH = 2.75
+
 export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}): Promise<FightResult> {
   const signal = opts.signal
-  const reach = opts.reach ?? 2.9
+  const reach = opts.reach ?? FIGHT_REACH
   const crits = opts.crits !== false
   const useShield = opts.shield !== false
   const maxTicks = opts.maxTicks ?? 1200
