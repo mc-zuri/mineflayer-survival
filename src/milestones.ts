@@ -28,6 +28,7 @@ import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from
 import { makeWaterHole, plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
 import { herdPen, inPen, leadIntoPen, type PenPlan } from './skills/pen'
+import { BREEDERS_KEPT, HERD } from './skills/herd'
 import { TRIP_KIT, kitSpares, stashTripKit } from './skills/tripKit'
 import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
@@ -57,8 +58,7 @@ export function netherNeeds (inv: { count: (name: string) => number }): { rods: 
   return { rods: Math.max(0, Math.ceil((wanted - powder) / 2)), pearls: Math.max(0, wanted - inv.count('ender_pearl')) }
 }
 
-/** the point of interest where the bot's herd was let out */
-export const HERD = 'herd'
+export { HERD, BREEDERS_KEPT }
 
 /**
  * What the enchanting's room in the bag keeps (a forced makeRoom throws the rest it must): the herd's wheat, the
@@ -216,8 +216,6 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
 /** books kept out of the shelves, to enchant and put on the gear at an anvil */
 export const BOOKS_KEPT = 1
 
-/** adult cows kept to breed when the rest are killed for leather */
-export const BREEDERS_KEPT = 2
 
 /**
  * The shelves the leather at hand makes books for (3 books a shelf, a book a leather; the table's book first, and
