@@ -15,6 +15,8 @@ export interface ShootOptions extends SkillOptions {
   checkBlocks?: boolean
   /** where on an entity to aim, from its position (default: its middle, else high on its box when the middle's line is blocked) */
   aimOffset?: Vec3
+  /** looked at each tick: once true the shooting stops (the bow let go, a draw cut short) */
+  until?: () => boolean
 }
 
 export interface ShootResult {
@@ -95,6 +97,7 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
     while (shots < maxShots) {
       throwIfAborted(signal)
       if (isEntity && !isAlive(bot, target)) return { shots, hit: shots > 0, solution }
+      if (opts.until?.() === true) return { shots, hit: false, solution }
       if (!hasArrows(bot) && bot.game.gameMode !== 'creative') throw new TaskError('MISSING_ITEMS', 'out of arrows')
       bot.clearControlStates()
       bot.deactivateItem()
@@ -105,6 +108,7 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
         if (solution != null) await bot.look(solution.yaw, solution.pitch, true)
         await waitTicks(bot, 1, signal)
         if (isEntity && !isAlive(bot, target)) break
+        if (opts.until?.() === true) { bot.deactivateItem(); return { shots, hit: false, solution } }
       }
       if (isEntity && !isAlive(bot, target)) { bot.deactivateItem(); return { shots, hit: true, solution } }
       solution = aim(bot, target, { leadTicks: 1, highArc: opts.highArc, world, offset: opts.aimOffset })
@@ -119,7 +123,7 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
       shots++
       const flight = Math.ceil(solution.ticks) + 10
       if (isEntity) {
-        for (let t = 0; t < flight && isAlive(bot, target); t++) await waitTicks(bot, 1, signal)
+        for (let t = 0; t < flight && isAlive(bot, target) && opts.until?.() !== true; t++) await waitTicks(bot, 1, signal)
         if (!isAlive(bot, target)) return { shots, hit: true, solution }
       } else {
         await waitTicks(bot, flight, signal)

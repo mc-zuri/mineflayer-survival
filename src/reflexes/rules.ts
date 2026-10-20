@@ -274,6 +274,30 @@ export function inNether (bot: Bot): boolean {
   return /nether/.test(String(bot.game?.dimension ?? ''))
 }
 
+/**
+ * In the nether a wither skeleton coming at the bot is shot while it's WITHER_SHOOT_FROM or more off (to
+ * WITHER_SHOOT_RANGE, in sight, a bow and arrows carried) and nothing else is nearer, and met with the sword and the
+ * shield (fight's meleeGuard) once it's within WITHER_MELEE_AT. Its 20 health is three full draws (BowItem: 6 to 9 a
+ * full-power arrow), and a fortress's corridors are straight: a 26.3 bot with a bow and 28 arrows met two in melee in
+ * a corridor by seed 2's throne, took four of their hits of 4.4 and the wither, and died
+ * (full-26.3-fresh-u, t232814)
+ */
+export const WITHER_SHOOT_FROM = 6
+export const WITHER_SHOOT_RANGE = 16
+export const WITHER_MELEE_AT = 4
+
+/** the wither skeleton to shoot now (WITHER_SHOOT_FROM), the nearest, or null */
+export function witherToShoot (ctx: ReflexContext): Entity | null {
+  const { bot, config } = ctx
+  if (!inNether(bot) || !hasBowAndArrows(bot)) return null
+  return ctx.hostiles.find(e => {
+    if (e.name !== 'wither_skeleton') return false
+    const d = distance(bot, e)
+    return d >= WITHER_SHOOT_FROM && d <= WITHER_SHOOT_RANGE && Math.abs(e.position.y - bot.entity.position.y) <= config.hostiles.maxDy &&
+      hasLineOfSight(bot, e) && !letBeInNether(bot, e, ctx.tick)
+  }) ?? null
+}
+
 /** whether `pos` is past the leash of `anchor` (NETHER_LEASH across, NETHER_FIGHT_DROP down) */
 export function pastLeash (anchor: Vec3, pos: Vec3): boolean {
   return Math.hypot(pos.x - anchor.x, pos.z - anchor.z) > NETHER_LEASH || pos.y < anchor.y - NETHER_FIGHT_DROP
@@ -429,7 +453,8 @@ export const hostilesReflex: Reflex = {
     if (!config.hostiles.enabled) return null
     const nether = inNether(bot)
     const near = hostilesInRange(ctx).filter(e => !nether || !letBeInNether(bot, e, ctx.tick))
-    if (near.length === 0) return null
+    const wither = witherToShoot(ctx)
+    if (near.length === 0 && wither == null) return null
     const cornered = wasCornered(bot, ctx.tick) && bestMeleeWeapon(bot) != null
     if (sealDue(bot, near, config, ctx.tick)) {
       return {
@@ -472,6 +497,18 @@ export const hostilesReflex: Reflex = {
         run: async (signal) => await fleeFrom(bot, () => hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e)) }), { signal, distance: config.hostiles.fleeDistance }).catch(err => noteCornered(bot, ctx.tick, err))
       }
     }
+    // a wither skeleton coming from afar, nothing nearer: shot till it's within WITHER_MELEE_AT (witherToShoot)
+    if (wither != null && !near.some(e => e.id !== wither.id && distance(bot, e) < WITHER_SHOOT_FROM)) {
+      const stop = (): boolean => !isAlive(bot, wither) || distance(bot, wither) < WITHER_MELEE_AT ||
+        hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e)) }).some(e => e.id !== wither.id && distance(bot, e) < WITHER_SHOOT_FROM)
+      return {
+        name: 'hostiles',
+        priority: config.hostiles.priority,
+        detail: 'shoot wither_skeleton',
+        run: async (signal) => await shoot(bot, wither, { signal, maxShots: 3, until: stop })
+      }
+    }
+    if (near.length === 0) return null
     // creepers: shot from a distance when there's a bow; melee only with a shield to take the blast
     const target = near.find(e => {
       if (e.name !== 'creeper') return true

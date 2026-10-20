@@ -721,3 +721,39 @@ test('drops reflex: a slime ball or magma cream a fight left lying is picked up 
   assert.strictEqual(check(dropsReflex, { entities: [drop('slime_ball', 4), entity({ name: 'zombie', position: at(5) })] }), null)
   assert.strictEqual(check(dropsReflex, { entities: [drop('magma_cream', 4), entity({ name: 'blaze', position: at(20, 70) })] }), null)
 })
+
+test('hostiles reflex in the nether: a wither skeleton coming from WITHER_SHOOT_FROM or more is shot with the bow, nothing nearer; within WITHER_MELEE_AT, without a bow or in the overworld, fought (full-26.3-fresh-u)', async () => {
+  const { WITHER_SHOOT_FROM, WITHER_SHOOT_RANGE, WITHER_MELEE_AT } = await import('../../src/reflexes/rules')
+  const nether = (e: ReflexEngine): void => { (e as any).bot.game.dimension = 'the_nether' }
+  const kit = [item('diamond_sword'), item('bow'), item('arrow', 28)]
+  const ws = (x: number): any => entity({ name: 'wither_skeleton', position: at(x) })
+  assert.strictEqual(check(hostilesReflex, { entities: [ws(10)], items: kit }, {}, nether), 'shoot wither_skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [ws(WITHER_SHOOT_FROM + 0.5)], items: kit }, {}, nether), 'shoot wither_skeleton')
+  // out of the hostiles' range (8) but in the bow's: shot as it comes
+  assert.strictEqual(check(hostilesReflex, { entities: [ws(WITHER_SHOOT_RANGE - 1)], items: kit }, {}, nether), 'shoot wither_skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [ws(WITHER_SHOOT_RANGE + 2)], items: kit }, {}, nether), null)
+  assert.strictEqual(check(hostilesReflex, { entities: [ws(3)], items: kit }, {}, nether), 'fight wither_skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [ws(10)], items: [item('diamond_sword')] }, {}, nether), null)
+  assert.strictEqual(check(hostilesReflex, { entities: [ws(7)], items: [item('diamond_sword'), item('bow')] }, {}, nether), 'fight wither_skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [ws(7)], items: kit }), 'fight wither_skeleton')
+  // another mob nearer: that first
+  assert.strictEqual(check(hostilesReflex, { entities: [ws(10), entity({ name: 'magma_cube', position: at(3) })], items: kit }, {}, nether), 'fight magma_cube')
+  // the shooting stops once it's within WITHER_MELEE_AT
+  const skeleton = ws(10)
+  const bot = fakeBot({ entities: [skeleton], items: kit })
+  bot.game.dimension = 'the_nether'
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const task = hostilesReflex.check(engine.context())
+  assert.strictEqual(task?.detail, 'shoot wither_skeleton')
+  let ticks = 0
+  bot.on('physicsTick', () => { if (++ticks === 5) skeleton.position = at(WITHER_MELEE_AT - 1) })
+  bot.waitForTicks = async (n: number) => { for (let i = 0; i < n; i++) bot.emit('physicsTick') }
+  bot.equip = async (it: any) => { bot.heldItem = it }
+  bot.activateItem = () => {}
+  bot.deactivateItem = () => {}
+  bot.world = { ...(bot.world ?? {}), raycast: () => null }
+  const shot: any = await task!.run(new AbortController().signal)
+  engine.stop()
+  assert.ok(ticks < 22, `${ticks} ticks drawing`)
+  assert.strictEqual(shot.hit, false)
+})
