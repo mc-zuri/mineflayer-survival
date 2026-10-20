@@ -697,11 +697,11 @@ test('planBlazeNooks at seed 7741\'s fortress spawner (136 77 258, 26.3): on the
   assert.deepEqual(planBlazeNooks(lookup, spawner, { from, melee: true }), [])
 })
 
-test('inSpawnVolume: the cells a spawned blaze\'s box can be in, 3 across of the spawner and 2 over or under; not 4 off, nor 3 under', async () => {
+test('inSpawnVolume: the cells a spawned blaze\'s box can be in, 4 across of the spawner (its edge, where they hover) and 2 over or under; not 5 off, nor 3 under', async () => {
   const { inSpawnVolume } = await import('../../src/nether/blazeFight')
   const S = new Vec3(10, 64, 10)
-  for (const p of [new Vec3(10, 64, 12), new Vec3(13, 66, 7), new Vec3(7, 62, 13)]) assert.ok(inSpawnVolume(S, p), p.toString())
-  for (const p of [new Vec3(14, 64, 10), new Vec3(10, 64, 6), new Vec3(10, 61, 10), new Vec3(10, 67, 10)]) assert.ok(!inSpawnVolume(S, p), p.toString())
+  for (const p of [new Vec3(10, 64, 12), new Vec3(13, 66, 7), new Vec3(7, 62, 13), new Vec3(14, 64, 6)]) assert.ok(inSpawnVolume(S, p), p.toString())
+  for (const p of [new Vec3(15, 64, 10), new Vec3(10, 64, 5), new Vec3(10, 61, 10), new Vec3(10, 67, 10)]) assert.ok(!inSpawnVolume(S, p), p.toString())
 })
 
 test('planBlazeNooks at seed 2\'s throne spawner (-277 77 -159, 26.3; the whole game\'s from its portal): the bow\'s nook in the hall under the throne\'s stairs, facing up them, seeing near half its spawns; no melee nook (the throne room is all in its spawn volume)', async () => {
@@ -719,8 +719,9 @@ test('planBlazeNooks at seed 2\'s throne spawner (-277 77 -159, 26.3; the whole 
     assert.deepEqual(n.facing, new Vec3(0, 0, 1))
     assert.ok(spawnView(lookup, spawner, n).seen >= 0.4, n.stand.toString())
   }
-  // the melee nook the runs died in, 2 off at the stairs' top: in the volume
+  // the melee nooks the runs died in, 2 off at the stairs' top and 4 off on them: in the volume
   assert.ok(inSpawnVolume(spawner, new Vec3(-277, 77, -161)))
+  assert.ok(inSpawnVolume(spawner, new Vec3(-277, 76, -163)))
   assert.deepEqual(planBlazeNooks(lookup, spawner, { from, melee: true }), [])
 })
 
