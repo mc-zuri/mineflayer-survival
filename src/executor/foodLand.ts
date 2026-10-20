@@ -63,6 +63,8 @@ export const FAILED_LAND_RADIUS = 160
 export const SEED_RINGS = [128, 224, 320, 448]
 /** how far a scouting walks out in its direction */
 export const SCOUT_DISTANCE = 320
+/** the walks a trip to food land takes at most, each while the last got the bot nearer */
+export const FOOD_TRIP_TRIES = 4
 /** how many directions are scouted (the best first) */
 export const SCOUT_DIRECTIONS = 8
 
@@ -340,6 +342,13 @@ export async function seekFoodLand (bot: Bot, args: FoodLandArgs, signal?: Abort
   for (const p of memory.getPois(FOOD_LAND_POI, { dimension: 'overworld' })) memory.removePoi(FOOD_LAND_POI, p, 'overworld')
   memory.addPoi(FOOD_LAND_POI, dest.pos, 'overworld', dest.biome)
   args.forgetLand()
-  await go(dest.pos)
+  // (again while a trip gets the bot nearer: one from the bottom of the night's mine on seed 31337 ended 40 ticks in)
+  for (let i = 0; i < FOOD_TRIP_TRIES; i++) {
+    const from = bot.entity.position.clone()
+    await go(dest.pos)
+    const left = Math.hypot(dest.pos.x - bot.entity.position.x, dest.pos.z - bot.entity.position.z)
+    trace('foodLand: the trip', i + 1, 'ended', Math.round(left), 'blocks from the food land')
+    if (left <= FED_RADIUS / 2 || bot.entity.position.distanceTo(from) < 8) break
+  }
   return dest.pos
 }

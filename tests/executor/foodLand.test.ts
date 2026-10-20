@@ -175,3 +175,16 @@ test('seekFoodLand notes the food land before the trip there: one cut off still 
   assert.ok(noted != null && (noted as Vec3).x === -200, String(noted))
   assert.ok(foodLandOf(memory)?.x === -200)
 })
+
+test('seekFoodLand walks again while a trip that ended short got the bot nearer, and stops when one got it nowhere', async () => {
+  for (const step of [30, 0]) {
+    const bot = fakeBot('26.3', () => ({ biome: 'grove', y: 120 }))
+    const memory = new WorldMemory()
+    memory.addPoi(FOOD_BIOME_POI, { x: -200, y: 80, z: 0 }, 'overworld', 'snowy_taiga')
+    let trips = 0
+    const go = async (): Promise<void> => { trips++; bot.entity.position = bot.entity.position.offset(-step, 0, 0) }
+    await seekFoodLand(bot, { survey: new BiomeSurvey(bot, memory), memory, home: new Vec3(0, 120, 0), misses: () => 0, forgetLand: () => {}, travel: go })
+    // 30 a walk: 4 walks (to x -120, 160 blocks short of 40 of it, the tries' end); none: 1
+    assert.equal(trips, step > 0 ? 4 : 1)
+  }
+})
