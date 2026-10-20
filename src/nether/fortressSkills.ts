@@ -27,7 +27,8 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, planBlazeNooks, withBlocksKept } from './blazeFight'
+import { SPAWN_RANGE, type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, openNook, planBlazeNooks, sealAndHeal, withBlocksKept } from './blazeFight'
+import { walkTo } from '../skills/navigate'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
 
@@ -268,6 +269,41 @@ export function retreatHealth (blazes: number, set?: number): number {
 
 /** how far from the spawner the bot backs off to (along the way it came) */
 export const BLAZE_RETREAT_DISTANCE = 36
+
+/** the health the camp's retreat heals to, shut in */
+export const SEAL_HEAL_TO = 18
+
+/**
+ * The camp's retreat where the bot stands: shut in there (a nook round its feet, nookAround, its open side toward the
+ * spawner, and that shut too: sealAndHeal), fed and healed, and opened toward the spawner again. No blaze's fireball nor
+ * a wither skeleton's sword reaches into a box of full blocks. The walk off 36 blocks along the way it came took a 26.3
+ * bot at 10 health, burning, into a fortress's corridors, where a wither skeleton killed it (full-26.3-fresh-d).
+ * Resolves false, the walk then, when there's no box to be had there (no floor, a wall that isn't a full block, too
+ * few blocks in the bag) or its front wouldn't shut.
+ */
+export async function healSealed (bot: Bot, toward: Vec3, signal?: AbortSignal): Promise<boolean> {
+  const feet = bot.entity.position.floored()
+  const d = toward.minus(feet)
+  const facing = Math.abs(d.x) >= Math.abs(d.z) ? new Vec3(d.x < 0 ? -1 : 1, 0, 0) : new Vec3(0, 0, d.z < 0 ? -1 : 1)
+  const lookup = (p: Vec3): any => bot.blockAt(p)
+  const nook = nookAround(lookup, feet, facing)
+  if (nook == null) return false
+  const front = nook.front.filter(p => lookup(p)?.boundingBox !== 'block').length
+  if (nookBlocks(bot) < nook.build.length + front) return false
+  trace('collectBlazeRods: shut in at', feet.toString(), 'to heal,', nook.build.length + front, 'blocks')
+  // (the body in the middle of its cell: half in a wall's cell, the wall's block would walk it out of the box)
+  await walkTo(bot, feet.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal)
+  try {
+    await buildNook(bot, nook, signal)
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('collectBlazeRods: no box:', (err as Error).message)
+    return false
+  }
+  const shut = await sealAndHeal(bot, nook, SEAL_HEAL_TO, signal)
+  if (shut) await openNook(bot, nook, signal)
+  return shut
+}
 
 /** ticks the blaze fight waits with blazes about and none in sight before it moves to another camp spot */
 export const BLIND_TICKS = 200
@@ -681,6 +717,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         // on at the spawner, fireballed and burning, till it died)
         if (bot.health <= retreatHealth(blazesInView(bot, 24).length, args.retreatAt) && retreats < BLAZE_RETREATS) {
           retreats++
+          // shut in where it stands to heal, when it can be
+          if (await healSealed(bot, spawner, signal)) continue
           trace('collectBlazeRods: health', bot.health, 'retreating to', retreatTo.toString())
           // farther first (out of their sight: 20 blocks off they shot on and the bot was low again in a while, 26.3),
           // where it came from else

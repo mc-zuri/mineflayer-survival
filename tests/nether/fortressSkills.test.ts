@@ -464,3 +464,42 @@ test('the camp\'s meal waits while a blaze is within 6 (unless starving): it is 
   }
   assert.deepEqual(order.slice(0, 2), ['fight blaze', 'eat with 0 blazes'], order.join(' | '))
 })
+
+test('the camp\'s retreat with blocks in the bag: shut in where the bot stands to heal, opened toward the spawner, no walk off along the corridors (full-26.3-fresh-d: a wither skeleton on the way)', async () => {
+  const { collectBlazeRods, healSealed } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/nether/blazeFight')
+  const gridModule = require('../../src/skills/gridWalk')
+  const navModule = require('../../src/skills/navigate')
+  const { item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ position: new Vec3(8.5, 64, 0.5), items: [item('cobblestone', 32)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).health = 6
+  ;(bot as any).food = 18
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  const calls: string[] = []
+  const real = { build: fightModule.buildNook, seal: fightModule.sealAndHeal, open: fightModule.openNook, move: gridModule.moveNear, walk: navModule.walkTo }
+  fightModule.buildNook = async (_b: unknown, nook: any) => { calls.push(`build ${nook.stand.toString()} facing ${nook.facing.toString()}`) }
+  fightModule.sealAndHeal = async () => { calls.push('seal'); (bot as any).health = 20; return true }
+  fightModule.openNook = async () => { calls.push('open') }
+  gridModule.moveNear = async (_b: unknown, to: Vec3) => { calls.push(`move ${to.toString()}`) }
+  navModule.walkTo = async () => true
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 200, safety: false, nook: false }), /TIMEOUT|rods/)
+    assert.deepEqual(calls.slice(0, 3), ['build (8, 64, 0) facing (-1, 0, 0)', 'seal', 'open'], calls.join(' | '))
+    assert.ok(!calls.some(c => c.startsWith('move (3')), calls.join(' | '))
+    // with too few blocks for the box: false, nothing done
+    ;(bot.inventory.slots as any[]).fill(null, 9, 45)
+    calls.length = 0
+    assert.equal(await healSealed(bot, new Vec3(0, 64, 0)), false)
+    assert.deepEqual(calls, [])
+  } finally {
+    clearInterval(ticking)
+    fightModule.buildNook = real.build
+    fightModule.sealAndHeal = real.seal
+    fightModule.openNook = real.open
+    gridModule.moveNear = real.move
+    navModule.walkTo = real.walk
+  }
+})
