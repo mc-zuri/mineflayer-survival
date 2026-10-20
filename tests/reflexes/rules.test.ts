@@ -227,6 +227,8 @@ test('hostiles reflex: the fight with slimes and magma cubes keeps to its level 
   assert.strictEqual(meleeOptions({ name: 'slime' }, config).maxDrop, 1)
   assert.strictEqual(meleeOptions({ name: 'zombie' }, config).maxDrop, undefined)
   assert.strictEqual(meleeOptions({ name: 'enderman' }, config).aimHeight, 0.3)
+  // an enderman's fight on the bot's level too (knocked off a ledge to its death, 26.3)
+  assert.strictEqual(meleeOptions({ name: 'enderman' }, config).maxDrop, SWARM_MAX_DROP)
 })
 
 test('hostiles reflex: a blaze in sight within 16 is held off where the bot stands when it has a shield (holdOffBlazes), fought without one', () => {

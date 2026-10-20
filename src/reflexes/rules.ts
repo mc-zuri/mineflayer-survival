@@ -241,7 +241,10 @@ export function meleeOptions (target: { name?: string }, config: ReflexConfig): 
     maxDistance: config.combat.scanRange * 2,
     // an enderman hit low: a look at its eyes (EnderMan.isLookingAtMe) is what angers the others
     aimHeight: target.name === 'enderman' ? 0.3 : undefined,
-    maxDrop: SWARMERS.has(target.name ?? '') ? SWARM_MAX_DROP : undefined
+    // (an enderman's fight kept on the bot's level too: its hits knock the bot back, and one after it over a warped
+    // forest's ledges was knocked off one to its death, 26.3 run n2-d; another fought one by the lava sea and went in,
+    // run p11)
+    maxDrop: SWARMERS.has(target.name ?? '') || target.name === 'enderman' ? SWARM_MAX_DROP : undefined
   }
 }
 
