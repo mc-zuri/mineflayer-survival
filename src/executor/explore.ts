@@ -680,8 +680,22 @@ export function climbHazard (why: string | null, wet: boolean): string | null {
 }
 
 /**
+ * Whether the pathfinder is kept from breaking the block at `pos` (its break exclusions put 1e9 on it: the base's
+ * shell, protectBase; the trip kit's chest and the beds, keepUnbroken): a dig by hand leaves it too
+ */
+export function breakKept (bot: Bot, pos: Vec3): boolean {
+  const areas: Array<(block: any) => number> | undefined = (bot as any).pathfinder?.defaultMoveSettings?.exclusionAreasBreak
+  if (areas == null || areas.length === 0) return false
+  const block = bot.blockAt(pos)
+  if (block == null || block.boundingBox === 'empty') return false
+  const info = { position: pos.floored(), block }
+  return areas.reduce((n, f) => n + f(info), 0) >= 1e9
+}
+
+/**
  * A staircase up and out, dug by hand where the pathfinder plans no way up: a block forward and a block up each
- * step, turning from lava and water, until the bot is under the open sky.
+ * step, turning from lava and water and from what the pathfinder is kept from breaking, until the bot is under the
+ * open sky.
  */
 export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: AbortSignal): Promise<boolean> {
   const lookup = lookupOf(bot)
@@ -701,6 +715,10 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
       // the step stands on the block ahead: it has to be there (or be put there)
       const why = climbHazard(unsafeStep(lookup, { open: step.open, floor: step.floor }), inWater(bot))
       if (why != null) { trace('explore: climb turns from', d.toString(), why); continue }
+      // (nor through a block the pathfinder is kept from breaking: a 1.21.11 bot shut in its house dug its staircase up
+      // through the roof the base's protection kept, onto its crafting table, ls-1.21.11 t102592)
+      const kept = step.open.find(c => breakKept(bot, c))
+      if (kept != null) { trace('explore: climb turns from', d.toString(), 'kept unbroken at', kept.toString()); continue }
       if (!floorHeld(lookup, step, hasPlug(bot))) { trace('explore: climb turns from', d.toString(), 'no floor at', step.floor.toString()); continue }
       try {
         await open(bot, step.open, signal)

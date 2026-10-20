@@ -697,3 +697,23 @@ test('leftWhenSubmerged: a mine step leaves the ores, the stones and a lake floo
   assert.equal(leftWhenSubmerged(['stone'], 'stone'), true)
   assert.equal(leftWhenSubmerged(['oak_log'], 'oak_log'), false)
 })
+
+test('climbOut: no step dug through what the pathfinder is kept from breaking (breakKept: the base\'s roof), the climb given up; with the roof not kept, its steps dug (ls-1.21.11: up through its own house\'s roof)', async () => {
+  const { breakKept, climbOut } = await import('../../src/executor/explore')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  // a 1 × 2 pocket at y 64 under stone, the roof from y 66 up kept
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('stone_pickaxe'), item('cobblestone', 16)], world: (p: Vec3) => p.x === 0 && p.z === 0 && (p.y === 64 || p.y === 65) ? 'air' : p.y > 90 ? 'air' : 'stone' })
+  bot.game.dimension = 'overworld'
+  const kept = (block: any): number => block.position.y >= 66 && block.position.y < 70 ? 1e9 : 0
+  bot.pathfinder = { defaultMoveSettings: { exclusionAreasBreak: [kept] }, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+  let digs = 0
+  bot.pathingUtil = { refresh () { digs++; throw new Error('no dig in this test') } }
+  assert.equal(breakKept(bot, new Vec3(0, 66, 0)), true)
+  assert.equal(breakKept(bot, new Vec3(1, 65, 0)), false, 'the wall beside')
+  assert.equal(breakKept(bot, new Vec3(0, 65, 0)), false, 'air')
+  assert.equal(await climbOut(bot, { room: async () => {}, maxSteps: 2 }), false)
+  assert.equal(digs, 0, 'nothing dug')
+  bot.pathfinder.defaultMoveSettings.exclusionAreasBreak = []
+  assert.equal(await climbOut(bot, { room: async () => {}, maxSteps: 2 }), false)
+  assert.ok(digs > 0, 'the roof not kept: its steps tried')
+})
