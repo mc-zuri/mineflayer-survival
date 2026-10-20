@@ -5,7 +5,7 @@ import { Vec3 } from 'vec3'
 import { SkillError, isAbort, throwIfAborted } from './errors'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { navigate, navigateToReach } from './navigate'
-import { isInteractive, isSolid } from './placement'
+import { findPlacementNear, isInteractive, isSolid } from './placement'
 import { potionOf } from './potion'
 import { CARDINALS, FACES, blockAtOrThrow, blockReach, canSee, countItems, eyeHeight, eyePosition, findInventoryItem, settleInventory, waitUntil, withinReach, type Block } from './util'
 
@@ -139,20 +139,34 @@ export async function fillBottles (bot: Bot, args: FillBottlesArgs = {}, signal?
   const want = args.count ?? countItems(bot, 'glass_bottle')
   const water = (): number => bot.inventory.items().filter(i => i.name === 'potion' && potionOf(i) === 0).length
   let filled = 0
-  while (filled < want) {
-    const bottle = findInventoryItem(bot, 'glass_bottle')
-    if (bottle == null) break
-    const source = bot.findBlock({ matching: (block: any) => isSource(block, 'water'), maxDistance: args.maxDistance ?? 32 })
-    if (source == null) throw new SkillError('NOT_FOUND', 'no water source nearby to fill the bottles at')
-    const pos = source.position
-    const point = await approachToSee(bot, pos, eye => surfacePoints(pos).find(p => canSee(bot, p, undefined, eye)) ?? null, signal)
-    const before = water()
-    await settleInventory(bot, signal)
-    await bot.equip(bottle, 'hand')
-    await bot.lookAt(point, true)
-    bot.activateItem()
-    if (!await waitUntil(bot, () => water() > before, 10, signal)) throw new SkillError('VERIFY_FAILED', `no water bottle after using a glass bottle on ${pos.toString()}`)
-    filled++
+  // no water near: the water bucket's poured by the bot for the while, and taken back up after
+  let poured: Vec3 | null = null
+  try {
+    while (filled < want) {
+      const bottle = findInventoryItem(bot, 'glass_bottle')
+      if (bottle == null) break
+      const source = bot.findBlock({ matching: (block: any) => isSource(block, 'water'), maxDistance: args.maxDistance ?? 32 })
+      if (source == null) {
+        const cell: Vec3 | null = poured == null && findInventoryItem(bot, 'water_bucket') != null ? findPlacementNear(p => bot.blockAt(p), bot.entity.position) : null
+        if (cell == null) throw new SkillError('NOT_FOUND', 'no water source nearby to fill the bottles at')
+        await emptyBucket(bot, { pos: cell, fluid: 'water' }, signal)
+        poured = cell
+        continue
+      }
+      const pos = source.position
+      const point = await approachToSee(bot, pos, eye => surfacePoints(pos).find(p => canSee(bot, p, undefined, eye)) ?? null, signal)
+      const before = water()
+      await settleInventory(bot, signal)
+      await bot.equip(bottle, 'hand')
+      await bot.lookAt(point, true)
+      bot.activateItem()
+      if (!await waitUntil(bot, () => water() > before, 10, signal)) throw new SkillError('VERIFY_FAILED', `no water bottle after using a glass bottle on ${pos.toString()}`)
+      filled++
+    }
+  } finally {
+    if (poured != null && findInventoryItem(bot, 'bucket') != null) {
+      await fillBucket(bot, { fluid: 'water', pos: poured }, signal).catch(err => { if (isAbort(err)) throw err })
+    }
   }
   return filled
 }

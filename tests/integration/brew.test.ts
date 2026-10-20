@@ -79,4 +79,17 @@ describe(`brewing on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 * 1000 }, 
     assert.ok(await drinkPotion(bot, 'fire_resistance'))
     assert.ok(hasEffect(bot, 'fire_resistance'))
   })
+
+  it('with no water about, fills the bottles at the water its bucket pours, and takes the water back up', async () => {
+    await run(`fill ${xyz(origin.offset(-8, 0, -8))} ${xyz(origin.offset(8, 6, 8))} air`)
+    await run(`fill ${xyz(origin.offset(-8, -1, -8))} ${xyz(origin.offset(8, -1, 8))} grass_block`)
+    await run(`clear ${USERNAME}`)
+    await run(`tp ${USERNAME} ${origin.x + 0.5} ${origin.y} ${origin.z + 0.5}`)
+    await run(`give ${USERNAME} glass_bottle 2`)
+    await run(`give ${USERNAME} water_bucket 1`)
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'glass_bottle') === 2 && countItems(bot, 'water_bucket') === 1, 100), 'the items given')
+    assert.strictEqual(await fillBottles(bot, { maxDistance: 8 }), 2)
+    assert.strictEqual(waterBottles(bot), 2)
+    assert.strictEqual(countItems(bot, 'water_bucket'), 1)
+  })
 })
