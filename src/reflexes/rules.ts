@@ -690,19 +690,23 @@ export interface NightChoiceInputs {
   sleepFailed: boolean
   /** out in the night (outInTheNight: the open sky over the head, or in a shelter) */
   out: boolean
+  /** the weapon and armor the progress has had are on hand (planner/schedule's nightGeared; default true) */
+  geared?: boolean
 }
 
 /**
  * The night's choice: good gear works on (the hostiles reflex fights); below the surface the night is work, a bed
  * only when the rest is due; a bed sleeps, once a night (a bed that failed isn't tried again till the day: tried every
  * 200 ticks in a 1-wide staircase, each try cut off the 300-tick dig of a block by hand, and the night went by with
- * nothing dug, run full-26.3-f); else out in the night, a shelter.
+ * nothing dug, run full-26.3-f); else out in the night, a shelter. Below the surface without the gear its progress had
+ * (a bot back bare from a death) the night is no work: a bed, else a shelter dug where it is.
  */
 export function nightChoice (i: NightChoiceInputs): NightChoice {
   if (i.plan === 'fight') return 'work'
-  if (i.underground && !(i.plan === 'sleep' && i.sleep && i.restDue)) return 'work'
+  const bare = i.geared === false
+  if (i.underground && !bare && !(i.plan === 'sleep' && i.sleep && i.restDue)) return 'work'
   if (i.plan === 'sleep' && i.sleep && !i.sleepFailed) return 'sleep'
-  if (i.shelter && i.out) return 'shelter'
+  if (i.shelter && (i.out || (i.underground && bare))) return 'shelter'
   return 'work'
 }
 
@@ -745,7 +749,9 @@ export const nightReflex: Reflex = {
       underground,
       restDue: ticksSinceRest(bot) >= config.night.restTicks,
       sleepFailed: sleepFailed.has(bot),
-      out: outInTheNight(bot)
+      out: outInTheNight(bot),
+      // (the runner's, from its milestones: none without one)
+      geared: (bot as any).survival?.nightGeared?.() ?? true
     })
     if (choice === 'work') return null
     const backoff = noGround.get(bot)

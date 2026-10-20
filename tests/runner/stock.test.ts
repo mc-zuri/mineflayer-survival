@@ -116,7 +116,7 @@ test('a top-up waits when its plan is dearer than its budget, and stops when its
 })
 
 test('at night the stock\'s mine top-ups are the night\'s work: with no milestone goal down there, the bot mines for them', async () => {
-  const bot = fakeBot({ iron_pickaxe: 1, diamond_pickaxe: 1, stone_sword: 1, crafting_table: 1, furnace: 1, cooked_beef: 16, shield: 1, oak_log: 64, torch: 16 })
+  const bot = fakeBot({ iron_pickaxe: 1, diamond_pickaxe: 1, stone_sword: 1, iron_chestplate: 1, crafting_table: 1, furnace: 1, cooked_beef: 16, shield: 1, oak_log: 64, torch: 16 })
   bot.time = { timeOfDay: 13000, day: 4 }
   const steps: string[] = []
   const lines: string[] = []
@@ -128,7 +128,7 @@ test('at night the stock\'s mine top-ups are the night\'s work: with no mileston
   // only the mine's: no logs cut, no hunt
   assert.ok(!steps.some(s => /log|beef|arrow/.test(s)), steps.join(', '))
   // without a stock policy the night has nothing to mine for
-  const none = new Runner(fakeBot({ iron_pickaxe: 1, diamond_pickaxe: 1, cooked_beef: 16, torch: 16 }), { stock: false, log: () => {} })
+  const none = new Runner(fakeBot({ iron_pickaxe: 1, diamond_pickaxe: 1, stone_sword: 1, iron_chestplate: 1, cooked_beef: 16, torch: 16 }), { stock: false, log: () => {} })
   none.bot.time = { timeOfDay: 13000, day: 4 }
   none.reached.push(...at(['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting']))
   assert.equal(none.nightDue(), null)

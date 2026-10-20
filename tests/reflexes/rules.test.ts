@@ -308,6 +308,34 @@ test('nightChoice: below the surface at work the night is work, the bed only wit
   assert.strictEqual(nightChoice({ ...base, plan: 'shelter', out: false }), 'work')
 })
 
+test('nightChoice: below the surface without the gear its progress had (back bare from a death), no night\'s work there: a bed, else a shelter', () => {
+  const base: NightChoiceInputs = { plan: 'shelter', sleep: true, shelter: true, underground: true, restDue: false, sleepFailed: false, out: false, geared: false }
+  assert.strictEqual(nightChoice(base), 'shelter')
+  assert.strictEqual(nightChoice({ ...base, plan: 'sleep' }), 'sleep')
+  assert.strictEqual(nightChoice({ ...base, plan: 'sleep', sleepFailed: true }), 'shelter')
+  assert.strictEqual(nightChoice({ ...base, shelter: false }), 'work')
+  // geared, as before: the mine's dark is the same day and night
+  assert.strictEqual(nightChoice({ ...base, geared: true }), 'work')
+  assert.strictEqual(nightChoice({ ...base, geared: undefined }), 'work')
+})
+
+test('night reflex: down a staircase at night, bare where the progress had a sword and armor (the runner\'s nightGeared), digs in', () => {
+  const night = (geared: boolean | undefined): string | null => {
+    const bot = fakeBot({ items: [item('stone_pickaxe')], world: staircase, position: new Vec3(10.5, 65, 0.5) })
+    bot.time = { timeOfDay: 13000 }
+    bot.game.dimension = 'overworld'
+    bot.findBlock = () => null
+    if (geared != null) bot.survival = { ...(bot.survival ?? {}), nightGeared: () => geared }
+    const engine = new ReflexEngine(bot, { enabled: false })
+    const task = nightReflex.check(engine.context())
+    engine.stop()
+    return task == null ? null : (task.detail ?? task.name)
+  }
+  assert.strictEqual(night(undefined), null)
+  assert.strictEqual(night(true), null)
+  assert.strictEqual(night(false), 'shelter')
+})
+
 /** a 1-wide staircase down along +x through stone to y 80: the step at x has its feet at 75 - x, open to feet + 2 */
 const staircase = (p: Vec3): string => p.z === 0 && p.x >= 0 && p.x <= 20 && p.y >= 75 - p.x && p.y <= 77 - p.x ? 'air' : p.y < 80 ? 'stone' : 'air'
 

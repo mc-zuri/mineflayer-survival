@@ -14,7 +14,7 @@ import { Inventory, type ItemCount } from './core/inventory'
 import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './core/memory'
 import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, MILESTONES, foodGoals, mealGoals, milestonesAhead, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
-import { comeUp, dayPhase, nightAction, nightGoals, topUpPlaces } from './planner/schedule'
+import { carriesWeapon, comeUp, dayPhase, nightAction, nightGeared, nightGoals, topUpPlaces } from './planner/schedule'
 import { describeLevel, markAt, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
 import { onSurface, SURFACE_MIN_Y } from './executor/explore'
 import { itemTags } from './core/tags'
@@ -440,6 +440,8 @@ export class Runner {
   constructor (readonly bot: Bot, readonly options: PlayOptions = {}) {
     this.log = options.log ?? (line => console.log(tickLine(this.tick, line)))
     this.store = options.saveStore ?? (options.saveFile != null ? fileSaveStore(options.saveFile) : null)
+    // (the night reflex's: below the surface without the gear its progress had, no night's work there)
+    if ((bot as any).survival != null) (bot as any).survival.nightGeared = (): boolean => this.nightGeared()
     // the reports of a stuck bot next to the save (a stuck folder), when nothing else says where: an e2e run's
     // checkpoints have them then
     const diag = this.diagnostics
@@ -1146,9 +1148,27 @@ export class Runner {
       bed: this.options.sleep !== false && this.bedAtHand(),
       pickaxe: inv.bestTool('pickaxe'),
       // the stock's mine top-ups are the night's work too (the ores by night)
-      goals: goals.length > 0 || this.dueTopUps(['underground'], reached).length > 0
+      goals: goals.length > 0 || this.dueTopUps(['underground'], reached).length > 0,
+      // (a bot back bare from a death: the surface and the shelter by night till it's re-kitted)
+      geared: this.nightGeared()
     })
     return action === 'mine' ? { day, goals } : null
+  }
+
+  /** the weapon and armor the progress has had are on hand, worn or carried (nightGeared) */
+  nightGeared (): boolean {
+    return nightGeared(this.reached.map(r => r.id), { weapon: carriesWeapon(this.bot.inventory.items().map(i => i.name)), armor: armorPoints(this.bot) })
+  }
+
+  /** at night in the overworld without the gear (nightGeared): the night waited out where the bot is before `what` */
+  async nightOutFirst (what: string, signal?: AbortSignal): Promise<void> {
+    const bot = this.bot
+    if (bot.time == null || dayPhase(bot.time.timeOfDay) !== 'night' || normalizeDimension(bot.game?.dimension) !== 'overworld' || this.nightGeared()) return
+    this.log(`night (time ${bot.time.timeOfDay}) with no weapon or armor: the night waited out before ${what}`)
+    await this.executor.task('wait out the night', async (s) => await waitOutTheNight(bot, s), signal).catch(err => {
+      if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+      this.log(`the night: ${(err as Error).message}`)
+    })
   }
 
   /**
@@ -1516,6 +1536,9 @@ export class Runner {
    * least, then iron ones, a bucket, an iron chestplate), each as can be, within REEQUIP_TICKS in all
    */
   async reequip (signal?: AbortSignal): Promise<void> {
+    // the iron's ore and the stone are down a mine: at night a bot short of the gear its progress had waits for the
+    // day first (a bed by, else a hole dug), not down there in the dark with its fists (nightGeared)
+    if (reequipGoals(ownedInventory(this.bot)).length > 0) await this.nightOutFirst('re-equipping', signal)
     const start = this.bot.survival.tasks.tick
     for (const goal of reequipGoals(ownedInventory(this.bot))) {
       if (this.bot.survival.tasks.tick - start > REEQUIP_TICKS) break

@@ -405,7 +405,7 @@ test('a night down the mine with no wood carried cuts a few logs first, for its 
   const { woodCarried, DUSK_LOGS } = await import('../../src/runner')
   const { Inventory } = await import('../../src/core/inventory')
   assert.equal(woodCarried(new Inventory(registry, { oak_log: 1, oak_planks: 4, stick: 8 })), 3)
-  const bot = fakeBot({ wooden_pickaxe: 1, cooked_beef: 8 })
+  const bot = fakeBot({ wooden_pickaxe: 1, stone_sword: 1, cooked_beef: 8 })
   bot.time = { timeOfDay: 12000, day: 3 }
   bot.findBlock = () => null
   const mined: string[] = []
@@ -467,14 +467,14 @@ test('the enchanting milestone failing five times is left out and play goes on t
 })
 
 test('a trip across the world (the eyes\' stronghold search, the End) isn\'t stopped for a night down a mine', async () => {
-  const bot = fakeBot({ diamond_pickaxe: 1, diamond_sword: 1, torch: 2, cooked_beef: 8, ender_eye: 16 })
+  const bot = fakeBot({ diamond_pickaxe: 1, diamond_sword: 1, iron_chestplate: 1, torch: 2, cooked_beef: 8, ender_eye: 16 })
   bot.time = { timeOfDay: 13000, day: 1 }
   bot.findBlock = () => null
   const runner = new Runner(bot, { log: () => {} })
   for (const id of ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting', 'nether'] as const) runner.reached.push({ id, title: '', tick: 0, wallMs: 0 })
   assert.equal(runner.nightDue(), null)
   // the nether next (worked from home), the torches are the night's work as before
-  const bot2 = fakeBot({ diamond_pickaxe: 1, diamond_sword: 1, torch: 2, cooked_beef: 8 })
+  const bot2 = fakeBot({ diamond_pickaxe: 1, diamond_sword: 1, iron_chestplate: 1, torch: 2, cooked_beef: 8 })
   bot2.time = { timeOfDay: 13000, day: 1 }
   bot2.findBlock = () => null
   const home = new Runner(bot2, { log: () => {} })
@@ -483,6 +483,52 @@ test('a trip across the world (the eyes\' stronghold search, the End) isn\'t sto
   // the rods got: the pearls are the night's work, on the surface
   bot2.give('blaze_rod', 8)
   assert.equal(home.nightDue(), null)
+})
+
+test('a bot back bare from a death isn\'t sent down the mine at night (nightGeared), and its re-equip waits for the day first (full-26.3-fresh-u)', async () => {
+  const reach = (runner: Runner): void => { for (const id of ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting'] as const) runner.reached.push({ id, title: '', tick: 0, wallMs: 0 }) }
+  // the night's mine with the kit: torches to make (as in the trip test)
+  const geared = fakeBot({ diamond_pickaxe: 1, diamond_sword: 1, iron_chestplate: 1, torch: 2, cooked_beef: 8 })
+  geared.time = { timeOfDay: 13000, day: 1 }
+  geared.findBlock = () => null
+  const kitted = new Runner(geared, { log: () => {} })
+  reach(kitted)
+  assert.notEqual(kitted.nightDue(), null)
+  assert.equal(geared.survival.nightGeared(), true)
+  // back from a death with a pickaxe from a chest, no sword and no armor: not down the mine
+  const bare = fakeBot({ stone_pickaxe: 1, torch: 2, cooked_beef: 8 })
+  bare.time = { timeOfDay: 13000, day: 1 }
+  bare.findBlock = () => null
+  const lines: string[] = []
+  const runner = new Runner(bare, { log: l => lines.push(l) })
+  reach(runner)
+  assert.equal(runner.nightDue(), null)
+  assert.equal(bare.survival.nightGeared(), false)
+  // a sword alone isn't enough past the iron milestone; with a chestplate too it is
+  bare.give('stone_sword', 1)
+  assert.equal(runner.nightDue(), null)
+  bare.give('iron_chestplate', 1)
+  assert.notEqual(runner.nightDue(), null)
+  // the re-equip at night, bare: the night waited out first, then the goals
+  const bot = fakeBot({ dirt: 3 })
+  bot.time = { timeOfDay: 14000, day: 1 }
+  const order: string[] = []
+  const r2 = new Runner(bot, { log: l => order.push(l) })
+  reach(r2)
+  r2.executor.task = (async (name: string) => { order.push(`task ${name}`); bot.time = { timeOfDay: 0, day: 2 } }) as any
+  r2.executor.obtain = (async (reqs: any[]) => { order.push(`obtain ${String(reqs[0].item)}`); bot.give(reqs[0].item, 1) }) as any
+  await r2.reequip()
+  const wait = order.findIndex(l => l === 'task wait out the night')
+  assert.ok(wait >= 0 && wait < order.findIndex(l => l.startsWith('obtain')), order.join(' | '))
+  // by day: no wait
+  const day = fakeBot({ dirt: 3 })
+  const r3 = new Runner(day, { log: () => {} })
+  reach(r3)
+  const tasks: string[] = []
+  r3.executor.task = (async (name: string) => { tasks.push(name) }) as any
+  r3.executor.obtain = (async (reqs: any[]) => { day.give(reqs[0].item, 1) }) as any
+  await r3.reequip()
+  assert.deepEqual(tasks, [])
 })
 
 test('a death while recovering from one is recovered from in turn, not thrown out of play', async () => {

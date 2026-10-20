@@ -42,18 +42,40 @@ export interface NightInputs {
   pickaxe: string | null
   /** something to mine at night (nightGoals has goals) */
   goals: boolean
+  /** the weapon and armor the progress has had are on hand (nightGeared; default true) */
+  geared?: boolean
 }
 
 /**
  * The schedule's decision for now: by day, the work; from dusk, a bed when there's one (the night skipped), else down
- * into the mine with a pickaxe and something to mine there; else the shelter.
+ * into the mine with a pickaxe, something to mine there and the gear for it (nightGeared); else the shelter.
  */
 export function nightAction (i: NightInputs): NightAction {
   if (i.phase === 'day' || !i.overworld) return 'work'
   if (i.bed && i.phase === 'night') return 'sleep'
   if (i.bed) return 'work'
-  if (i.pickaxe != null && i.goals) return 'mine'
+  if (i.pickaxe != null && i.goals && i.geared !== false) return 'mine'
   return i.phase === 'night' ? 'shelter' : 'work'
+}
+
+/** a weapon among the items' names: a sword or an axe (a pickaxe's hit isn't one), a mace, a trident */
+export function carriesWeapon (names: Iterable<string>): boolean {
+  for (const name of names) if (/_(sword|axe)$|^(mace|trident)$/.test(name)) return true
+  return false
+}
+
+/**
+ * Whether the bot has the gear its progress had to be down the mine at night: a weapon once the stone milestone is
+ * reached (its stone sword), and some armor once the iron one is (its iron set). A bot back bare from a death has
+ * neither till it's re-kitted, and a mine's zombies and creepers are there at any hour: a 26.3 bot respawned with
+ * nothing, on its way to its trip kit, ended up in its old mine at y 5 and was hit and blown up there
+ * (full-26.3-fresh-u, t234260). Before the stone milestone the night's mine is where the first tools come from, and
+ * before the iron one where the armor's iron does.
+ */
+export function nightGeared (reached: readonly MilestoneId[], gear: { weapon: boolean, armor: number }): boolean {
+  if (reached.includes('stone') && !gear.weapon) return false
+  if (reached.includes('iron') && gear.armor <= 0) return false
+  return true
 }
 
 /** iron for the iron milestone: a pickaxe 3, a sword 2, the armor 24, a shield 1 and a bucket 3 */

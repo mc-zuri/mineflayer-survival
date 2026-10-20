@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import minecraftData from 'minecraft-data'
 import { Inventory } from '../../src/core/inventory'
 import { obtainAll } from '../../src/planner/obtain'
-import { comeUp, dayPhase, nightAction, nightGoals, IRON_FOR_MILESTONE, TORCH_BUDGET } from '../../src/planner/schedule'
+import { carriesWeapon, comeUp, dayPhase, nightAction, nightGeared, nightGoals, IRON_FOR_MILESTONE, TORCH_BUDGET } from '../../src/planner/schedule'
 
 const registry: any = minecraftData('1.21.11')
 const inv = (items: Record<string, number>): Inventory => new Inventory(registry, items)
@@ -34,6 +34,28 @@ test('dusk means down the mine with a pickaxe; a bed skips the night; no pickaxe
   assert.equal(nightAction({ ...base, goals: false, phase: 'night' }), 'shelter')
   // the nether and the End have no night
   assert.equal(nightAction({ ...base, overworld: false, phase: 'night' }), 'work')
+})
+
+test('a bot without the weapon and armor its progress had isn\'t sent down the mine at night: the shelter, the work at dusk (nightGeared)', () => {
+  const base = { overworld: true, bed: false, pickaxe: 'stone_pickaxe', goals: true }
+  assert.equal(nightAction({ ...base, phase: 'night', geared: false }), 'shelter')
+  assert.equal(nightAction({ ...base, phase: 'dusk', geared: false }), 'work')
+  assert.equal(nightAction({ ...base, phase: 'night', geared: true }), 'mine')
+  // a bed sleeps the night all the same
+  assert.equal(nightAction({ ...base, bed: true, phase: 'night', geared: false }), 'sleep')
+  // a weapon from the stone milestone on, some armor from the iron one on (a bare bot back from a death)
+  const bare = { weapon: false, armor: 0 }
+  assert.equal(nightGeared(['wood'], bare), true)
+  assert.equal(nightGeared(['wood', 'stone', 'food', 'base'], bare), false)
+  assert.equal(nightGeared(['wood', 'stone', 'food', 'base'], { weapon: true, armor: 0 }), true)
+  const iron = ['wood', 'stone', 'food', 'base', 'iron'] as const
+  assert.equal(nightGeared(iron, { weapon: true, armor: 0 }), false)
+  assert.equal(nightGeared(iron, { weapon: false, armor: 6 }), false)
+  assert.equal(nightGeared(iron, { weapon: true, armor: 1 }), true)
+  // a pickaxe's hit is no weapon
+  assert.equal(carriesWeapon(['iron_pickaxe', 'dirt']), false)
+  assert.equal(carriesWeapon(['stone_sword']), true)
+  assert.equal(carriesWeapon(['iron_axe']), true)
 })
 
 test('the night\'s goals: torches first (coal means torches), then the iron, then the diamonds', () => {
