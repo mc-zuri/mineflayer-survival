@@ -785,12 +785,23 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   log(`nether kit: getting ${missing.map(describeRequest).join(', ')} before going in`)
   // the gear within NETHER_GEAR_TICKS; the food short after it within NETHER_FOOD_TICKS, near home: the rest is
   // banked over the tries (farm, herd), not one long search (seed 2's 120 points took 90000 ticks of exploring)
-  const gear = missing.filter(r => r.unit !== 'nutrition' && r.item !== 'arrow')
+  const gear = missing.filter(r => r.unit !== 'nutrition' && r.item !== 'arrow' && r.item !== 'bow')
   if (gear.length > 0) {
     await withTickBudget(bot, NETHER_GEAR_TICKS, signal, async (s) => await executor.obtain(gear, s)).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`nether kit: ${(err as Error).message}`)
     })
+  }
+  // the bow within NETHER_BOW_TICKS: not got (no spider found for its string), the gate goes without it and asks for
+  // the water bottles for fire resistance instead (gate.bow)
+  if (netherGearNeeds(ownedInventory(bot), gate).some(r => r.item === 'bow')) {
+    await withTickBudget(bot, NETHER_BOW_TICKS, signal, async (s) => await executor.obtain([{ item: 'bow', count: 1 }], s)).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`nether kit: the bow: ${(err as Error).message}`)
+      if (countItems(bot, 'bow') === 0) (executor as any).sightings?.missing?.(['spider'])
+    })
+    Object.assign(gate, { bow: netherGate(bot, executor as any).bow })
+    if (gate.bow === false) log('nether kit: no bow to be had: fire resistance instead (the water bottles)')
   }
   // the arrows within NETHER_ARROW_TICKS, the gate looked at again after (a hunt for the feathers' chickens that found
   // none asks for fewer: the plan went on for 64 after its miss, 11 chickens more, full-26.3-fresh-p)
@@ -813,6 +824,12 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
     })
   }
   const still = netherGearNeeds(ownedInventory(bot), gate)
+  // without a bow, the water bottles for fire resistance are the gate's (brewKit's, its tries)
+  if (gate.bow === false && still.length === 0) {
+    await brewKit(bot, executor, signal, log)
+    if (waterBottles(bot) < BREW_BOTTLES) throw Object.assign(new SkillError('MISSING_ITEMS', `not going into the nether without a bow or ${BREW_BOTTLES} water bottles for fire resistance`), { notReady: true })
+    return
+  }
   if (still.length > 0) {
     throw Object.assign(new SkillError('MISSING_ITEMS', `not going into the nether without ${still.map(describeRequest).join(', ')}`), {
       notReady: true,
@@ -828,6 +845,8 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
 export const NETHER_FOOD_TICKS = 12000
 /** the ticks a try of the nether kit spends on the gate's arrows after the rest of the gear */
 export const NETHER_ARROW_TICKS = 12000
+/** the ticks a try of the nether kit spends on the bow (its string) after the rest of the gear */
+export const NETHER_BOW_TICKS = 12000
 
 /** the water bottles carried into the nether for fire resistance brewed there (a brew's 3: brewing's blazeRodsWithBrew) */
 export const BREW_BOTTLES = 3
@@ -898,6 +917,13 @@ export interface NetherGate {
   food: number
   /** arrows (NETHER_ARROWS) */
   arrows: number
+  /**
+   * a bow (and the arrows) asked for: false once no spider was found for its string, the water bottles for fire
+   * resistance asked for instead (the blaze fight's other way: the throne walled in is given up without a bow, and
+   * the fortress's other spawner fought under fire resistance); a 1.21.11 seed 2 kit's 'kill 3 spider for 3 string'
+   * found none for 130000 ticks (full-1.21.11-fresh-c)
+   */
+  bow?: boolean
 }
 
 /** the food points the gate asks for when a farm or a herd tops the food up between the trips (configurable) */
@@ -922,7 +948,9 @@ export function netherGate (bot: Bot, executor: Pick<Executor, 'memory'> & { sig
   const fireRes = bot.inventory.items().filter(i => (POTION_IDS.fire_resistance ?? []).includes(potionOf(i) ?? -1)).reduce((n, i) => n + i.count, 0)
   const noChickens = (executor.sightings?.misses('chicken') ?? 0) > 0
   const arrows = fireRes >= NETHER_FIRE_POTIONS ? NETHER_ARROWS_FIRE_RESISTANT : noChickens ? NETHER_ARROWS_NO_FEATHERS : NETHER_ARROWS
-  return { food, arrows }
+  // no bow held and no spider found for its string: none asked for
+  const bow = bot.inventory.items().some(i => i.name === 'bow') || countItems(bot, 'string') >= 3 || (executor.sightings?.misses('spider') ?? 0) === 0
+  return { food, arrows, bow }
 }
 
 export function netherGearNeeds (inv: Inventory, gate: NetherGate = { food: NETHER_FOOD_POINTS, arrows: NETHER_ARROWS }): ObtainRequest[] {
@@ -943,8 +971,10 @@ export function netherGearNeeds (inv: Inventory, gate: NetherGate = { food: NETH
   // (-277, 77, -159), the whole game's from its portal) were fought among them, in their spawn volume, and 26.3 bots
   // with a stone sword (the gate's least, nether-26.3-q3's bag) died there 6 runs of 6 for 0 to 1 rods, one in iron with
   // an iron sword got 0 to 1 rods in 16000 ticks; the fight gives such a spawner up now (tests/integration/blaze)
-  if (inv.count('bow') === 0) out.push({ item: 'bow', count: 1 })
-  if (inv.count('arrow') < gate.arrows) out.push({ item: 'arrow', count: gate.arrows })
+  if (gate.bow !== false) {
+    if (inv.count('bow') === 0) out.push({ item: 'bow', count: 1 })
+    if (inv.count('arrow') < gate.arrows) out.push({ item: 'arrow', count: gate.arrows })
+  }
   const food = heldFor(inv, FOOD_GOAL, { unit: 'nutrition' })
   if (food < gate.food) out.push({ item: FOOD_GOAL, count: gate.food, unit: 'nutrition' })
   return out

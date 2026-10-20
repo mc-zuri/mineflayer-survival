@@ -337,7 +337,7 @@ test('netherGate: 80 food points with a farm or a herd known, else 120, the play
   const { Vec3 } = await import('vec3')
   const memory = new WorldMemory()
   const bot = fakeBot({ items: [] })
-  assert.deepStrictEqual(netherGate(bot, { memory }), { food: 120, arrows: 64 })
+  assert.deepStrictEqual(netherGate(bot, { memory }), { food: 120, arrows: 64, bow: true })
   rememberFarm(memory, { crop: 'wheat', water: new Vec3(5, 63, 0), cells: [new Vec3(4, 63, 0)] } as any, 0)
   assert.equal(netherGate(bot, { memory }).food, 80)
   bot.survival = { playOptions: { netherFood: 60 } }
@@ -388,6 +388,37 @@ test('netherKit: the arrows are got on their own after the gear, and once the hu
   }
   await netherKit(timed, stopped, new AbortController().signal, () => {})
   assert.deepStrictEqual(missed, ['chicken'])
+})
+
+test('netherKit: no bow got within its budget (no spider found for the string), the gate goes without the bow and its arrows and asks for the water bottles for fire resistance', async () => {
+  const { netherKit, netherGate } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const gear = NETHER_GEAR().filter((i: any) => i.name !== 'bow' && i.name !== 'arrow')
+  // a spider missed already: no bow asked for
+  const memory = new WorldMemory()
+  assert.equal(netherGate(fakeBot({ items: gear }), { memory, sightings: { misses: (n: string) => n === 'spider' ? 1 : 0 } }).bow, false)
+  assert.equal(netherGate(fakeBot({ items: [...gear, item('bow', 1)] }), { memory, sightings: { misses: () => 1 } }).bow, true)
+  const bot = fakeBot({ items: gear })
+  bot.game.dimension = 'overworld'
+  const missed: string[] = []
+  const asked: string[] = []
+  const executor: any = {
+    memory,
+    tasks: { tick: 0 },
+    sightings: { misses: (n: string) => missed.filter(m => m === n).length, missing: (names: string[]) => missed.push(...names) },
+    obtain: async (reqs: any[]) => {
+      asked.push(reqs.map(r => r.item).join(','))
+      if (reqs.some(r => r.item === 'bow')) throw new TaskError('NOT_FOUND', 'no spider found exploring')
+    },
+    task: async () => {}
+  }
+  const err: any = await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e)
+  assert.deepStrictEqual(missed, ['spider'])
+  assert.equal(asked[0], 'bow')
+  // no arrows asked for after; the bottles (none to be had here) keep it out
+  assert.ok(!asked.includes('arrow'), asked.join(' | '))
+  assert.match(err?.message ?? '', /without a bow or 3 water bottles/)
+  assert.equal(err?.notReady, true)
 })
 
 test('netherKit: short of only the food after its tries, the milestone is not ready with the food points banked (foodShort)', async () => {
