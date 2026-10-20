@@ -8,11 +8,11 @@ import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { retrieveItems, storeItems } from '../../src/skills/chest'
 import { countItems, emptySlots, waitTicks, waitUntil } from '../../src/skills/util'
-import { DEPOT_POI, Executor, LAVA_ROOM } from '../../src/executor/executor'
-import { isThrownDrop } from '../../src/skills/pickupDrops'
+import { DEPOT_POI, Executor, LAVA_ROOM, THROW_AWAY_RANGE } from '../../src/executor/executor'
+import { isThrownDrop, pickupDrops, tossAway } from '../../src/skills/pickupDrops'
 import { obsidianFromPools, TABLE_OBSIDIAN } from '../../src/milestones'
-import { descendTo } from '../../src/executor/explore'
-import { milestoneNeeds } from '../../src/executor/keep'
+import { descendTo, pitThrow } from '../../src/executor/explore'
+import { milestoneNeeds, THROW_LOOP_REPEATS } from '../../src/executor/keep'
 import { milestone, milestonesAhead } from '../../src/planner/progression'
 import { progressState } from '../../src/runner'
 
@@ -153,6 +153,8 @@ describe(`the bag down a mine on a ${DEFAULT_VERSION} server`, { timeout: 20 * 6
     await run(`tp ${USERNAME} ${origin.x + 5.5} ${origin.y} ${origin.z + 0.5} -90 0`)
     // 35 slots: the bag a slot short of its 2 free (26.3 run full-26.3-j: '1 furnace, 6 obsidian, 2 raw_iron, 2
     // chicken, 1 oak_door, 2 raw_gold' stashed in a depot by a diamond, and the frame had no obsidian)
+    // (the depot an earlier test put down, its chest gone under the fill, forgotten: its nook may be a cell over)
+    bot.survival.memory.removePoi(DEPOT_POI)
     for (const [item, n] of [['diamond_pickaxe', 1], ['obsidian', 6], ['bucket', 2], ['water_bucket', 1], ['lava_bucket', 1], ['flint_and_steel', 1], ['raw_gold', 2], ['oak_log', 4], ['crafting_table', 1], ['cobblestone', 64], ['dirt', 64], ['furnace', 1], ['raw_iron', 23 * 64]] as const) await give(item, n)
     assert.strictEqual(emptySlots(bot), 1)
     const lines: string[] = []
@@ -369,6 +371,81 @@ describe(`the bag down a mine on a ${DEFAULT_VERSION} server`, { timeout: 20 * 6
     // the way back up whole: the pits beside it, not in it
     assert.deepStrictEqual(steps.floors.filter(f => bot.blockAt(f)?.boundingBox !== 'block').map(f => f.toString()), [])
     assert.ok(emptySlots(bot) >= 2, `${emptySlots(bot)} slots free`)
+  })
+
+  it('a gate obtain with a bag a slot short whose junk keeps coming back, no chest near and no wood for one: the junk thrown THROW_AWAY_RANGE off, the shield made, no inventory full', async (t) => {
+    // (26.3 run full-26.3-fresh-f: '23 diorite, 7 andesite, 3 dirt' thrown twice and picked up again, the third throw
+    // refused with no chest to put it in, 'can't craft 1 chest: short of 1 chest' with 7 planks, and the nether's gate
+    // 'craft 1 shield, smelt 2 cooked_chicken' failed 'inventory full (1 free slots)' 48 times in a tick)
+    await mine(20)
+    await run(`tp ${USERNAME} ${origin.x + 5.5} ${origin.y} ${origin.z + 0.5} -90 0`)
+    assert.ok(await waitUntil(bot, () => bot.entity.position.distanceTo(origin.offset(5.5, 0, 0.5)) < 0.2, 100))
+    // 35 slots: the shield's planks, iron and table, the pickaxe, the junk, the stone and the iron the stock keeps; 1 free
+    for (const [item, n] of [['diamond_pickaxe', 1], ['oak_planks', 6], ['iron_ingot', 1], ['crafting_table', 1], ['diorite', 23], ['andesite', 7], ['dirt', 3], ['cobblestone', 5 * 64], ['raw_iron', 23 * 64]] as const) await give(item, n)
+    assert.strictEqual(emptySlots(bot), 1)
+    const lines: string[] = []
+    let recollected = 0
+    const onCollect = (collector: any, collected: any): void => {
+      if (collector === bot.entity && isThrownDrop(bot, collected)) {
+        recollected++
+        t.diagnostic(`picked up again: ${collected.id} at ${collected.position.toString()}, the bot at ${bot.entity.position.toString()}`)
+      }
+    }
+    // the stock short of its stone (none of it surplus): the junk is all that may be thrown
+    const executor = new Executor(bot, { log: line => { lines.push(line); t.diagnostic(line) }, stocked: () => false })
+    // thrown twice already and picked up again (the run's pits by its walk to the next ore)
+    const junk = [{ name: 'diorite', count: 23 }, { name: 'andesite', count: 7 }, { name: 'dirt', count: 3 }]
+    for (let i = 1; i < THROW_LOOP_REPEATS; i++) (executor as any).throws.record(junk, executor.tasks.tick)
+    const spot = bot.entity.position.clone()
+    bot.on('playerCollect', onCollect)
+    const start = bot.survival.tasks.tick
+    try {
+      await executor.obtain([{ item: 'shield', count: 1 }])
+    } finally {
+      bot.off('playerCollect', onCollect)
+    }
+    t.diagnostic(`a shield in ${bot.survival.tasks.tick - start} ticks, ${emptySlots(bot)} slots free`)
+    assert.strictEqual(countItems(bot, 'shield'), 1)
+    assert.ok(!lines.some(l => /inventory full|INVENTORY_FULL|NO_SPACE/.test(l)), lines.filter(l => /full|NO_SPACE/.test(l)).join(' | '))
+    assert.ok(lines.some(l => new RegExp(`came back: thrown ${THROW_AWAY_RANGE} blocks off`).test(l)), lines.join(' | '))
+    assert.strictEqual(countItems(bot, 'diorite'), 0)
+    await waitTicks(bot, 40)
+    const thrown = Object.values(bot.entities).filter(e => e.name === 'item' && e.position.distanceTo(spot) < 32)
+    assert.ok(thrown.length > 0 && thrown.every(e => e.position.distanceTo(spot) >= THROW_AWAY_RANGE - 1), thrown.map(e => e.position.toString()).join(' '))
+    assert.strictEqual(recollected, 0, 'thrown items picked up again')
+  })
+
+  it('a stack thrown into a pit that merges into a larger one of its name lying there (ItemEntity.mergeWithNeighbours): the pickups after don\'t go for it', async (t) => {
+    await mine(10)
+    await run(`tp ${USERNAME} ${origin.x + 5.5} ${origin.y} ${origin.z + 0.5} -90 0`)
+    // a pit 2 deep beside the bot, 20 dirt lying in its bottom (no thrown one)
+    const pit = at(5, -2, 1)
+    await run(`fill ${xyz(at(5, -2, 1))} ${xyz(at(5, 1, 1))} air`)
+    await run(`summon item ${pit.x + 0.5} ${pit.y} ${pit.z + 0.5} {Item:{id:"minecraft:dirt",count:20},PickupDelay:0}`)
+    assert.ok(await waitUntil(bot, () => bot.entity.position.distanceTo(origin.offset(5.5, 0, 0.5)) < 0.2 && bot.blockAt(pit)?.name === 'air', 100))
+    await give('dirt', 5)
+    await give('diamond_pickaxe', 1)
+    await waitTicks(bot, 20)
+    const lying = Object.values(bot.entities).filter(e => e.name === 'item')
+    assert.strictEqual(lying.length, 1)
+    const look = pitThrow(p => bot.blockAt(p) as any, bot.entity.position, pit)
+    assert.ok(look != null, 'no throw into the pit')
+    const gone: number[] = []
+    const onGone = (e: any): void => { if (e.name === 'item') gone.push(e.id) }
+    bot.on('entityGone', onGone)
+    try {
+      assert.strictEqual(await tossAway(bot, 'dirt', 5, undefined, { ...look, pit }), 5)
+      const thrownId = Object.values(bot.entities).find(e => e.name === 'item' && e !== lying[0])?.id
+      // merged within 40 ticks of landing (ItemEntity.tick: every 40 ticks at rest), the smaller into the larger
+      assert.ok(await waitUntil(bot, () => thrownId != null && gone.includes(thrownId), 200), `no merge: ${gone.join(' ')}`)
+    } finally {
+      bot.off('entityGone', onGone)
+    }
+    assert.ok(bot.entities[lying[0].id] != null)
+    assert.ok(isThrownDrop(bot, bot.entities[lying[0].id]))
+    const res = await pickupDrops(bot, { radius: 8, waitTicks: 5 })
+    t.diagnostic(`picked ${JSON.stringify(res.items)}`)
+    assert.strictEqual(countItems(bot, 'dirt'), 0)
   })
 
   it('puts a stack that keeps coming back into the chest near rather than throw it a third time (a pocket in the obsidian with nowhere to throw)', async (t) => {
