@@ -480,3 +480,47 @@ test('fightFromNook gives the nook up (CANNOT_PLACE) when its front won\'t shut,
   assert.match(settled.message, /front .* won't shut/)
   assert.ok(SEAL_FAILS > 1)
 })
+
+test('withNookKept keeps the floor under the stand and the front from the pathfinder\'s breaking, with the walls and the roof', async () => {
+  const { nookAround, withNookKept } = await import('../../src/nether/blazeFight')
+  const w = world()
+  const nook = nookAround(w.lookup, new Vec3(0, 64, 10), new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  assert.deepEqual(nook.floor.map(p => p.toString()), ['(0, 63, 10)', '(0, 63, 9)'])
+  const pathfinder: any = { defaultMoveSettings: { exclusionAreasBreak: [] }, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+  const bot: any = { pathfinder }
+  const cost = (p: Vec3): number => pathfinder.defaultMoveSettings.exclusionAreasBreak.reduce((a: number, f: any) => a + f({ position: p }), 0)
+  await withNookKept(bot, nook, async () => {
+    // seed 7741's bridge: the way to the nook came up through the front's floor
+    for (const p of [...nook.floor, ...nook.walls]) assert.ok(cost(p) >= 1e9, p.toString())
+    assert.equal(cost(new Vec3(0, 63, 8)), 0)
+  })
+  assert.equal(pathfinder.defaultMoveSettings.exclusionAreasBreak.length, 0)
+})
+
+test('fillNook puts a block in the front\'s floor first when it\'s dug out (nothing beside the front to go against)', async () => {
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { fillNook } = await import('../../src/nether/blazeFight')
+  const placeModule = require('../../src/skills/placeBlock')
+  const solid = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const dugOut = '(0, 63, 9)'
+  const name = (p: Vec3): string => solid.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 && p.floored().toString() !== dugOut ? 'stone' : 'air'
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), items: [item('cobblestone', 32)], world: name })
+  const placed: string[] = []
+  const realPlace = placeModule.placeBlock
+  placeModule.placeBlock = async (b: any, a: any) => {
+    const p = a.pos as Vec3
+    const backed = [p.offset(0, -1, 0), p.offset(0, 1, 0), p.offset(1, 0, 0), p.offset(-1, 0, 0), p.offset(0, 0, 1), p.offset(0, 0, -1)].some(q => b.blockAt(q)?.boundingBox === 'block')
+    if (!backed) throw new Error(`nothing solid to place against at ${p.toString()}`)
+    solid.add(p.toString())
+    placed.push(p.toString())
+  }
+  try {
+    const missed = await fillNook(bot, [new Vec3(0, 64, 9), new Vec3(0, 65, 9)])
+    assert.equal(missed, 0)
+    assert.deepEqual(placed, ['(0, 63, 9)', '(0, 64, 9)', '(0, 65, 9)'])
+  } finally {
+    placeModule.placeBlock = realPlace
+  }
+})
+

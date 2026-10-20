@@ -122,6 +122,12 @@ export interface BlazeNook {
   front: Vec3[]
   /** the walls and the roof (built or there already): what the pathfinder mustn't break */
   walls: Vec3[]
+  /**
+   * the floor under the stand and under the front's feet, kept from the pathfinder's breaking too: a 26.3 bot's way
+   * to the nook on seed 7741's bridge came up through it from under the bridge, and the front's floor dug out left
+   * the front with nothing to go against ('nothing solid to place against', every tick for 3000 ticks)
+   */
+  floor: Vec3[]
 }
 
 export interface NookOptions {
@@ -250,7 +256,7 @@ export function nookAround (lookup: NookLookup, stand: Vec3, facing: Vec3, maxBl
     solid.add(support.toString())
   }
   if (left.length > 0 || build.length > maxBlocks) return null
-  return { stand, facing, build, front: [stand.plus(facing), stand.plus(facing).plus(UP)], walls }
+  return { stand, facing, build, front: [stand.plus(facing), stand.plus(facing).plus(UP)], walls, floor: [stand.offset(0, -1, 0), stand.plus(facing).offset(0, -1, 0)] }
 }
 
 // ---- the fight
@@ -701,12 +707,12 @@ export async function enterNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal
   await withNookKept(bot, nook, async () => await moveNear(bot, nook.stand, 0, signal))
 }
 
-/** the pathfinder kept from breaking the nook's walls and roof while `fn` runs */
+/** the pathfinder kept from breaking the nook's walls, roof and floor while `fn` runs */
 export async function withNookKept<T> (bot: Bot, nook: BlazeNook, fn: () => Promise<T>): Promise<T> {
   const pathfinder: any = (bot as any).pathfinder
   const settings = pathfinder?.defaultMoveSettings
   if (settings == null || typeof pathfinder.setMoveOptions !== 'function') return await fn()
-  const kept = new Set(nook.walls.map(p => p.toString()))
+  const kept = new Set([...nook.walls, ...(nook.floor ?? [])].map(p => p.toString()))
   const brk = (block: any): number => kept.has(new Vec3(block.position.x, block.position.y, block.position.z).toString()) ? 1e9 : 0
   const before = { ...settings }
   pathfinder.setMoveOptions({ ...settings, exclusionAreasBreak: [...(settings.exclusionAreasBreak ?? []), brk] })
@@ -717,15 +723,29 @@ export async function withNookKept<T> (bot: Bot, nook: BlazeNook, fn: () => Prom
   }
 }
 
-/** the nook's open cells filled from inside it; resolves how many couldn't be */
+/**
+ * The nook's open cells filled from inside it; resolves how many couldn't be. A cell with nothing solid beside it to
+ * go against has the open cell under it filled first (the front's floor dug out: the walk there came up through it)
+ */
 export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: AbortSignal): Promise<number> {
   let missed = 0
+  const solidAt = (p: Vec3): boolean => bot.blockAt(p)?.boundingBox === 'block'
+  const backed = (p: Vec3): boolean => [p.offset(0, -1, 0), p.offset(0, 1, 0), ...SIDES.map(s => p.plus(s))].some(solidAt)
   for (const cell of cells) {
     throwIfAborted(signal)
     const b = bot.blockAt(cell)
     if (b == null || b.boundingBox === 'block') continue
     const item = nookBlock(bot)
     if (item == null) throw new SkillError('MISSING_ITEMS', 'out of blocks for the nook')
+    const under = cell.offset(0, -1, 0)
+    if (!backed(cell) && isOpen(bot.blockAt(under) as NookBlock | null) && backed(under)) {
+      try {
+        await placeBlock(bot, { pos: under, item }, signal)
+      } catch (err) {
+        if (isAbort(err)) throw err
+        trace('blaze nook: no block under', cell.toString(), (err as Error).message)
+      }
+    }
     try {
       await placeBlock(bot, { pos: cell, item }, signal)
     } catch (err) {
