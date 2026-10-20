@@ -1,15 +1,18 @@
-// The bot plays a few thousand real-time ticks on a 1.21.11 server with GrimAC (tests/harness GRIM_MODS, each
-// violation an alert): it walks, sprint-jumps and pathfinds over steps, a gap and a drop, digs, crafts, places and
-// pillars, eats walking, fights a zombie and swims. Grim's alerts are counted by phase and check; none is the pass.
-// Grim sets a flagged move back (Simulation), undoes a flagged break (FastBreak, PositionBreak), and the bot's plans
-// fail on it. GRIM_PHASES=walk,dig runs some phases only; GRIM_REPORT=1 reports the alerts without failing.
+// The bot plays a few thousand ticks on a 1.21.11 server with GrimAC (each violation an alert): it walks, sprint-jumps
+// and pathfinds over steps, a gap and a drop, digs, crafts, places and pillars, eats walking, fights a zombie and
+// swims. Grim's alerts are counted by phase and check; none is the pass. Grim sets a flagged move back (Simulation),
+// undoes a flagged break (FastBreak, PositionBreak), and the bot's plans fail on it.
+// By default under lockstep, with the local Grim build (tests/harness grimModJar: its clock the server's ticks, so
+// its Timer, FastBreak and transaction checks hold at lockstep speed); GRIM_REALTIME=1 runs it in real time, no
+// lockstep mod, with the pinned Modrinth build (GRIM_MODS). Either way the bot's actions go at the start of its ticks
+// (actionsInTick). GRIM_PHASES=walk,dig runs some phases only; GRIM_REPORT=1 reports the alerts without failing.
 // Run alone: node --test --require ts-node/register/transpile-only tests/integration/grim.test.ts
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
-import { connectLockstepBot, grimMods, modJars, parseGrimAlert, parseLogLine, quitBot, startServer, GRIM_CONFIG, type GrimAlert, type TestServer } from '../harness'
+import { connectLockstepBot, grimLockstepMods, grimMods, modJars, parseGrimAlert, parseLogLine, quitBot, startServer, GRIM_CONFIG, type GrimAlert, type TestServer } from '../harness'
 import { collectBlock, countItems, craft, navigateNear, waitTicks, waitUntil, walkTo } from '../../src/skills/gather'
 import { placeBlock } from '../../src/skills/placeBlock'
 import { eat } from '../../src/skills/eat'
@@ -20,14 +23,17 @@ const VERSION = '1.21.11'
 const USERNAME = 'grimbot'
 const ONLY = (process.env.GRIM_PHASES ?? '').split(',').filter(p => p !== '')
 const REPORT = process.env.GRIM_REPORT === '1'
+const REALTIME = process.env.GRIM_REALTIME === '1'
 
-describe(`a real-time ${VERSION} server with GrimAC`, { timeout: 20 * 60 * 1000 }, () => {
+describe(`a ${REALTIME ? 'real-time' : 'lockstep'} ${VERSION} server with GrimAC`, { timeout: 20 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
   let origin: Vec3
   const alerts: GrimAlert[] = []
   const byPhase = new Map<string, GrimAlert[]>()
   let phase = 'join'
+  let wall0 = 0
+  let ticks0 = 0
 
   const run = async (cmd: string): Promise<string> => (await server.command(cmd)).join(' ')
   const at = (dx: number, dy: number, dz: number): Vec3 => origin.offset(dx, dy, dz)
@@ -36,11 +42,11 @@ describe(`a real-time ${VERSION} server with GrimAC`, { timeout: 20 * 60 * 1000 
   before(async () => {
     server = await startServer({
       version: VERSION,
-      lockstep: false,
+      lockstep: !REALTIME,
       flat: true,
       seed: 'grim',
       difficulty: 'easy',
-      mods: await modJars(grimMods(VERSION)),
+      mods: REALTIME ? await modJars(grimMods(VERSION)) : await grimLockstepMods(VERSION),
       files: GRIM_CONFIG,
       gamerules: { advance_weather: false, spawn_mobs: false, spawn_monsters: false, advance_time: false },
       log: (line) => {
@@ -52,7 +58,7 @@ describe(`a real-time ${VERSION} server with GrimAC`, { timeout: 20 * 60 * 1000 
       }
     })
     // (not an op: Grim may exempt one; the console sets the scene)
-    bot = await connectLockstepBot(server, { username: USERNAME, realtime: true, op: false })
+    bot = await connectLockstepBot(server, { username: USERNAME, realtime: REALTIME, op: false, actionsInTick: true })
     await bot.waitForChunksToLoad()
     bot.loadPlugin(createPlugin({ reflexes: false }))
     // where the bot stands: a clear patch of grass around it (a superflat makes structures: a trial chamber's blocks)
@@ -63,11 +69,15 @@ describe(`a real-time ${VERSION} server with GrimAC`, { timeout: 20 * 60 * 1000 
     await run('kill @e[type=!player]')
     await run('time set 1000')
     await waitTicks(bot, 40)
+    wall0 = Date.now()
+    ticks0 = bot.lockstep.ticks
   })
 
   after(async () => {
     const lines = [...byPhase].map(([p, list]) => `${p}: ${list.length} (${[...new Set(list.map(a => a.check))].join(', ')})`)
-    console.log(`[grim] ${alerts.length} alerts${lines.length > 0 ? `; ${lines.join('; ')}` : ''}`)
+    const ticks = bot != null ? bot.lockstep.ticks - ticks0 : 0
+    const rate = ticks / Math.max(0.001, (Date.now() - wall0) / 1000)
+    console.log(`[grim] ${REALTIME ? 'real time' : 'lockstep'}: ${ticks} ticks, ${rate.toFixed(1)} ticks/s; ${alerts.length} alerts${lines.length > 0 ? `; ${lines.join('; ')}` : ''}`)
     if (bot != null) await quitBot(bot)
     if (server != null) await server.cleanup()
   })
