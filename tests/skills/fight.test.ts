@@ -288,3 +288,75 @@ test('swingVictim: a hostile\'s mount under the crosshair (a chicken jockey\'s c
   zombie.vehicle = chicken
   assert.strictEqual(swingVictim(bot, zombie)?.id, chicken.id)
 })
+
+test('shieldCover: among two melee mobs from two sides the shield is faced between them, both within its front; not with them on opposite sides; none for one', async () => {
+  const { shieldCover, SHIELD_COVER_ANGLE } = await import('../../src/skills/fight')
+  const at = new Vec3(0.5, 64, 0.5)
+  // one to the west (-x), one to the south (+z): faced south-west
+  const two = shieldCover(at, [new Vec3(-1.5, 64, 0.5), new Vec3(0.5, 64, 2.5)])
+  assert.ok(two != null && two.covered)
+  const look = { x: -Math.sin(two.yaw), z: -Math.cos(two.yaw) }
+  assert.ok(Math.abs(look.x + Math.SQRT1_2) < 1e-6 && Math.abs(look.z - Math.SQRT1_2) < 1e-6, JSON.stringify(look))
+  // one each side, 170 degrees apart: no front holds both
+  const wide = shieldCover(at, [new Vec3(-1.5, 64, 0.5), new Vec3(2.5, 64, 0.85)])
+  assert.ok(wide != null && !wide.covered)
+  assert.ok(SHIELD_COVER_ANGLE < 90)
+  assert.equal(shieldCover(at, [new Vec3(-1.5, 64, 0.5)]), null)
+  assert.equal(shieldCover(at, [new Vec3(-1.5, 64, 0.5), new Vec3(2.5, 64, 0.5)]), null)
+})
+
+/** a fake fight's bot: a diamond sword in hand, a shield in the off hand, a tick each wait */
+function fightBot (entities: any[]): any {
+  const bot = fakeBot({ entities, items: [item('diamond_sword')], offhand: item('shield') })
+  bot.heldItem = bot.inventory.slots[9]
+  bot.equip = async () => {}
+  bot.activateItem = () => { bot.usingHeldItem = true }
+  bot.deactivateItem = () => { bot.usingHeldItem = false }
+  bot.waitForTicks = async (n: number) => { for (let i = 0; i < n; i++) bot.emit('physicsTick') }
+  bot.entity.yaw = 0
+  bot.look = async (yaw: number, pitch: number) => { bot.entity.yaw = yaw; bot.entity.pitch = pitch }
+  return bot
+}
+
+test('fight: two wither skeletons at the bot from the west and the south, the shield up faces between them, each in its front; one on each side, backed off from them with it up (full-26.3-fresh-u)', async () => {
+  const { fight } = await import('../../src/skills/fight')
+  const west = entity({ id: 8, name: 'wither_skeleton', position: new Vec3(-0.9, 64, 0.5) })
+  const south = entity({ id: 9, name: 'wither_skeleton', position: new Vec3(0.5, 64, 1.9) })
+  const bot = fightBot([west, south])
+  const blockedLooks: Array<{ x: number, z: number }> = []
+  bot.on('physicsTick', () => { if (bot.usingHeldItem === true) blockedLooks.push({ x: -Math.sin(bot.entity.yaw), z: -Math.cos(bot.entity.yaw) }) })
+  await fight(bot, west as any, { maxTicks: 60 }).catch(() => {})
+  assert.ok(blockedLooks.length > 10, `${blockedLooks.length} ticks blocking`)
+  const front = (look: { x: number, z: number }, m: any): number => {
+    const dx = m.position.x - bot.entity.position.x; const dz = m.position.z - bot.entity.position.z; const d = Math.hypot(dx, dz)
+    return (dx * look.x + dz * look.z) / d
+  }
+  const both = blockedLooks.filter(l => front(l, west) > 0 && front(l, south) > 0).length
+  assert.ok(both >= blockedLooks.length - 2, `both in front ${both} of ${blockedLooks.length} blocking ticks`)
+  // one each side of the bot (west and east): the shield up, backing off (the back key held) on open ground
+  const east = entity({ id: 10, name: 'wither_skeleton', position: new Vec3(1.9, 64, 0.6) })
+  const w2 = entity({ id: 11, name: 'wither_skeleton', position: new Vec3(-0.9, 64, 0.5) })
+  const bot2 = fightBot([w2, east])
+  let backing = 0
+  bot2.on('physicsTick', () => { if (bot2.usingHeldItem === true && bot2.getControlState('back') === true) backing++ })
+  await fight(bot2, w2 as any, { maxTicks: 40 }).catch(() => {})
+  assert.ok(backing > 0, 'never backed off with the shield up')
+})
+
+test('fight with yieldToNearer: another melee mob at the bot while the target is out of the sword\'s reach ends the fight (the reflex fights the nearest next); without it the fight goes on', async () => {
+  const { fight } = await import('../../src/skills/fight')
+  const far = entity({ id: 8, name: 'wither_skeleton', position: new Vec3(6.5, 64, 0.5) })
+  const near = entity({ id: 9, name: 'wither_skeleton', position: new Vec3(0.5, 64, 1.9) })
+  const bot = fightBot([far, near])
+  const r = await fight(bot, far as any, { maxTicks: 60, yieldToNearer: true })
+  assert.equal(r.killed, false)
+  assert.ok(r.ticks <= 2, `${r.ticks} ticks`)
+  const bot2 = fightBot([entity({ id: 8, name: 'wither_skeleton', position: new Vec3(6.5, 64, 0.5) }), entity({ id: 9, name: 'wither_skeleton', position: new Vec3(0.5, 64, 1.9) })])
+  const r2 = await fight(bot2, bot2.entities[8], { maxTicks: 30 }).catch(err => err)
+  assert.ok(r2 instanceof Error && /still alive/.test(r2.message), String(r2?.message ?? JSON.stringify(r2)))
+  // the hostiles reflex's fights yield so
+  const { meleeOptions } = await import('../../src/reflexes/rules')
+  const { DEFAULT_REFLEX_CONFIG } = await import('../../src/reflexes/config')
+  assert.equal(meleeOptions({ name: 'wither_skeleton' }, DEFAULT_REFLEX_CONFIG, true).yieldToNearer, true)
+})
+

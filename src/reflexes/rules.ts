@@ -300,9 +300,12 @@ export function letBeInNether (bot: Bot, e: Entity, tick: number): boolean {
 }
 
 /** the hostiles reflex's melee against `target` (fight's options) */
-export function meleeOptions (target: { name?: string }, config: ReflexConfig, nether = false): { maxTicks: number, maxDistance: number, aimHeight?: number, maxDrop?: number } {
+export function meleeOptions (target: { name?: string }, config: ReflexConfig, nether = false): { maxTicks: number, maxDistance: number, aimHeight?: number, maxDrop?: number, yieldToNearer: boolean } {
   return {
     maxTicks: config.hostiles.fightTicks,
+    // (another melee mob at the bot while the target is out of the sword's reach: the fight ends, and the reflex
+    // fights the nearest next)
+    yieldToNearer: true,
     maxDistance: config.combat.scanRange * 2,
     // an enderman hit low: a look at its eyes (EnderMan.isLookingAtMe) is what angers the others
     aimHeight: target.name === 'enderman' ? 0.3 : undefined,

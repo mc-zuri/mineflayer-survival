@@ -48,6 +48,12 @@ export interface FightOptions extends SkillOptions {
   stuckTicks?: number
   /** the way to the target when the steering gets no nearer: resolves whether it got anywhere */
   onStuck?: () => Promise<boolean>
+  /**
+   * given up (returned, not killed) while another melee mob is in its reach of the bot and the target out of the
+   * sword's: the caller fights the one at the bot (the hostiles reflex, nearest first). The fight closed in on one
+   * wither skeleton with the shield down while the other hit the bot from its side (full-26.3-fresh-u)
+   */
+  yieldToNearer?: boolean
 }
 
 /** the most ticks ahead a chase leads its target by, and the most blocks */
@@ -218,6 +224,36 @@ export const MELEE_GUARD_MARGIN = 1.2
 export function meleeGuard (inTheirReach: boolean, inOurReach: boolean, charged: boolean, blocking: boolean, opening = true): 'swing' | 'lower' | 'block' | 'none' {
   if (inOurReach && charged && (opening || !inTheirReach)) return blocking ? 'lower' : 'swing'
   return inTheirReach ? 'block' : 'none'
+}
+
+/**
+ * The most a melee mob's way may be off the look for the shield to be held covering it: a hit is blocked only from in
+ * front (BlocksAttacks' damage reduction, its horizontal_blocking_angle of 90 degrees between the look and the way
+ * to the attacker), and 15 degrees are kept for the mobs' steps and the look's trip to the server
+ */
+export const SHIELD_COVER_ANGLE = 75
+
+/**
+ * The way to face with the shield up among melee mobs in their reach (their positions): the mean of the ways to them
+ * across, and whether each is then within SHIELD_COVER_ANGLE of it; null with fewer than two, or with their ways
+ * cancelling out. Facing one of two at the bot from two sides left the other's hits unblocked: a 26.3 bot in iron with
+ * a shield, two wither skeletons on it by seed 2's throne from the west and the south, took four hits of 4.4 and died
+ * (full-26.3-fresh-u, t232814).
+ */
+export function shieldCover (from: Vec3, mobs: readonly Vec3[]): { yaw: number, covered: boolean } | null {
+  if (mobs.length < 2) return null
+  const ways = mobs.map(m => { const dx = m.x - from.x; const dz = m.z - from.z; const d = Math.hypot(dx, dz); return d < 1e-6 ? null : { x: dx / d, z: dz / d } })
+  let mx = 0
+  let mz = 0
+  for (const w of ways) if (w != null) { mx += w.x; mz += w.z }
+  const len = Math.hypot(mx, mz)
+  if (len < 1e-3) return null
+  mx /= len
+  mz /= len
+  const cos = Math.cos(SHIELD_COVER_ANGLE * Math.PI / 180)
+  const covered = ways.every(w => w == null || w.x * mx + w.z * mz >= cos)
+  // (mineflayer's yaw: the look's way across is -sin, -cos)
+  return { yaw: Math.atan2(-mx, -mz), covered }
 }
 
 /** MeleeAttackGoal.resetAttackCooldown: a melee mob swings again 20 ticks after its last swing at the earliest (adjustedTickDelay(20)) */
@@ -400,6 +436,9 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
   }
   const onSwing = (e: Entity): void => { if (e != null && e !== bot.entity && MELEE_MOBS.has(entityName(e))) cycleOf(e).swung(ticks) }
   if (guarded) bot.on('entitySwingArm', onSwing)
+  /** the melee mobs about (the target too) in their reach, or about to be (MELEE_GUARD_MARGIN): where they are */
+  const meleeInReach = (margin = MELEE_GUARD_MARGIN): Entity[] => Object.values(bot.entities)
+    .filter(m => m !== bot.entity && MELEE_MOBS.has(entityName(m)) && isAlive(bot, m) && inMobReach(m, bot.entity.position, margin))
   /** whether a swing now is clear of every melee mob's next hit (MeleeCycle) */
   const opening = (): boolean => {
     let open = true
@@ -470,6 +509,8 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       } else if (name === 'blaze' && blazeCharged(bot, target) && distance > reach && hasShield()) {
         // its three small fireballs: the shield takes them (Player.isDamageSourceBlocked)
         wantBlock = true
+      } else if (guarded && opts.yieldToNearer === true && distance > reach && meleeInReach(0).some(m => m.id !== target.id)) {
+        break
       } else if (guarded && hasShield()) {
         // a melee mob: its swings on the shield, the sword's between them (meleeGuard). A 26.3 bot in iron with a
         // shield traded blows with a wither skeleton in a fortress's corridor, its shield never up, and was hit to
@@ -489,8 +530,16 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       if (wantBlock) {
         bot.clearControlStates()
         if (advance) steerToward(bot, target.position, { sprint: false, guard: true, maxDrop: opts.maxDrop })
-        // (the shield blocks what comes from in front: Player's BlocksAttacks, faced to the loaded one)
-        lookAt(bot, loadedCrossbow != null && !isCreeper ? loadedCrossbow.position.offset(0, (loadedCrossbow.height ?? 1.95) * 0.85, 0) : center)
+        // among two melee mobs or more in their reach, faced between them (shieldCover); with one of them out of the
+        // shield's front, backed off with it up, away from them, till they're both in front (not over an edge)
+        const cover = guarded && loadedCrossbow == null ? shieldCover(bot.entity.position, meleeInReach().map(m => m.position)) : null
+        if (cover != null) {
+          void bot.look(cover.yaw, yawPitchOf(center.minus(eyePosition(bot))).pitch, true)
+          if (!cover.covered && !edgeAhead(bot, cover.yaw + Math.PI, 1.2, opts.maxDrop ?? 3)) bot.setControlState('back', true)
+        } else {
+          // (the shield blocks what comes from in front: Player's BlocksAttacks, faced to the loaded one)
+          lookAt(bot, loadedCrossbow != null && !isCreeper ? loadedCrossbow.position.offset(0, (loadedCrossbow.height ?? 1.95) * 0.85, 0) : center)
+        }
         if (!blocking) blocking = await raiseShield(bot)
         await waitTicks(bot, 1, signal)
         continue
