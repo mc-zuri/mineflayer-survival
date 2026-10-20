@@ -90,6 +90,13 @@ const KITS: Record<string, Array<[string, number]>> = {
     ['bow', 1], ['arrow', 1], ['cobblestone', 121], ['cooked_mutton', 2], ['cooked_porkchop', 2], ['diamond_pickaxe', 1],
     ['torch', 16], ['oak_log', 37], ['coal', 23], ['water_bucket', 1]
   ],
+  // full-26.3-fresh-u's at s2fortress (killed by two wither skeletons by the nook at (-276, 74, -169), t232814): a
+  // diamond sword, iron armor and golden boots, a shield, a bow and 28 arrows, 13 cooked chicken
+  freshU: [
+    ['diamond_sword', 1], ['iron_helmet', 1], ['iron_chestplate', 1], ['iron_leggings', 1], ['golden_boots', 1], ['shield', 1],
+    ['bow', 1], ['arrow', 28], ['cobblestone', 56], ['cooked_chicken', 13], ['diamond_pickaxe', 1], ['iron_pickaxe', 1],
+    ['torch', 17], ['coal', 29], ['oak_log', 35], ['water_bucket', 1], ['flint_and_steel', 1], ['netherrack', 119]
+  ],
   // the least the gear gate lets in since it asks for the iron helmet and leggings, a bow, 64 arrows and 120 food points
   gate2: [
     ['stone_sword', 1], ['iron_helmet', 1], ['iron_chestplate', 1], ['iron_leggings', 1], ['golden_boots', 1], ['shield', 1],
@@ -130,10 +137,25 @@ if (process.env.BLAZE_CREAM != null) FIRE_RES.push(['magma_cream', Number(proces
 assert.ok(KITS[process.env.BLAZE_KIT ?? 'nether'] != null, `BLAZE_KIT is one of ${Object.keys(KITS).join(', ')}`)
 const KIT = [...FIRE_RES, ...KITS[process.env.BLAZE_KIT ?? 'nether']]
 const RUNS = Number(process.env.BLAZE_RUNS ?? 3)
+// BLAZE_WITHER="x y z; x y z": wither skeletons summoned there at each run's start, or once the bot comes within
+// BLAZE_WITHER_NEAR of the first (the fortress's patrols where a run met them: BLAZE_WITHER=fresh-u, full-26.3-fresh-u's
+// two in the corridor south of the nook at (-276, 74, -169), the first 13 off the bot when it came by, t232574);
+// a "mob@x y z" entry summons another mob there (BLAZE_WITHER=fresh-x: full-26.3-fresh-x's wither skeleton in that
+// corridor and two zombified piglins, calm, by the pit it dug at (-276, 73, -174), t207314; a run they hit the bot in
+// fails: it angered them);
+// BLAZE_PASS=alive passes a run that ends alive, rods or not (the approach's scenario, with a short BLAZE_MAX_TICKS)
+const WITHER_AT: Record<string, string> = {
+  'fresh-u': '-276.5 74 -175.5; -277.5 74 -178.5',
+  'fresh-x': '-275.5 74 -177.5; zombified_piglin@-275.5 74 -173.5; zombified_piglin@-275 74 -175.5'
+}
+const WITHER_NEAR = Number(process.env.BLAZE_WITHER_NEAR ?? (WITHER_AT[process.env.BLAZE_WITHER ?? ''] != null ? 13 : 0))
+const WITHER = (WITHER_AT[process.env.BLAZE_WITHER ?? ''] ?? process.env.BLAZE_WITHER ?? '').split(';').map(t => t.trim()).filter(t => t !== '')
+  .map(t => { const [mob, at] = t.includes('@') ? t.split('@') : ['wither_skeleton', t]; return Object.assign(vec(at), { mob }) })
+const PASS_ALIVE = process.env.BLAZE_PASS === 'alive'
 const RODS = Number(process.env.BLAZE_RODS ?? 6)
 const MAX_TICKS = Number(process.env.BLAZE_MAX_TICKS ?? 16000)
 
-interface RunResult { run: number, rods: number, kills: number, died: boolean, death: string, ticks: number, hurt: number, health: number, error: string }
+interface RunResult { run: number, rods: number, kills: number, died: boolean, death: string, ticks: number, hurt: number, health: number, error: string, piglinHits: number }
 
 describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString()} on a ${DEFAULT_VERSION} server`, { timeout: 120 * 60 * 1000 }, () => {
   let server: TestServer
@@ -164,7 +186,7 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
 
   /** the area round the throne as it was: no blazes, items, fires or cobblestone the last run left */
   async function resetArea (): Promise<void> {
-    const cmds = ['kill @e[type=blaze]', 'kill @e[type=item]', 'kill @e[type=small_fireball]']
+    const cmds = ['kill @e[type=blaze]', 'kill @e[type=wither_skeleton]', 'kill @e[type=zombified_piglin]', 'kill @e[type=item]', 'kill @e[type=small_fireball]']
     // (in slabs under /fill's 32768 blocks)
     for (let y = SPAWNER.y - 9; y < SPAWNER.y + 27; y += 8) for (const b of ['fire', 'cobblestone']) cmds.push(`fill ${SPAWNER.x - 30} ${y} ${SPAWNER.z - 32} ${SPAWNER.x + 30} ${y + 7} ${SPAWNER.z + 30} air replace ${b}`)
     for (const cmd of cmds) {
@@ -197,6 +219,8 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
     await run(`effect give ${USERNAME} minecraft:instant_health 1 10 true`)
     await run(`effect give ${USERNAME} minecraft:saturation 1 20 true`)
     await nether(`tp ${USERNAME} ${START.x} ${START.y} ${START.z}`)
+    const summonWither = async (): Promise<void> => { for (const w of WITHER) await nether(`summon minecraft:${w.mob} ${w.x} ${w.y} ${w.z} {PersistenceRequired:1b}`) }
+    if (WITHER_NEAR <= 0) await summonWither()
     // (the kit's last item in: they're given in order)
     const lastItem = KIT[KIT.length - 1][0].replace(/\[.*$/, '')
     assert.ok(await waitUntil(bot, () => countItems(bot, lastItem) > 0 && bot.entity.onGround, 400), 'no kit')
@@ -225,9 +249,15 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
       }
     }
     const reflexes = new Map<string, number>()
-    const onReflex = (name: string, detail?: string): void => { const k = detail != null ? `${name} (${detail})` : name; reflexes.set(k, (reflexes.get(k) ?? 0) + 1) }
+    const onReflex = (name: string, detail?: string): void => {
+      const k = detail != null ? `${name} (${detail})` : name
+      reflexes.set(k, (reflexes.get(k) ?? 0) + 1)
+      if (process.env.BLAZE_HURT_LOG != null) console.log(`reflex ${bot.lockstep.ticks} ${k} at ${bot.entity.position.floored().toString()} health ${bot.health.toFixed(1)}`)
+    }
+    const onReflexFailed = (name: string, err: any): void => { if (process.env.BLAZE_HURT_LOG != null) console.log(`reflex ${bot.lockstep.ticks} ${name} ended: ${String(err?.message ?? err)}`) }
     bot.on('entityHurt', onHurt)
     bot.on('reflex' as any, onReflex)
+    bot.on('reflexFailed' as any, onReflexFailed)
     const onDeath = (): void => { died = true }
     const onMessage = (m: string): void => { if (typeof m === 'string' && m.startsWith(`${USERNAME} `)) death = m }
     // the rods dropped by the kills: picked up, or gone otherwise (burnt in a fire, in lava, despawned), and where
@@ -254,6 +284,14 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
     bot.on('messagestr' as any, onMessage)
     const executor = new Executor(bot, { log: () => {} })
     resetBrewTries(bot)
+    // (the wither skeletons come once the bot is near the first's spot)
+    let summoned = WITHER.length === 0 || WITHER_NEAR <= 0
+    const onApproach = (): void => {
+      if (summoned || bot.entity.position.distanceTo(WITHER[0]) > WITHER_NEAR) return
+      summoned = true
+      void summonWither()
+    }
+    bot.on('physicsTick', onApproach)
     const t0 = bot.lockstep.ticks
     let result = { rods: 0, kills: 0 }
     let error = ''
@@ -265,9 +303,11 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
       error = (err as Error).message
     } finally {
       bot.off('health', onHealth)
+      bot.off('physicsTick', onApproach)
       bot.off('entityDead', onKill)
       bot.off('entityHurt', onHurt)
       bot.off('reflex' as any, onReflex)
+      bot.off('reflexFailed' as any, onReflexFailed)
       bot.off('death', onDeath)
       bot.off('messagestr' as any, onMessage)
       bot.off('itemDrop' as any, onItem)
@@ -279,7 +319,7 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
     // where the blazes were at the end, and the bot (a spawner makes none with 6 of them in its box: a run of no kills)
     const left = Object.values(bot.entities).filter((e: any) => e.name === 'blaze' && e.position.distanceTo(SPAWNER) <= 32)
     console.log(`blaze run ${n} end: bot at ${bot.entity.position.floored().toString()}; blazes ${left.map((e: any) => e.position.floored().toString()).join(' ')}`)
-    const out: RunResult = { run: n, rods: died ? Math.max(rods, result.rods) : countItems(bot, 'blaze_rod'), kills: Math.max(kills, result.kills), died, death, ticks, hurt: Math.round(hurt), health: Math.round(bot.health), error }
+    const out: RunResult = { run: n, rods: died ? Math.max(rods, result.rods) : countItems(bot, 'blaze_rod'), kills: Math.max(kills, result.kills), died, death, ticks, hurt: Math.round(hurt), health: Math.round(bot.health), error, piglinHits: hits.get('zombified_piglin') ?? 0 }
     const list = (m: Map<string, number>): string => [...m].map(([k, v]) => `${k} x${v}`).join(', ')
     console.log(`blaze run ${n}: ${out.rods} rods, ${out.kills} kills, ${died ? `died (${death})` : 'alive'}, ${ticks} ticks, ${out.hurt} health lost, health ${out.health}${error !== '' ? `, ${error}` : ''}; hits: ${list(hits)}; reflexes: ${list(reflexes)}`)
     if (died) await waitUntil(bot, () => bot.health > 0 && bot.entity != null, 400)
@@ -289,7 +329,9 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
   it(`gets ${RODS} blaze rods without dying, ${RUNS} runs in a row`, async () => {
     const results: RunResult[] = []
     for (let n = 1; n <= RUNS; n++) results.push(await oneRun(n))
-    const passed = results.filter(r => !r.died && r.rods >= RODS).length
+    // (with calm zombified piglins summoned, a run they hit in is one the bot angered them in)
+    const calm = WITHER.some(w => w.mob === 'zombified_piglin')
+    const passed = results.filter(r => !r.died && (PASS_ALIVE || r.rods >= RODS) && (!calm || r.piglinHits === 0)).length
     console.log(`blaze runs: ${passed} of ${results.length} passed; deaths ${results.filter(r => r.died).length}; ticks ${results.map(r => r.ticks).join(', ')}`)
     assert.strictEqual(passed, results.length, JSON.stringify(results))
   })
