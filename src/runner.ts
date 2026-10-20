@@ -19,7 +19,7 @@ import { describeLevel, markAt, StockPolicy, stockedItem, storedAtBase, type Sto
 import { onSurface, SURFACE_MIN_Y } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
-import { buildBase, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
+import { buildBase, keepBaseUnbroken, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
 import { DEPOT_POI, Executor, describeRequest, ownedInventory, type ExecutorOptions, type PlanOptions } from './executor/executor'
 import { SPARE_FOOD_POINTS, milestoneNeeds, spareKitGoals, stockKeepRule, tripSpareGoals } from './executor/keep'
@@ -533,6 +533,8 @@ export class Runner {
       kept.push(foot, foot.offset(1, 0, 0), foot.offset(-1, 0, 0), foot.offset(0, 0, 1), foot.offset(0, 0, -1))
     }
     if (kept.length > 0) keepUnbroken(this.bot, kept)
+    // and the base's bed, table, furnaces and chests (a resume sets no build's protection)
+    keepBaseUnbroken(this.bot, this.memory)
     this.reached.push(...data.reached)
     this.ticksBefore = data.ticks
     // the memory's clock goes on from the save's (a chest's age, a death's)

@@ -6,7 +6,7 @@ import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { TaskError } from '../core/errors'
 import { isBed } from '../core/items'
-import { normalizeDimension } from '../core/memory'
+import { normalizeDimension, type WorldMemory } from '../core/memory'
 import type { Executor } from '../executor/executor'
 import { isAbort } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
@@ -19,7 +19,8 @@ import { type BlockGetter, type Vec, blockRegistry, posKey } from './blocks'
 import { generateBlueprint, planBuild, SHELL_MATERIALS, type Blueprint, type BlueprintOptions, type Placement } from './blueprint'
 import { checkStorageSafety, type SafetyReport } from './safety'
 import { selectSite, siteCandidates, type SiteScore } from './siteSelection'
-import { BASE_POI } from './pois'
+import { BASE_POI, baseRecord } from './pois'
+import { keepUnbroken } from '../skills/tripKit'
 
 /**
  * The first base: a 6 × 3 × 4 room (11 chest places along the walls, 1 furnace, a crafting table and a bed), the
@@ -179,6 +180,27 @@ export function protectBase (bot: Bot, blueprint: Pick<Blueprint, 'bounds' | 'di
   })
 }
 
+/**
+ * The base's bed (its foot and the cells round it, the head one of them), its table, furnaces and chests kept from the
+ * pathfinder's digs (keepUnbroken), from the memory: after a build, and on a resume, when the blueprint's bounds
+ * protection (protectBase) isn't set again. A GoalSurface out of the base after a respawn broke its bed, 'more
+ * white_bed', and the respawn point was gone (full-26.3-fresh-u, t232877)
+ */
+export function keepBaseUnbroken (bot: Bot, memory: WorldMemory): Vec3[] {
+  const base = baseRecord(memory)
+  if (base == null) return []
+  const cells: Vec3[] = []
+  if (base.bed != null) {
+    const foot = new Vec3(base.bed.x, base.bed.y, base.bed.z)
+    cells.push(foot, foot.offset(1, 0, 0), foot.offset(-1, 0, 0), foot.offset(0, 0, 1), foot.offset(0, 0, -1))
+  }
+  for (const p of [...(base.table != null ? [base.table] : []), ...base.furnaces, ...base.chests]) cells.push(new Vec3(p.x, p.y, p.z))
+  // (the bed's cells round its foot kept only where a bed is: not the floor or a wall by it)
+  const kept = cells.filter((c, i) => i === 0 || i > 4 || base.bed == null || /_bed$/.test(bot.blockAt(c)?.name ?? '_bed'))
+  if (kept.length > 0) keepUnbroken(bot, kept)
+  return kept
+}
+
 /** chooses the site: the best siteSelection score of a grid of candidates around `around` */
 export function chooseSite (bot: Bot, blueprintOptions: BlueprintOptions, around: Vec, opts: { radius?: number, step?: number, depths?: number[] } = {}): SiteScore | null {
   const world = botWorld(bot)
@@ -335,6 +357,7 @@ export async function buildBase (bot: Bot, opts: BuildBaseOptions): Promise<Buil
   const chests = blueprint.storage.filter(p => bot.blockAt(v(p))?.name === 'chest').map(v)
   record(bot, executor, blueprint, chests, { missing: missing.length, total: blueprint.placements.filter(p => (p as any).autoPlaced !== true && wanted(p)).length })
   protectBase(bot, blueprint)
+  keepBaseUnbroken(bot, executor.memory)
   const safety = checkStorageSafety(world, chests, { bounds: blueprint.bounds, registry })
   log(`base built: ${dug} dug, ${placed} placed, ${missing.length} missing, ${chests.length} chests, ${safety.safe ? 'safe' : `${safety.unsafe.length} chests unsafe`}`)
   for (const u of safety.unsafe.slice(0, 5)) log(`unsafe: ${u.reason}`)
