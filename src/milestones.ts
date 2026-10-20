@@ -609,15 +609,33 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
       } catch (err) {
         // (no diamond pickaxe to mine the obsidian with, or no water: the cast takes neither)
         if (signal.aborted || TaskError.is(err, 'DIED') || !(isSkillError(err, 'NOT_FOUND') || isSkillError(err, 'MISSING_ITEMS'))) throw err
-        log(`a portal frame: ${(err as Error).message}: the lava carried up to a cast on the surface`)
+        log(`a portal frame: ${(err as Error).message}: the lava carried to a cast away from it`)
       }
-      // no shore either: the pool's lava carried up in buckets (more made from the iron) to a cast on flat ground
+      // no shore either: the pool's lava carried in buckets to a cast away from it
       const lava = findLavaSources(blockGetter(bot), bot.entity.position, 16).map(p => new Vec3(p.x, p.y, p.z))
-      await executor.obtain([{ item: 'bucket', count: LAVA_BUCKETS }], signal).catch(err => {
-        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-        log(`buckets: ${(err as Error).message}`)
-      })
-      await executor.task('up to the surface', async (s) => await ensureSurface(bot, s), signal)
+      const away = castNearSpot(bot.entity.position, lava)
+      if (away != null) {
+        // a deep pool: the cast on a site dug in the rock CAST_AWAY blocks off it, the trips for its lava short (a 26.3
+        // whole game carried the lava of the deep pools up 120 blocks a trip to the surface, after exploring 20000
+        // ticks for the iron of more buckets, some 20000 to 50000 ticks a pool, and it failed)
+        log(`a portal frame: the cast ${CAST_AWAY} blocks off the deep pool, at ${away.floored().toString()}`)
+        await executor.task('off the lava', async (s) => await tunnelTo(bot, { target: away, range: 2 }, s), signal).catch(err => {
+          if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+          log(`a portal frame: off the lava: ${(err as Error).message}`)
+        })
+        if (count('bucket') === 0 && count('lava_bucket') === 0) {
+          await executor.obtain([{ item: 'bucket', count: 1 }], signal).catch(err => {
+            if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+            log(`buckets: ${(err as Error).message}`)
+          })
+        }
+      } else {
+        await executor.obtain([{ item: 'bucket', count: LAVA_BUCKETS }], signal).catch(err => {
+          if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+          log(`buckets: ${(err as Error).message}`)
+        })
+        await executor.task('up to the surface', async (s) => await ensureSurface(bot, s), signal)
+      }
       await executor.task('cast a portal', async (s) => await castPortalAway(bot, lava, Math.max(1, countItems(bot, 'bucket')), s), signal)
       return
     } catch (err) {
@@ -721,6 +739,28 @@ export const PORTAL_LEG = 128
 
 /** the depth of the deep caves' lava lakes (the aquifers' lava level, y -54 and under) the portal's search goes down to */
 export const DEEP_LAVA_Y = -50
+
+/** a pool under this height has its lava cast near it (castNearSpot), not carried up to the surface */
+export const CAST_NEAR_Y = 40
+/** how far from a deep pool's nearest source its cast is made */
+export const CAST_AWAY = 12
+
+/**
+ * Where a deep pool's cast goes: CAST_AWAY blocks from its nearest source, on the bot's side of it at the bot's
+ * height, so the cast's water doesn't reach the pool (it spreads 7). Null for a pool above CAST_NEAR_Y.
+ */
+export function castNearSpot (bot: { x: number, y: number, z: number }, lava: ReadonlyArray<{ x: number, y: number, z: number }>): Vec3 | null {
+  if (lava.length === 0 || bot.y >= CAST_NEAR_Y) return null
+  const cx = lava.reduce((n, p) => n + p.x + 0.5, 0) / lava.length
+  const cz = lava.reduce((n, p) => n + p.z + 0.5, 0) / lava.length
+  let dx = bot.x - cx
+  let dz = bot.z - cz
+  const len = Math.hypot(dx, dz)
+  if (len < 0.5) { dx = 1; dz = 0 } else { dx /= len; dz /= len }
+  // past the farthest source along the way out
+  const reach = Math.max(...lava.map(p => (p.x + 0.5 - cx) * dx + (p.z + 0.5 - cz) * dz))
+  return new Vec3(Math.floor(cx + dx * (reach + CAST_AWAY)), Math.floor(bot.y), Math.floor(cz + dz * (reach + CAST_AWAY)))
+}
 
 /** the empty buckets a cast carried up from far lava takes its lava in, a trip */
 export const LAVA_BUCKETS = 5
