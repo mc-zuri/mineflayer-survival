@@ -275,6 +275,17 @@ export function nextMilestone (state: ProgressState): Milestone | null {
   return MILESTONES.find(m => !m.done(state)) ?? null
 }
 
+/**
+ * The milestone being worked on and the next one not done after it (of MILESTONES; an epoch alone): what the bag keeps
+ * for (keep.ts milestoneNeeds)
+ */
+export function milestonesAhead (current: Milestone, state: ProgressState): Milestone[] {
+  const i = MILESTONES.findIndex(m => m.id === current.id)
+  if (i < 0) return [current]
+  const next = MILESTONES.slice(i + 1).find(m => !m.done(state))
+  return next != null ? [current, next] : [current]
+}
+
 /** plans a milestone's goals from the state (worn armor counts as held) */
 export function planMilestone (registry: RegistryLike, m: Milestone, state: ProgressState, opts: Omit<ObtainOptions, 'inventory' | 'memory' | 'stations'> = {}): ObtainPlan {
   return obtainAll(registry, m.goals(state), { ...opts, inventory: owned(state), memory: state.memory, stations: state.stations })

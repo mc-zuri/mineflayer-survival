@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import minecraftData from 'minecraft-data'
-import { defaultKeep, isValuable, junkToToss, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, tossValue } from '../../src/executor/keep'
+import { defaultKeep, isValuable, junkToToss, splitInventory, storable, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, tossValue } from '../../src/executor/keep'
 import { VERSIONS } from '../versions'
 
 for (const version of VERSIONS) {
@@ -224,4 +224,84 @@ test('ThrowHistory: a part stack thrown again with the same count is looping at 
   pearls.record([{ name: 'egg', count: 16 }], 0)
   assert.deepEqual(pearls.looping([{ name: 'egg', count: 16 }], 10, name => name === 'egg' ? 16 : 64), [])
   assert.deepEqual(pearls.looping([{ name: 'egg', count: 16 }], 10), [{ name: 'egg', count: 16 }])
+})
+
+for (const version of VERSIONS) {
+  test(`milestoneNeeds: the nether's goals, the plan for them and its kit, and the eyes' after it (${version})`, async () => {
+    const { milestoneNeeds } = await import('../../src/executor/keep')
+    const { milestone, milestonesAhead, planMilestone } = await import('../../src/planner/progression')
+    const { Inventory } = await import('../../src/core/inventory')
+    const { WorldMemory } = await import('../../src/core/memory')
+    const registry = minecraftData(version)
+    // a flint and steel to craft from the bag's iron and flint, 6 obsidian made of the 10
+    const inventory = new Inventory(registry as any, { diamond_pickaxe: 1, iron_ingot: 3, flint: 2, obsidian: 6, water_bucket: 1, bucket: 2, raw_gold: 2, crafting_table: 1 })
+    const state = { inventory, memory: new WorldMemory() }
+    const nether = milestone('nether')
+    const ahead = milestonesAhead(nether, state)
+    assert.deepEqual(ahead.map(m => m.id), ['nether', 'eyes'])
+    let planned = 0
+    const needs = milestoneNeeds(ahead, state, goals => { planned++; return planMilestone(registry as any, { ...nether, goals: () => goals }, state) })
+    assert.equal(planned, 2)
+    // the goals
+    assert.equal(needs.obsidian, 10)
+    assert.equal(needs.flint_and_steel, 1)
+    assert.ok(needs.blaze_rod >= 8 && needs.ender_pearl >= 16, JSON.stringify(needs))
+    // the plan's: the flint and steel's iron and flint
+    assert.ok(needs.iron_ingot >= 1 && needs.flint >= 1, JSON.stringify(needs))
+    // the kit: the cast's buckets and the gold
+    for (const name of ['bucket', 'water_bucket', 'lava_bucket', 'gold_ingot', 'raw_gold']) assert.ok(needs[name] > 0, name)
+    // the eyes after it: the powder and the eyes
+    assert.ok(needs.blaze_powder > 0 && needs.ender_eye > 0)
+    // with no plan (or one that throws): the goals and the kit alone
+    const bare = milestoneNeeds(ahead, state, () => { throw new Error('no plan') })
+    assert.equal(bare.obsidian, 10)
+    assert.equal(bare.flint, undefined)
+  })
+
+  test(`milestoneNeeds: the enchanting's books, lapis, diamonds and obsidian, the table's makings from its plan (${version})`, async () => {
+    const { milestoneNeeds } = await import('../../src/executor/keep')
+    const { milestone, planMilestone } = await import('../../src/planner/progression')
+    const { Inventory } = await import('../../src/core/inventory')
+    const { WorldMemory } = await import('../../src/core/memory')
+    const registry = minecraftData(version)
+    const inventory = new Inventory(registry as any, { diamond_pickaxe: 1, diamond: 2, obsidian: 4, paper: 3, leather: 1, crafting_table: 1 })
+    const state = { inventory, memory: new WorldMemory() }
+    const m = milestone('enchanting')
+    const needs = milestoneNeeds([m], state, goals => planMilestone(registry as any, { ...m, goals: () => goals }, state))
+    assert.equal(needs.enchanting_table, 1)
+    assert.ok(needs.lapis_lazuli >= 9)
+    assert.ok(needs.diamond >= 2 && needs.obsidian >= 4 && needs.book > 0, JSON.stringify(needs))
+    // the plan's: the book's paper and leather
+    assert.ok(needs.paper >= 3 && needs.leather >= 1, JSON.stringify(needs))
+  })
+}
+
+test('a full bag in the nether milestone: the stash and the store take the junk and the rest, never the obsidian, the buckets, the gold (protectedCounts needs)', () => {
+  const registry = minecraftData('26.3')
+  const needs = { obsidian: 10, bucket: Infinity, water_bucket: Infinity, lava_bucket: Infinity, flint_and_steel: 1, gold_ingot: Infinity, raw_gold: Infinity, diamond: 3 }
+  const bag = [
+    { name: 'diamond_pickaxe', count: 1 }, { name: 'obsidian', count: 6 }, { name: 'bucket', count: 2 }, { name: 'water_bucket', count: 1 },
+    { name: 'lava_bucket', count: 1 }, { name: 'raw_gold', count: 2 }, { name: 'raw_iron', count: 2 }, { name: 'furnace', count: 1 },
+    { name: 'oak_door', count: 1 }, { name: 'dirt', count: 64 }, { name: 'cobblestone', count: 64 }
+  ]
+  // a stock policy's keep rule of 0 for everything: what's kept is what's protected
+  const nothing = (): number => 0
+  const { keep, store } = splitInventory(bag, { keep: nothing, registry, protect: { needs } })
+  const stored = Object.fromEntries(store.map(s => [s.name, s.count]))
+  const kept = Object.fromEntries(keep.map(s => [s.name, s.count]))
+  for (const name of ['obsidian', 'bucket', 'water_bucket', 'lava_bucket', 'raw_gold']) {
+    assert.equal(stored[name], undefined, `${name} stored`)
+    assert.equal(kept[name], bag.find(b => b.name === name)?.count, `${name} kept`)
+  }
+  assert.deepEqual(['cobblestone', 'dirt', 'furnace', 'oak_door', 'raw_iron'].filter(n => stored[n] > 0), ['cobblestone', 'dirt', 'furnace', 'oak_door', 'raw_iron'])
+  // a chest's store of all of it (chest.ts storable) leaves them too
+  const into = storable(bag, bag, registry, { needs })
+  assert.deepEqual(into.filter(i => needs[i.name as keyof typeof needs] != null), [])
+  // and a throw of anything for room takes none of them (the buckets and gold aren't valuable)
+  const toss = junkToToss(bag, 10, { keep: nothing, registry, anything: true, protect: { needs } })
+  assert.deepEqual(toss.filter(t => needs[t.name as keyof typeof needs] != null), [])
+  assert.ok(toss.some(t => t.name === 'dirt'))
+  // the same bag without the needs: the obsidian and the gold go to the stash (the 26.3 run's depot)
+  const before = splitInventory(bag, { keep: nothing, registry })
+  assert.ok(before.store.some(s => s.name === 'obsidian') && before.store.some(s => s.name === 'raw_gold'))
 })

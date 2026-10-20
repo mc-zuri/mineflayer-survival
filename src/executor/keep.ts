@@ -3,8 +3,8 @@
 import { foodInfo, isBed, isSafeFood, parseTool, TOOL_MATERIALS, type ToolKind } from '../core/items'
 import type { Inventory, ItemCount } from '../core/inventory'
 import type { RegistryLike } from '../core/registry'
-import { heldFor, unitValue, type ObtainRequest } from '../planner/obtain'
-import { FOOD_GOAL, toolsAtLeast } from '../planner/progression'
+import { heldFor, unitValue, type ObtainPlan, type ObtainRequest } from '../planner/obtain'
+import { FOOD_GOAL, toolsAtLeast, type Milestone, type MilestoneId, type ProgressState } from '../planner/progression'
 import type { StockPolicy } from '../planner/stock'
 
 /** how many of an item to carry; Infinity: all of them (the registry: the version's, for what is food) */
@@ -165,14 +165,18 @@ export interface ProtectOptions {
   arrows?: number
   /** food points kept (default FOOD_WORKING_SET) */
   foodPoints?: number
+  /** what the milestones being worked on need (milestoneNeeds), kept up to these counts */
+  needs?: Readonly<Record<string, number>>
 }
 
 /**
  * What a store, a stash, a depot or a throw for room never takes from the bag, whatever the keep rule says (a stock
  * policy's keep count over it): the best of each tool kind (pickaxe, axe, shovel, sword; the hoe when farming), a
  * shield, a bow and ARROWS_KEPT arrows with it, a water bucket, and food up to FOOD_WORKING_SET points, the most
- * filling first. (Worn armor and the off hand aren't in the bag's slots: no store moves them.) The obsidian of a 26.3
- * whole game was made by a bot whose diamond pickaxe a store could have left at the base 160 blocks off.
+ * filling first, and what the milestones being worked on need (`needs`: milestoneNeeds). (Worn armor and the off hand
+ * aren't in the bag's slots: no store moves them.) The obsidian of a 26.3 whole game was made by a bot whose diamond
+ * pickaxe a store could have left at the base 160 blocks off; another's 6 obsidian for the portal went into a depot put
+ * down by a diamond far from the lava, and the frame had none.
  */
 export function protectedCounts (items: readonly ItemCount[], registry?: RegistryLike, opts: ProtectOptions = {}): Record<string, number> {
   const totals = new Map<string, number>()
@@ -202,6 +206,58 @@ export function protectedCounts (items: readonly ItemCount[], registry?: Registr
       keep(f.n, n)
       left -= n * f.points
     }
+  }
+  for (const [name, n] of Object.entries(opts.needs ?? {})) keep(name, n)
+  return out
+}
+
+/** what the requests need, by item: what's kept when storing or making room */
+export function neededItems (requests: readonly ObtainRequest[], plan?: ObtainPlan): Record<string, number> {
+  const out: Record<string, number> = {}
+  const add = (name: string, n: number): void => { if (!name.startsWith('#')) out[name] = Math.max(out[name] ?? 0, n) }
+  // (food points: the keep rule keeps every safe food)
+  for (const r of requests) if (r.unit !== 'nutrition') for (const i of typeof r.item === 'string' ? [r.item] : r.item) add(i, r.count)
+  for (const step of plan?.steps ?? []) {
+    if (step.kind === 'craft') for (const i of step.ingredients) add(i.name, (out[i.name] ?? 0) + i.count)
+    if (step.kind === 'smelt') for (const i of [...step.inputs, ...step.fuel]) add(i.name, (out[i.name] ?? 0) + i.count)
+    if (step.kind === 'mine' && step.tool != null) add(step.tool, 1)
+  }
+  return out
+}
+
+const GOLD = { gold_ingot: Infinity, raw_gold: Infinity, gold_block: Infinity, raw_gold_block: Infinity, gold_nugget: Infinity, golden_helmet: 1, golden_chestplate: 1, golden_leggings: 1, golden_boots: 1 }
+const EYE_MAKINGS = { ender_pearl: Infinity, blaze_rod: Infinity, blaze_powder: Infinity, ender_eye: Infinity }
+
+/**
+ * What a milestone's work uses beside its goals and their plan (milestoneNeeds): the enchanting's books, lapis,
+ * diamonds and obsidian (the table, the shelves, the anvil's books); the nether's obsidian, the buckets of the lava
+ * cast (empty, of water and of lava), the flint and steel and the gold (a golden piece for the piglins, the barters);
+ * the eyes' and the End's pearls, rods, powder and eyes
+ */
+export const MILESTONE_KIT: Partial<Record<MilestoneId, Readonly<Record<string, number>>>> = {
+  enchanting: { book: Infinity, enchanted_book: Infinity, lapis_lazuli: Infinity, diamond: 3, obsidian: 4 },
+  nether: { obsidian: 10, bucket: Infinity, water_bucket: Infinity, lava_bucket: Infinity, flint_and_steel: 1, ...GOLD, ...EYE_MAKINGS },
+  eyes: EYE_MAKINGS,
+  end: { ender_eye: Infinity, ender_pearl: Infinity, water_bucket: 1 }
+}
+
+/**
+ * What the milestones being worked on (the current one and the next: progression.ts milestonesAhead) need, by item:
+ * their goals and what the planner's plan for them takes (neededItems: the crafts' ingredients, the smelts' inputs and
+ * fuel, the mine steps' tools), and their kit (MILESTONE_KIT). No store, stash, depot or throw takes those from the bag
+ * (protectedCounts' `needs`): room made while a worn pickaxe's replacement was mined put a nether milestone's 6
+ * obsidian and its gold into a depot far from the lava, and the frame had none (26.3). `plan`: the planner's plan for
+ * the goals (none, or one that throws: the goals and the kit alone).
+ */
+export function milestoneNeeds (milestones: readonly Milestone[], state: ProgressState, plan?: (goals: ObtainRequest[]) => ObtainPlan | null): Record<string, number> {
+  const out: Record<string, number> = {}
+  const add = (name: string, n: number): void => { if (n > 0) out[name] = Math.max(out[name] ?? 0, n) }
+  for (const m of milestones) {
+    const goals = m.goals(state)
+    let p: ObtainPlan | null = null
+    try { p = plan?.(goals) ?? null } catch {}
+    for (const [name, n] of Object.entries(neededItems(goals, p ?? undefined))) add(name, n)
+    for (const [name, n] of Object.entries(MILESTONE_KIT[m.id] ?? {})) add(name, n)
   }
   return out
 }

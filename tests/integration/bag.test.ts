@@ -12,6 +12,9 @@ import { DEPOT_POI, Executor, LAVA_ROOM } from '../../src/executor/executor'
 import { isThrownDrop } from '../../src/skills/pickupDrops'
 import { obsidianFromPools, TABLE_OBSIDIAN } from '../../src/milestones'
 import { descendTo } from '../../src/executor/explore'
+import { milestoneNeeds } from '../../src/executor/keep'
+import { milestone, milestonesAhead } from '../../src/planner/progression'
+import { progressState } from '../../src/runner'
 
 const USERNAME = 'bagbot'
 
@@ -121,6 +124,33 @@ describe(`the bag down a mine on a ${DEFAULT_VERSION} server`, { timeout: 20 * 6
     // (and what digging the nook dropped)
     assert.ok(countItems(bot, 'cobblestone') >= 64)
     assert.strictEqual(countItems(bot, 'diamond_pickaxe'), 1)
+  })
+
+  it('a full bag in the nether milestone: the depot takes the iron, the junk is thrown, the obsidian, the buckets and the gold stay (milestoneNeeds)', async (t) => {
+    await mine(10)
+    await run(`tp ${USERNAME} ${origin.x + 5.5} ${origin.y} ${origin.z + 0.5} -90 0`)
+    // 35 slots: the bag a slot short of its 2 free (26.3 run full-26.3-j: '1 furnace, 6 obsidian, 2 raw_iron, 2
+    // chicken, 1 oak_door, 2 raw_gold' stashed in a depot by a diamond, and the frame had no obsidian)
+    for (const [item, n] of [['diamond_pickaxe', 1], ['obsidian', 6], ['bucket', 2], ['water_bucket', 1], ['lava_bucket', 1], ['flint_and_steel', 1], ['raw_gold', 2], ['oak_log', 4], ['crafting_table', 1], ['cobblestone', 64], ['dirt', 64], ['furnace', 1], ['raw_iron', 23 * 64]] as const) await give(item, n)
+    assert.strictEqual(emptySlots(bot), 1)
+    const lines: string[] = []
+    const nether = milestone('nether')
+    let executor: Executor | null = null
+    const needs = (): Record<string, number> => {
+      const state = progressState(bot, bot.survival.memory)
+      return milestoneNeeds(milestonesAhead(nether, state), state, goals => executor!.plan(goals, state.inventory))
+    }
+    executor = new Executor(bot, { log: line => { lines.push(line); t.diagnostic(line) }, stocked: () => false, milestoneNeeds: needs })
+    await executor.makeRoom()
+    const depots = bot.survival.memory.getPois(DEPOT_POI)
+    assert.strictEqual(depots.length, 1, lines.join(' | '))
+    const d = depots[0]
+    const inChest = parseItems(await run(`data get block ${d.x} ${d.y} ${d.z} Items`))
+    assert.ok((inChest.raw_iron ?? 0) >= 20 * 64, JSON.stringify(inChest))
+    for (const name of ['obsidian', 'bucket', 'water_bucket', 'lava_bucket', 'flint_and_steel', 'raw_gold']) assert.strictEqual(inChest[name], undefined, `${name} in the depot: ${JSON.stringify(inChest)}`)
+    for (const [name, n] of [['obsidian', 6], ['bucket', 2], ['water_bucket', 1], ['lava_bucket', 1], ['flint_and_steel', 1], ['raw_gold', 2], ['diamond_pickaxe', 1]] as const) assert.strictEqual(countItems(bot, name), n, name)
+    assert.ok(lines.some(l => /throwing away 64 dirt/.test(l)), lines.join(' | '))
+    assert.ok(emptySlots(bot) >= 2, `${emptySlots(bot)} slots free`)
   })
 
   it('mines 4 diamonds through the stone with a bag nearly full of cobblestone: room made on the way, no inventory full, nothing thrown picked up again', async (t) => {

@@ -463,6 +463,38 @@ test('stashNearby puts a depot chest down when no chest is near, stores what isn
   assert.equal(count(bot, 'andesite'), 20)
 })
 
+test('stashNearby keeps what the milestones being worked on need (milestoneNeeds: the nether\'s obsidian, buckets and gold), stashes the rest', async () => {
+  const bot = fakeBot({ raw_iron: 2, furnace: 1, obsidian: 6, raw_gold: 2, bucket: 2, lava_bucket: 1, oak_door: 1, iron_pickaxe: 1 })
+  bot.entities = {}
+  bot.entity.yaw = 0
+  bot.entity.eyeHeight = 1.62
+  const depot = new Vec3(1, 64, 0)
+  let placed = false
+  bot.blockAt = (pos: Vec3) => placed && pos.equals(depot) ? { name: 'chest', type: registry.blocksByName.chest.id, position: depot, boundingBox: 'block' } : { name: 'air', position: pos, boundingBox: 'empty' }
+  bot._client = new EventEmitter()
+  const inChest: Record<string, number> = {}
+  bot.openContainer = async () => ({
+    slots: new Array(63).fill(null),
+    inventoryStart: 27,
+    inventoryEnd: 63,
+    items: () => bot.inventory.items(),
+    containerItems: () => Object.entries(inChest).map(([name, count]) => ({ name, count, type: registry.itemsByName[name].id })),
+    deposit: async (type: number, _meta: unknown, n: number) => { const name = registry.items[type].name; bot.take(name, n); inChest[name] = (inChest[name] ?? 0) + n },
+    close: () => {}
+  })
+  // a stock keep rule of nothing: what stays is what's protected
+  const ex = new Executor(bot, { runners: {}, keep: () => 0, milestoneNeeds: () => ({ obsidian: 10, bucket: Infinity, lava_bucket: Infinity, raw_gold: Infinity }) })
+  ;(ex as any).putDownDepot = async () => { placed = true; return depot }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await ex.stashNearby({}, undefined, async (_name: string, fn: any) => await fn(new AbortController().signal))
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.deepEqual(inChest, { raw_iron: 2, furnace: 1, oak_door: 1 })
+  for (const [name, n] of [['obsidian', 6], ['raw_gold', 2], ['bucket', 2], ['lava_bucket', 1], ['iron_pickaxe', 1]] as const) assert.equal(count(bot, name), n, name)
+})
+
 test('the loot step walks to a chest out of the loaded chunks before it opens it', async () => {
   const travelModule = require('../../src/skills/travel')
   const chestModule = require('../../src/skills/chest')

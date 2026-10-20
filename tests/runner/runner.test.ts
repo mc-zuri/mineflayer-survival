@@ -591,3 +591,21 @@ test('after a death the basics lacking are made again in order: stone tools, iro
   // the stone ones, then the iron ones (the stone sword's need gone once iron came is still asked in order)
   assert.deepEqual(asked, ['stone_pickaxe', 'stone_sword', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
 })
+
+test('in the nether milestone the executor\'s stores keep what it and the eyes need: the goals, their plan, the kit (Runner.milestoneNeeds)', async () => {
+  const bot = fakeBot({ diamond_pickaxe: 1, iron_ingot: 2, flint: 1, obsidian: 6, bucket: 1, water_bucket: 1, raw_gold: 3, crafting_table: 1 })
+  let needs: Record<string, number> = {}
+  const runner = new Runner(bot, {
+    skip: ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting'],
+    stopAt: 'eyes',
+    log: () => {},
+    handlers: { nether: async ({ executor }) => { needs = { ...executor.protect().needs }; bot.give('ender_eye', 16) } }
+  })
+  const result = await runner.play()
+  assert.equal(result.stoppedAt, 'eyes')
+  assert.equal(needs.obsidian, 10)
+  assert.equal(needs.flint_and_steel, 1)
+  // the flint and steel's makings, from the plan
+  assert.ok(needs.flint >= 1 && needs.iron_ingot >= 1, JSON.stringify(needs))
+  for (const name of ['bucket', 'water_bucket', 'lava_bucket', 'raw_gold', 'gold_ingot', 'ender_pearl', 'blaze_rod', 'blaze_powder', 'ender_eye']) assert.ok(needs[name] > 0, name)
+})

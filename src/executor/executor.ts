@@ -25,7 +25,7 @@ import { tossAway } from '../skills/pickupDrops'
 import { holdBag, type BagKeeper } from '../skills/bag'
 import { countItems, emptySlots, trace } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
-import { defaultKeep, JUNK, junkToToss, ROUTE_STONE, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
+import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { noteVillage } from '../skills/village'
@@ -43,6 +43,8 @@ export const VILLAGE_CHECK_TICKS = 400
 
 /** how far from the bot a failed mine step's remembered blocks are forgotten: all of them in the dimension */
 export const FORGET_RADIUS = Infinity
+
+export { neededItems }
 
 export interface ExecutorHooks {
   /** before every step (the runner sleeps through the night here) */
@@ -85,6 +87,11 @@ export interface ExecutorOptions {
   log?: (line: string) => void
   /** the spawn or base, where exploring turns around */
   home?: () => Vec3 | null
+  /**
+   * What the milestones being worked on need (keep.ts milestoneNeeds: the runner's current and next milestone), never
+   * stored, stashed, put in a depot or thrown away (default nothing)
+   */
+  milestoneNeeds?: () => Readonly<Record<string, number>>
 }
 
 /** times a task is stopped for a worn tool (TOOL_WORN) and run again before the stop is let through */
@@ -182,20 +189,6 @@ export function requestsMet (inv: Inventory, requests: readonly ObtainRequest[])
   })
 }
 
-/** what the requests need, by item: what's kept when storing or making room */
-export function neededItems (requests: readonly ObtainRequest[], plan?: ObtainPlan): Record<string, number> {
-  const out: Record<string, number> = {}
-  const add = (name: string, n: number): void => { if (!name.startsWith('#')) out[name] = Math.max(out[name] ?? 0, n) }
-  // (food points: the keep rule keeps every safe food)
-  for (const r of requests) if (r.unit !== 'nutrition') for (const i of typeof r.item === 'string' ? [r.item] : r.item) add(i, r.count)
-  for (const step of plan?.steps ?? []) {
-    if (step.kind === 'craft') for (const i of step.ingredients) add(i.name, (out[i.name] ?? 0) + i.count)
-    if (step.kind === 'smelt') for (const i of [...step.inputs, ...step.fuel]) add(i.name, (out[i.name] ?? 0) + i.count)
-    if (step.kind === 'mine' && step.tool != null) add(step.tool, 1)
-  }
-  return out
-}
-
 export class Executor {
   readonly memory: WorldMemory
   readonly tasks: TaskRunner
@@ -236,7 +229,8 @@ export class Executor {
       surplus: opts.surplus ?? (() => false),
       stocked: opts.stocked ?? (() => true),
       scaffold: opts.scaffold ?? { items: SCAFFOLD_ITEMS, keep: SCAFFOLD_KEEP },
-      exclude: opts.exclude ?? ['barter']
+      exclude: opts.exclude ?? ['barter'],
+      milestoneNeeds: opts.milestoneNeeds ?? (() => ({}))
     }
     this.runners = { ...DEFAULT_RUNNERS, ...opts.runners } as any
     this.hooks = opts.hooks ?? {}
@@ -625,9 +619,12 @@ export class Executor {
     }, signal, { step, desc: describeStep(step) })
   }
 
-  /** what no store or throw takes from the bag beyond keep.ts protectedCounts' own: the best hoe while the bot keeps a farm */
+  /**
+   * What no store or throw takes from the bag beyond keep.ts protectedCounts' own: the best hoe while the bot keeps a
+   * farm, and what the milestones being worked on need (milestoneNeeds)
+   */
   protect (): ProtectOptions {
-    return { farming: knownFarms(this.memory, normalizeDimension(this.bot.game?.dimension)).length > 0 }
+    return { farming: knownFarms(this.memory, normalizeDimension(this.bot.game?.dimension)).length > 0, needs: this.options.milestoneNeeds() }
   }
 
   /** what making room may throw away beyond the keep count: the options' surplus, and the route's stone the stock has enough of */
@@ -641,7 +638,7 @@ export class Executor {
    */
   unwantedDrop (name: string): boolean {
     if (!ROUTE_STONE.has(name) || !this.options.stocked(name)) return false
-    const kept = Math.max(this.options.keep(name, this.bot.registry as any) ?? 0, this.needed[name] ?? 0)
+    const kept = Math.max(this.options.keep(name, this.bot.registry as any) ?? 0, this.needed[name] ?? 0, this.options.milestoneNeeds()[name] ?? 0)
     return countItems(this.bot, name) >= kept
   }
 

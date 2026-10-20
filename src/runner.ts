@@ -12,7 +12,7 @@ import { TaskError } from './core/errors'
 import { isBed } from './core/items'
 import { Inventory, type ItemCount } from './core/inventory'
 import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './core/memory'
-import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
+import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, milestonesAhead, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { comeUp, dayPhase, nightAction, nightGoals, topUpPlaces } from './planner/schedule'
 import { describeLevel, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
@@ -22,7 +22,7 @@ import type { Station } from './planner/steps'
 import { buildBase, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
 import { DEPOT_POI, Executor, describeRequest, ownedInventory, type ExecutorOptions, type PlanOptions } from './executor/executor'
-import { SPARE_FOOD_POINTS, spareKitGoals, stockKeepRule, tripSpareGoals } from './executor/keep'
+import { SPARE_FOOD_POINTS, milestoneNeeds, spareKitGoals, stockKeepRule, tripSpareGoals } from './executor/keep'
 import { isAbort } from './skills/errors'
 import { navigate, navigateNear, pickaxeForTheWay } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
@@ -289,6 +289,9 @@ export function restockGoals (state: ProgressState, reached: readonly MilestoneI
   return foodGoals(state.inventory, FOOD_POINTS)
 }
 
+/** ticks the milestones' needs (keep.ts milestoneNeeds, planned) hold before they're planned again */
+export const MILESTONE_NEEDS_TICKS = 1200
+
 /** how near an earlier deadly spot (one the bot died going back to) a death spot is passed over */
 export const DEADLY_SPOT_RADIUS = 16
 
@@ -328,6 +331,10 @@ export class Runner {
   private ticksBefore = 0
   /** the milestone being worked on (play's stop names it when an abort gets past the loop) */
   private current: MilestoneId | null = null
+  /** the milestone being worked on, for what the bag keeps (milestoneNeeds) */
+  private working: Milestone | null = null
+  /** the needs last planned, kept MILESTONE_NEEDS_TICKS */
+  private needs: { id: MilestoneId, tick: number, needs: Readonly<Record<string, number>> } | null = null
   private readonly started = Date.now()
   private readonly log: (line: string) => void
   private sleepCooldownUntil = 0
@@ -355,6 +362,7 @@ export class Runner {
     this.executor = new Executor(bot, {
       log: this.log,
       home: () => this.home(),
+      milestoneNeeds: () => this.milestoneNeeds(),
       ...options.executor,
       // the stock's working set carried, the rest stored at the base
       keep: options.executor?.keep ?? (this.stock != null ? stockKeepRule(this.stock) : undefined),
@@ -377,6 +385,27 @@ export class Runner {
 
   get memory (): WorldMemory {
     return this.executor.memory
+  }
+
+  /**
+   * What the milestone being worked on (else the next to work on) and the one after it need (keep.ts milestoneNeeds:
+   * their goals, the plan for them, their kit), planned again every MILESTONE_NEEDS_TICKS: no store, stash, depot or
+   * throw takes it from the bag
+   */
+  milestoneNeeds (): Readonly<Record<string, number>> {
+    if (this.bot.entity == null || this.bot.inventory == null) return {}
+    const tick = this.bot.survival.tasks.tick
+    try {
+      const state = progressState(this.bot, this.memory)
+      const m = this.working ?? nextToWork(state, this.reached.map(r => r.id))
+      if (m == null) return {}
+      if (this.needs != null && this.needs.id === m.id && tick - this.needs.tick < MILESTONE_NEEDS_TICKS) return this.needs.needs
+      const needs = milestoneNeeds(milestonesAhead(m, state), state, goals => this.executor.plan(goals, state.inventory))
+      this.needs = { id: m.id, tick, needs }
+      return needs
+    } catch {
+      return this.needs?.needs ?? {}
+    }
   }
 
   /** the reports of a stuck bot (bot.survival.diagnostics): told of each milestone, its failures and the waits */
@@ -565,6 +594,7 @@ export class Runner {
       const m = nextToWork(state, reachedIds, skip) ?? (this.options.epochs === true ? nextEpoch(state, reachedIds, skip) : null)
       if (m == null) return this.stop(null, 'finished')
       this.current = m.id
+      this.working = m
       if (this.options.stopAt === m.id) return this.stop(m.id, 'until')
       const handler = this.handlerFor(m.id)
       if (handler == null) {
