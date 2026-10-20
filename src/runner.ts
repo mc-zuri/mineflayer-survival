@@ -1182,6 +1182,15 @@ export class Runner {
     if (base.entrance != null) {
       const e = base.entrance
       await pickaxeForTheWay(bot, signal)
+      // nothing to make one from (back from a death with 2 dirt, the dug-in base 5 blocks down, the way in stone and
+      // the searches timing out by hand, 26.3): the wood got and a pickaxe made as the start of the game is
+      if (!bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))) {
+        this.log('a pickaxe for the way into the base')
+        await this.executor.obtain([{ item: ['stone_pickaxe', 'wooden_pickaxe'], count: 1 }], signal).catch(err => {
+          if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+          this.log(`no pickaxe for the way in: ${(err as Error).message}`)
+        })
+      }
       // (a search that timed out 10 blocks from the dug-in base left the bot with no kit at all, its diamond tools in
       // the chest: the walk then, by hops and a stair down when the path doesn't come, 26.3)
       await this.executor.task('to the base', async (s) => await navigate(bot, { goal: new goals.GoalNear(e.x, e.y, e.z, 2) }, s).catch(async err => {

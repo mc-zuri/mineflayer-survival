@@ -552,6 +552,32 @@ test('rekit gets to a dug-in base the long way (hops, a stair down) when the pat
   assert.ok(calls.includes('retrieve'))
 })
 
+test('rekit with nothing to make a pickaxe from gets one the way the game starts (wood, then stone) before the way into the base', async () => {
+  const navModule = require('../../src/skills/navigate')
+  const strongholdModule = require('../../src/end/strongholdSkills')
+  const chestModule = require('../../src/skills/chest')
+  const exploreModule = require('../../src/executor/explore')
+  const bot = fakeBot({ dirt: 2 })
+  bot.survival.memory.setBase({ x: -56, y: 60, z: -16 })
+  bot.survival.memory.addPoi('base_entrance', { x: -51, y: 60, z: -20 }, 'overworld')
+  bot.survival.memory.rememberChest({ x: -56, y: 60, z: -16 }, { diamond_pickaxe: 1 }, 'overworld')
+  const runner = new Runner(bot, { log: () => {} })
+  const calls: string[] = []
+  const real = [navModule.navigate, strongholdModule.overland, chestModule.retrieveItems, exploreModule.ensurePickaxe]
+  navModule.navigate = async () => { calls.push('navigate') }
+  strongholdModule.overland = async () => { calls.push('overland') }
+  chestModule.retrieveItems = async () => { calls.push('retrieve'); return { moved: {} } }
+  exploreModule.ensurePickaxe = async () => { calls.push('ensurePickaxe'); return null }
+  runner.executor.task = (async (_name: string, fn: any) => await fn(new AbortController().signal)) as any
+  runner.executor.obtain = (async (reqs: any[]) => { calls.push(`obtain ${String(reqs[0].item)}`) }) as any
+  try {
+    await runner.rekit()
+  } finally {
+    [navModule.navigate, strongholdModule.overland, chestModule.retrieveItems, exploreModule.ensurePickaxe] = real
+  }
+  assert.deepEqual(calls.slice(0, 3), ['ensurePickaxe', 'obtain stone_pickaxe,wooden_pickaxe', 'navigate'])
+})
+
 test('after a death the basics lacking are made again in order: stone tools, iron ones, a bucket, a chestplate', async () => {
   const { reequipGoals } = await import('../../src/runner')
   const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
