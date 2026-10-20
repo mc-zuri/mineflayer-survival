@@ -647,6 +647,17 @@ export function pickaxeKeeper (bot: Bot, craftFn?: Crafter): (signal?: AbortSign
 }
 
 /**
+ * What keeps a climb's step from being dug (unsafeStep's), for a bot `wet` already: the water by a cell it opens lets
+ * in none it isn't in (lava still does). A 26.3 bot whose night mine opened into a flooded cave under a stone roof at
+ * y 10 turned from every step up, 'water at', and swam there 8000 ticks and more on the drowning reflex
+ * (full-26.3-fresh-l)
+ */
+export function climbHazard (why: string | null, wet: boolean): string | null {
+  if (why == null || !wet) return why
+  return /^(water|bubble_column) at /.test(why) ? null : why
+}
+
+/**
  * A staircase up and out, dug by hand where the pathfinder plans no way up: a block forward and a block up each
  * step, turning from lava and water, until the bot is under the open sky.
  */
@@ -666,7 +677,7 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
     for (const d of turns) {
       const step = staircaseUpStep(feet, d)
       // the step stands on the block ahead: it has to be there (or be put there)
-      const why = unsafeStep(lookup, { open: step.open, floor: step.floor })
+      const why = climbHazard(unsafeStep(lookup, { open: step.open, floor: step.floor }), inWater(bot))
       if (why != null) { trace('explore: climb turns from', d.toString(), why); continue }
       if (!floorHeld(lookup, step, hasPlug(bot))) { trace('explore: climb turns from', d.toString(), 'no floor at', step.floor.toString()); continue }
       try {

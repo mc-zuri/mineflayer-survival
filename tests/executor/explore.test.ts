@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { facingDir, floorHeld, liquidAround, oreLevel, spiralWaypoints, staircaseStep, tunnelStep, unsafeStep } from '../../src/executor/explore'
+import { climbHazard, facingDir, floorHeld, liquidAround, oreLevel, spiralWaypoints, staircaseStep, tunnelStep, unsafeStep } from '../../src/executor/explore'
 
 const SOLID = new Set(['stone', 'deepslate', 'cobblestone', 'dirt'])
 const world = (blocks: Record<string, string>, fill = 'stone') => (pos: Vec3) => {
@@ -603,4 +603,15 @@ test("floorHeld: a step's floor is there, or can be put against a block beside i
   assert.equal(floorHeld(cave, staircaseStep(new Vec3(0, 20, 0), new Vec3(1, 0, 0)), true), true)
   assert.equal(floorHeld(cave, staircaseStep(new Vec3(0, 20, 0), new Vec3(1, 0, 0)), false), false)
   assert.equal(floorHeld(world({}), staircaseStep(new Vec3(0, 20, 0), new Vec3(1, 0, 0)), false), true)
+})
+
+test('climbHazard: a bot in the water already digs its climb by the water, never by lava; a dry one by neither', () => {
+  const step = tunnelStep(new Vec3(0, 20, 0), new Vec3(1, 0, 0))
+  const wet = unsafeStep(world({ '2,20,0': 'water' }), step)
+  assert.match(wet ?? '', /^water at/)
+  assert.equal(climbHazard(wet, true), null)
+  assert.equal(climbHazard(wet, false), wet)
+  const lava = unsafeStep(world({ '2,20,0': 'lava' }), step)
+  assert.equal(climbHazard(lava, true), lava)
+  assert.equal(climbHazard(null, true), null)
 })
