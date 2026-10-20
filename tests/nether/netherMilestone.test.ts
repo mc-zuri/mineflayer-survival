@@ -553,7 +553,7 @@ test('the blaze rods: a spawner there\'s no way to is left for another of the fo
   const fortressSkills = require('../../src/nether/fortressSkills')
   const { SkillError } = await import('../../src/skills/errors')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ items: [item('ender_eye', 0)] })
+  const bot = fakeBot({ items: [item('ender_eye', 0), item('bow', 1), item('arrow', 64)] })
   bot.game.dimension = 'the_nether'
   bot.findBlocks = () => []
   ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
@@ -1051,4 +1051,48 @@ test('brewKit: before the nether, 3 glass bottles, a crafting table and 3 cobble
   executor.obtain = async () => { throw new Error('no sand found') }
   await brewKit(dry, executor, new AbortController().signal, l => lines.push(l))
   assert.match(lines.join(' | '), /no water bottles: no sand found/)
+})
+
+test('the blaze rods with no bow and no fire resistance to be had (blazeRodsWithBrew: noFireResistance): back to the overworld, the milestone not ready, no fight (full-1.21.11-fresh-e: the sword alone at a throne, burned)', async () => {
+  const { netherHandler } = await import('../../src/milestones')
+  const fortressSkills = require('../../src/nether/fortressSkills')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('ender_eye', 0), item('diamond_sword', 1)] })
+  bot.game.dimension = 'the_nether'
+  bot.findBlocks = () => []
+  ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
+  const memory = new WorldMemory()
+  ;(bot as any).survival = { memory }
+  memory.addPoi('blaze_spawner', { x: 870, y: 76, z: 143 }, 'the_nether')
+  const real = fortressSkills.collectBlazeRods
+  const tasks: string[] = []
+  const lines: string[] = []
+  fortressSkills.collectBlazeRods = async () => { tasks.push('fight'); return { rods: 0, kills: 0, ticks: 0 } }
+  const executor: any = { memory, tasks: { tick: 0 }, obtain: async () => {}, task: async (name: string, fn: (s: AbortSignal) => Promise<unknown>) => { tasks.push(name); if (name === 'back to the overworld') return; return await fn(new AbortController().signal) } }
+  let err: any = null
+  try {
+    err = await netherHandler({ bot, executor, signal: new AbortController().signal, log: (l: string) => lines.push(l), milestone: null as any, state: null as any }).then(() => null, e => e)
+  } finally {
+    fortressSkills.collectBlazeRods = real
+  }
+  assert.equal(err?.notReady, true, String(err))
+  assert.deepEqual(tasks, ['blaze rods', 'back to the overworld'])
+  assert.ok(lines.some(l => /fire resistance: no bow and none of it: no fight/.test(l)), lines.join(' | '))
+})
+
+test('netherKit: no bow to be had, the water bottles held but no slime ball nor magma cream for the brew: not ready (the slime chunks of the night mines get one)', async () => {
+  const { netherKit } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const water = (): any => { const p = item('potion'); p.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: 0, customEffects: [] } }]]); return p }
+  const gear = [...NETHER_GEAR().filter((i: any) => i.name !== 'bow' && i.name !== 'arrow'), water(), water(), water()]
+  const memory = new WorldMemory()
+  const executor: any = { memory, tasks: { tick: 0 }, sightings: { misses: (n: string) => n === 'spider' ? 1 : 0, missing: () => {} }, obtain: async () => {}, task: async () => {} }
+  const bot = fakeBot({ items: gear })
+  bot.game.dimension = 'overworld'
+  const err: any = await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e)
+  assert.equal(err?.notReady, true)
+  assert.match(err?.message ?? '', /slime ball/)
+  const ready = fakeBot({ items: [...gear, item('slime_ball', 1)] })
+  ready.game.dimension = 'overworld'
+  assert.equal(await netherKit(ready, executor, new AbortController().signal, () => {}).then(() => null, e => e), null)
 })

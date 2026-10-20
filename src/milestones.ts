@@ -49,7 +49,7 @@ import { findBlocks } from './core/findBlocks'
 import { nearestBiomeSpot, pearlLeg } from './nether/ground'
 import { endermenFromCover, forgetCover } from './nether/endermanCover'
 import { NetherBiomeSource } from './worldgen/netherBiomes'
-import { blazeRodsWithBrew, resetBrewTries } from './nether/brewing'
+import { blazeRodsWithBrew, creamMakings, resetBrewTries } from './nether/brewing'
 import { waterBottles } from './skills/brew'
 import { fillBottles } from './skills/bucket'
 import { ruinedPortalCandidates } from './worldgen/placement'
@@ -781,7 +781,11 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   const missing = netherGearNeeds(ownedInventory(bot), gate)
   // (the gate passed: the water bottles for fire resistance brewed in there, none to be had in the nether, when they
   // can be got; not a reason not to go in)
-  if (missing.length === 0) return await brewKit(bot, executor, signal, log)
+  if (missing.length === 0) {
+    await brewKit(bot, executor, signal, log)
+    if (gate.bow === false) bowlessBrewGate(bot)
+    return
+  }
   log(`nether kit: getting ${missing.map(describeRequest).join(', ')} before going in`)
   // the gear within NETHER_GEAR_TICKS; the food short after it within NETHER_FOOD_TICKS, near home: the rest is
   // banked over the tries (farm, herd), not one long search (seed 2's 120 points took 90000 ticks of exploring)
@@ -824,10 +828,13 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
     })
   }
   const still = netherGearNeeds(ownedInventory(bot), gate)
-  // without a bow, the water bottles for fire resistance are the gate's (brewKit's, its tries)
+  // without a bow, the water bottles for fire resistance are the gate's (brewKit's, its tries), and the magma cream's
+  // slime ball (the cream of it and a blaze powder: the night's mines take them in the slime chunks, the stock's slime
+  // mark): a 1.21.11 bot with no bow, its bottles and no cream went in, the brew skipped for want of the cream, and
+  // fought seed 2's other throne at (-290, 77, -209) with its sword alone and burned (full-1.21.11-fresh-e)
   if (gate.bow === false && still.length === 0) {
     await brewKit(bot, executor, signal, log)
-    if (waterBottles(bot) < BREW_BOTTLES) throw Object.assign(new SkillError('MISSING_ITEMS', `not going into the nether without a bow or ${BREW_BOTTLES} water bottles for fire resistance`), { notReady: true })
+    bowlessBrewGate(bot)
     return
   }
   if (still.length > 0) {
@@ -839,6 +846,15 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
     })
   }
   await brewKit(bot, executor, signal, log)
+}
+
+/**
+ * The gate without a bow: the makings of fire resistance the overworld gives, BREW_BOTTLES water bottles and the magma
+ * cream's slime ball (or the cream), else the milestone is not ready (MISSING_ITEMS, notReady)
+ */
+export function bowlessBrewGate (bot: Bot): void {
+  if (waterBottles(bot) < BREW_BOTTLES) throw Object.assign(new SkillError('MISSING_ITEMS', `not going into the nether without a bow or ${BREW_BOTTLES} water bottles for fire resistance`), { notReady: true })
+  if (!creamMakings(bot)) throw Object.assign(new SkillError('MISSING_ITEMS', 'not going into the nether without a bow or a slime ball for the magma cream of fire resistance'), { notReady: true })
 }
 
 /** the ticks a try of the nether kit spends on the gate's food after the gear (the rest banked over the tries) */
@@ -1100,9 +1116,16 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
       // (fire resistance brewed first when the bottles were brought: blazeRodsWithBrew, its makings got from here)
       const away = bot.entity.position.clone()
       try {
-        await executor.task('blaze rods', async (s) => await blazeRodsWithBrew(bot, { count: rods, spawner, exclude, away }, s), signal)
+        await executor.task('blaze rods', async (s) => await blazeRodsWithBrew(bot, { count: rods, spawner, exclude, away, log }, s), signal)
         break
       } catch (err) {
+        // no bow and no fire resistance to be had: back to the overworld for the cream's slime ball, the milestone not
+        // ready (the gate asks for it there), not the fight with the sword alone
+        if ((err as any)?.noFireResistance === true && !signal.aborted) {
+          log(`blaze rods: ${(err as Error).message}: back to the overworld for it`)
+          await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
+          throw Object.assign(err as Error, { notReady: true })
+        }
         if (signal.aborted || TaskError.is(err, 'DIED') || attempt >= BLAZE_SPAWNER_TRIES) throw err
         const message = (err as Error).message
         // no way to it: the fortress's other spawner next (findBlazeSpawner leaves this one out); none other found

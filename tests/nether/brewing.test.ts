@@ -38,9 +38,11 @@ test('blazeRodsWithBrew: with the wart and cream held, the rods a rod at a time 
   const water = (): any => { const p = item('potion'); p.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: 0, customEffects: [] } }]]); return p }
   const calls: string[] = []
   const give = (bot: any, it: any): void => { const slot = bot.inventory.slots.findIndex((s: any, i: number) => i >= 9 && i < 45 && s == null); it.slot = slot; bot.inventory.slots[slot] = it }
-  const run = async (items: any[]): Promise<string[]> => {
+  const lines: string[] = []
+  const run = async (items: any[], bow = true): Promise<string[]> => {
     calls.length = 0
-    const bot = fakeBot({ items, position: new Vec3(0.5, 64, 30.5) })
+    lines.length = 0
+    const bot = fakeBot({ items: [...items, ...(bow ? [item('bow'), item('arrow', 32)] : [])], position: new Vec3(0.5, 64, 30.5) })
     bot.entity.effects = {}
     bot.pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
     resetBrewTries(bot)
@@ -50,12 +52,21 @@ test('blazeRodsWithBrew: with the wart and cream held, the rods a rod at a time 
       for (let n = have; n < a.count; n++) give(bot, item('blaze_rod'))
       return { rods: a.count, kills: 0, ticks: 0 }
     }
-    brewModule.brew = async () => { calls.push('brew'); return { potions: 3, potion: 11, stand: new Vec3(0, 0, 0), placedStand: true } }
+    // (the potions it makes in the bag, the effect on once one's drunk: the mock's drink puts it on)
+    brewModule.brew = async () => {
+      calls.push('brew')
+      const { POTION_IDS } = require('../../src/skills/potion')
+      const p = item('potion'); p.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: POTION_IDS.fire_resistance[0], customEffects: [] } }]])
+      give(bot, p)
+      return { potions: 3, potion: 11, stand: new Vec3(0, 0, 0), placedStand: true }
+    }
     fight.fillNook = async () => { calls.push('box'); return 0 }
     travelModule.travel = async (_b: unknown, a: any) => { calls.push(`travel ${String(a.target)}`); return {} }
     craftModule.craft = async (_b: unknown, a: any) => { calls.push(`craft ${String(a.item)}`); give(bot, item(a.item)); return {} }
     try {
-      await blazeRodsWithBrew(bot, { count: 8, spawner: new Vec3(0, 64, 0), away: new Vec3(0.5, 64, 30.5) })
+      await blazeRodsWithBrew(bot, { count: 8, spawner: new Vec3(0, 64, 0), away: new Vec3(0.5, 64, 30.5), log: (l: string) => lines.push(l) })
+    } catch (err) {
+      calls.push(`threw ${(err as Error).message}${(err as any).noFireResistance === true ? ' (noFireResistance)' : ''}`)
     } finally {
       fortress.collectBlazeRods = real.rods
       brewModule.brew = real.brew
@@ -75,6 +86,12 @@ test('blazeRodsWithBrew: with the wart and cream held, the rods a rod at a time 
   assert.deepEqual(await run([water(), water(), water()]), ['rods 8'])
   // no bottles: nothing looked for
   assert.deepEqual(await run([item('nether_wart'), item('magma_cream')]), ['rods 8'])
+  assert.deepEqual(lines, ['fire resistance: no water bottles to brew it in'])
+  // no cream and no bow: no fight with the sword alone (full-1.21.11-fresh-e), the decisions logged
+  assert.deepEqual(await run([water(), water(), water()], false), ['threw MISSING_ITEMS: no bow and no fire resistance for the blazes (no magma cream or slime ball to brew it) (noFireResistance)'])
+  assert.deepEqual(lines, ['fire resistance: no magma cream or slime ball: the cubes about looked for', 'fire resistance: no magma cream and no slime ball for it: no wart sought, no brew', 'fire resistance: not brewed, short of nether_wart, magma_cream, blaze rods', 'fire resistance: no bow and none of it: no fight'])
+  // no bow, the makings held: the brew, then the rest with the potions
+  assert.deepEqual(await run([water(), water(), water(), item('nether_wart'), item('magma_cream')], false), ['rods 1', 'rods 2', 'craft blaze_powder', 'craft brewing_stand', 'box', 'brew', 'rods 8'])
 })
 
 test('getBrewMakings: wart seen far in the chunks the bot has (WART_SIGHT 160: seed 2\'s room 126 off) is walked to and dug, no legs; then back where the bot came in, shut in to heal there when hurt (backToHeal)', async () => {

@@ -18,7 +18,7 @@ import { distanceToBox, entityBox, eyePosition, hasLineOfSight, metadataValue, i
 import { shoot } from '../skills/shoot'
 import { lowerShield, raiseShield } from '../skills/fight'
 import { attackStrengthOf, bestMeleeWeapon } from '../skills/weapons'
-import { drinkPotion, findPotion } from '../skills/potion'
+import { drinkPotion, findPotion, hasEffect } from '../skills/potion'
 import { countItems, trace, waitTicks } from '../skills/util'
 import { findBlocks } from '../core/findBlocks'
 import { withNetherSafety } from './safety'
@@ -47,6 +47,16 @@ export const CUBE_SPAWNER_CLEAR = 20
 /** the magma cream to make of a slime ball for the brew: 1 with none held and a slime ball, else 0 */
 export function creamToMake (bot: Bot): number {
   return countItems(bot, 'magma_cream') === 0 && countItems(bot, 'slime_ball') > 0 ? 1 : 0
+}
+
+/** whether the bag holds the magma cream for the brew, or a slime ball to make it of (creamToMake) */
+export function creamMakings (bot: Bot): boolean {
+  return countItems(bot, 'magma_cream') > 0 || countItems(bot, 'slime_ball') > 0
+}
+
+/** whether the bag holds a bow and an arrow for it */
+function bowAndArrows (bot: Bot): boolean {
+  return countItems(bot, 'bow') > 0 && countItems(bot, ['arrow', 'spectral_arrow', 'tipped_arrow']) > 0
 }
 
 /** whether a fire resistance brew is wanted: none held, water bottles to brew in the bag */
@@ -300,11 +310,19 @@ export function resetBrewTries (bot: Bot): void {
  * while the brew waits on its makings (the cream of a cube the nook's sword meets: dropsNear) and BREW_RODS rods (the
  * stand's and the fuel's), and once it has them back to `away`, shut in a box there (brewingBox) and brewed; then
  * the rest (collectBlazeRods drinks the potions as it fights). Makings not to be had, or a brew that fails, leave the
- * fight to go on without it.
+ * fight to go on without it, with a bow; with no bow and no fire resistance (none held, on, or brewed) there's no
+ * fight: a SkillError MISSING_ITEMS marked noFireResistance (the milestone goes back for the cream's slime ball). A
+ * 1.21.11 bot with no bow, its bottles and no cream went in, the brew skipped, and fought seed 2's other throne at
+ * (-290, 77, -209) with its sword alone and burned (full-1.21.11-fresh-e). Each decision goes to `log` too.
  */
-export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count: number, away?: Vec3 }, signal?: AbortSignal): Promise<BlazeRodsResult> {
+export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count: number, away?: Vec3, log?: (line: string) => void }, signal?: AbortSignal): Promise<BlazeRodsResult> {
+  const say = (line: string): void => { trace('blazeRodsWithBrew:', line); args.log?.(`fire resistance: ${line}`) }
   // (BREW_TRIES at most: the task begun again after a reflex looked for the makings again each time, 6 times in a run)
   const state = brewState(bot)
+  if (findPotion(bot, 'fire_resistance') != null) say('a potion of it held')
+  else if (waterBottles(bot) === 0) say('no water bottles to brew it in')
+  else if (state.tries >= BREW_TRIES) say(`${BREW_TRIES} brews tried`)
+  else say(countItems(bot, 'magma_cream') > 0 ? 'brewing it: the magma cream held' : countItems(bot, 'slime_ball') > 0 ? 'brewing it: a slime ball for the cream' : 'no magma cream or slime ball: the cubes about looked for')
   if (brewWanted(bot) && state.tries < BREW_TRIES) {
     const away = args.away ?? bot.entity.position.clone()
     try {
@@ -312,7 +330,10 @@ export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count
       const at = args.spawner ?? await findBlazeSpawner(bot, { exclude: args.exclude ?? unreachableSpawners(bot) }, signal)
       const spawner = new Vec3(at.x, at.y, at.z)
       args = { ...args, spawner }
+      const hadWart = countItems(bot, 'nether_wart') > 0
       await getBrewMakings(bot, away, spawner, signal)
+      if (!creamMakings(bot)) say('no magma cream and no slime ball for it: no wart sought, no brew')
+      else if (!hadWart) say(countItems(bot, 'nether_wart') > 0 ? `${countItems(bot, 'nether_wart')} nether wart got` : 'no nether wart found')
       const rodsFor = (): number => Math.max(0, BREW_RODS - (countItems(bot, 'brewing_stand') > 0 ? 1 : 0) - (countItems(bot, 'blaze_powder') > 0 ? 1 : 0))
       // (a slime ball counts for the cream: a rod's 2 powder are the fuel's and the cream's)
       const makings = (): boolean => countItems(bot, 'nether_wart') > 0 && (countItems(bot, 'magma_cream') > 0 || countItems(bot, 'slime_ball') > 0)
@@ -335,19 +356,24 @@ export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count
         if (countItems(bot, 'brewing_stand') === 0) await craft(bot, { item: 'brewing_stand' }, signal)
         const standAt = await brewingBox(bot, signal)
         const brewed = await brew(bot, { ingredients: FIRE_RESISTANCE_BREW, standAt: standAt ?? undefined }, signal)
-        trace('blazeRodsWithBrew: brewed', brewed.potions, 'potions of fire resistance')
+        say(`${brewed.potions} potions brewed`)
         // the first one drunk at once, shut in still (the nook's fight drinks one only when no blaze is about to shoot:
         // back in it with 3 potions a 26.3 bot never had that quiet, and the blazes killed it)
         if (findPotion(bot, 'fire_resistance') != null) await drinkPotion(bot, 'fire_resistance', signal).catch(err => { if (isAbort(err)) throw err })
       } else {
-        trace('blazeRodsWithBrew: no makings for fire resistance:', FIRE_RESISTANCE_BREW.filter(n => countItems(bot, n) === 0).join(', '))
+        say(`not brewed, short of ${[...FIRE_RESISTANCE_BREW.filter(n => countItems(bot, n) === 0 && !(n === 'magma_cream' && countItems(bot, 'slime_ball') > 0)), ...(countItems(bot, 'blaze_rod') < rodsFor() ? ['blaze rods'] : [])].join(', ')}`)
       }
       state.tries++
     } catch (err) {
       if (isAbort(err) || bot.health <= 0) throw err
       state.tries++
-      trace('blazeRodsWithBrew: no fire resistance brewed:', (err as Error).message)
+      say(`not brewed: ${(err as Error).message}`)
     }
+  }
+  // no bow and no fire resistance: no fight (the blazes' throne fought with a sword alone burned the bots)
+  if (countItems(bot, 'blaze_rod') < args.count && !bowAndArrows(bot) && findPotion(bot, 'fire_resistance') == null && !hasEffect(bot, 'fire_resistance')) {
+    say('no bow and none of it: no fight')
+    throw Object.assign(new SkillError('MISSING_ITEMS', 'no bow and no fire resistance for the blazes (no magma cream or slime ball to brew it)', { rods: countItems(bot, 'blaze_rod') }), { noFireResistance: true })
   }
   return await collectBlazeRods(bot, args, signal)
 }
