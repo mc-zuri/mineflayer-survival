@@ -1098,3 +1098,31 @@ test('fetchDrops: in a fire\'s cell, not fire resistant, the fetch is given up f
   bot.entity.position = new Vec3(0.5, 64, 7.5)
   assert.equal(inFireCell(bot), false)
 })
+
+test('enterNook: no way in for the fire in the nook\'s front (the grid walk keeps out of fire): the fire put out, the walk again', async () => {
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { enterNook, nookAround } = await import('../../src/nether/blazeFight')
+  const { SkillError } = await import('../../src/skills/errors')
+  const gridModule = require('../../src/skills/gridWalk')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const fires = new Set(['(0, 64, 9)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : fires.has(p.floored().toString()) ? 'fire' : 'air'
+  const bot = fakeBot({ position: new Vec3(-0.5, 64, 8.5), world: name })
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const log: string[] = []
+  bot.dig = async (b: any) => { log.push(`dig ${b.name as string} ${b.position.toString() as string}`); fires.delete(b.position.toString()) }
+  const realMove = gridModule.moveNear
+  gridModule.moveNear = async (_b: unknown, to: Vec3) => {
+    if (fires.size > 0) { log.push('no way'); throw new SkillError('NO_PATH', 'no grid path') }
+    log.push(`to ${to.toString()}`)
+    bot.entity.position = to.offset(0.5, 0, 0.5)
+  }
+  try {
+    await enterNook(bot, nook)
+  } finally {
+    gridModule.moveNear = realMove
+  }
+  assert.deepEqual(log, ['no way', 'dig fire (0, 64, 9)', `to ${stand.toString()}`])
+})

@@ -12,7 +12,7 @@
 // the bot never burns. Low, the front is shut and the bot eats and heals inside.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
-import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
+import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { type Entity, entityBox, distanceToBox, eyePosition, hasLineOfSight, isAlive } from '../skills/combatUtil'
 import { blazeCharged, fight, lowerShield, raiseShield } from '../skills/fight'
 import { aim, arrowWorld } from '../skills/shoot'
@@ -993,13 +993,41 @@ export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch
 /** into the nook's cell (by the open front: the walls are kept from the pathfinder's breaking) */
 export async function enterNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal): Promise<void> {
   if (inNook(bot, nook)) return
-  await withNookKept(bot, nook, async () => await moveNear(bot, nook.stand, 0, signal))
+  // the fireballs' fire in its front or round the bot puts out first when the walk finds no way (the grid walk keeps
+  // out of fire's cells): a 26.3 bot 1 off its nook under seed 2's throne at (-277, 77, -159), fire burning in the
+  // nook's front, found 'no grid path' in, took the nook for one it couldn't have, and gave the spawner up
+  await withNookKept(bot, nook, async () => await moveNear(bot, nook.stand, 0, signal)).catch(async err => {
+    if (isAbort(err) || !isSkillError(err, 'NO_PATH')) throw err
+    if (await putOutNookFires(bot, nook, signal) === 0) throw err
+    await withNookKept(bot, nook, async () => await moveNear(bot, nook.stand, 0, signal))
+  })
   // the walk ended on its cell's edge, a hair into the next (at (-276.009, 74, -168.4) for the nook at (-276, 74,
   // -169), 26.3 seed 2's throne at (-277, 77, -159)): stepped into its middle, not the nook given up as not got to
   const p = bot.entity.position
   if (!inNook(bot, nook) && Math.abs(p.y - nook.stand.y) < 0.6 && Math.hypot(p.x - nook.stand.x - 0.5, p.z - nook.stand.z - 0.5) <= 1.2) {
     await walkTo(bot, nook.stand.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal).catch(err => { if (isAbort(err)) throw err })
   }
+}
+
+/** the cells whose fire stands in the way into the nook: its stand and front, and the cells round the bot's feet */
+export function nookFireCells (bot: Bot, nook: BlazeNook): Vec3[] {
+  const feet = bot.entity.position.floored()
+  const cells = [nook.stand, nook.stand.offset(0, 1, 0), ...nook.front]
+  for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) for (const dy of [-1, 0, 1]) cells.push(feet.offset(dx, dy, dz))
+  return cells.filter(p => { const n = bot.blockAt(p)?.name; return n === 'fire' || n === 'soul_fire' })
+}
+
+/** the fire in nookFireCells put out (a fire's block is broken at once, punched); resolves how many */
+export async function putOutNookFires (bot: Bot, nook: BlazeNook, signal?: AbortSignal): Promise<number> {
+  let out = 0
+  for (const p of nookFireCells(bot, nook)) {
+    throwIfAborted(signal)
+    const block = bot.blockAt(p)
+    if (block == null || (block.name !== 'fire' && block.name !== 'soul_fire')) continue
+    await bot.dig(block as any, true).then(() => { out++ }, () => {})
+  }
+  trace('enterNook: put out', out, 'fires on the way in')
+  return out
 }
 
 /** the pathfinder kept from breaking the nook's walls, roof and floor while `fn` runs */
