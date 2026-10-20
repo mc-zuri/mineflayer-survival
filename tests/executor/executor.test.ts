@@ -1031,3 +1031,31 @@ test('the executor knows an ocean that grows kelp near by its biome survey (or t
   ex2.memory.rememberBlock('kelp_plant', new Vec3(30, 50, 30), 'overworld')
   assert.equal(ex2.oceanNear(), true)
 })
+
+test('a worn pickaxe replaceWornTools can make no new one for is muted: the next mine step goes on with it (toolMuted), not back for one each plan', async () => {
+  // nothing to make a pickaxe of (the mine steps find no iron)
+  const { bot } = wornPickBot(20, {})
+  const lines: string[] = []
+  const muted: boolean[] = []
+  const ex = new Executor(bot, {
+    runners: {
+      mine: async (step: any, ctx: any) => {
+        if (step.item === 'diamond') {
+          muted.push(ctx.toolMuted?.({ kind: 'pickaxe', material: 'iron', name: 'iron_pickaxe', uses: 20 }) === true)
+          bot.give('diamond', step.count)
+          return { gained: step.count }
+        }
+        throw new TaskError('NOT_FOUND', 'none found')
+      }
+    },
+    maxStepFailures: 1,
+    log: line => lines.push(line)
+  })
+  await ex.replaceWornTools()
+  assert.ok(lines.some(l => /no new pickaxe: .*the iron_pickaxe is used till it breaks/.test(l)), lines.join('\n'))
+  const tries = lines.filter(l => /uses left: making another/.test(l)).length
+  // muted: not tried again before the step, and the step is told
+  await ex.obtain([{ item: 'diamond', count: 1 }])
+  assert.equal(lines.filter(l => /uses left: making another/.test(l)).length, tries)
+  assert.deepEqual(muted, [true])
+})
