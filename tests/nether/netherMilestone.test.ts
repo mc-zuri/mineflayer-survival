@@ -82,7 +82,7 @@ test('a portal\'s frame from the obsidian in sight first (the caves\' lava met b
   const { Vec3 } = await import('vec3')
   const calls: string[] = []
   const { item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1)] })
+  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1), item('flint_and_steel', 1)] })
   bot.game.dimension = 'overworld'
   const obsidian = bot.registry.blocksByName.obsidian.id
   bot.findBlocks = (opts: any) => opts.matching === obsidian ? Array.from({ length: 12 }, (_, i) => new Vec3(i, -52, 3)) : []
@@ -96,7 +96,7 @@ test('a portal with no bucket gets one first; with no lava near to try it walks 
   const { fakeBot } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
   const calls: string[] = []
-  const bot = fakeBot({ position: new Vec3(0.5, -55, 0.5) })
+  const bot = fakeBot({ position: new Vec3(0.5, -55, 0.5), items: [require('../reflexes/fakeBot').item('flint_and_steel', 1)] })
   bot.game.dimension = 'overworld'
   bot.findBlocks = () => []
   ;(bot as any).findBlock = () => null
@@ -151,7 +151,7 @@ test('pearls in the nether: a warped forest in sight is gone to, and waited in f
   const { pearlsInTheNether, pearlGround } = await import('../../src/milestones')
   const { fakeBot } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
-  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [require('../reflexes/fakeBot').item('flint_and_steel', 1)] })
   bot.game.dimension = 'the_nether'
   const nylium = bot.registry.blocksByName.warped_nylium.id
   let forestAt = new Vec3(60, 63, 0)
@@ -174,7 +174,7 @@ test('a portal with no diamond pickaxe (a death lost it) gets one before the lak
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
   const calls: string[] = []
-  const bot = fakeBot({ position: new Vec3(0.5, -55, 0.5), items: [item('water_bucket', 1)] })
+  const bot = fakeBot({ position: new Vec3(0.5, -55, 0.5), items: [item('water_bucket', 1), item('flint_and_steel', 1)] })
   bot.game.dimension = 'overworld'
   bot.findBlocks = () => []
   ;(bot as any).findBlock = () => null
@@ -246,7 +246,7 @@ function giveTo (bot: any, items: any[]): void {
 /** what netherGearNeeds asks for, so a test bot goes in */
 function NETHER_GEAR (): any[] {
   const { item } = require('../reflexes/fakeBot')
-  return [item('diamond_sword', 1), item('iron_chestplate', 1), item('golden_boots', 1), item('cooked_beef', 8)]
+  return [item('diamond_sword', 1), item('iron_chestplate', 1), item('golden_boots', 1), item('cooked_beef', 8), item('flint_and_steel', 1)]
 }
 
 test('netherKit: the bot does not go in without a sword, armor, gold and food: got, else the milestone fails', async () => {
@@ -309,7 +309,7 @@ test('the nether pearl legs spiral out from where the search began, no point twi
   const { pearlsInTheNether, PEARL_NETHER_LEGS } = await import('../../src/milestones')
   const { fakeBot } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
-  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [require('../reflexes/fakeBot').item('flint_and_steel', 1)] })
   bot.game.dimension = 'the_nether'
   const lines: string[] = []
   const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async () => {} }
@@ -491,7 +491,7 @@ test('pearls by night: an enderman there\'s no way to is passed over for the nig
   const { pearlsByNight } = await import('../../src/milestones')
   const { fakeBot, entity } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
-  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [require('../reflexes/fakeBot').item('flint_and_steel', 1)] })
   bot.game.dimension = 'overworld'
   ;(bot as any).time = { timeOfDay: 18000 }
   const far = entity({ name: 'enderman', position: new Vec3(30.5, 90, 0.5) })
@@ -613,4 +613,20 @@ test('a deep pool cast with no empty bucket gets one first, then goes to the spo
   }
   const from = calls.indexOf('obsidian from the lava')
   assert.deepEqual(calls.slice(from + 1, from + 4), ['obtain bucket', 'off the lava', 'cast a portal'], calls.join(', '))
+})
+
+test('a portal with no flint and steel gets one (its iron mined) before the frame, from obsidian carried too', async () => {
+  const { buildAPortal } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('obsidian', 10)] })
+  bot.game.dimension = 'overworld'
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async (reqs: any[]) => { calls.push(`obtain ${String(reqs[0].item)}`) },
+    task: async (name: string) => { calls.push(name) }
+  }
+  await buildAPortal(bot, executor, new AbortController().signal, () => {})
+  assert.deepStrictEqual(calls.slice(0, 3), ['obtain flint_and_steel', 'up to the surface', 'build a nether portal'])
 })

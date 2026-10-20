@@ -523,6 +523,14 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
       }, signal)
     }
   }
+  // the flint and steel to light it got first (the iron for it mined: a 26.3 whole game built its frame from the
+  // obsidian it mined, then failed the milestone 'no iron ingot for flint and steel')
+  if (count('flint_and_steel') === 0 && count('fire_charge') === 0) {
+    await executor.obtain([{ item: 'flint_and_steel', count: 1 }], signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`a portal frame: flint and steel: ${(err as Error).message}`)
+    })
+  }
   if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
   // a bucket and its water first (a death lost the kit's: every pool after was 'no water bucket to make obsidian with')
   if (count('water_bucket') === 0 && count('bucket') === 0) {
