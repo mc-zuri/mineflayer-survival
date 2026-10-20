@@ -141,6 +141,62 @@ export interface NookOptions {
   from?: Vec3
   /** most blocks to put (default 12) */
   maxBlocks?: number
+  /** the least share of the spawner's spawns the nook's eyes see (spawnView: default MIN_SPAWN_VIEW) */
+  minView?: number
+  /**
+   * a nook by the spawn volume, for the sword (MELEE_NOOK's distances; the share of the spawns within its reach
+   * counted): the blazes come out within reach of its front
+   */
+  melee?: boolean
+}
+
+/** BaseSpawner.spawnRange: a spawn's x and z within this of the spawner's middle */
+export const SPAWN_RANGE = 4
+/** BaseSpawner.requiredPlayerRange: the spawner makes blazes only with a player's feet within this of its middle */
+export const SPAWNER_ACTIVATION = 16
+/** the least share of the spawns a nook sees: fewer, the blazes it can shoot or hit come seldom */
+export const MIN_SPAWN_VIEW = 0.25
+/** a melee nook's distances from the spawner (planBlazeNooks' melee) */
+export const MELEE_NOOK = { minDistance: 2, maxDistance: 5, standOff: 3 }
+/** the sword's reach from the eyes, a spawn's middle within it counted as in reach */
+const SWORD_REACH = 3.5
+
+/**
+ * The share of a spawner's spawns a nook's eyes see (a blaze's middle, from its eyes with the nook built), and the
+ * share within the sword's reach: BaseSpawner.serverTick puts each at x and z = the spawner's + (r - r') * spawnRange
+ * + 0.5 (r, r' uniform: a triangle over 4 either way) and y = its + -1 to 1, where the blaze's box has no block in it;
+ * the cells weighted so
+ */
+export function spawnView (lookup: NookLookup, spawner: Vec3, nook: BlazeNook): { seen: number, reach: number } {
+  const S = spawner.floored()
+  const eye = nook.stand.offset(0.5, 1.62, 0.5)
+  const built = new Set(nook.build.map(p => p.toString()))
+  const view: NookLookup = p => built.has(p.toString()) ? { name: 'cobblestone', boundingBox: 'block' } : lookup(p)
+  const free = (p: Vec3): boolean => { const b = lookup(p); return b != null && b.boundingBox === 'empty' }
+  let all = 0
+  let seen = 0
+  let reach = 0
+  for (let dx = -SPAWN_RANGE; dx <= SPAWN_RANGE; dx++) {
+    for (let dz = -SPAWN_RANGE; dz <= SPAWN_RANGE; dz++) {
+      const w = spawnWeight(dx) * spawnWeight(dz)
+      for (let dy = -1; dy <= 1; dy++) {
+        const c = S.offset(dx, dy, dz)
+        if (!free(c) || !free(c.plus(UP))) continue
+        all += w
+        const middle = c.offset(0.5, 0.9, 0.5)
+        if (!clearLine(view, eye, middle)) continue
+        seen += w
+        if (middle.distanceTo(eye) <= SWORD_REACH) reach += w
+      }
+    }
+  }
+  return all > 0 ? { seen: seen / all, reach: reach / all } : { seen: 0, reach: 0 }
+}
+
+/** the share of the spawns whose x (or z) is in the cell `k` off the spawner's: the triangle over (k - 0.5, k + 0.5) */
+function spawnWeight (k: number): number {
+  const f = (u: number): number => Math.max(0, SPAWN_RANGE - Math.abs(u))
+  return (f(k - 0.5) + 4 * f(k) + f(k + 0.5)) / 6 / (SPAWN_RANGE * SPAWN_RANGE)
 }
 
 const isSolidBlock = (b: NookBlock | null): boolean => b != null && b.boundingBox === 'block'
@@ -177,12 +233,18 @@ export function planBlazeNook (lookup: NookLookup, spawner: Vec3, opts: NookOpti
   return planBlazeNooks(lookup, spawner, opts, 1)[0] ?? null
 }
 
-/** the `n` cheapest nooks (planBlazeNook's), cheapest first, no two of them on the same stand */
+/**
+ * The `n` cheapest nooks (planBlazeNook's), cheapest first, no two of them on the same stand. Each sees at least
+ * `minView` of the spawner's spawns (spawnView), its feet within the spawner's SPAWNER_ACTIVATION; one that sees under
+ * half of them costs more, a melee nook's spawns within the sword's reach count for it
+ */
 export function planBlazeNooks (lookup: NookLookup, spawner: Vec3, opts: NookOptions = {}, n = 3): BlazeNook[] {
-  const minD = opts.minDistance ?? 7
-  const maxD = opts.maxDistance ?? 13
-  const standOff = opts.standOff ?? 10
+  const melee = opts.melee === true
+  const minD = opts.minDistance ?? (melee ? MELEE_NOOK.minDistance : 7)
+  const maxD = opts.maxDistance ?? (melee ? MELEE_NOOK.maxDistance : 13)
+  const standOff = opts.standOff ?? (melee ? MELEE_NOOK.standOff : 10)
   const maxBlocks = opts.maxBlocks ?? 12
+  const minView = opts.minView ?? MIN_SPAWN_VIEW
   const S = spawner.floored()
   // the blazes hover about it, a block or two over it
   const over = S.offset(0.5, 1.5, 0.5)
@@ -193,6 +255,7 @@ export function planBlazeNooks (lookup: NookLookup, spawner: Vec3, opts: NookOpt
       if (h < minD || h > maxD) continue
       for (let dy = -4; dy <= 2; dy++) {
         const stand = S.offset(dx, dy, dz)
+        if (stand.offset(0.5, 0, 0.5).distanceTo(S.offset(0.5, 0.5, 0.5)) >= SPAWNER_ACTIVATION - 1) continue
         if (!isOpen(lookup(stand)) || !isOpen(lookup(stand.plus(UP))) || !isFloor(lookup(stand.offset(0, -1, 0)))) continue
         // facing the spawner: the cardinal way nearest it
         const to = new Vec3(-dx, 0, -dz).scaled(1 / h)
@@ -212,7 +275,14 @@ export function planBlazeNooks (lookup: NookLookup, spawner: Vec3, opts: NookOpt
       }
     }
   }
-  return found.sort((a, b) => a.cost - b.cost).slice(0, n).map(f => f.nook)
+  // the spawns seen, looked at for the cheapest (each a few hundred lines of sight)
+  const out: Array<{ nook: BlazeNook, cost: number }> = []
+  for (const f of found.sort((a, b) => a.cost - b.cost).slice(0, 4 * n + 12)) {
+    const view = spawnView(lookup, S, f.nook)
+    if (view.seen < minView) continue
+    out.push({ nook: f.nook, cost: f.cost + Math.max(0, 0.5 - view.seen) * 12 - (melee ? view.reach * 12 : 0) })
+  }
+  return out.sort((a, b) => a.cost - b.cost).slice(0, n).map(f => f.nook)
 }
 
 /** the nook round a stand facing a way: its blocks in an order that has each go against a solid one, or null */

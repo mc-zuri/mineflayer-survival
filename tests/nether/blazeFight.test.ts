@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import {
-  BLAZE_CHARGE_TICKS, BLAZE_EYE_HEIGHT, BlazeVolleys, FIREBALL_FLIGHT_TICKS, SHIELD_LEAD_TICKS, clearLine, nookAround,
+  BLAZE_CHARGE_TICKS, BLAZE_EYE_HEIGHT, BlazeVolleys, FIREBALL_FLIGHT_TICKS, SHIELD_LEAD_TICKS, clearLine, nookAround, spawnView,
   planBlazeNook, type NookLookup
 } from '../../src/nether/blazeFight'
 import { readNetherSnapshot } from './netherSnapshot'
@@ -110,7 +110,7 @@ test('a blaze sees the bot in its nook only through the front, within 45 degrees
   assert.ok(!clearLine(w.lookup, eye.offset(0.3, 6, 0.2), eye))
 })
 
-test('planBlazeNook at seed 2\'s fortress spawner (59 64 -534, 26.3): on the bridge into its throne, 10 off, facing it, 5 blocks', () => {
+test('planBlazeNook at seed 2\'s fortress spawner (59 64 -534, 26.3): on the bridge into its throne, 10 off, facing it, 5 blocks, seeing over half its spawns', () => {
   const snap = readNetherSnapshot(path.join(__dirname, '..', 'fixtures', 'nether-seed2-blaze.json.gz'))
   const mc = require('minecraft-data')(snap.version)
   const [x0, y0, z0] = snap.origin
@@ -125,9 +125,11 @@ test('planBlazeNook at seed 2\'s fortress spawner (59 64 -534, 26.3): on the bri
   assert.equal(lookup(spawner)?.name, 'spawner')
   const nook = planBlazeNook(lookup, spawner, { from: new Vec3(43.5, 89, -515.5) })
   assert.ok(nook != null)
-  assert.deepEqual(nook.stand, new Vec3(58, 61, -544))
+  // (58, 61, -544) before the spawns seen were counted: 0.46 of them; 0.59 two over
+  assert.deepEqual(nook.stand, new Vec3(60, 61, -544))
   assert.deepEqual(nook.facing, new Vec3(0, 0, 1))
   assert.equal(nook.build.length, 5)
+  assert.ok(spawnView(lookup, spawner, nook).seen > 0.5)
   for (const w of nook.walls) assert.ok(lookup(w)?.boundingBox === 'block' || nook.build.some(b => b.equals(w)), w.toString())
   assert.ok(clearLine(lookup, nook.stand.offset(0.5, 1.62, 0.5), spawner.offset(0.5, 1.5, 0.5), p => p.equals(spawner)))
 })
@@ -660,4 +662,55 @@ test('fightFromNook ends (MISSING_ITEMS) with no meal left to heal on and the ba
   const { fakeBot: fb } = await import('../reflexes/fakeBot')
   assert.ok(mealLeft(fb({ items: [item('golden_apple')] })))
   assert.ok(!mealLeft(fb({ items: [item('rotten_flesh', 5), item('spider_eye')] })))
+})
+
+/** a snapshot fixture's blocks */
+function snapshotLookup (file: string): NookLookup {
+  const snap = readNetherSnapshot(path.join(__dirname, '..', 'fixtures', file))
+  const mc = require('minecraft-data')(snap.version)
+  const [x0, y0, z0] = snap.origin
+  const [sx, sy, sz] = snap.size
+  return p => {
+    const x = p.x - x0; const y = p.y - y0; const z = p.z - z0
+    if (x < 0 || y < 0 || z < 0 || x >= sx || y >= sy || z >= sz) return null
+    const b = mc.blocksByStateId[snap.ids[(x * sz + z) * sy + y]]
+    return b == null ? null : { name: b.name, boundingBox: b.boundingBox }
+  }
+}
+
+test('planBlazeNooks at seed 7741\'s fortress spawner (136 77 258, 26.3): on the bridge 10 off facing its throne, seeing 0.4 of its spawns; the melee nook on the throne by it, half its spawns within the sword\'s reach', async () => {
+  const { planBlazeNooks, SPAWNER_ACTIVATION } = await import('../../src/nether/blazeFight')
+  const lookup = snapshotLookup('nether-seed7741-blaze.json.gz')
+  const spawner = new Vec3(136, 77, 258)
+  assert.equal(lookup(spawner)?.name, 'spawner')
+  // where full-26.3-s7741-b came in
+  const from = new Vec3(120.5, 61, 247.5)
+  const far = planBlazeNooks(lookup, spawner, { from })
+  assert.ok(far.length > 0)
+  for (const n of far) {
+    assert.equal(n.stand.y, 74, n.stand.toString())
+    assert.deepEqual(n.facing, new Vec3(0, 0, -1))
+    assert.ok(n.stand.offset(0.5, 0, 0.5).distanceTo(spawner.offset(0.5, 0.5, 0.5)) < SPAWNER_ACTIVATION)
+    assert.ok(spawnView(lookup, spawner, n).seen >= 0.4, n.stand.toString())
+  }
+  const melee = planBlazeNooks(lookup, spawner, { from, melee: true })
+  assert.ok(melee.length > 0)
+  for (const n of melee) {
+    assert.ok(n.stand.distanceTo(spawner) <= 2.3, n.stand.toString())
+    assert.equal(n.stand.y, 77)
+    assert.ok(spawnView(lookup, spawner, n).reach >= 0.45, n.stand.toString())
+  }
+})
+
+test('spawnView: a nook facing the spawner on open ground sees most of its spawns, none with the front walled up; planBlazeNooks leaves out a nook seeing fewer than minView', async () => {
+  const { planBlazeNooks } = await import('../../src/nether/blazeFight')
+  const w = world()
+  const nook = nookAround(w.lookup, new Vec3(0, 64, 10), new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const open = spawnView(w.lookup, new Vec3(0, 64, 0), nook)
+  assert.ok(open.seen > 0.6 && open.reach === 0, JSON.stringify(open))
+  const walled = world(p => p.z === 9 && p.y >= 64 && p.y <= 65 && p.x === 0 ? 'cobblestone' : null)
+  assert.equal(spawnView(walled.lookup, new Vec3(0, 64, 0), nook).seen, 0)
+  assert.ok(planBlazeNooks(w.lookup, new Vec3(0, 64, 0)).length > 0)
+  assert.equal(planBlazeNooks(w.lookup, new Vec3(0, 64, 0), { minView: 0.99 }).length, 0)
 })
