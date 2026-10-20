@@ -70,6 +70,18 @@ export async function placeAgainst (bot: Bot, against: Block, face: Vec3): Promi
  * reach): an attack goes only to it. True for a bot with no view to check (no mineflayer raycast, an entity with no
  * position, as a dragon's part is)
  */
+/**
+ * The entity under the crosshair within the attack's reach (LocalPlayer.raycastHitResult: in front of the first block),
+ * what an attack now goes to; null for none (a block or nothing), undefined for a bot with no view to check (no
+ * mineflayer raycast)
+ */
+export function entityUnderCrosshair (bot: Bot): Bot['entity'] | null | undefined {
+  const raycast = (bot as any).raycastHitResult
+  if (typeof raycast !== 'function' || bot.entity?.position == null) return undefined
+  const hit = raycast(blockReach(bot), 3)
+  return hit.type === 'entity' ? hit.entity ?? null : null
+}
+
 export function entityInCrosshair (bot: Bot, entity: { id: number, position?: Vec3 }): boolean {
   const raycast = (bot as any).raycastHitResult
   if (typeof raycast !== 'function' || entity.position == null || bot.entity?.position == null) return true

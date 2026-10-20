@@ -144,3 +144,44 @@ test('fight: against a wither skeleton in its reach, with a shield, the swings c
   assert.ok(swings.every(u => !u), 'a swing with the shield up')
   assert.ok(blockedTicks.filter(b => b).length > blockedTicks.length / 2, `the shield up ${blockedTicks.filter(b => b).length} of ${blockedTicks.length} ticks`)
 })
+
+test('fight: a swing goes to the hostile under the crosshair in front of the target; a swing the crosshair refuses keeps the shield up (full-26.3-fresh-l)', async () => {
+  const { fight, swingVictim } = await import('../../src/skills/fight')
+  const run = async (under: (z: { front: any, back: any }) => any): Promise<{ attacked: number[], blocked: number, ticks: number }> => {
+    // down a 1-wide tunnel: the target 2.4 off, another zombie between it and the bot, 1.4 off
+    const back = entity({ id: 9, name: 'zombie', position: new Vec3(2.9, 64, 0.5) })
+    const front = entity({ id: 10, name: 'zombie', position: new Vec3(1.9, 64, 0.5) })
+    const bot = fakeBot({ entities: [back, front], items: [item('diamond_sword')], offhand: item('shield') })
+    bot.heldItem = bot.inventory.slots[9]
+    bot.equip = async () => {}
+    bot.activateItem = () => { bot.usingHeldItem = true }
+    bot.deactivateItem = () => { bot.usingHeldItem = false }
+    bot.raycastHitResult = () => under({ front, back })
+    const attacked: number[] = []
+    bot.attack = (e: any) => { attacked.push(e.id) }
+    let blocked = 0
+    let ticks = 0
+    bot.on('physicsTick', () => { ticks++; if (bot.usingHeldItem === true) blocked++ })
+    bot.waitForTicks = async (n: number) => { for (let i = 0; i < n; i++) bot.emit('physicsTick') }
+    assert.strictEqual(swingVictim(bot, back)?.id, under({ front, back }).type === 'entity' ? under({ front, back }).entity.id : undefined)
+    await fight(bot, back as any, { maxTicks: 60 }).catch(() => {})
+    return { attacked, blocked, ticks }
+  }
+  const inFront = await run(({ front }) => ({ type: 'entity', entity: front }))
+  assert.ok(inFront.attacked.length >= 2, `${inFront.attacked.length} swings`)
+  assert.ok(inFront.attacked.every(id => id === 10), `swung at ${inFront.attacked.join(', ')}`)
+  // the crosshair on the tunnel's wall: no swing, the shield up the while
+  const wall = await run(() => ({ type: 'block', block: { name: 'stone' } }))
+  assert.strictEqual(wall.attacked.length, 0)
+  assert.ok(wall.blocked >= wall.ticks - 2, `the shield up ${wall.blocked} of ${wall.ticks} ticks`)
+})
+
+test('swingVictim: a neutral mob (an enderman) in front of the target is never hit in passing', async () => {
+  const { swingVictim } = await import('../../src/skills/fight')
+  const target = entity({ name: 'zombie', position: new Vec3(2.9, 64, 0.5) })
+  const enderman = entity({ name: 'enderman', position: new Vec3(1.9, 64, 0.5) })
+  const bot = fakeBot({ entities: [target, enderman] })
+  bot.raycastHitResult = () => ({ type: 'entity', entity: enderman })
+  assert.strictEqual(swingVictim(bot, target), null)
+  assert.strictEqual(swingVictim(bot, enderman)?.id, enderman.id)
+})

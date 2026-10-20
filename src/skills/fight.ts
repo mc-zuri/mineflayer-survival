@@ -4,6 +4,7 @@ import type { Vec3 } from 'vec3'
 import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { edgeAhead, steerAway, steerToward } from './steer'
 import { onDripstone } from './hazardCells'
+import { entityUnderCrosshair } from '../core/actions'
 import { type Entity, hasLineOfSight, metadataIndex, metadataValue, distanceToBox, entityBox, entityName, eyePosition, isAlive, TaskError, type SkillOptions, throwIfAborted, waitTicks, yawPitchOf } from './combatUtil'
 
 export interface FightOptions extends SkillOptions {
@@ -190,6 +191,27 @@ const BOLT_SPAWN_DISTANCE = 2.5
 /** how far off a crossbow mob's loaded crossbow is watched by fight() (Pillager's FOLLOW_RANGE 32 and then some less) */
 const CROSSBOW_WATCH_DISTANCE = 24
 
+/** mobs typed hostile that are neutral till hit (NeutralMob): never hit in passing, only as the fight's own target */
+const NEUTRAL_HOSTILES = new Set(['enderman', 'zombified_piglin', 'piglin'])
+
+/**
+ * What a swing now hits that the fight wants hit (MultiPlayerGameMode.attack goes to the entity under the crosshair,
+ * LocalPlayer.raycastHitResult): the target, or a hostile in front of it (a crowd's nearer one, another zombie down a
+ * tunnel between the bot and the one it fights); null when the swing would meet a block, nothing or a mob let be. The
+ * fight swung only at its target: with another zombie in front of it in a 1-wide tunnel every swing was refused, the
+ * shield stayed down (the sword charged, the swing due each tick), and a 26.3 bot in iron with a diamond sword was hit
+ * every 20 ticks till it died (full-26.3-fresh-l, tests/integration/mineZombies).
+ */
+export function swingVictim (bot: Bot, target: Entity): Entity | null {
+  const under = entityUnderCrosshair(bot)
+  if (under === undefined) return target
+  if (under == null || !isAlive(bot, under)) return null
+  if (under.id === target.id) return target
+  const name = entityName(under)
+  const hostile = (bot.registry.entitiesByName as any)[name]?.type === 'hostile' || MELEE_MOBS.has(name)
+  return hostile && !NEUTRAL_HOSTILES.has(name) ? under : null
+}
+
 function findItem (bot: Bot, name: string): Item | undefined {
   return bot.inventory.items().find(i => i.name === name) ?? (bot.inventory.slots[45]?.name === name ? bot.inventory.slots[45] ?? undefined : undefined)
 }
@@ -323,7 +345,9 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
         // a melee mob: its swings on the shield, the sword's between them (meleeGuard). A 26.3 bot in iron with a
         // shield traded blows with a wither skeleton in a fortress's corridor, its shield never up, and was hit to
         // death and withered (full-26.3-fresh-d)
-        const guard = meleeGuard(inMobReach(target, bot.entity.position, MELEE_GUARD_MARGIN), distance <= reach, strength.scale(0.5) >= 1, blocking)
+        // (in our reach only with the swing landing on it or one in front of it: a swing the crosshair refuses keeps
+        // the shield up)
+        const guard = meleeGuard(inMobReach(target, bot.entity.position, MELEE_GUARD_MARGIN), distance <= reach && swingVictim(bot, target) != null, strength.scale(0.5) >= 1, blocking)
         if (guard === 'block') wantBlock = true
         if (guard === 'lower') {
           lowerShield(bot)
@@ -371,10 +395,10 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       // no crit jump off a stalagmite: each landing back on its tip impales (PointedDripstoneBlock.fallOn; a 26.3 bot
       // jumped at zombies from one 17 times, till it died)
       // (and none in a melee mob's reach with the shield to take its swings: the jump's fall leaves the shield down for
-      // 6 ticks and more; a crit is from beyond its reach, as it comes)
+      // 6 ticks and more; a crit is from beyond its reach, as it comes; nor any other's, one in front of it in a tunnel)
       const canCrit = crits && !isCreeper && e.isInWater !== true && e.isInLava !== true && e.onClimbable !== true &&
         !onDripstone(p => bot.blockAt(p), bot.entity.position.floored()) &&
-        !(guarded && hasShield() && inMobReach(target, bot.entity.position, 0.3))
+        !(guarded && hasShield() && Object.values(bot.entities).some(m => m !== bot.entity && MELEE_MOBS.has(entityName(m)) && isAlive(bot, m) && inMobReach(m, bot.entity.position, 0.3)))
       const airborne = ticks - jumpedAt <= 14 && !bot.entity.onGround
       const falling = !bot.entity.onGround && bot.entity.velocity.y < 0
       const jumpNow = canCrit && bot.entity.onGround && !airborne && strength.ticksToFull() <= 5
@@ -386,8 +410,9 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       } else {
         bot.setControlState('jump', false)
       }
-      if (!jumpNow && strength.scale(0.5) >= 1 && (!canCrit || falling || !airborne)) {
-        if (strength.attack(target)) {
+      const victim = swingVictim(bot, target)
+      if (!jumpNow && strength.scale(0.5) >= 1 && (!canCrit || falling || !airborne) && victim != null) {
+        if (strength.attack(victim)) {
           hits++
           if (isCreeper) retreating = true
         }
