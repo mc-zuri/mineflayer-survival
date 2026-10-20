@@ -363,3 +363,61 @@ export function inCaveWall (bot: Bot, pos: { x: number, y: number, z: number }):
   const p = new Vec3(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z))
   return cells.isCave(p) || cells.beside([p]).length > 0
 }
+
+/**
+ * Why a dug step (a staircase's or a tunnel's: the cells it opens and its floor) is a cave's, or null: a cell it opens
+ * is a cave's, a cave's cell is against one (opened, the tunnel is the cave's), or its floor is one (the step over a
+ * cave's air). Such a step isn't taken: the staircase or the tunnel turns and goes round, the rock kept between.
+ */
+export function caveStepHazard (cells: CaveCells, step: { open: readonly Vec3[], floor: Vec3 }, body: readonly Vec3[] = []): string | null {
+  for (const c of step.open) if (cells.isCave(c)) return `a cave at ${c.toString()}`
+  if (cells.isCave(step.floor)) return `a cave under ${step.floor.toString()}`
+  const beside = cells.beside(step.open).filter(c => !body.some(b => b.equals(c)))
+  return beside.length > 0 ? `a cave at ${beside[0].toString()}` : null
+}
+
+/** caveStepHazard for the bot under the cave rule (caveRuleOn), its body's cells left out; null off the rule */
+export function caveStep (bot: Bot, step: { open: readonly Vec3[], floor: Vec3 }): string | null {
+  if (!caveRuleOn(bot)) return null
+  const p = bot.entity.position
+  const feet = new Vec3(Math.floor(p.x), Math.floor(p.y + 1e-6), Math.floor(p.z))
+  return caveStepHazard(caveCells(bot), step, [feet, feet.offset(0, 1, 0)])
+}
+
+/**
+ * The cave's cells against the bot's body (its feet's sides, its head's sides and the cell over it) while it stands
+ * in the rock (its feet's and head's cells no cave's), under the cave rule: the holes its tunnel broke into a cave
+ */
+export function caveOpenings (bot: Bot): Vec3[] {
+  if (!caveRuleOn(bot) || bot.entity == null) return []
+  const cells = caveCells(bot)
+  const p = bot.entity.position
+  const feet = new Vec3(Math.floor(p.x), Math.floor(p.y + 1e-6), Math.floor(p.z))
+  const head = feet.offset(0, 1, 0)
+  if (cells.isCave(feet) || cells.isCave(head)) return []
+  // (not under the feet: the floor's no hole, and a block put there is under the bot)
+  return cells.beside([feet, head]).filter(c => !(c.x === feet.x && c.z === feet.z && c.y < feet.y))
+}
+
+/**
+ * Seals the holes into a cave by the bot (caveOpenings) with a block each (sealItem: cobblestone first); resolves the
+ * blocks put. A hole that won't take one (a mob in it) is left.
+ */
+export async function sealCaveOpenings (bot: Bot, signal?: AbortSignal): Promise<number> {
+  const holes = caveOpenings(bot)
+  if (holes.length === 0) return 0
+  const { sealItem } = await import('./shelter')
+  const { placeBlock } = await import('./placeBlock')
+  let placed = 0
+  for (const hole of holes) {
+    const item = sealItem(bot)
+    if (item == null) break
+    try {
+      await placeBlock(bot, { pos: hole, item }, signal)
+      placed++
+    } catch (err) {
+      if (signal?.aborted === true) throw err
+    }
+  }
+  return placed
+}

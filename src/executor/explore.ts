@@ -17,6 +17,7 @@ import { headInWater, surface } from '../skills/escape'
 import { placeBlock } from '../skills/placeBlock'
 import { AIR_BLOCKS, CARDINALS, countItems, trace, waitUntil } from '../skills/util'
 import { DIGGING_PICKAXE, wantsDiggingPickaxe } from '../skills/digTool'
+import { caveStep, sealCaveOpenings } from '../skills/caves'
 
 export type Lookup = (pos: Vec3) => { name: string, boundingBox: string } | null
 
@@ -1135,13 +1136,16 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
     let stepped = false
     for (const d of turns) {
       const step = staircaseStep(feet, d)
-      const why = unsafeStep(lookup, step)
+      // (and a step into a cave, or opening the way into one, for a bot not fit for the caves: round it in the rock)
+      const why = unsafeStep(lookup, step) ?? caveStep(bot, step)
       if (why != null) { trace('explore: staircase turns from', d.toString(), why); continue }
       if (!floorHeld(lookup, step, hasPlug(bot))) { trace('explore: staircase turns from', d.toString(), 'no floor at', step.floor.toString()); continue }
       try {
         await open(bot, step.open, signal)
         if (!(await ensureFloor(bot, step.floor, signal))) continue
         await walkInto(bot, step.next, signal)
+        // a hole into a cave the step opened all the same (gravel that fell, a cave the step's cells hid) sealed
+        await sealCaveOpenings(bot, signal)
       } catch (err) {
         if (isAbort(err)) throw err
         trace('explore: staircase step failed', (err as Error).message)
@@ -1184,12 +1188,13 @@ const LEVEL_STEPS = 32
 async function levelStep (bot: Bot, lookup: Lookup, feet: Vec3, dirs: Vec3[], signal?: AbortSignal): Promise<boolean> {
   for (const d of dirs) {
     const step = tunnelStep(feet, d)
-    const why = unsafeStep(lookup, step)
+    const why = unsafeStep(lookup, step) ?? caveStep(bot, step)
     if (why != null || !floorHeld(lookup, step, hasPlug(bot))) continue
     try {
       await open(bot, step.open, signal)
       if (!(await ensureFloor(bot, step.floor, signal))) continue
       await walkInto(bot, step.next, signal)
+      await sealCaveOpenings(bot, signal)
       trace('explore: no safe step down from', feet.toString(), ': a level step to', step.next.toString())
       return true
     } catch (err) {
@@ -1251,13 +1256,15 @@ export async function tunnel (bot: Bot, args: DigRouteArgs & { length?: number, 
       await routeRoom(bot, args, signal, tunnelStep(feetOf(bot), dir).next)
       const feet = feetOf(bot)
       const step = tunnelStep(feet, dir)
-      const why = unsafeStep(lookup, step)
+      // (a cave ahead, or against the next cells, for a bot not fit for the caves: the tunnel turns, the rock kept between)
+      const why = unsafeStep(lookup, step) ?? caveStep(bot, step)
       if (why != null) { trace('explore: tunnel stops,', why); blocked++; break }
       if (!floorHeld(lookup, step, hasPlug(bot))) { trace('explore: tunnel stops, no floor at', step.floor.toString()); blocked++; break }
       try {
         await open(bot, step.open, signal)
         if (!(await ensureFloor(bot, step.floor, signal))) break
         await walkInto(bot, step.next, signal)
+        await sealCaveOpenings(bot, signal)
       } catch (err) {
         if (isAbort(err)) throw err
         trace('explore: tunnel step failed', (err as Error).message)

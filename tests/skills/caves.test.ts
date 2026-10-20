@@ -163,6 +163,7 @@ async function caveRig (rule: boolean): Promise<{ bot: any, stop: () => void }> 
   }
   bot.loadPlugin(pf.createPlugin({ pathfinderSettings: { partialPathProducer: false, searchTimeoutMs: 15000 } }))
   bot.pathfinder.setMoveOptions({ ...bot.pathfinder.defaultMoveSettings, canDig: true, canPlace: false, digCost: 0.02 })
+  caveCells(bot)
   for (let x = -5; x <= 0; x++) for (const y of [64, 65]) bot.emit('diggingCompleted', { position: new Vec3(x, y, 0) })
   if (rule) keepOutOfCaves(bot)
   return { bot, stop: () => rig.stopPassivePhysics() }
@@ -204,4 +205,55 @@ test('caveStepCost and caveBreakCost: a cave\'s cell, and a block against one, c
   bot.game.dimension = 'the_nether'
   bot.emit('physicsTick')
   assert.equal(step({ position: { x: 4, y: 21, z: 0 } }), 0)
+})
+
+test('caveStepHazard: a staircase\'s or a tunnel\'s step into a cave, against one or over one is a cave\'s; one in the rock beside it not', async () => {
+  const { caveStepHazard } = await import('../../src/skills/caves')
+  const { staircaseStep, tunnelStep } = await import('../../src/executor/explore')
+  // a cave from x 3 to 9 (y 18 to 21, z -3 to 3); the bot's tunnel at z 0 up to x 0, its cells dug
+  const t = tunnel(-6, 0)
+  const cells = new CaveCells(view({ ...t, ...box([3, 18, -3], [9, 21, 3]) }, { dug: new Set(Object.keys(t)) }))
+  const body = [new Vec3(0, 20, 0), new Vec3(0, 21, 0)]
+  const east = new Vec3(1, 0, 0)
+  // x 1: rock between; x 2: the next cells against the cave's at x 3
+  assert.equal(caveStepHazard(cells, tunnelStep(new Vec3(0, 20, 0), east), body), null)
+  assert.match(caveStepHazard(cells, tunnelStep(new Vec3(1, 20, 0), east), body) ?? '', /a cave at \(3, 2[01], 0\)/)
+  assert.match(caveStepHazard(cells, tunnelStep(new Vec3(2, 20, 0), east), body) ?? '', /a cave at \(3, 20, 0\)/)
+  // a staircase down over the cave: the step two over its roof (at 22) is in the rock, the next one opens the roof
+  assert.equal(caveStepHazard(cells, staircaseStep(new Vec3(4, 24, 0), east)), null)
+  assert.match(caveStepHazard(cells, staircaseStep(new Vec3(4, 23, 0), east)) ?? '', /cave/)
+  // a step over the cave (its floor a cave's cell)
+  assert.match(caveStepHazard(cells, { open: [new Vec3(5, 23, 5)], floor: new Vec3(5, 21, 3) }) ?? '', /under/)
+  // north, away from it: nothing
+  assert.equal(caveStepHazard(cells, tunnelStep(new Vec3(0, 20, 0), new Vec3(0, 0, -1)), body), null)
+})
+
+test('caveOpenings: the holes from the bot\'s tunnel into a cave, by its feet and head (not under it); sealed with cobblestone, none once cave-ready', async () => {
+  const { caveOpenings, sealCaveOpenings } = await import('../../src/skills/caves')
+  const filled = new Set<string>()
+  const bot = fakeBot({ position: new Vec3(0.5, 20, 0.5), items: [item('cobblestone', 16)] })
+  bot.game.dimension = 'overworld'
+  bot.blockAt = (p: Vec3) => {
+    const k = `${p.x},${p.y},${p.z}`
+    const open = !filled.has(k) && ((p.z === 0 && p.x >= -6 && p.x <= 0 && (p.y === 20 || p.y === 21)) || (p.x >= 1 && p.x <= 7 && p.y >= 19 && p.y <= 23 && Math.abs(p.z) <= 3))
+    const name = open ? 'air' : p.y > 70 ? 'air' : filled.has(k) ? 'cobblestone' : 'stone'
+    return { name, position: p, boundingBox: name === 'air' ? 'empty' : 'block' }
+  }
+  caveCells(bot)
+  for (let x = -6; x <= 0; x++) for (const y of [20, 21]) bot.emit('diggingCompleted', { position: new Vec3(x, y, 0) })
+  assert.deepEqual(caveOpenings(bot).map(p => p.toArray()).sort(), [[1, 20, 0], [1, 21, 0]])
+  const placed: string[] = []
+  const mod = require('../../src/skills/placeBlock')
+  const real = mod.placeBlock
+  mod.placeBlock = async (_b: any, args: any) => { placed.push(`${args.item} ${args.pos.toString()}`); filled.add(`${args.pos.x},${args.pos.y},${args.pos.z}`); bot.emit('blockUpdate', { name: 'air', boundingBox: 'empty', position: args.pos }, { name: 'cobblestone', boundingBox: 'block', position: args.pos }) }
+  try {
+    assert.equal(await sealCaveOpenings(bot), 2)
+  } finally {
+    mod.placeBlock = real
+  }
+  assert.deepEqual(placed.sort(), ['cobblestone (1, 20, 0)', 'cobblestone (1, 21, 0)'])
+  assert.deepEqual(caveOpenings(bot), [])
+  // the bot in the cave itself: no openings to seal (it walks out first)
+  bot.entity.position = new Vec3(4.5, 20, 0.5)
+  assert.deepEqual(caveOpenings(bot), [])
 })
