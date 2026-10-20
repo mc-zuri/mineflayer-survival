@@ -287,3 +287,29 @@ test('sealPocket: the night\'s wait down the mine shut in where the bot stands, 
     mod.sealIn = real
   }
 })
+
+test('watchCaveEntries: each way into a cave under the rule counted and logged, the gate\'s opening logged; none once cave-ready', async () => {
+  const { caveEntries, watchCaveEntries } = await import('../../src/skills/caves')
+  const bot = fakeBot({ position: new Vec3(-2.5, 20, 0.5) })
+  bot.game.dimension = 'overworld'
+  bot.blockAt = (p: Vec3) => {
+    const open = (p.z === 0 && p.x >= -6 && p.x <= 0 && (p.y === 20 || p.y === 21)) || (p.x >= 1 && p.x <= 7 && p.y >= 19 && p.y <= 23 && Math.abs(p.z) <= 3)
+    const name = open ? 'air' : p.y > 70 ? 'air' : 'stone'
+    return { name, position: p, boundingBox: name === 'air' ? 'empty' : 'block' }
+  }
+  caveCells(bot)
+  for (let x = -6; x <= 0; x++) for (const y of [20, 21]) bot.emit('diggingCompleted', { position: new Vec3(x, y, 0) })
+  const lines: string[] = []
+  watchCaveEntries(bot, l => lines.push(l))
+  const walk = (x: number): void => { bot.entity.position = new Vec3(x + 0.5, 20, 0.5); bot.emit('physicsTick') }
+  for (const x of [-1, 0, 1, 2, 3, 2, 1, 0, 1, 2]) walk(x)
+  assert.equal(caveEntries(bot), 2)
+  assert.match(lines[0], /^caves: into a cave at 1 20 0 \(1 so far, not cave-ready: /)
+  // ready (its kit put on): the gate's line, no more counting
+  const prot = [{ name: 'protection', lvl: 1 }]
+  for (const [slot, it] of [[5, item('iron_helmet', 1, prot)], [6, item('iron_chestplate', 1, prot)], [7, item('iron_leggings')], [8, item('iron_boots')], [9, item('iron_sword', 1, [{ name: 'sharpness', lvl: 1 }])], [10, item('cooked_beef', 10)]] as const) { (it as any).slot = slot; bot.inventory.slots[slot] = it }
+  for (let i = 0; i < 40; i++) bot.emit('physicsTick')
+  assert.ok(lines.some(l => /cave-ready now/.test(l)), lines.join('\n'))
+  for (const x of [0, 1, 2]) walk(x)
+  assert.equal(caveEntries(bot), 2)
+})

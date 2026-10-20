@@ -18,7 +18,7 @@ import { checkPlan, type PlanStep, type Station } from '../planner/steps'
 import { BASE_POI, baseRecord, type BaseRecord } from '../base/pois'
 import { storeItems } from '../skills/chest'
 import { craft } from '../skills/craft'
-import { caveReady } from '../skills/caves'
+import { caveReady, watchCaveEntries } from '../skills/caves'
 import { placeBlock } from '../skills/placeBlock'
 import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
@@ -301,6 +301,8 @@ export class Executor {
       room: async (s, toward) => await this.makeRoomDuringStep(s, toward),
       unwanted: name => this.unwantedDrop(name)
     }
+    // the bot's ways into the caves under the cave rule counted and logged, and the gate's opening (skills/caves)
+    watchCaveEntries(bot, line => this.log(line))
     // the cobwebs about noted (a mineshaft's, the night's mines open into them), for the string's plans (a bow's)
     let nextWebCheck = 0
     bot.on('physicsTick', () => {

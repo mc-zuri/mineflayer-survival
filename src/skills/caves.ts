@@ -454,3 +454,51 @@ export async function sealPocket (bot: Bot, signal?: AbortSignal): Promise<numbe
   const res = await sealIn(bot, { signal, healTo: 0, maxTicks: 0 })
   return res.placed
 }
+
+/** ticks between the cave-entry lines (watchCaveEntries) */
+export const CAVE_ENTRY_LOG_TICKS = 200
+
+const entries = new WeakMap<Bot, { count: number }>()
+
+/** the times the bot's feet went into a cave's cell under the cave rule (watchCaveEntries) */
+export function caveEntries (bot: Bot): number {
+  return entries.get(bot)?.count ?? 0
+}
+
+/**
+ * Counts and logs the bot's ways into the caves while the rule holds (its feet into a cave's cell from one that isn't),
+ * and the gate as it opens and shuts (caveReady): what a game's log shows of the rule. Once per bot.
+ */
+export function watchCaveEntries (bot: Bot, log: (line: string) => void): void {
+  if (entries.has(bot) || typeof bot.on !== 'function') return
+  const e = { count: 0 }
+  entries.set(bot, e)
+  let lastFeet = ''
+  let wasCave = false
+  let ready: boolean | null = bot.entity != null && bot.inventory != null ? caveReadyNow(bot) : null
+  let lastLog = -Infinity
+  let ticks = 0
+  bot.on('physicsTick', () => {
+    ticks++
+    if (bot.entity == null || typeof bot.blockAt !== 'function') return
+    if (ticks % 20 === 0) {
+      const now = caveReadyNow(bot)
+      if (ready != null && now !== ready) log(now ? 'caves: cave-ready now (enchanted iron, a full bar, cooked food): the caves are walked as any ground' : `caves: not cave-ready (${caveUnreadiness(bot) ?? ''}): mining in its own tunnels only`)
+      ready = now
+    }
+    const p = bot.entity.position
+    const feet = `${Math.floor(p.x)},${Math.floor(p.y + 1e-6)},${Math.floor(p.z)}`
+    if (feet === lastFeet) return
+    lastFeet = feet
+    if (!caveRuleOn(bot)) { wasCave = false; return }
+    const cave = caveCells(bot).isCave(new Vec3(Math.floor(p.x), Math.floor(p.y + 1e-6), Math.floor(p.z)))
+    if (cave && !wasCave) {
+      e.count++
+      if (ticks - lastLog >= CAVE_ENTRY_LOG_TICKS) {
+        lastLog = ticks
+        log(`caves: into a cave at ${feet.replace(/,/g, ' ')} (${e.count} so far, not cave-ready: ${caveUnreadiness(bot) ?? ''})`)
+      }
+    }
+    wasCave = cave
+  })
+}
