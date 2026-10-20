@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { FORBID, fireballIncoming, lavaAgainst, lavaBeside, netherMoveSettings, overLava, wearingGold } from '../../src/nether/safety'
+import { FORBID, FORTRESS_BREAK_COST, fireballIncoming, lavaAgainst, lavaBeside, netherMoveSettings, overLava, wearingGold } from '../../src/nether/safety'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
 
 test('nether safety: lava beside the body, against a block to break, under a block to place', () => {
@@ -36,6 +36,9 @@ test('netherMoveSettings: the exclusion areas forbid lava edges and piglin gold 
   assert.equal(brk({ position: new Vec3(0, 63, 0), type: reg.blocksByName.gold_block.id }), FORBID)
   assert.equal(brk({ position: new Vec3(0, 63, 0), type: reg.blocksByName.netherrack.id }), 0)
   assert.equal(brk({ position: new Vec3(4, 63, 0), type: reg.blocksByName.netherrack.id }), FORBID) // lava on top
+  // a fortress's bricks dug only at a cost: its corridors and bridges walked instead
+  assert.equal(brk({ position: new Vec3(0, 63, 0), type: reg.blocksByName.nether_bricks.id }), FORTRESS_BREAK_COST)
+  assert.equal(brk({ position: new Vec3(0, 63, 0), type: reg.blocksByName.nether_brick_fence.id }), FORTRESS_BREAK_COST)
   assert.equal(place({ position: new Vec3(4, 65, 0), type: 0 }), FORBID)
   assert.equal(place({ position: new Vec3(0, 64, 0), type: 0 }), 0)
 })

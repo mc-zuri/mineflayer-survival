@@ -215,6 +215,7 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
   // where the bot died in the nether: kept away from (rememberNetherDeath)
   const deaths: Pos[] = opts.avoidDeaths === false ? [] : (bot.survival?.memory?.getPois('nether_death', { dimension: 'the_nether' }) ?? [])
   const guarded = new Set([...PIGLIN_GUARDED].map(n => bot.registry.blocksByName[n]?.id).filter((n): n is number => n != null))
+  const fortress = new Set(FORTRESS_BLOCKS.map(n => bot.registry.blocksByName[n]?.id).filter((n): n is number => n != null))
   let piglinCheckTick = -1
   let piglinNear = false
   const piglinsAbout = (): boolean => {
@@ -246,6 +247,9 @@ export function netherMoveSettings (bot: Bot, opts: NetherSafetyOptions = {}): P
     fresh()
     if (lavaAgainst(isLava, block.position)) return FORBID
     if (opts.piglins !== false && guarded.has(block.type) && piglinsAbout()) return FORBID
+    // a fortress walked along its corridors and bridges, not dug through: the way to a blaze spawner went under a
+    // bridge and dug up through it, into the wither skeletons on it (26.3)
+    if (fortress.has(block.type)) return FORTRESS_BREAK_COST
     return 0
   }
   const place = (block: BlockInfoLike): number => { fresh(); return overLava(isLava, isAir, block.position) ? FORBID : 0 }
@@ -270,6 +274,11 @@ function currentMoveSettings (bot: Bot): MovementOptions {
 export function hasNetherSafety (bot: Bot): boolean {
   return ((bot.pathfinder as any)?.defaultMoveSettings?.exclusionAreasStep ?? []).some((area: any) => area?.survivalNether === true)
 }
+
+/** a fortress's blocks, dug through only at FORTRESS_BREAK_COST more */
+export const FORTRESS_BLOCKS = ['nether_bricks', 'nether_brick_fence', 'nether_brick_stairs', 'nether_brick_slab', 'nether_brick_wall', 'cracked_nether_bricks', 'chiseled_nether_bricks']
+/** the cost a fortress block's break adds to a path (a walk's step is about 1) */
+export const FORTRESS_BREAK_COST = 30
 
 /**
  * runs `fn` with the nether settings laid over the pathfinder's, and puts the old ones back; inside another's (the
