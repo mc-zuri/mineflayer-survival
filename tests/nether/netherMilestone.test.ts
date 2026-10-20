@@ -372,7 +372,8 @@ test('netherKit: the arrows are got on their own after the gear, and once the hu
     task: async () => {}
   }
   await netherKit(bot, executor, new AbortController().signal, () => {})
-  assert.deepStrictEqual(asked, ['iron_helmet', 'arrow'])
+  // (then the brewing's bottles: brewKit)
+  assert.deepStrictEqual(asked, ['iron_helmet', 'arrow', 'glass_bottle,crafting_table,cobblestone'])
 })
 
 test('netherKit: short of only the food after its tries, the milestone is not ready with the food points banked (foodShort)', async () => {
