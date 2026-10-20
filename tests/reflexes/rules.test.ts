@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { armorReflex, creeperReflex, drowningReflex, eatReflex, emergencyEatReflex, hazardReflex, hostilesReflex, nightChoice, nightReflex, totemReflex, type NightChoiceInputs } from '../../src/reflexes/rules'
+import { dropsReflex, armorReflex, creeperReflex, drowningReflex, eatReflex, emergencyEatReflex, hazardReflex, hostilesReflex, nightChoice, nightReflex, totemReflex, type NightChoiceInputs } from '../../src/reflexes/rules'
 import { ReflexEngine } from '../../src/reflexes/engine'
 import { DEFAULT_REFLEX_CONFIG, type ReflexConfigInput } from '../../src/reflexes/config'
 import type { Reflex } from '../../src/reflexes/types'
@@ -677,4 +677,19 @@ test('eat reflex: a meal that does not fit the bar whole (FoodData.eat caps it a
   assert.strictEqual(check(eatReflex, { food: 14, items: [...pork, item('bread', 2)] }), 'eat')
   // starving: whatever
   assert.strictEqual(check(eatReflex, { food: 6, items: [item('rabbit_stew', 1)] }), 'eat')
+})
+
+test('drops reflex: a slime ball or magma cream a fight left lying is picked up while the bag is short of them; not in a fight, by a blaze, too far, or with enough', () => {
+  const drop = (name: string, x: number, y = 64, id = 900): any => ({ id, name: 'item', type: 'object', position: at(x, y), getDroppedItem: () => item(name) })
+  assert.strictEqual(check(dropsReflex, { entities: [drop('slime_ball', 4)] }), 'pick up the wanted drops')
+  assert.strictEqual(check(dropsReflex, { entities: [drop('magma_cream', 4)] }), 'pick up the wanted drops')
+  // not what's wanted, too far, over 3 up
+  assert.strictEqual(check(dropsReflex, { entities: [drop('rotten_flesh', 4)] }), null)
+  assert.strictEqual(check(dropsReflex, { entities: [drop('slime_ball', 14)] }), null)
+  assert.strictEqual(check(dropsReflex, { entities: [drop('slime_ball', 2, 69)] }), null)
+  // enough held already
+  assert.strictEqual(check(dropsReflex, { entities: [drop('slime_ball', 4)], items: [item('slime_ball', 4)] }), null)
+  // a fight on, or a blaze about (the nook's own fetch)
+  assert.strictEqual(check(dropsReflex, { entities: [drop('slime_ball', 4), entity({ name: 'zombie', position: at(5) })] }), null)
+  assert.strictEqual(check(dropsReflex, { entities: [drop('magma_cream', 4), entity({ name: 'blaze', position: at(20, 70) })] }), null)
 })

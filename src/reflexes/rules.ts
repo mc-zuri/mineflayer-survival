@@ -9,7 +9,8 @@ import type { Vec3 } from 'vec3'
 import { bestMeleeWeapon } from '../skills/weapons'
 import { hasLineOfSight, isAlive, type Entity } from '../skills/combatUtil'
 import { holdOffBlazes } from '../nether/blazeFight'
-import { ARCHER_BUDGET, GHAST_FIREBALL, deadlyDropBeside, deflectFireball, fireballIncoming, holdOffArcher, keepFromGhast, nearestGhast } from '../nether/safety'
+import { ARCHER_BUDGET, GHAST_FIREBALL, deadlyDropBeside, deflectFireball, fireballIncoming, holdOffArcher, keepFromGhast, nearestGhast, withNetherSafety } from '../nether/safety'
+import { nearbyDrops, pickupDrops } from '../skills/pickupDrops'
 import { isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
 import type { ReflexConfig } from './config'
@@ -835,4 +836,56 @@ export const spawnerReflex: Reflex = {
   }
 }
 
-export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, wardenReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, spawnerReflex, nightReflex, armorReflex]
+/**
+ * The drops a fight leaves that the bag wants and nothing else picks up, while short of them: slime balls and magma
+ * cream, the magma cream of the nether's fire resistance (a slime ball and a blaze powder make one). Only a size 1
+ * slime drops slime balls (a slime splits into smaller ones on its death, Slime.remove, the hostiles reflex fighting
+ * each), the magma cubes of a fortress (NetherFortressStructure's spawns) and of the basalt deltas the cream; the
+ * hostiles reflex killed them and left their drops lying: 26.3 bots fought 4 to 18 magma cubes by seed 2's fortress a
+ * run and went into the blaze fight with no cream for the brew (tests/integration/blaze BLAZE_BREW=1)
+ */
+export const WANTED_DROPS = ['slime_ball', 'magma_cream']
+/** the wanted drops are picked up while the bag holds fewer than this of them */
+export const WANTED_DROPS_KEEP = 4
+/** how far off a wanted drop is gone for (and no further over or under than 3) */
+export const WANTED_DROPS_RANGE = 10
+/** a drop not got is let be this long */
+export const WANTED_DROPS_RETRY_TICKS = 600
+
+const dropTries = new WeakMap<Bot, Map<number, number>>()
+
+/** the nearest wanted drop to go for now, or null */
+export function wantedDrop (bot: Bot, tick: number): Entity | null {
+  if (countItems(bot, WANTED_DROPS) >= WANTED_DROPS_KEEP) return null
+  const tried = dropTries.get(bot)
+  const me = bot.entity.position
+  return nearbyDrops(bot, me, WANTED_DROPS_RANGE, WANTED_DROPS)
+    .find(e => Math.abs(e.position.y - me.y) <= 3 && (tried?.get(e.id) ?? -Infinity) <= tick) ?? null
+}
+
+export const dropsReflex: Reflex = {
+  name: 'drops',
+  priority: 46,
+  check (ctx) {
+    const { bot } = ctx
+    if (ctx.inCombat || bot.entity == null) return null
+    // (not in a blaze fight: the nook's own fetch picks up what lies by it, and a walk out of it is a walk into fire)
+    if (Object.values(bot.entities).some(e => e.name === 'blaze' && e.position.distanceTo(bot.entity.position) <= 32)) return null
+    const drop = wantedDrop(bot, ctx.tick)
+    if (drop == null) return null
+    return {
+      name: 'drops',
+      priority: 46,
+      detail: 'pick up the wanted drops',
+      run: async (signal) => {
+        let tried = dropTries.get(bot)
+        if (tried == null) dropTries.set(bot, tried = new Map())
+        tried.set(drop.id, ctx.tick + WANTED_DROPS_RETRY_TICKS)
+        const go = async (): Promise<unknown> => await pickupDrops(bot, { near: drop.position.clone(), radius: 4, names: WANTED_DROPS, waitTicks: 15 }, signal)
+        return /nether/.test(String(bot.game?.dimension ?? '')) ? await withNetherSafety(bot, go) : await go()
+      }
+    }
+  }
+}
+
+export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, wardenReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, dropsReflex, spawnerReflex, nightReflex, armorReflex]
