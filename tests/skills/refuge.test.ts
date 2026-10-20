@@ -19,8 +19,10 @@ test('chooseRefuge: nothing to get safe from armed, sheltered, or by day with no
 })
 
 test('chooseRefuge (full-1.21.11-fresh-m: respawned bare by the base at night, a zombie 1.6 off): a run from it; then up a pillar of punched dirt, a hole, or in behind the base\'s door got to first', () => {
-  // the zombie by the bot and nearer the door than it: not the base, no time to punch dirt or dig
-  const there = situation({ threats: [mob(1.6)], base: { distance: 8, threatDistance: 7 }, dirtNear: true, hole: true })
+  // the zombie by the bot, the door 8 off: in behind it (the bot's sprint gets there first)
+  assert.strictEqual(chooseRefuge(situation({ threats: [mob(1.6)], base: { distance: 8, threatDistance: 7 }, dirtNear: true, hole: true })), 'base')
+  // the zombie by the door, between: not the base, no time to punch dirt or dig
+  const there = situation({ threats: [mob(1.6)], base: { distance: 8, threatDistance: 3 }, dirtNear: true, hole: true })
   assert.strictEqual(chooseRefuge(there), 'flee')
   // run off 18: the pillar of punched dirt, the hole without dirt to punch, nothing to do with neither
   const away = { threats: [mob(18)], hole: true }
@@ -29,7 +31,7 @@ test('chooseRefuge (full-1.21.11-fresh-m: respawned bare by the base at night, a
   assert.strictEqual(chooseRefuge(situation({ ...away, hole: false })), 'flee')
   // the base's door got to first (the bot's sprint against the zombie's walk): in behind it, ahead of all else
   assert.strictEqual(chooseRefuge(situation({ threats: [mob(3)], base: { distance: 4, threatDistance: 9 }, pillarBlocks: 64 })), 'base')
-  assert.strictEqual(chooseRefuge(situation({ threats: [mob(3)], base: { distance: 4, threatDistance: 5 }, pillarBlocks: 64 })), 'pillar')
+  assert.strictEqual(chooseRefuge(situation({ threats: [mob(3)], base: { distance: 4, threatDistance: 3 }, pillarBlocks: 64 })), 'pillar')
   assert.strictEqual(chooseRefuge(situation({ base: { distance: 30, threatDistance: Infinity }, hole: true })), 'base')
   // by the door already: in, whatever's about
   assert.strictEqual(chooseRefuge(situation({ threats: [mob(1)], base: { distance: 1.5, threatDistance: 1 } })), 'base')

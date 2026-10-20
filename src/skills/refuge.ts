@@ -31,10 +31,11 @@ export const REFUGE_THREAT_RANGE = 16
 /** the base's door within this many blocks is gone in behind */
 export const REFUGE_BASE_RANGE = 48
 /**
- * the base's door is got to first when the bot's this many times nearer it than the nearest threat or more: its sprint
- * (some 5.6 blocks a second) against a zombie's walk (some 2.3), a path's bends between
+ * the base's door is got to first when the bot's no further from it than this many times the nearest threat is: its
+ * sprint (some 5.6 blocks a second) against a zombie's walk (some 2.3), the door's opening and shutting and a path's
+ * bends between; a threat by the door (between the bot and it) is nearer it than the bot
  */
-export const REFUGE_BASE_LEAD = 1.5
+export const REFUGE_BASE_LEAD = 1.2
 /** a pillar's height: the feet 3 over the ground, out of the reach of a mob's attack box (a zombie's is 1.95 high, Mob.getAttackBoundingBox inflated across only) */
 export const PILLAR_HEIGHT = 3
 /** the nearest threat this far off at least to climb a pillar of the blocks at hand (a jump and a block a step) */
@@ -88,7 +89,8 @@ export interface RefugeSituation {
 
 /**
  * What a respawn does first: nothing when it's armed, sheltered already, or it's day with nothing about. Else in
- * order: in behind the base's door, when the bot gets there before the threats (REFUGE_BASE_LEAD); the bed, at night
+ * order: in behind the base's door, when the bot gets there before the threats (REFUGE_BASE_LEAD: its sprint against
+ * their walk); the bed, at night
  * with nothing about; up a pillar of the blocks at hand or of punched dirt, when every threat is a melee one it's safe
  * from (PILLAR_SAFE_FROM) and none too near to climb (PILLAR_CLEAR, PUNCH_CLEAR), by day only for one within
  * PILLAR_DAY_RANGE; at night a hole sealed over the head (the night's shelter) with none within HOLE_CLEAR; else a run
@@ -99,7 +101,7 @@ export function chooseRefuge (s: RefugeSituation): Refuge | null {
   if (!s.night && s.threats.length === 0) return null
   const ok = (r: Refuge): boolean => !s.failed.has(r)
   const nearest = Math.min(Infinity, ...s.threats.map(t => t.distance))
-  if (ok('base') && s.base != null && (s.base.distance <= 2 || s.base.distance * REFUGE_BASE_LEAD < s.base.threatDistance)) return 'base'
+  if (ok('base') && s.base != null && (s.base.distance <= 2 || s.base.distance < s.base.threatDistance * REFUGE_BASE_LEAD)) return 'base'
   if (ok('sleep') && s.night && s.bed && s.threats.length === 0) return 'sleep'
   const melee = s.threats.length > 0 && s.threats.every(t => PILLAR_SAFE_FROM.has(t.name))
   const climb = (s.pillarBlocks >= PILLAR_HEIGHT && nearest >= PILLAR_CLEAR) || (s.dirtNear && nearest >= PUNCH_CLEAR)
