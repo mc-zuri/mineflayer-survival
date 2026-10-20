@@ -535,3 +535,31 @@ test('the camp\'s fight goes no further after a blaze than the spawn volume\'s e
   assert.deepEqual(untils[0], [false, true])
   assert.ok(moves.length > 0, 'not back to the camp')
 })
+
+test('the camp\'s fight from in the spawn volume (no camp out of it to be had) is fought where the bot is, not cut at once', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/skills/fight')
+  const gridModule = require('../../src/skills/gridWalk')
+  // 2 off the spawner, walled in a throne: no camp spot (none sees it), the moves end where the bot is
+  const bot = fakeBot({ position: new Vec3(2.5, 64, 0.5), world: (p: any) => p.y < 64 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  ;(bot as any).lookAt = async () => {}
+  bot.entities[9] = { id: 9, name: 'blaze', type: 'hostile', position: new Vec3(0.5, 64, 2.5), metadata: [] } as any
+  const untils: boolean[] = []
+  const realFight = fightModule.fight
+  const realMove = gridModule.moveNear
+  fightModule.fight = async (_b: unknown, _t: unknown, o: any) => { untils.push(o.until()) }
+  gridModule.moveNear = async () => {}
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 60, safety: false, nook: false }), /TIMEOUT|rods/)
+  } finally {
+    clearInterval(ticking)
+    fightModule.fight = realFight
+    gridModule.moveNear = realMove
+  }
+  assert.ok(untils.length > 0)
+  assert.ok(untils.every(u => !u), `the fight cut at once: ${untils.join(' ')}`)
+})

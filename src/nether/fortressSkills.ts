@@ -791,8 +791,12 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
           if (d > Math.min(shootFrom, 3.5) && canShoot) {
             await shoot(bot, blaze, { signal: cut.signal, maxShots: 2 })
           } else {
-            // (not after it into the spawn volume, where the next ones come out on the bot: back to the camp then)
-            await fight(bot, blaze, { signal: cut.signal, maxTicks: 300, maxDistance: 16, until: () => !atCamp(bot.entity.position.distanceTo(spawner), Infinity) })
+            // (not after it into the spawn volume, where the next ones come out on the bot: back to the camp then).
+            // From a camp out of it only: in it already (a throne with no floor out of it that sees the spawner, seed
+            // 2's at (-277, 77, -159)), the fight is where the bot is; cut at once, the loop stood a 26.3 bot there 2
+            // ticks a turn under the blazes' fire for 9000 ticks, till it burned (BLAZE_KIT=q3)
+            const fromCamp = atCamp(bot.entity.position.distanceTo(spawner), Infinity)
+            await fight(bot, blaze, { signal: cut.signal, maxTicks: 300, maxDistance: 16, until: () => fromCamp && !atCamp(bot.entity.position.distanceTo(spawner), Infinity) })
           }
         } catch (err) {
           if (isAbort(err) && signal?.aborted === true) throw err
