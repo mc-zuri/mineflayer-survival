@@ -715,13 +715,16 @@ const GOLD_PIECES = ['golden_helmet', 'golden_chestplate', 'golden_leggings', 'g
 const SWORDS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'golden_sword', 'wooden_sword']
 
 /** the food points the bot goes into the nether with at the least */
-export const NETHER_FOOD_POINTS = 30
+export const NETHER_FOOD_POINTS = 40
+/** the arrows a bow goes into the nether with at the least */
+export const NETHER_ARROWS = 16
 /** the ticks the gear for the nether may take to get, when it's missing */
 export const NETHER_GEAR_TICKS = 48000
 
 /**
  * What the bot doesn't go into the nether without (worn or carried): a sword, an iron chestplate or better, a golden
- * piece (or the 4 ingots for boots) for the piglins, and NETHER_FOOD_POINTS of food. After a death the bot went back
+ * piece (or the 4 ingots for boots) for the piglins, a shield, NETHER_ARROWS for a bow carried, and NETHER_FOOD_POINTS of
+ * food. After a death the bot went back
  * in bare, no gold and no armor, and died to the piglins, the blazes or the lava again (26.3).
  */
 export function netherGearNeeds (inv: Inventory): ObtainRequest[] {
@@ -729,6 +732,10 @@ export function netherGearNeeds (inv: Inventory): ObtainRequest[] {
   if (inv.countAny(SWORDS.filter(s => s !== 'wooden_sword' && s !== 'golden_sword')) === 0) out.push({ item: 'stone_sword', count: 1 })
   if (inv.countAny(['iron_chestplate', 'diamond_chestplate', 'netherite_chestplate']) === 0) out.push({ item: 'iron_chestplate', count: 1 })
   if (inv.countAny(GOLD_PIECES) === 0 && inv.count('gold_ingot') < 4) out.push({ item: 'golden_boots', count: 1 })
+  // a shield for the blazes' fireballs (the raw iron smelted for it), and a bow's arrows: a 26.3 bot with neither shield
+  // nor arrows left got no rods at the spawner, and starved (blaze2)
+  if (inv.count('shield') === 0) out.push({ item: 'shield', count: 1 })
+  if (inv.count('bow') > 0 && inv.count('arrow') < NETHER_ARROWS) out.push({ item: 'arrow', count: NETHER_ARROWS })
   const food = heldFor(inv, FOOD_GOAL, { unit: 'nutrition' })
   if (food < NETHER_FOOD_POINTS) out.push({ item: FOOD_GOAL, count: NETHER_FOOD_POINTS, unit: 'nutrition' })
   return out
