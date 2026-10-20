@@ -226,12 +226,22 @@ export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3, ways: Pi
 const ROUTE_STEP_RANGE = 2
 
 /**
+ * How deep a pit goes under the floor where it can (a block less where it can't): what lies in a pit 2 deep is out of
+ * the reach of the bot walking by on its floor and of one a block lower (Player.aiStep's box inflated 0.5 down meets an
+ * item 0.75 under its feet, not 1.75). A 26.3 bot's pits 1 deep beside it, its makeRoom between steps with no
+ * `toward`, were walked by a block lower on the way to the next ore, the stone picked up again each time, and the
+ * third throw refused (full-26.3-fresh-f)
+ */
+export const PIT_DEPTH = 2
+
+/**
  * Where a pit goes for a bot at `feet` (its look `yaw`) that goes to `toward` next: by a dug route's next step or the
  * block it breaks next (a cell within ROUTE_STEP_RANGE), to its sides, 2 under the floor (a step a block down and one
  * more); behind a trip's way (farther off); else (`toward` over or under the feet, or none) by the facing
- * (dumpPitCells)
+ * (dumpPitCells); PIT_DEPTH deep but by a route's step, a block less where no side has the rock for it
  */
 export function dumpPitFor (lookup: Lookup, feet: Vec3, yaw: number, toward?: Vec3): ReturnType<typeof dumpPitCells> {
+  const deepest = (facing: Vec3, ways: PitWays): ReturnType<typeof dumpPitCells> => dumpPitCells(lookup, feet, facing, ways, PIT_DEPTH) ?? dumpPitCells(lookup, feet, facing, ways, PIT_DEPTH - 1)
   // from the feet's cell to the cell of `toward` (a goal's block, a block, a point): a GoalBlock's corner seen from the
   // bot off its cell's middle pointed along the route, the pit dug in the next step's floor
   const dx = toward != null ? Math.floor(toward.x) - feet.x : 0
@@ -240,10 +250,10 @@ export function dumpPitFor (lookup: Lookup, feet: Vec3, yaw: number, toward?: Ve
   if (toward != null && dist >= 1) {
     const way = facingDir(Math.atan2(-dx, -dz))
     if (dist <= ROUTE_STEP_RANGE) return dumpPitCells(lookup, feet, way, 'sides', 2 + Math.min(1, Math.max(0, feet.y - Math.floor(toward.y) - 1)))
-    const behind = dumpPitCells(lookup, feet, way, 'behind')
+    const behind = deepest(way, 'behind')
     if (behind != null) return behind
   }
-  return dumpPitCells(lookup, feet, facingDir(yaw))
+  return deepest(facingDir(yaw), 'any')
 }
 
 /**

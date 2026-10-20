@@ -486,6 +486,38 @@ test('dumpPitFor: by a staircase\'s next step, a pit at its side 2 under the flo
   assert.equal(dumpPitFor(world({ ...cells, '0,20,2': 'water', '0,20,-2': 'water' }), feet, 0, next.offset(0.5, 0, 0.5)), null)
 })
 
+test('dumpPitFor: with no route\'s step to go by (a room made between steps, a trip), the pit goes PIT_DEPTH (2) under the floor, out of the reach of a bot walking by a block lower; a block less where the rock 2 down is missing', async () => {
+  // (26.3 run full-26.3-fresh-f: the room made before a step dug its pits a block under the floor, the walk to the
+  // next ore went by them a block lower, and the same stone was picked up and thrown three times)
+  const { dumpPitFor, pitThrow, PIT_DEPTH } = await import('../../src/executor/explore')
+  const { touches } = await import('../../src/skills/pickupDrops')
+  assert.equal(PIT_DEPTH, 2)
+  const feet = new Vec3(0, 20, 0)
+  const room = { '0,20,0': 'air', '0,21,0': 'air' }
+  for (const toward of [undefined, new Vec3(40.5, 20, 0.5)]) {
+    const pit = dumpPitFor(world(room), feet, 0, toward)
+    assert.ok(pit != null)
+    assert.deepEqual(pit.open.map(c => c.y), [21, 20, 19, 18], String(toward))
+    assert.equal(pit.bottom.y, 18)
+    const item = pit.bottom.offset(0.5, 0, 0.5)
+    // a bot by the pit on its floor, and a block lower beside it
+    assert.equal(touches(feet.offset(0.5, 0, 0.5), item), false)
+    assert.equal(touches(pit.side.plus(pit.side.minus(feet)).offset(0.5, -1, 0.5), item), false)
+    assert.equal(touches(feet.offset(0.5, -1, 0.5), item), false)
+    // (a pit 1 deep was in that one's reach)
+    assert.equal(touches(feet.offset(0.5, -1, 0.5), item.offset(0, 1, 0)), true)
+    // and a throw lands in its bottom
+    const dug: Record<string, string> = { ...room }
+    for (const c of pit.open) dug[`${c.x},${c.y},${c.z}`] = 'air'
+    assert.ok(pitThrow(world(dug), feet.offset(0.5, 0, 0.5), pit.bottom) != null)
+  }
+  // a cave 2 under every side: a block deep
+  const cave: Record<string, string> = { ...room }
+  for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) cave[`${x},17,${z}`] = 'air'
+  const shallow = dumpPitFor(world(cave), feet, 0)
+  assert.ok(shallow != null && shallow.bottom.y === 19, String(shallow?.bottom))
+})
+
 test('pitThrow: a look whose stack comes to rest in the bottom of a pit 2 deep beside a staircase for every lift, where one aimed at the bottom stops on the edge of the bot\'s floor', async () => {
   const { dumpPitFor, itemFlight, pitThrow, staircaseStep } = await import('../../src/executor/explore')
   const cells: Record<string, string> = {}
