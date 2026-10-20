@@ -715,6 +715,37 @@ test('spawnView: a nook facing the spawner on open ground sees most of its spawn
   assert.equal(planBlazeNooks(w.lookup, new Vec3(0, 64, 0), { minView: 0.99 }).length, 0)
 })
 
+test('fightFromNook gives a nook up (STUCK) after NOOK_STALL_UNARMED ticks with blazes about but none killed and no arrows; a kill puts it off', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, nookAround, NOOK_STALL_UNARMED } = await import('../../src/nether/blazeFight')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 65, 2.5), meta: { health: 20, flags: 0 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), items: [item('diamond_sword'), item('bow'), item('cobblestone', 32), item('cooked_beef', 16)], offhand: item('shield'), entities: [blaze], world: name })
+  bot.world = { raycast: () => null }
+  bot.equip = async (it: any) => { bot.heldItem = it }
+  bot.activateItem = () => { bot.usingHeldItem = true }
+  bot.deactivateItem = () => { bot.usingHeldItem = false }
+  bot.lookAt = async () => {}
+  bot.look = async () => {}
+  bot.game.dimension = 'the_nether'
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  let settled: any = null
+  void fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 5000 }).catch(err => err).then(r => { settled = r })
+  const tick = async (n: number): Promise<void> => { for (let i = 0; i < n && settled == null; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) } }
+  await tick(NOOK_STALL_UNARMED - 100)
+  assert.equal(settled, null)
+  // a kill: the count starts again
+  const other = entity({ name: 'blaze', position: new Vec3(0.5, 65, 3.5), meta: { health: 0, flags: 0 } })
+  bot.emit('entityDead', other)
+  await tick(NOOK_STALL_UNARMED - 100)
+  assert.equal(settled, null)
+  await tick(300)
+  assert.ok(settled instanceof Error && settled.message.includes('no blaze killed'), String(settled))
+})
+
 test('nookAround takes no fence for a wall (a fireball goes between its posts): a nook with one at its head is none, with a full block there it is', () => {
   const at = (name: string): NookLookup => world(p => p.x === 1 && p.y === 65 && p.z === 10 ? name : null).lookup
   assert.equal(nookAround(at('nether_brick_fence'), new Vec3(0, 64, 10), new Vec3(0, 0, -1)), null)

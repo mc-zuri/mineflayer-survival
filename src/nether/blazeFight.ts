@@ -368,6 +368,15 @@ export function blazeEye (blaze: Entity): Vec3 {
  */
 export const NOOK_IDLE_TICKS = 3000
 
+/**
+ * ticks a nook may go with no kill and no rod before it's given up for one nearer (fightFromNook's STUCK): a working
+ * nook kills one in 400 to 600 (tests/integration/blaze at seed 7741's spawner, the nether stage's kit: 9 kills in 3413
+ * ticks); a 26.3 whole game's sat 20861 ticks by that spawner for 2 kills and no rod, its 12 arrows gone
+ */
+export const NOOK_STALL_TICKS = 3000
+/** the same with no bow and arrows: only a blaze come into the sword's reach is killed */
+export const NOOK_STALL_UNARMED = 1000
+
 export interface NookFightOptions {
   /** rods to have */
   count: number
@@ -386,6 +395,11 @@ export interface NookFightOptions {
   shootRange?: number
   /** give up when no blaze has been within 48 for this many ticks (default NOOK_IDLE_TICKS) */
   idleTicks?: number
+  /**
+   * give up (STUCK) when no blaze has been killed and no rod got for this many ticks, the ticks shut in to heal left
+   * out (default NOOK_STALL_TICKS; NOOK_STALL_UNARMED once out of arrows)
+   */
+  stallTicks?: number
   /** called on each kill */
   onKill?: (blaze: Entity) => void
 }
@@ -467,6 +481,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   const shootRange = opts.shootRange ?? 28
   const idleTicks = opts.idleTicks ?? NOOK_IDLE_TICKS
   let lastBlaze = 0
+  let lastGain = 0
+  let rods = countItems(bot, 'blaze_rod')
   const volleys = new BlazeVolleys()
   const world = arrowWorld(bot)
   const tracker = motionTrackerOf(bot)
@@ -487,6 +503,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   const onDead = (e: Entity): void => {
     if (e.name !== 'blaze') return
     dead.add(e.id)
+    lastGain = tick
     result.kills++
     opts.onKill?.(e)
   }
@@ -536,6 +553,10 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       const blazes = blazesNow()
       if (blazes.length > 0) lastBlaze = tick
       else if (tick - lastBlaze > idleTicks) throw new SkillError('NOT_FOUND', `no blaze came from the blaze spawner at ${opts.spawner.toString()} in ${idleTicks} ticks`, { ...result, ticks: tick })
+      // blazes about but none killed for long (out of the bow's sight or reach, the arrows gone): a nook nearer
+      if (countItems(bot, 'blaze_rod') > rods) { rods = countItems(bot, 'blaze_rod'); lastGain = tick }
+      const stall = opts.stallTicks ?? (bow() != null && hasArrows() ? NOOK_STALL_TICKS : NOOK_STALL_UNARMED)
+      if (tick - lastGain > stall) throw new SkillError('STUCK', `no blaze killed from the nook in ${tick - lastGain} ticks`, { ...result, ticks: tick })
       if (!inNook(bot, nook)) {
         // out of it (a drop fetched, a reflex's work): the shield up where it is while a blaze that sees it is about
         // to shoot, then in
@@ -598,7 +619,11 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       if (bot.health <= sealAt && tick >= sealAgain && close == null) {
         unblock()
         stopDraw()
-        if (!await sealAndHeal(bot, nook, healTo, signal)) {
+        const shutAt = tick
+        const shut = await sealAndHeal(bot, nook, healTo, signal)
+        // (the ticks shut in to heal aren't the nook's to give nothing in)
+        lastGain += tick - shutAt
+        if (!shut) {
           sealAgain = tick + 40
           // a front that won't shut for long is no cover: the nook given up for another (a 26.3 bot low in a nook by
           // seed 2's spawner at (97, 64, -515) tried its front 50 times in 2000 ticks, 'No block has been placed', and
