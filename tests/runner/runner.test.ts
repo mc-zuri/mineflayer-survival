@@ -740,7 +740,7 @@ test('a milestone not ready to go on (notReady) is tried again without counting 
   assert.equal(calls, 4)
   assert.ok(logs.some(l => /milestone wood not ready \(3\)/.test(l)))
   assert.ok(!logs.some(l => /milestone wood failed/.test(l)))
-  assert.equal(logs.filter(l => /nothing came of it, waiting/.test(l)).length, 3)
+  assert.equal(logs.filter(l => /nothing came of it, the stock topped up/.test(l)).length, 3)
 })
 
 test('a milestone short of only its food banks more of it each try without a try counted (FOOD_BANK_TRIES); a try that banked none is counted', async () => {

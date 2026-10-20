@@ -806,8 +806,24 @@ export class Runner {
             // back at once (nothing could be got: a bag full of junk that wouldn't go, 26.3, the ten tries and five
             // failures all in one tick, the game stopped): a while waited first
             if (this.bot.survival.tasks.tick - begun < NOT_READY_MIN_TICKS) {
-              this.log(`milestone ${m.id}: nothing came of it, waiting ${NOT_READY_WAIT_TICKS} ticks`)
-              await this.waitTicksOrAbort(NOT_READY_WAIT_TICKS, signal)
+              // the stock's top-ups meanwhile (the string, feathers and slime the gate may be short of come in so
+              // over the tries), the wait for what's left of NOT_READY_WAIT_TICKS: a 1.21.11 bot with no bow waited
+              // out ten tries a failure for a slime ball, then its water bottles, and the game stopped at the nether
+              // (full-1.21.11-fresh-g)
+              const from = this.bot.survival.tasks.tick
+              try {
+                await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
+              } catch (e) {
+                if (stopped()) return this.stop(m.id, 'aborted', e)
+                if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
+                  this.log(`died topping up for ${m.id}: ${(e as Error).message}`)
+                  await this.recover(signal)
+                  continue
+                }
+              }
+              const left = NOT_READY_WAIT_TICKS - (this.bot.survival.tasks.tick - from)
+              this.log(`milestone ${m.id}: nothing came of it, the stock topped up${left > 0 ? `, waiting ${left} ticks` : ''}`)
+              if (left > 0) await this.waitTicksOrAbort(left, signal)
             }
             continue
           }
