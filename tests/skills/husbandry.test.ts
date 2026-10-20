@@ -308,3 +308,25 @@ test('leatherFromHerd counts the cows about a pen built off home with those in i
   await leatherFromHerd(bot, executor, 46, new AbortController().signal, l => lines.push(l))
   assert.ok(lines.some(l => /herd: breed \(8 cows/.test(l)), lines.join(' | '))
 })
+
+test('startFarm digs a water hole only by home, two at most: none from a cave 70 blocks off, none a third time', async () => {
+  const { startFarm } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const tasks: string[] = []
+  const lines: string[] = []
+  const memory = new WorldMemory()
+  memory.setBase({ x: 0, y: 64, z: 0 }, 'overworld')
+  const executor: any = { memory, task: async (name: string) => { tasks.push(name) } }
+  const far = fakeBot({ position: new Vec3(70.5, 30, 0.5), items: [item('water_bucket', 1), item('wheat_seeds', 8)] })
+  far.game.dimension = 'overworld'
+  assert.strictEqual(await startFarm(far, executor, new AbortController().signal, l => lines.push(l)), false)
+  assert.deepStrictEqual(tasks, [])
+  assert.ok(lines.some(l => /away from home/.test(l)), lines.join(' | '))
+  const near = fakeBot({ position: new Vec3(3.5, 64, 0.5), items: [item('water_bucket', 1), item('wheat_seeds', 8)] })
+  near.game.dimension = 'overworld'
+  for (let i = 0; i < 3; i++) await startFarm(near, executor, new AbortController().signal, l => lines.push(l))
+  assert.deepStrictEqual(tasks, ['a water hole for the farm', 'a water hole for the farm'])
+  assert.ok(lines.some(l => /no more water holes/.test(l)), lines.join(' | '))
+})

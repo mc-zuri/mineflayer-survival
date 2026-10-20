@@ -1956,6 +1956,11 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
   if (isInEnd(bot)) await executor.task('out of the End', async (s) => await leaveEnd(bot, { signal: s }), signal)
 }
 
+/** how near home (across and up or down 8) the bot is for a farm's water hole to be dug there, and the holes a game */
+export const WATER_HOLE_RANGE = 24
+export const WATER_HOLE_TRIES = 2
+const waterHoleTries = new WeakMap<Bot, number>()
+
 /** what a farm's start may cost (a hoe and the seeds from grass) before it is left for later */
 export const FARM_START_TICKS = 2000
 
@@ -1972,6 +1977,14 @@ export async function startFarm (bot: Bot, executor: Executor, signal: AbortSign
   // no water near: a hole dug and filled from the water bucket held (the herd's wheat farm on 26.3 had none), the
   // empty bucket filled first where there's water within REFILL_RANGE (a 26.3 bot on a mountain with an empty bucket
   // had 'no water with ground by it near: no farm yet', and no farm all game, seed 31337)
+  // (a hole only by home, the bot there, WATER_HOLE_TRIES at most: the enchanting's farm planned one from a cave 70
+  // blocks off, try after try, the drowning reflex between, hunt2's runs)
+  const byHome = Math.hypot(bot.entity.position.x - home.x, bot.entity.position.z - home.z) <= WATER_HOLE_RANGE && Math.abs(bot.entity.position.y - home.y) <= 8
+  if (site == null && (!byHome || (waterHoleTries.get(bot) ?? 0) >= WATER_HOLE_TRIES)) {
+    log(`no water with ground by it near: no farm yet${byHome ? ' (no more water holes)' : ' (away from home: no water hole from here)'}`)
+    return false
+  }
+  if (site == null) waterHoleTries.set(bot, (waterHoleTries.get(bot) ?? 0) + 1)
   if (site == null && countItems(bot, 'water_bucket') === 0 && countItems(bot, 'bucket') > 0) {
     log('no water by ground near for a farm: the bucket filled for a water hole')
     await refillWater(bot, signal)
