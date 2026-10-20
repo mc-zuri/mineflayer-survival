@@ -68,7 +68,7 @@ export function calmEndermen (bot: Bot): Entity[] {
  * and at each tick's end the look held is put right (a look set straight on bot.entity), unless allowStare is on
  */
 export function installGazeGuard (bot: Bot): void {
-  if ((bot as any).survivalGazeGuard === true) return
+  if ((bot as any).survivalGazeGuard === true || typeof bot.look !== 'function') return
   ;(bot as any).survivalGazeGuard = true
   const look = bot.look.bind(bot)
   const guarded = (yaw: number, pitch: number): number => {
