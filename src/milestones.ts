@@ -4,7 +4,7 @@
 // through, the dragon fought, out by the exit portal). Each skill runs as one foreground task, so the reflexes still
 // preempt it (it starts over after).
 import type { Bot } from 'mineflayer'
-import { BOOKSHELVES, ENCHANTED_ARMOR, EYES_FOR_FRAME, EYES_TARGET, FOOD_GOAL, eyesForPortal } from './planner/progression'
+import { BOOKSHELVES, ENCHANTED_ARMOR, EYES_FOR_FRAME, EYES_TARGET, FOOD_GOAL, armorAtLeast, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
 import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, huntable, isAdultPiglin, returnOverworld, wearGold, wearingGold, withNetherSafety } from './nether/skills'
 import { travel } from './skills/travel'
@@ -467,6 +467,20 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   await enchantingRoom(executor, signal, log)
   await executor.task('enchant the gear', async (s) => await enchantGear(bot, { executor, signal: s, bookshelves: shelves }), signal)
   await enchantBooksAndApply(bot, executor, signal, log)
+  // the armor still plain (out of lapis or levels): a failure, tried again (more lapis and levels got) and left out
+  // after the optional milestone's failures, not worked again and again with nothing to show (done needs the armor)
+  const plain = armorLeftPlain(bot)
+  if (plain.length > 0) throw new SkillError('MISSING_ITEMS', `the ${plain.join(', ')} left plain`)
+}
+
+/** the pieces of ENCHANTED_ARMOR (iron or better) the bot has, held or worn, none of them enchanted */
+export function armorLeftPlain (bot: Bot): string[] {
+  const all = [...bot.inventory.items(), ...[5, 6, 7, 8].map(s => bot.inventory.slots[s])].filter(i => i != null)
+  return ENCHANTED_ARMOR.filter(slot => {
+    const names = armorAtLeast(slot, 'iron')
+    const pieces = all.filter(i => names.includes(i.name))
+    return pieces.length > 0 && !pieces.some(i => (i.enchants?.length ?? 0) > 0)
+  })
 }
 
 /**

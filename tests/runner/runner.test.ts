@@ -57,7 +57,8 @@ test('play works the milestones in order, an event for each reached, and stops b
   const runner = new Runner(bot, { handlers, stopAt: 'nether', log: () => {} })
   // the enchanted check reads item.enchants: the fake's pickaxe gets one once the handler ran
   const items = bot.inventory.items
-  bot.inventory.items = () => items().map((i: any) => i.name === 'diamond_pickaxe' && enchantedPick.done ? { ...i, enchants: [{ name: 'efficiency', lvl: 1 }] } : i)
+  // (and the iron armor: the milestone's done asks for it enchanted too)
+  bot.inventory.items = () => items().map((i: any) => /^(diamond_pickaxe|iron_(helmet|chestplate|leggings))$/.test(i.name) && enchantedPick.done ? { ...i, enchants: [{ name: 'efficiency', lvl: 1 }] } : i)
   const result = await runner.play()
   assert.deepEqual(worked, ['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting'])
   assert.equal(result.reason, 'until')

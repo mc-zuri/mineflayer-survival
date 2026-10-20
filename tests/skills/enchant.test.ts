@@ -421,3 +421,11 @@ test('roomForOne: a full bag throws its smallest stack of junk for a worn piece 
     assert.deepStrictEqual(tossed, full ? ['12 cobbled_deepslate'] : [])
   }
 })
+
+test('armorLeftPlain: the iron helmet, chestplate and leggings held or worn with none of their kind enchanted (the golden boots aside)', async () => {
+  const { armorLeftPlain } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('iron_leggings'), item('leather_helmet')], armor: { torso: item('iron_chestplate', 1, [{ name: 'protection', lvl: 1 }]), head: item('iron_helmet'), feet: item('golden_boots') } })
+  assert.deepStrictEqual(armorLeftPlain(bot), ['helmet', 'leggings'])
+  assert.deepStrictEqual(armorLeftPlain(fakeBot({ items: [item('diamond_pickaxe')] })), [])
+})
