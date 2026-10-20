@@ -481,6 +481,9 @@ export async function spareShield (bot: Bot, signal?: AbortSignal): Promise<numb
   return made
 }
 
+/** the camp's spots keep this far out of the spawn volume's edge (inSpawnVolume's margin) */
+export const CAMP_MARGIN = 1
+
 /** from further than this from the spawner, the camp is gone to by a trip (travel) first */
 export const CAMP_TRIP = 48
 
@@ -645,9 +648,11 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
       })
     }
-    // (out of the spawn volume, where the blazes come out on the bot)
+    // (out of the spawn volume, where the blazes come out on the bot, and a block clear of its edge: camped 5 off by
+    // seed 2's throne at (-277, 77, -159), over its stairs, 26.3 bots with a stone sword fought among the blazes that
+    // spill out of it there, 26 about at the last, and died three runs of three, BLAZE_KIT=q3)
     const near = campSpots(bot, spawner, standOff)
-    const spots = near.filter(s => !inSpawnVolume(spawner, s))
+    const spots = near.filter(s => !inSpawnVolume(spawner, s, CAMP_MARGIN))
     // the only floor that sees it in the volume (a throne room walled in: seed 2's at (-277, 77, -159)): no fight in
     // there, the spawner given up as one there's no way to (the milestone's next). A 26.3 bot with a stone sword and
     // no bow fought on in that throne among its blazes, punched from all sides, and died (BLAZE_KIT q3, gate)

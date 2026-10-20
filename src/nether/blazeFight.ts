@@ -200,15 +200,15 @@ export function spawnView (lookup: NookLookup, spawner: Vec3, nook: BlazeNook): 
  * box 0.6 wide and 1.8 high (BaseSpawner.serverTick, EntityType.BLAZE). The cells 4 off take a sliver of a box only
  * (2 spawns in 100 along that axis), but the blazes hover out to them and over: in (a melee nook on seed 2's throne's
  * stairs at (-277, 76, -163), 4 off, burned a 26.3 bot with a stone sword and one in iron with a bow, BLAZE_KIT q3 and
- * gateIronBow, and the camp on those stairs one with a stone sword). A nook in it is no cover: in the melee nook 2 off seed 2's throne
+ * gateIronBow, and the camp on those stairs one with a stone sword). `margin` more across. A nook in it is no cover: in the melee nook 2 off seed 2's throne
  * spawner at (-277, 77, -159) the blazes came out in its stand and its front, on the bot, punching it from beside and
  * behind its shield, and 26.3 bots died in it with a stone sword (BLAZE_KIT q3, gate) and in iron with a bow
  * (gateIronBow, its bow's nook STUCK), and in the one by seed 7741's throne spawner the same
  */
-export function inSpawnVolume (spawner: Vec3, stand: Vec3): boolean {
+export function inSpawnVolume (spawner: Vec3, stand: Vec3, margin = 0): boolean {
   const S = spawner.floored()
   const dy = stand.y - S.y
-  return Math.abs(stand.x - S.x) <= SPAWN_RANGE && Math.abs(stand.z - S.z) <= SPAWN_RANGE && dy >= -2 && dy <= 2
+  return Math.abs(stand.x - S.x) <= SPAWN_RANGE + margin && Math.abs(stand.z - S.z) <= SPAWN_RANGE + margin && dy >= -2 && dy <= 2
 }
 
 /** the share of the spawns whose x (or z) is in the cell `k` off the spawner's: the triangle over (k - 0.5, k + 0.5) */
