@@ -228,7 +228,7 @@ const dimensionOf = (bot: Bot): string => String(bot.game?.dimension ?? 'overwor
 /** the bot's world for the classifier: its block states (a chunk not loaded: null), block light and dug cells */
 function botView (bot: Bot, dug: Set<string>): CaveView {
   const world = (bot as any).world
-  const byState = (bot.registry as any).blocksByStateId
+  const byState = (bot.registry as any)?.blocksByStateId
   const fast = typeof world?.getBlockStateId === 'function' && typeof world?.getColumnAt === 'function' && byState != null
   const block = fast
     ? (p: Vec3): CaveBlock => world.getColumnAt(p) == null ? null : (byState[world.getBlockStateId(p)] ?? null)
