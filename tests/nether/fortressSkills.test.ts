@@ -677,3 +677,34 @@ test('collectBlazeRods: short of the bow nook\'s arrows with no melee nook by th
     fightModule.planBlazeNooks = real.plan
   }
 })
+
+test('collectBlazeRods: the kept nook the bot finds no way back into is followed by another of the planned ones, not the camp (no nook of 1: the spawner given up mid-fight)', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const { SkillError } = await import('../../src/skills/errors')
+  const fightModule = require('../../src/nether/blazeFight')
+  const { item } = await import('../reflexes/fakeBot')
+  const real = { build: fightModule.buildNook, fight: fightModule.fightFromNook }
+  const built: string[] = []
+  let refuse: string | null = null
+  fightModule.buildNook = async (_b: unknown, nook: any) => {
+    if (nook.stand.toString() === refuse) throw new SkillError('NO_PATH', 'no grid path')
+    built.push(nook.stand.toString())
+  }
+  try {
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('cobblestone', 64), item('bow'), item('arrow', 64)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+    bot.game.dimension = 'the_nether'
+    ;(bot as any).world = { raycast: () => null }
+    bot.findBlocks = () => []
+    let rods = 0
+    fightModule.fightFromNook = async () => { bot.inventory.slots[20 + rods] = item('blaze_rod'); rods++; return { kills: 1, shots: 2, blocked: 0, ticks: 10 } }
+    await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    assert.equal(built.length, 1)
+    refuse = built[0]
+    await collectBlazeRods(bot, { count: 2, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    assert.equal(built.length, 2)
+    assert.notEqual(built[1], refuse)
+  } finally {
+    fightModule.buildNook = real.build
+    fightModule.fightFromNook = real.fight
+  }
+})

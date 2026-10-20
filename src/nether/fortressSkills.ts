@@ -579,7 +579,11 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     // the one built before, else the cheapest three in turn (one the bot finds no way to, the next), not one whose
     // front wouldn't shut
     const bad = badNooks(bot)
-    const candidates = kept != null ? [kept] : planBlazeNooks(lookup, spawner, { from: bot.entity.position, melee }, 3 + bad.length).filter(n => !bad.some(b => b.equals(n.stand))).slice(0, 3)
+    // (the kept one first, the others after it: a way back into the kept one that failed, 'no grid path' or the walk
+    // stopped short, left 26.3 bots at seed 2's throne at (-277, 77, -159) with no nook, the camp none, and the spawner
+    // given up mid-fight: 'no nook of 1')
+    const planned = planBlazeNooks(lookup, spawner, { from: bot.entity.position, melee }, 3 + bad.length).filter(n => !bad.some(b => b.equals(n.stand)))
+    const candidates = kept != null ? [kept, ...planned.filter(n => !n.stand.equals(kept.stand))].slice(0, 3) : planned.slice(0, 3)
     let nook: BlazeNook | null = null
     for (const c of candidates) {
       trace('collectBlazeRods: the nook at', c.stand.toString(), 'facing', c.facing.toString(), c.build.length, 'blocks')
