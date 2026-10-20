@@ -1,7 +1,7 @@
 import type { Bot } from 'mineflayer'
 import { armorUpgrades, equipArmor, equipTotem } from '../skills/armor'
 import { eat, dueMeal, reserveAllows } from '../skills/eat'
-import { escapeHazard, evadeCreeper, fleeFrom, headInWater, inHazard, surface } from '../skills/escape'
+import { escapeHazard, evadeCreeper, fireHandled, fleeFrom, headInWater, inFireOnly, inHazard, surface } from '../skills/escape'
 import { MELEE_GUARD_MARGIN, MELEE_MOBS, creeperSwelling, fight, inMobReach } from '../skills/fight'
 import { shoot, sparedInLine } from '../skills/shoot'
 import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterRunning, shelterToLeave, sleepThroughNight, ticksSinceRest, undergroundAtWork, type NightPlan } from '../skills/shelter'
@@ -145,6 +145,8 @@ export const hazardReflex: Reflex = {
     const { bot, config } = ctx
     if (!config.hazard.enabled) return null
     if (!inHazard(bot)) return null
+    // (the fire's cells left to a task that handles them, the blaze fight's: handleFire; lava never)
+    if (fireHandled(bot) && inFireOnly(bot)) return null
     return {
       name: 'hazard',
       priority: config.hazard.priority,

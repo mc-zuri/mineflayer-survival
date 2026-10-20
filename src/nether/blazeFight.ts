@@ -595,6 +595,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
     while (countItems(bot, 'blaze_rod') < opts.count) {
       throwIfAborted(signal)
       if (bot.health <= 0) throw new SkillError('VERIFY_FAILED', 'the bot died in the nook', { ...result, ticks: tick })
+      // the fireballs' fire in the nook's cells put out here (the hazard reflex leaves it to the fight: handleFire)
+      if (!fireProof(bot) && await putOutFireOnBot(bot, signal) > 0) continue
       if (tick > maxTicks) throw new SkillError('TIMEOUT', `${countItems(bot, 'blaze_rod')} of ${opts.count} blaze rods after ${tick} ticks in the nook`, { ...result, ticks: tick })
       // nothing left to heal on (no meal, the bar under 18): the fight ends while the health's still up (a 26.3 bot
       // ate its last meal in the nook by seed 7741's spawner, sat 15000 ticks shut in it at 4.9 health, then came out
@@ -901,6 +903,29 @@ export function inFireCell (bot: Bot): boolean {
     }
   }
   return false
+}
+
+/**
+ * The fire in the cells of the bot's body put out (a fire's block broken at once, punched), so it doesn't stand in
+ * it: the hazard reflex leaves the fire's cells to the blaze fight (handleFire). Resolves how many
+ */
+export async function putOutFireOnBot (bot: Bot, signal?: AbortSignal): Promise<number> {
+  if (!inFireCell(bot)) return 0
+  const p = bot.entity.position
+  const cells: Vec3[] = []
+  for (const dy of [0, 1]) for (const dx of [-0.3, 0.3]) for (const dz of [-0.3, 0.3]) {
+    const c = new Vec3(p.x + dx, p.y + dy, p.z + dz).floored()
+    if (!cells.some(q => q.equals(c))) cells.push(c)
+  }
+  let out = 0
+  for (const c of cells) {
+    throwIfAborted(signal)
+    const b = bot.blockAt(c)
+    if (b == null || (b.name !== 'fire' && b.name !== 'soul_fire')) continue
+    await bot.dig(b as any, true).then(() => { out++ }, () => {})
+  }
+  if (out > 0) trace('fightFromNook: put out', out, 'fires where the bot stands')
+  return out
 }
 
 export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch: FetchWatch, signal?: AbortSignal): Promise<void> {

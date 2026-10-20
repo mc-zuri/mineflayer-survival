@@ -28,7 +28,8 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, openNook, planBlazeNooks, sealAndHeal, withBlocksKept } from './blazeFight'
+import { SPAWN_RANGE, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, openNook, planBlazeNooks, putOutFireOnBot, sealAndHeal, withBlocksKept } from './blazeFight'
+import { handleFire } from '../skills/escape'
 import { walkTo } from '../skills/navigate'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
@@ -548,11 +549,14 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     const engine = bot.survival?.reflexes
     const leave = engine?.leaveAlone(['blaze'])
     const noEat = engine?.inhibit(['eat'])
+    // and the fire's cells it puts out and steps off itself (putOutFireOnBot), the hazard reflex's for lava only
+    const fire = handleFire(bot)
     try {
       return await fightForRods()
     } finally {
       leave?.()
       noEat?.()
+      fire()
     }
   }
   /**
@@ -746,6 +750,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     try {
       while (countItems(bot, 'blaze_rod') < count) {
         throwIfAborted(signal)
+        await putOutFireOnBot(bot, signal)
         if (dimensionOf(bot) !== 'the_nether' || bot.health <= 0) throw new SkillError('VERIFY_FAILED', `the bot ${bot.health > 0 ? 'left the nether' : 'died'} by the spawner`, { rods: countItems(bot, 'blaze_rod'), kills, ticks })
         // fire resistance through the fight when there's a potion of it (the fireballs set the bot alight)
         if (args.fireResistance !== false && !hasEffect(bot, 'fire_resistance') && findPotion(bot, 'fire_resistance') != null) {

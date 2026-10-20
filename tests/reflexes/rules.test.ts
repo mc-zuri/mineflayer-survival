@@ -788,3 +788,32 @@ test('hostiles reflex in the nether: a calm zombified piglin at the bot doesn\'t
   }
   assert.ok(await run(entity({ name: 'zombified_piglin', position: at(-1.2, 64, 0.5) })) >= 1)
 })
+
+test('hazard reflex: the fire left to a task that handles it (handleFire: the blaze fight), lava never; released, the fire its again', async () => {
+  const { handleFire } = await import('../../src/skills/escape')
+  const fire = { world: (p: Vec3): string => p.y === 64 ? 'fire' : p.y < 64 ? 'stone' : 'air' }
+  const run = (input: FakeBotInput, handled: boolean): string | null => {
+    const bot = fakeBot(input)
+    const release = handled ? handleFire(bot) : () => {}
+    const engine = new ReflexEngine(bot, { config: {}, enabled: false })
+    const task = hazardReflex.check(engine.context())
+    engine.stop()
+    release()
+    return task == null ? null : (task.detail ?? task.name)
+  }
+  assert.strictEqual(run(fire, false), 'hazard')
+  assert.strictEqual(run(fire, true), null)
+  assert.strictEqual(run({ inLava: true }, true), 'hazard')
+  assert.strictEqual(run({ ...fire, inLava: true }, true), 'hazard')
+})
+
+test('putOutFireOnBot: the fire in the body\'s cells broken, none elsewhere', async () => {
+  const { putOutFireOnBot } = await import('../../src/nether/blazeFight')
+  const fires = new Set(['(0, 64, 0)', '(3, 64, 0)'])
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: p => fires.has(p.floored().toString()) ? 'fire' : p.y < 64 ? 'stone' : 'air' })
+  const dug: string[] = []
+  bot.dig = async (b: any) => { dug.push(b.position.toString()); fires.delete(b.position.toString()) }
+  assert.equal(await putOutFireOnBot(bot), 1)
+  assert.deepEqual(dug, ['(0, 64, 0)'])
+  assert.equal(await putOutFireOnBot(bot), 0)
+})

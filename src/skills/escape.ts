@@ -46,6 +46,39 @@ export function boxCells (bot: Bot): Vec3[] {
  * 10 ticks (in_fire), and the reflex, which looked at its middle's cells alone, never went. Or on a magma block not
  * sneaking (onHotFloor).
  */
+/** per bot, the tasks that handle the fire's cells themselves (handleFire): the hazard reflex leaves fire to them */
+const fireHandlers = new WeakMap<Bot, number>()
+
+/**
+ * The fire's cells (fire, soul fire) left to the task that calls this, till the release it returns: the hazard
+ * reflex's escape from them is held off (lava, powder snow and a hot floor still its). The blaze fight puts out the
+ * fire in its nook and steps off it itself: the reflex walking the bot out of a fire in the nook cut the camp's task
+ * off some 9 times in a row, each time out among the blazes, and combat5's bots burned
+ */
+export function handleFire (bot: Bot): () => void {
+  fireHandlers.set(bot, (fireHandlers.get(bot) ?? 0) + 1)
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const k = (fireHandlers.get(bot) ?? 1) - 1
+    if (k <= 0) fireHandlers.delete(bot)
+    else fireHandlers.set(bot, k)
+  }
+}
+
+/** whether a task handles the fire's cells itself (handleFire) */
+export function fireHandled (bot: Bot): boolean {
+  return (fireHandlers.get(bot) ?? 0) > 0
+}
+
+/** whether the hazard the bot is in is the fire's only (its cells' fire; no lava, powder snow nor hot floor) */
+export function inFireOnly (bot: Bot): boolean {
+  const cells = boxCells(bot).map(p => nameAt(bot, p))
+  return (bot.entity as any).isInLava !== true && !onHotFloor(bot) && cells.some(n => n === 'fire' || n === 'soul_fire') &&
+    !cells.some(n => n === 'lava' || FREEZING.has(n ?? ''))
+}
+
 export function inHazard (bot: Bot): boolean {
   const bad = (n: string | undefined): boolean => BURNING.has(n ?? '') || FREEZING.has(n ?? '')
   return (bot.entity as any).isInLava === true || boxCells(bot).some(p => bad(nameAt(bot, p))) || onHotFloor(bot)
