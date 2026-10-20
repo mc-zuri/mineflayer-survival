@@ -1126,3 +1126,32 @@ test('enterNook: no way in for the fire in the nook\'s front (the grid walk keep
   }
   assert.deepEqual(log, ['no way', 'dig fire (0, 64, 9)', `to ${stand.toString()}`])
 })
+
+test('sealAndHeal: shut in hurt, a porkchop waits at food 18 and 19 (the bar heals there) and goes in under 18 (dueMeal)', async () => {
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { sealAndHeal, nookAround } = await import('../../src/nether/blazeFight')
+  const eatModule = require('../../src/skills/eat')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)', '(0, 64, 9)', '(0, 65, 9)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), items: [item('cooked_porkchop', 4)], world: name })
+  bot.entity.effects = {}
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  ;(bot as any).health = 14
+  ;(bot as any).food = 19
+  const eaten: number[] = []
+  const realEat = eatModule.eat
+  eatModule.eat = async () => { eaten.push(bot.food); (bot as any).food = 20; (bot as any).health = 20 }
+  let ticks = 0
+  bot.on('physicsTick', () => { if (++ticks === 100) (bot as any).food = 17 })
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await sealAndHeal(bot, nook, 18)
+  } finally {
+    clearInterval(ticking)
+    eatModule.eat = realEat
+  }
+  assert.deepEqual(eaten, [17])
+  assert.ok(ticks >= 100, `${ticks}`)
+})

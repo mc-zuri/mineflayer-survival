@@ -18,7 +18,7 @@ import { blazeCharged, fight, lowerShield, raiseShield } from '../skills/fight'
 import { aim, arrowWorld } from '../skills/shoot'
 import { motionTrackerOf } from '../skills/motion'
 import { attackStrengthOf, bestMeleeWeapon } from '../skills/weapons'
-import { eat, bestFoodInInventory, dueMeal } from '../skills/eat'
+import { eat, dueMeal } from '../skills/eat'
 import { chooseFood } from '../skills/food'
 import { placeBlock } from '../skills/placeBlock'
 import { collectDropsNear } from '../skills/hunt'
@@ -1150,8 +1150,10 @@ export async function sealAndHeal (bot: Bot, nook: BlazeNook, healTo: number, si
     throwIfAborted(signal)
     if (bot.health <= 0 || !shut()) return true
     const apple = bot.health <= 8 && bot.inventory.items().some(i => i.name === 'golden_apple') ? 'golden_apple' : undefined
-    if ((bot.food < 20 || apple != null) && (apple != null || bestFoodInInventory(bot) != null)) {
-      try { await eat(bot, { signal, food: apple }) } catch (err) { if (isAbort(err)) throw err }
+    // (a meal that fits the bar, or one the health needs: dueMeal; at 18 and 19 the bar heals, a meal's mostly lost)
+    const meal = apple ?? dueMeal(bot, { hurtAt: healTo })
+    if (meal != null) {
+      try { await eat(bot, { signal, food: meal }) } catch (err) { if (isAbort(err)) throw err }
       continue
     }
     await waitTicks(bot, 10, signal)
