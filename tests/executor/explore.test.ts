@@ -198,6 +198,11 @@ test('nookCell: a wall block beside the feet with rock under it, none next to la
   // nothing but bedrock and lava-backed walls: none
   assert.equal(nookCell(world({ ...tunnel, '0,20,-2': 'lava', '0,20,2': 'water' }), feet), null)
   assert.equal(nookCell(world(tunnel, 'bedrock'), feet), null)
+  // a pen's fences and gate, a wall: never dug for a nook
+  for (const built of ['oak_fence', 'oak_fence_gate', 'cobblestone_wall']) {
+    const fenced = (pos: Vec3) => (pos.y === 20 && pos.z !== 0 ? { name: built, boundingBox: 'block' } : world(tunnel)(pos))
+    assert.equal(nookCell(fenced, feet), null, built)
+  }
 })
 
 test('surfaceStepCost: a step under a roof (a cave, a ravine\'s overhang) costs more, one on the ground or under a tree none', async () => {

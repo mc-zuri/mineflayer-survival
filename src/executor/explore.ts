@@ -160,7 +160,9 @@ export function nookCell (lookup: Lookup, feet: Vec3): Vec3 | null {
 
 function isNookCell (lookup: Lookup, cell: Vec3): boolean {
   const b = lookup(cell)
-  if (b == null || b.boundingBox !== 'block' || UNBREAKABLE.has(b.name) || /(chest|furnace|table|barrel|bed|door)/.test(b.name)) return false
+  // (nor what the bot built: a fence of the herd's pen, a wall; a 26.3 bot with no room for its furnace in the pen dug
+  // a nook through its ring, and the herd walked out)
+  if (b == null || b.boundingBox !== 'block' || UNBREAKABLE.has(b.name) || /(chest|furnace|table|barrel|bed|door|fence|wall)/.test(b.name)) return false
   if (lookup(cell.offset(0, -1, 0))?.boundingBox !== 'block') return false
   return liquidAround(lookup, cell) == null
 }
