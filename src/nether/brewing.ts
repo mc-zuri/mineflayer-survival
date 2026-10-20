@@ -290,11 +290,11 @@ export const BREW_TRIES = 2
  * a bot's brew so far: the tries ended, and whether the wart and the cubes were looked for (the task begun again after
  * a reflex cut it off goes on from there, not off on the wart's legs again: 26.3 seed 2's every restart looked anew)
  */
-interface BrewState { tries: number, wartSought: boolean, creamSought: boolean }
+interface BrewState { tries: number, wartSought: boolean, creamSought: boolean, said: boolean }
 const brewStates = new WeakMap<Bot, BrewState>()
 function brewState (bot: Bot): BrewState {
   let s = brewStates.get(bot)
-  if (s == null) brewStates.set(bot, s = { tries: 0, wartSought: false, creamSought: false })
+  if (s == null) brewStates.set(bot, s = { tries: 0, wartSought: false, creamSought: false, said: false })
   return s
 }
 
@@ -319,10 +319,14 @@ export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count
   const say = (line: string): void => { trace('blazeRodsWithBrew:', line); args.log?.(`fire resistance: ${line}`) }
   // (BREW_TRIES at most: the task begun again after a reflex looked for the makings again each time, 6 times in a run)
   const state = brewState(bot)
-  if (findPotion(bot, 'fire_resistance') != null) say('a potion of it held')
-  else if (waterBottles(bot) === 0) say('no water bottles to brew it in')
-  else if (state.tries >= BREW_TRIES) say(`${BREW_TRIES} brews tried`)
-  else say(countItems(bot, 'magma_cream') > 0 ? 'brewing it: the magma cream held' : countItems(bot, 'slime_ball') > 0 ? 'brewing it: a slime ball for the cream' : 'no magma cream or slime ball: the cubes about looked for')
+  // (once a trip: the task begun again after each reflex said it again, 20 times in a 1.21.11 run)
+  if (!state.said) {
+    state.said = true
+    if (findPotion(bot, 'fire_resistance') != null) say('a potion of it held')
+    else if (waterBottles(bot) === 0) say('no water bottles to brew it in')
+    else if (state.tries >= BREW_TRIES) say(`${BREW_TRIES} brews tried`)
+    else say(countItems(bot, 'magma_cream') > 0 ? 'brewing it: the magma cream held' : countItems(bot, 'slime_ball') > 0 ? 'brewing it: a slime ball for the cream' : 'no magma cream or slime ball: the cubes about looked for')
+  }
   if (brewWanted(bot) && state.tries < BREW_TRIES) {
     const away = args.away ?? bot.entity.position.clone()
     try {

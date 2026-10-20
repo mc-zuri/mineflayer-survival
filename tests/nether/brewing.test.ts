@@ -124,3 +124,22 @@ test('getBrewMakings: wart seen far in the chunks the bot has (WART_SIGHT 160: s
   assert.ok(asked >= 128, `${asked}`)
   assert.deepEqual(calls, [`travel ${wart.toString()}`, `dig ${wart.toString()}`, `travel ${from.toString()}`, `heal at ${from.toString()}`])
 })
+
+test('blazeRodsWithBrew: its opening line is said once a trip, not again at each restart after a reflex', async () => {
+  const { blazeRodsWithBrew, resetBrewTries } = await import('../../src/nether/brewing')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const fortress = require('../../src/nether/fortressSkills')
+  const real = fortress.collectBlazeRods
+  fortress.collectBlazeRods = async () => ({ rods: 0, kills: 0, ticks: 0 })
+  const bot = fakeBot({ items: [item('bow'), item('arrow', 32)] })
+  const lines: string[] = []
+  resetBrewTries(bot)
+  try {
+    for (let i = 0; i < 3; i++) await blazeRodsWithBrew(bot, { count: 8, spawner: new Vec3(0, 64, 0), log: (l: string) => lines.push(l) })
+    resetBrewTries(bot)
+    await blazeRodsWithBrew(bot, { count: 8, spawner: new Vec3(0, 64, 0), log: (l: string) => lines.push(l) })
+  } finally {
+    fortress.collectBlazeRods = real
+  }
+  assert.deepEqual(lines, ['fire resistance: no water bottles to brew it in', 'fire resistance: no water bottles to brew it in'])
+})
