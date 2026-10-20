@@ -126,9 +126,31 @@ export function unknownChestNear (bot: Bot, memory: WorldMemory): Vec3 | null {
   return null
 }
 
-export function nearPortal (lookup: (p: Vec3) => any, pos: Vec3): boolean {
-  for (let dx = -2; dx <= 2; dx++) for (let dy = -1; dy <= 3; dy++) for (let dz = -2; dz <= 2; dz++) if (PORTAL_BLOCKS.has(lookup(pos.offset(dx, dy, dz))?.name)) return true
+/**
+ * how far from a portal's blocks a trip kit's chest and bed are put (and the bot stashes them from): the stash by the
+ * portal walked the bot into it twice, and it was in the nether with no arrival portal remembered and no way back
+ * (full-1.21.11-fresh-i, fresh-n)
+ */
+export const PORTAL_KEEP_OFF = 4
+
+export function nearPortal (lookup: (p: Vec3) => any, pos: Vec3, radius = PORTAL_KEEP_OFF): boolean {
+  for (let dx = -radius; dx <= radius; dx++) for (let dy = -1; dy <= 3; dy++) for (let dz = -radius; dz <= radius; dz++) if (PORTAL_BLOCKS.has(lookup(pos.offset(dx, dy, dz))?.name)) return true
   return false
+}
+
+/** the nearest portal block (or frame obsidian) within `radius` of `pos`, or null */
+export function portalBlockNear (lookup: (p: Vec3) => any, pos: Vec3, radius = PORTAL_KEEP_OFF + 2): Vec3 | null {
+  let best: Vec3 | null = null
+  for (let dx = -radius; dx <= radius; dx++) {
+    for (let dy = -2; dy <= 4; dy++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        const p = pos.floored().offset(dx, dy, dz)
+        if (!PORTAL_BLOCKS.has(lookup(p)?.name)) continue
+        if (best == null || p.distanceTo(pos) < best.distanceTo(pos)) best = p
+      }
+    }
+  }
+  return best
 }
 
 /**
@@ -261,6 +283,15 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
     pos = placed
   } else {
     if (!bot.inventory.items().some(i => i.name === 'chest')) throw new SkillError('MISSING_ITEMS', 'no chest for a trip kit')
+    // off the portal first, out of PORTAL_KEEP_OFF of its blocks and never through them (awayFromPortals): the chest
+    // and the bed go round the bot there
+    const portal = portalBlockNear(lookup, bot.entity.position)
+    if (portal != null) {
+      await awayFromPortals(bot, async () => await navigate(bot, { goal: new goals.GoalInvert(new goals.GoalNear(portal.x, portal.y, portal.z, PORTAL_KEEP_OFF + 3)) as any }, signal)).catch(err => {
+        if (isAbort(err)) throw err
+        trace('stashTripKit: no way off the portal:', (err as Error).message)
+      })
+    }
     // (room over it: a chest under a block doesn't open, ChestBlock.isChestBlockedAt, and each item's store waited
     // 20 s for the window, 58000 ticks gone in a 26.3 cave)
     const at = findPlacement(lookup, bot.entity.position, { radius: 3, freeAbove: true, avoid: p => nearPortal(lookup, p) })
@@ -330,6 +361,24 @@ export function keepUnbroken (bot: Bot, cells: Vec3[]): void {
   const keep = (block: any): number => keys.has(`${block.position.x},${block.position.y},${block.position.z}`) ? 1e9 : 0
   ;(keep as any).survivalKept = keys
   pathfinder.setMoveOptions({ ...settings, exclusionAreasBreak: [...(settings.exclusionAreasBreak as any[]).filter(f => f.survivalKept == null), keep] })
+}
+
+/**
+ * Runs `fn` with the portal blocks kept out of the pathfinder's steps (a step exclusion, 1e9 a cell), and the settings
+ * put back after: the trip kit's stash by the nether portal walked the bot into it, and it was in the nether with no
+ * arrival portal remembered and no way back (full-1.21.11-fresh-n)
+ */
+export async function awayFromPortals<T> (bot: Bot, fn: () => Promise<T>): Promise<T> {
+  const pf = (bot as any).pathfinder
+  if (pf?.setMoveOptions == null || pf.defaultMoveSettings == null) return await fn()
+  const before = { ...pf.defaultMoveSettings }
+  const portal = (block: any): number => bot.blockAt(block.position)?.name === 'nether_portal' ? 1e9 : 0
+  pf.setMoveOptions({ ...before, exclusionAreasStep: [...(before.exclusionAreasStep ?? []), portal] })
+  try {
+    return await fn()
+  } finally {
+    pf.setMoveOptions({ ...pf.defaultMoveSettings, exclusionAreasStep: (pf.defaultMoveSettings.exclusionAreasStep ?? []).filter((f: unknown) => f !== portal) })
+  }
 }
 
 /** takes everything out of the trip kit's chest (the bot by it); resolves what came out */

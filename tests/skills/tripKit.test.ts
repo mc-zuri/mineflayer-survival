@@ -139,12 +139,32 @@ test('leaveTripKit: the chest and bed got, beforeStash (back to the portal room)
   assert.ok(calls.indexOf('obtain chest') < calls.indexOf('back to the room'))
 })
 
-test('nearPortal: a cell 2 or fewer blocks from a portal\'s blocks is not for the kit', async () => {
-  const { nearPortal } = await import('../../src/skills/tripKit')
+test('nearPortal: a cell PORTAL_KEEP_OFF or fewer blocks from a portal\'s blocks is not for the kit', async () => {
+  const { nearPortal, portalBlockNear, PORTAL_KEEP_OFF } = await import('../../src/skills/tripKit')
   const { Vec3 } = await import('vec3')
   const world = (p: any) => ({ name: p.x === 0 && p.y >= 64 && p.y <= 66 && p.z === 0 ? 'nether_portal' : 'air' })
+  // (PORTAL_KEEP_OFF, 4, from 2: the stash by the portal walked the bot into it twice)
+  assert.equal(PORTAL_KEEP_OFF, 4)
   assert.strictEqual(nearPortal(world, new Vec3(1, 64, 1)), true)
-  assert.strictEqual(nearPortal(world, new Vec3(3, 64, 0)), false)
+  assert.strictEqual(nearPortal(world, new Vec3(4, 64, 0)), true)
+  assert.strictEqual(nearPortal(world, new Vec3(5, 64, 0)), false)
+  // the portal to walk off from first
+  assert.deepStrictEqual(portalBlockNear(world, new Vec3(3.5, 64, 2.5))?.toArray(), [0, 64, 0])
+  assert.strictEqual(portalBlockNear(world, new Vec3(12.5, 64, 0.5)), null)
+})
+
+test('awayFromPortals: the portal blocks out of the pathfinder\'s steps while it runs, the settings put back after', async () => {
+  const { awayFromPortals } = await import('../../src/skills/tripKit')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ world: (p: any) => p.x === 0 && p.z === 0 ? 'nether_portal' : 'air' })
+  bot.pathfinder = { defaultMoveSettings: { exclusionAreasStep: [] }, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+  let during = -1
+  await awayFromPortals(bot, async () => {
+    during = bot.pathfinder.defaultMoveSettings.exclusionAreasStep.reduce((n: number, f: any) => n + f({ position: new Vec3(0, 64, 0) }), 0)
+  })
+  assert.ok(during >= 1e9)
+  assert.deepStrictEqual(bot.pathfinder.defaultMoveSettings.exclusionAreasStep, [])
 })
 
 test('withTickBudget: the work is aborted once its ticks are gone', async () => {

@@ -35,7 +35,7 @@ import { BREEDERS_KEPT, HERD, HERD_MOBS, MEAT_OF, POINTS_PER_KILL, breedingFoodH
 import { hunt } from './skills/hunt'
 import { isAlive } from './skills/combatUtil'
 import { foodInfo } from './core/items'
-import { TRIP_KIT, kitSpares, stashTripKit, type TripKitKeep } from './skills/tripKit'
+import { TRIP_KIT, awayFromPortals, kitSpares, stashTripKit, type TripKitKeep } from './skills/tripKit'
 import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
 import { normalizeDimension, type WorldMemory } from './core/memory'
@@ -1107,7 +1107,8 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     await netherKit(bot, executor, signal, log)
     const gate = netherGate(bot, executor as any)
     await netherSpares(bot, executor, gate, signal, log)
-    await leaveTripKit(bot, executor, signal, log, undefined, { arrows: gate.bow === false ? 0 : gate.arrows, food: gate.food, nutrition: n => foodInfo(bot.registry as any, n)?.nutrition ?? 0 })
+    // (kept off the portal's blocks while by it: awayFromPortals)
+    await awayFromPortals(bot, async () => await leaveTripKit(bot, executor, signal, log, undefined, { arrows: gate.bow === false ? 0 : gate.arrows, food: gate.food, nutrition: n => foodInfo(bot.registry as any, n)?.nutrition ?? 0 }))
     // (the kit took only what's over the gate: still met, the bottles' brew kit made after it again if it took them)
     await netherKit(bot, executor, signal, log)
     try {
