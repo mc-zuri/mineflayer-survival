@@ -1046,6 +1046,8 @@ export class Executor {
   async storeAtBase (needed: Record<string, number> = {}, signal?: AbortSignal, opts: { spareTools?: boolean } = {}): Promise<Record<string, number>> {
     const base = this.base
     if (base == null || base.chests.length === 0) return {}
+    // (not from another dimension than the base's: its chests' coordinates are the overworld's)
+    if (normalizeDimension(this.bot.game?.dimension) !== (this.memory.base?.dimension ?? 'overworld')) return {}
     // (spareTools: the tools beyond a trip's, spareToolsKeep's, stored too)
     const keep = opts.spareTools === true ? spareToolsKeep(this.bot.inventory.items(), this.options.keep) : this.options.keep
     const { store: toStore } = splitInventory(this.bot.inventory.items(), { keep, registry: this.bot.registry, needed, protect: this.protect() })

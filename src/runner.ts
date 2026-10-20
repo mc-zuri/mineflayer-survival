@@ -865,6 +865,9 @@ export class Runner {
     await this.keepHerd(signal)
     const base = baseRecord(this.memory)
     if (base == null || base.chests.length === 0) return
+    // (the base's dimension: a bot in the nether by the base's coordinates went for its chests there, 'no chest at
+    // (-56, 72, 9) (netherrack)' 30 plans, full-1.21.11-fresh-i)
+    if (normalizeDimension(this.bot.game?.dimension) !== (this.memory.base?.dimension ?? 'overworld')) return
     const p = this.bot.entity.position
     if (Math.hypot(p.x - base.origin.x, p.y - base.origin.y, p.z - base.origin.z) > 96) return
     try {

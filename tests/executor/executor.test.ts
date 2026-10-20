@@ -977,3 +977,14 @@ test('the base\'s crafting table or furnace a step found gone (its chunk loaded)
   ex.forgetMissingStation(new TaskError('NOT_FOUND', 'no furnace at (-53, 60, -16)'))
   assert.equal(memory.getPois('base_furnace').length, 0)
 })
+
+test('storeAtBase stores nothing from another dimension than the base\'s (its chests\' coordinates are the overworld\'s)', async () => {
+  const bot = fakeBot({ diorite: 64 })
+  bot.game = { dimension: 'the_nether' }
+  const memory = new WorldMemory()
+  memory.setBase({ x: 0, y: 64, z: 0 }, 'overworld')
+  memory.addPoi('base_bounds', { x: -5, y: 60, z: -5 }, 'overworld', '5,70,5')
+  const ex = new Executor(bot, { runners: {}, log: () => {}, memory } as any)
+  ;(ex as any).storeChests = () => { throw new Error('went for the chests') }
+  assert.deepStrictEqual(await ex.storeAtBase(), {})
+})
