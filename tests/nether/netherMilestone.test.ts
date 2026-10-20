@@ -576,3 +576,41 @@ test('a deep pool with no shore and no diamond pickaxe has its cast made near it
   assert.deepEqual(calls.slice(from + 1, from + 3), ['off the lava', 'cast a portal'], calls.join(', '))
   assert.ok(!calls.slice(0, calls.indexOf('cast a portal')).includes('up to the surface'), calls.join(', '))
 })
+
+test('a deep pool cast with no empty bucket gets one first, then goes to the spot by the pool', async () => {
+  const { SkillError } = await import('../../src/skills/errors')
+  const gridModule = require('../../src/skills/gridWalk')
+  const tunnelModule = require('../../src/skills/tunnel')
+  const { buildAPortal } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1), item('cobblestone', 64)] })
+  bot.game.dimension = 'overworld'
+  const lava = bot.registry.blocksByName.lava.id
+  // a pool of 12 lava sources under the bot's feet level beside it
+  bot.findBlocks = (opts: any) => opts.matching === lava ? Array.from({ length: 12 }, (_, i) => new Vec3(2 + (i % 4), -55, Math.floor(i / 4))) : []
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => (p.y === -55 && p.x >= 2 && p.x < 6 && p.z >= 0 && p.z < 3) ? { ...realAt(p), name: 'lava', getProperties: () => ({ level: 0 }) } : realAt(p)) as any
+  const calls: string[] = []
+  const realMove = gridModule.moveNear
+  gridModule.moveNear = async () => {}
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async (reqs: any[]) => { calls.push(`obtain ${String(reqs[0].item)}`); if (reqs[0].item === 'diamond_pickaxe' || reqs[0].item === 'bucket') throw new Error('MISSING_ITEMS: none') },
+    task: async (name: string) => {
+      calls.push(name)
+      if (name === 'build a nether portal') throw new SkillError('CANNOT_PLACE', 'no site to cast a portal frame by the lava')
+      if (name === 'obsidian from the lava') throw new SkillError('MISSING_ITEMS', 'no diamond pickaxe to mine obsidian with')
+      if (name === 'cast a portal') throw new Error('stop here')
+    }
+  }
+  try {
+    // (the cast's failure is the pool's; the end, the obsidian's frame, fails on the stub too)
+    await buildAPortal(bot, executor, new AbortController().signal, () => {}).catch(() => {})
+  } finally {
+    gridModule.moveNear = realMove
+  }
+  const from = calls.indexOf('obsidian from the lava')
+  assert.deepEqual(calls.slice(from + 1, from + 4), ['obtain bucket', 'off the lava', 'cast a portal'], calls.join(', '))
+})

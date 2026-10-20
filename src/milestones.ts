@@ -619,16 +619,18 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
         // whole game carried the lava of the deep pools up 120 blocks a trip to the surface, after exploring 20000
         // ticks for the iron of more buckets, some 20000 to 50000 ticks a pool, and it failed)
         log(`a portal frame: the cast ${CAST_AWAY} blocks off the deep pool, at ${away.floored().toString()}`)
-        await executor.task('off the lava', async (s) => await tunnelTo(bot, { target: away, range: 2 }, s), signal).catch(err => {
-          if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-          log(`a portal frame: off the lava: ${(err as Error).message}`)
-        })
+        // an empty bucket first, within CAST_BUCKET_TICKS (the exploring for its iron took a 26.3 bot 50 blocks off,
+        // where the cast had 7 of the pool's sources in sight), then back to the spot by the pool
         if (count('bucket') === 0 && count('lava_bucket') === 0) {
-          await executor.obtain([{ item: 'bucket', count: 1 }], signal).catch(err => {
+          await withTickBudget(bot, CAST_BUCKET_TICKS, signal, async (s) => await executor.obtain([{ item: 'bucket', count: 1 }], s)).catch(err => {
             if (signal.aborted || TaskError.is(err, 'DIED')) throw err
             log(`buckets: ${(err as Error).message}`)
           })
         }
+        await executor.task('off the lava', async (s) => await tunnelTo(bot, { target: away, range: 2 }, s), signal).catch(err => {
+          if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+          log(`a portal frame: off the lava: ${(err as Error).message}`)
+        })
       } else {
         await executor.obtain([{ item: 'bucket', count: LAVA_BUCKETS }], signal).catch(err => {
           if (signal.aborted || TaskError.is(err, 'DIED')) throw err
@@ -744,6 +746,8 @@ export const DEEP_LAVA_Y = -50
 export const CAST_NEAR_Y = 40
 /** how far from a deep pool's nearest source its cast is made */
 export const CAST_AWAY = 12
+/** the ticks an empty bucket for a deep pool's cast may take to make */
+export const CAST_BUCKET_TICKS = 8000
 
 /**
  * Where a deep pool's cast goes: CAST_AWAY blocks from its nearest source, on the bot's side of it at the bot's
