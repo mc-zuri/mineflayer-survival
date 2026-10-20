@@ -159,7 +159,7 @@ type RoomRunner = <T>(name: string, fn: (signal: AbortSignal) => Promise<T>) => 
 export const SCAFFOLD_KEEP = 64
 
 /** what a caller adds to the executor's plans (the night's: undergroundOnly; a stock top-up's: no loot, exclude) */
-export type PlanOptions = Pick<ObtainOptions, 'undergroundOnly' | 'exclude' | 'exactYields'>
+export type PlanOptions = Pick<ObtainOptions, 'undergroundOnly' | 'exclude' | 'exactYields' | 'unseenFactor'>
 
 export interface ObtainOutcome {
   /** plans made */

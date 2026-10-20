@@ -26,17 +26,24 @@ export interface ObtainRequest {
    * FoodProperties.nutrition), any mix of them adding up: 40 points are 5 cooked beef or 20 sweet berries
    */
   unit?: 'items' | 'nutrition'
+  /**
+   * with the nutrition unit, the harmful foods count too, at half their nutrition (the hunger or poison they bring
+   * takes the rest): rotten flesh as the last resort of a starving bot
+   */
+  harmful?: boolean
 }
 
 /** what one of an item counts for in a request: 1, or its nutrition for a nutrition request (0 for harmful food) */
-export function unitValue (req: Pick<ObtainRequest, 'unit'>, item: string, registry: RegistryLike): number {
+export function unitValue (req: Pick<ObtainRequest, 'unit' | 'harmful'>, item: string, registry: RegistryLike): number {
   if (req.unit !== 'nutrition') return 1
   const food = foodInfo(registry, item)
-  return food == null || food.harmful === true ? 0 : food.nutrition
+  if (food == null) return 0
+  if (food.harmful === true) return req.harmful === true ? food.nutrition / 2 : 0
+  return food.nutrition
 }
 
 /** how much of a request the inventory holds, in the request's unit, over its (resolved) alternatives */
-export function heldFor (inv: Inventory, alts: readonly string[], req: Pick<ObtainRequest, 'unit'>): number {
+export function heldFor (inv: Inventory, alts: readonly string[], req: Pick<ObtainRequest, 'unit' | 'harmful'>): number {
   if (req.unit !== 'nutrition') return inv.countAny(alts)
   return alts.reduce((n, a) => n + inv.count(a) * unitValue(req, a, inv.registry), 0)
 }
@@ -81,6 +88,12 @@ export interface ObtainOptions {
    * executor's plan after its plans failed their check twice the same way
    */
   exactYields?: boolean
+  /**
+   * how many times dearer a block or animal neither in sight nor remembered is to find (default 1): a hungry bot's meal
+   * goes for what it sees, not for a cow somewhere (a 26.3 bot starved to food 0 exploring a snowy mountain for cows
+   * with rabbits about and a frozen lake by it, full-26.3-s31337-g)
+   */
+  unseenFactor?: number
 }
 
 /** what findCost is asked about: a block or mob of a source, and the source's own estimate */
@@ -314,7 +327,7 @@ export class Resolver {
    * alternative that makes up what is missing (the points from one source, as a hunt for cows or a patch of berry
    * bushes gets them; what is held of the others counts)
    */
-  private ensureValue (s0: State, alts: readonly string[], req: Pick<ObtainRequest, 'unit'>, count: number, path: string[], limit: number): State | null {
+  private ensureValue (s0: State, alts: readonly string[], req: Pick<ObtainRequest, 'unit' | 'harmful'>, count: number, path: string[], limit: number): State | null {
     if (heldFor(s0.inv, alts, req) >= count) return s0
     // the raw food held cooked first, as far as it goes (cookedFromHeld), the rest from the cheapest one alternative:
     // a bot with 3 raw rabbits for 20 points planned 10 berries for all 20, explored for over a snowy field
@@ -337,7 +350,7 @@ export class Resolver {
    * `s` with the alternatives the held raw food smelts into made of it (no more than the points missing): a smelt of
    * what's held, never a hunt; as it is when none is held or the smelt can't be had within `limit`
    */
-  private cookedFromHeld (s: State, alts: readonly string[], req: Pick<ObtainRequest, 'unit'>, count: number, path: string[], limit: number): State {
+  private cookedFromHeld (s: State, alts: readonly string[], req: Pick<ObtainRequest, 'unit' | 'harmful'>, count: number, path: string[], limit: number): State {
     let t = s
     for (const item of alts) {
       const value = unitValue(req, item, this.registry)
@@ -553,13 +566,14 @@ export class Resolver {
     if (s.visited.has(name)) return each
     const sighted = this.opts.findCost?.({ name, kind, dimension, find })
     if (sighted != null) return sighted
+    const unseen = find * (this.opts.unseenFactor ?? 1)
     // a crop or bush remembered may not have grown (the bot's own farm, sown this morning): only one seen grown counts
     // (the sightings'); on seed 7 the plan went for 3 wheat of its own farm, not grown, and searched 49000 ticks
-    if (GROWN_AGE[name] != null) return find
+    if (GROWN_AGE[name] != null) return unseen
     const memory = this.opts.memory
-    if (memory == null) return find
+    if (memory == null) return unseen
     const known = memory.findBlocks(name, { dimension, near: this.opts.position, count: 1 })
-    if (known.length === 0) return find
+    if (known.length === 0) return unseen
     if (this.opts.position == null) return Math.min(find, each * 4)
     const p = this.opts.position
     const d = Math.hypot(known[0].x - p.x, known[0].y - p.y, known[0].z - p.z)

@@ -792,3 +792,37 @@ test('the death spot: not gone back to bare where an archer shot the bot dead; a
   assert.equal(deathSpotTiming({ seen: 1900 }, { tick: 2000, timeOfDay: 13000, dimension: 'overworld' }, 100, 6000), 'go')
   assert.equal(deathSpotTiming({ seen: 1900, killer: 'blaze' }, { tick: 2000, timeOfDay: 13000, dimension: 'the_nether' }, 100, 6000), 'go')
 })
+
+test('a hungry bot short of food gets a meal first: mealDue in the overworld, the work stopped for it (untilDusk\'s hunger watch), none in the nether or when fed (full-26.3-s31337-g: a hunt for cows went on from food 9 to 0)', async () => {
+  const bot = fakeBot({ stone_pickaxe: 1 })
+  bot.food = 9
+  const runner = new Runner(bot, { log: () => {} })
+  const meal = runner.mealDue()
+  assert.ok(meal != null && meal[0].unit === 'nutrition', JSON.stringify(meal))
+  assert.notEqual(meal[0].harmful, true)
+  // starving: rotten flesh will do
+  bot.food = 5
+  assert.equal(runner.mealDue()?.[0].harmful, true)
+  bot.food = 9
+  // the work under way is stopped for it
+  let ticked = 0
+  const work = runner.untilDusk(new AbortController().signal, { hunger: true }, async (s) => {
+    await new Promise<void>((resolve, reject) => {
+      s.addEventListener('abort', () => reject(s.reason), { once: true })
+      const t = setInterval(() => { bot.emit('physicsTick'); if (++ticked > 100) { clearInterval(t); resolve() } }, 0)
+      s.addEventListener('abort', () => clearInterval(t), { once: true })
+    })
+  })
+  assert.equal(await work, 'hungry')
+  assert.ok(ticked <= 21, `${ticked} ticks`)
+  // fed (12 points carried), in the nether, or the bar high: none
+  bot.give('cooked_beef', 2)
+  assert.equal(runner.mealDue(), null)
+  const nether = fakeBot({})
+  nether.food = 3
+  nether.game.dimension = 'the_nether'
+  assert.equal(new Runner(nether, { log: () => {} }).mealDue(), null)
+  const full = fakeBot({})
+  full.food = 18
+  assert.equal(new Runner(full, { log: () => {} }).mealDue(), null)
+})

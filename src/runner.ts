@@ -12,7 +12,7 @@ import { TaskError } from './core/errors'
 import { isBed } from './core/items'
 import { Inventory, type ItemCount } from './core/inventory'
 import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './core/memory'
-import { FOOD_GOAL, FOOD_POINTS, MILESTONES, foodGoals, milestonesAhead, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
+import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, MILESTONES, foodGoals, mealGoals, milestonesAhead, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { comeUp, dayPhase, nightAction, nightGoals, topUpPlaces } from './planner/schedule'
 import { describeLevel, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
@@ -312,6 +312,11 @@ export const REFLEX_LOG_TICKS = 200
 /** food points under which a bot past the food milestone gets food again (up to FOOD_POINTS) before going on */
 export const FOOD_RESTOCK = FOOD_POINTS / 2
 
+/** ticks a meal (mealGoals) may take before the work goes on without it */
+export const MEAL_TICKS = 6000
+/** ticks a meal that came to nothing waits before it is tried again */
+export const MEAL_RETRY_TICKS = 6000
+
 /** ticks between the herd's upkeeps between trips: the breeding's cooldown (Animal.setAge(6000)) */
 export const HERD_TEND_TICKS = 6000
 /** ticks an upkeep of the herd between trips may take */
@@ -401,6 +406,7 @@ export class Runner {
   private nightMinedDay = -1
   private inNightWork = false
   private restockRetryAt = 0
+  private mealRetryAt = 0
   /** the tick the herd was last tended at between trips (keepHerd) */
   private herdTendedAt = -Infinity
   private readonly store: SaveStore | null
@@ -650,11 +656,32 @@ export class Runner {
         }
         throw err
       }
+      // a meal first when hungry and short of food (mealGoals): what's in sight before a cow somewhere, its own ticks
+      // at most; the work it left (untilDusk's hunger watch) after
+      const meal = this.mealDue()
+      if (meal != null) {
+        this.log(`hungry (food ${this.bot.food ?? 0}, ${ownedInventory(this.bot).foodPoints()} points carried): a meal first`)
+        try {
+          await this.untilDusk(signal, async (s) => await this.withinTicks(MEAL_TICKS, s, async (t) => {
+            await this.executor.obtain(meal, t, { unseenFactor: HUNGRY_FIND_FACTOR })
+          }))
+        } catch (err) {
+          if (stopped()) return this.stop(null, 'aborted', err)
+          if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+            this.log(`died getting a meal: ${(err as Error).message}`)
+            await this.recover(signal)
+            continue
+          }
+          this.log(`no meal for now: ${(err as Error).message}`)
+        }
+        if (this.mealDue() != null) this.mealRetryAt = this.bot.survival.tasks.tick + MEAL_RETRY_TICKS
+        continue
+      }
       const restock = this.bot.survival.tasks.tick >= this.restockRetryAt ? restockGoals(state, reachedIds) : null
       if (restock != null) {
         try {
           this.log(`food low (${state.inventory.foodPoints()} points): getting more before going on`)
-          await this.untilDusk(signal, async (s) => {
+          await this.untilDusk(signal, { hunger: true }, async (s) => {
             // the renewable food first: the farm's harvest, and the herd's surplus slaughtered and cooked
             await harvestGrownFarms(this.bot, this.executor, s, this.log)
             await this.tendHerdFor(FOOD_POINTS - ownedInventory(this.bot).foodPoints(), s)
@@ -695,7 +722,7 @@ export class Runner {
       const begun = this.bot.survival.tasks.tick
       const account = (): void => { spent.set(m.id, (spent.get(m.id) ?? 0) + this.bot.survival.tasks.tick - begun) }
       try {
-        const how = await this.untilDusk(signal, async (s) => {
+        const how = await this.untilDusk(signal, { hunger: true }, async (s) => {
           await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log, seed: this.options.seed })
           // the milestone ends with the stock topped up for the ones after it, what can be got where the bot is
           // (topUpPlaces: the surface's by day, the mine's down there); the milestone's own marks apply once it's done
@@ -706,6 +733,10 @@ export class Runner {
         if (stopped()) return this.stop(m.id, 'aborted')
         if (how === 'dusk') {
           this.log(`dusk: ${m.id} left for the night's mine`)
+          continue
+        }
+        if (how === 'hungry') {
+          this.log(`hungry: ${m.id} left for a meal`)
           continue
         }
         failures.delete(m.id)
@@ -1060,26 +1091,62 @@ export class Runner {
    * digging in on the surface (seed 7: the hunt ran into the night and the shelter waited 11000 ticks). Resolves
    * 'dusk' when cut off so.
    */
-  async untilDusk (signal: AbortSignal, fn: (s: AbortSignal) => Promise<void>): Promise<'done' | 'dusk'> {
+  async untilDusk (signal: AbortSignal, optsOrFn: { hunger?: boolean } | ((s: AbortSignal) => Promise<void>), maybeFn?: (s: AbortSignal) => Promise<void>): Promise<'done' | 'dusk' | 'hungry'> {
+    const fn = typeof optsOrFn === 'function' ? optsOrFn : maybeFn as (s: AbortSignal) => Promise<void>
+    const hunger = typeof optsOrFn === 'function' ? false : optsOrFn.hunger === true
     const bot = this.bot
     const ctrl = new AbortController()
     const onOuter = (): void => ctrl.abort(signal.reason)
     if (signal.aborted) onOuter()
     signal.addEventListener('abort', onOuter, { once: true })
     let n = 0
+    let why: 'dusk' | 'hungry' = 'dusk'
     const watch = (): void => {
-      if (++n % 20 !== 0 || ctrl.signal.aborted || this.nightDue() == null) return
-      ctrl.abort(new TaskError('ABORTED', 'dusk: the night is for the mine'))
+      if (++n % 20 !== 0 || ctrl.signal.aborted) return
+      if (this.nightDue() != null) {
+        ctrl.abort(new TaskError('ABORTED', 'dusk: the night is for the mine'))
+      } else if (hunger && this.mealDue() != null) {
+        // (the work stopped for a meal: a 26.3 bot's hunt for cows went on from food 9 to 0, full-26.3-s31337-g)
+        why = 'hungry'
+        ctrl.abort(new TaskError('ABORTED', 'hungry: a meal first'))
+      }
     }
     bot.on('physicsTick', watch)
     try {
       await fn(ctrl.signal)
       return 'done'
     } catch (err) {
-      if (!signal.aborted && ctrl.signal.aborted) return 'dusk'
+      if (!signal.aborted && ctrl.signal.aborted) return why
       throw err
     } finally {
       bot.off('physicsTick', watch)
+      signal.removeEventListener('abort', onOuter)
+    }
+  }
+
+  /** the meal due now (mealGoals), in the overworld, once the last one that came to nothing has waited its retry */
+  mealDue (): ObtainRequest[] | null {
+    const bot = this.bot
+    if (bot.entity == null || normalizeDimension(bot.game?.dimension) !== 'overworld' || bot.survival.tasks.tick < this.mealRetryAt) return null
+    return mealGoals(bot.food ?? 20, ownedInventory(bot))
+  }
+
+  /** runs `fn` stopped (TIMEOUT) after `ticks` ticks */
+  async withinTicks (ticks: number, signal: AbortSignal, fn: (s: AbortSignal) => Promise<void>): Promise<void> {
+    const ctrl = new AbortController()
+    const onOuter = (): void => ctrl.abort(signal.reason)
+    if (signal.aborted) onOuter()
+    signal.addEventListener('abort', onOuter, { once: true })
+    let n = 0
+    const count = (): void => { if (++n >= ticks && !ctrl.signal.aborted) ctrl.abort(new TaskError('TIMEOUT', `out of its ${ticks} ticks`)) }
+    this.bot.on('physicsTick', count)
+    try {
+      await fn(ctrl.signal)
+    } catch (err) {
+      if (!signal.aborted && ctrl.signal.aborted) throw new TaskError('TIMEOUT', `out of its ${ticks} ticks`)
+      throw err
+    } finally {
+      this.bot.off('physicsTick', count)
       signal.removeEventListener('abort', onOuter)
     }
   }

@@ -2,7 +2,7 @@ import { Inventory } from '../core/inventory'
 import { parseTool, TOOL_MATERIALS, type ToolKind } from '../core/items'
 import type { WorldMemory } from '../core/memory'
 import type { RegistryLike } from '../core/registry'
-import { obtainAll, type ObtainOptions, type ObtainPlan, type ObtainRequest } from './obtain'
+import { heldFor, obtainAll, type ObtainOptions, type ObtainPlan, type ObtainRequest } from './obtain'
 import type { Station } from './steps'
 import { SMELTING } from './sources'
 
@@ -64,6 +64,33 @@ export const FOOD_GOAL = [
   'cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'cooked_chicken', 'cooked_rabbit', 'cooked_cod', 'cooked_salmon',
   'bread', 'baked_potato', 'sweet_berries', 'apple', 'melon_slice', 'carrot', 'beetroot', 'dried_kelp'
 ]
+
+/** the hunger bar at or under which a bot carrying under MEAL_POINTS of food gets a meal before its work (mealGoals) */
+export const HUNGRY_FOOD = 12
+/** the food points a meal gets */
+export const MEAL_POINTS = 12
+/** the hunger bar at or under which a meal may be rotten flesh (the starving's: FoodData can't sprint under 6) */
+export const STARVING_FOOD = 6
+/** how many times dearer a meal finds what's neither in sight nor remembered (ObtainOptions.unseenFactor) */
+export const HUNGRY_FIND_FACTOR = 8
+/**
+ * What a meal is of: the food goal's, and the raw meat and fish that are safe raw (eaten as they come: a raw rabbit's
+ * 3 points), raw chicken and pufferfish not (their hunger and poison)
+ */
+export const MEAL_FOODS = [...FOOD_GOAL, 'beef', 'porkchop', 'mutton', 'rabbit', 'cod', 'salmon', 'tropical_fish', 'potato', 'mushroom_stew', 'rotten_flesh']
+
+/**
+ * A meal before the work when the bot is hungry (the hunger bar at HUNGRY_FOOD or under) and carries under MEAL_POINTS
+ * of food: MEAL_POINTS of MEAL_FOODS, rotten flesh counted only when starving (at half: its hunger), else null. A 26.3
+ * bot on a snowy mountain went on exploring for cows from food 9 to 0 and to 1 health, then fell to its death
+ * (full-26.3-s31337-f, g).
+ */
+export function mealGoals (hunger: number, inv: Inventory): ObtainRequest[] | null {
+  if (hunger > HUNGRY_FOOD) return null
+  const req: ObtainRequest = { item: MEAL_FOODS, count: MEAL_POINTS, unit: 'nutrition', ...(hunger <= STARVING_FOOD ? { harmful: true } : {}) }
+  if (heldFor(inv, MEAL_FOODS, req) >= MEAL_POINTS) return null
+  return [req]
+}
 
 /** raw food a furnace cooks, to what (vanilla's food smelting recipes) */
 export const RAW_TO_COOKED: Record<string, string> = Object.fromEntries(

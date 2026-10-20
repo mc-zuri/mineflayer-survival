@@ -117,6 +117,9 @@ export const BLOCK_SOURCES: BlockSource[] = [
   // 3 to 7 slices (blocks/melon): melons grow wild in the jungles
   block('melon', [{ item: 'melon_slice', count: 5 }], RARE_FIND, 20),
   block('bamboo', 'bamboo', 4000, 5),
+  // the mushrooms of a dark forest's floor, a cave's, a swamp's: a stew of one of each and a bowl (a meal's)
+  block('brown_mushroom', 'brown_mushroom', 3000, 30),
+  block('red_mushroom', 'red_mushroom', 3000, 30),
   block('kelp_plant', 'kelp', 1000, 5),
   block('kelp', 'kelp', 1000, 5),
   block('coal_ore', 'coal', 300, 40),
