@@ -16,6 +16,7 @@ import type { ReflexConfig } from './config'
 import { isBed } from '../core/items'
 import { breakFall, landingY, shouldBreakFall } from '../skills/fall'
 import { blockIdsNamed, findBlock } from '../core/findBlocks'
+import { findDoorRefuge, retreatIndoors, type DoorRefuge } from '../skills/indoors'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
 /**
@@ -260,6 +261,22 @@ export function unarmedOutmatched (bot: Bot, near: Entity[], config: ReflexConfi
   return config.hostiles.fleeUnarmed || near.length > 1 || near.some(e => RANGED_HOSTILES.has(e.name ?? ''))
 }
 
+/** each bot's door to get in behind (findDoorRefuge), kept till the tick `until` (REFUGE_TICKS, or REFUGE_RETRY_TICKS of none after a way in failed) */
+const refuges = new WeakMap<Bot, { until: number, refuge: DoorRefuge | null }>()
+export const REFUGE_TICKS = 40
+export const REFUGE_RETRY_TICKS = 600
+
+function cachedRefuge (ctx: ReflexContext, near: Entity[]): DoorRefuge | null {
+  const { bot, config } = ctx
+  if (config.hostiles.indoorsDistance <= 0) return null
+  if (bot.game?.dimension != null && !/overworld/.test(String(bot.game.dimension))) return null
+  const cached = refuges.get(bot)
+  if (cached != null && ctx.tick < cached.until && cached.until - ctx.tick <= REFUGE_RETRY_TICKS) return cached.refuge
+  const refuge = findDoorRefuge(bot, near, config.hostiles.indoorsDistance)
+  refuges.set(bot, { until: ctx.tick + REFUGE_TICKS, refuge })
+  return refuge
+}
+
 export const hostilesReflex: Reflex = {
   name: 'hostiles',
   priority: 60,
@@ -274,6 +291,25 @@ export const hostilesReflex: Reflex = {
     const outnumbered = (armed ? near.filter(e => !SWARMERS.has(e.name ?? '')) : near).length > config.hostiles.maxFight
     const flee = (bot.health <= config.hostiles.fleeHealth && !fightOn) || outnumbered || unarmedOutmatched(bot, near, config)
     if (flee) {
+      // a door near to get in behind (a house, the base's airlock): in there and shut, not a run in the open under
+      // the bolts and arrows
+      const refuge = cachedRefuge(ctx, near)
+      if (refuge != null) {
+        return {
+          name: 'hostiles',
+          priority: config.hostiles.priority,
+          detail: 'retreat indoors',
+          run: async (signal) => await retreatIndoors(bot, refuge, {
+            signal,
+            threats: () => Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e)),
+            maxTicks: config.hostiles.indoorsTicks
+          }).catch(err => {
+            // no way in: not tried again for a while (the flee next time)
+            refuges.set(bot, { until: ctx.tick + REFUGE_RETRY_TICKS, refuge: null })
+            throw err
+          })
+        }
+      }
       return {
         name: 'hostiles',
         priority: config.hostiles.priority,

@@ -53,6 +53,13 @@ export interface ReflexConfig {
     retaliateTicks: number
     /** ticks a fight may last (default 600) */
     fightTicks: number
+    /**
+     * fled from, the bot gets in behind a door within this distance (a house, the base's airlock) and shuts it (default
+     * 32; 0 off): a pillager or a skeleton can't open one, nor see through it
+     */
+    indoorsDistance: number
+    /** ticks it waits there at most for them to go off (default 2400) */
+    indoorsTicks: number
     priority: number
   }
   creeper: {
@@ -166,6 +173,8 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
     retaliate: ['enderman', 'zombified_piglin', 'piglin', 'piglin_brute', 'polar_bear', 'wolf', 'bee', 'llama', 'trader_llama', 'panda', 'goat', 'dolphin'],
     retaliateTicks: 400,
     fightTicks: 600,
+    indoorsDistance: 32,
+    indoorsTicks: 2400,
     priority: 60
   },
   creeper: { enabled: true, triggerDistance: 3, safeDistance: 7.5, blockAtSwell: 24, blockDistance: 5, maxTicks: 200, priority: 80 },
