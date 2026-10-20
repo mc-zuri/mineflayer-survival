@@ -78,6 +78,24 @@ export const NOT_READY_TRIES = 10
 /** a not-ready back sooner than this got nothing: NOT_READY_WAIT_TICKS waited before the next try */
 export const NOT_READY_MIN_TICKS = 200
 export const NOT_READY_WAIT_TICKS = 1200
+/** a milestone that failed sooner than this after its start waits a while before its next try (failureBackoff) */
+export const FAST_FAILURE_TICKS = 600
+/** the wait after a milestone's first fast failure in a row, doubled for each one after */
+export const FAILURE_BACKOFF_TICKS = 300
+
+/**
+ * The ticks to wait before a milestone's next try, after its `fastInARow`th failure in a row that came `worked` ticks
+ * after its start: none for one that worked FAST_FAILURE_TICKS or more, else `base` doubled for each fast one before,
+ * so the tries' failures are spread over a while (4500 ticks for maxFailures' 5), the world given its time to change,
+ * the steps' notes of what they couldn't get to theirs to take effect. A 1.21.11 bot shut in its house failed the iron
+ * milestone 5 times in 180 ticks, 'no path' to the same log each time, and the game stopped (ls-1.21.11 t103081 to
+ * t103261)
+ */
+export function failureBackoff (fastInARow: number, worked: number, base = FAILURE_BACKOFF_TICKS): number {
+  if (worked >= FAST_FAILURE_TICKS || base <= 0 || fastInARow <= 0) return 0
+  return base * 2 ** (fastInARow - 1)
+}
+
 /** the tries of a milestone short of only its food that bank more of it before they're counted as not ready */
 export const FOOD_BANK_TRIES = 12
 /** the wait by home between such tries (the farm's crops grow, the herd's cooldown runs) */
@@ -152,6 +170,11 @@ export interface PlayOptions {
   deathItemTicks?: number
   /** a milestone failing this many times in a row stops play (default 5) */
   maxFailures?: number
+  /**
+   * the first wait after a milestone's fast failure (failureBackoff; 0 for none): play's default FAILURE_BACKOFF_TICKS,
+   * a Runner made alone none (its tests' handlers fail with no ticks going)
+   */
+  failureBackoffTicks?: number
   /** the stock policy's top-ups: false for none, options for another policy than bot.survival.stock (createPlugin's) */
   stock?: false | StockOptions
   executor?: ExecutorOptions
@@ -668,6 +691,8 @@ export class Runner {
     this.playSignal = signal
     const skip = new Set(this.options.skip ?? [])
     const failures = new Map<MilestoneId, number>()
+    // the fast failures in a row (failureBackoff)
+    const fastFailures = new Map<MilestoneId, number>()
     const notReady = new Map<MilestoneId, number>()
     // the food points a milestone short of only its food had at its last try, and its tries so (FOOD_BANK_TRIES)
     const foodBank = new Map<MilestoneId, { points: number, tries: number }>()
@@ -803,6 +828,7 @@ export class Runner {
           continue
         }
         failures.delete(m.id)
+        fastFailures.delete(m.id)
       } catch (err) {
         account()
         if (stopped()) return this.stop(m.id, 'aborted', err)
@@ -883,6 +909,26 @@ export class Runner {
           continue
         }
         if (n >= maxFailures) return this.stop(m.id, 'failed', err)
+        // back at once: a while before the next try (the stock's top-ups meanwhile, then the wait for what's left)
+        const worked = this.bot.survival.tasks.tick - begun
+        const fast = worked < FAST_FAILURE_TICKS ? (fastFailures.get(m.id) ?? 0) + 1 : 0
+        fastFailures.set(m.id, fast)
+        const backoff = failureBackoff(fast, worked, this.options.failureBackoffTicks ?? 0)
+        if (backoff > 0) {
+          this.log(`milestone ${m.id} failed ${worked} ticks in: ${backoff} ticks before its next try`)
+          const from = this.bot.survival.tasks.tick
+          try {
+            await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
+            const left = backoff - (this.bot.survival.tasks.tick - from)
+            if (left > 0) await this.waitTicksOrAbort(left, signal)
+          } catch (e) {
+            if (stopped()) return this.stop(m.id, 'aborted', e)
+            if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
+              this.log(`died waiting to try ${m.id} again: ${(e as Error).message}`)
+              await this.recover(signal)
+            }
+          }
+        }
       }
       try {
         await this.afterTrip(signal)
@@ -1662,5 +1708,5 @@ export class Runner {
 /** plays the game from where the bot is; see PlayOptions */
 export async function play (bot: Bot, options: PlayOptions = {}): Promise<PlayResult> {
   ;(bot as any).survival.playOptions = options
-  return await new Runner(bot, options).play()
+  return await new Runner(bot, { failureBackoffTicks: FAILURE_BACKOFF_TICKS, ...options }).play()
 }

@@ -1010,3 +1010,36 @@ test('a food restock that gets nothing gives up after RESTOCK_TICKS of its own (
   // its own ticks only: the reflex's 500 on top
   assert.ok(explored >= RESTOCK_TICKS - 5 && explored <= RESTOCK_TICKS + 5, String(explored))
 })
+
+test('failureBackoff: a milestone failing at once waits before its next try, doubled each fast failure in a row; one that worked a while not (ls-1.21.11: 5 failures in 180 ticks, the game stopped)', async () => {
+  const { failureBackoff, FAILURE_BACKOFF_TICKS, FAST_FAILURE_TICKS } = await import('../../src/runner')
+  assert.equal(failureBackoff(1, 45), FAILURE_BACKOFF_TICKS)
+  assert.equal(failureBackoff(2, 45), 2 * FAILURE_BACKOFF_TICKS)
+  assert.equal(failureBackoff(4, 45), 8 * FAILURE_BACKOFF_TICKS)
+  assert.equal(failureBackoff(1, FAST_FAILURE_TICKS), 0, 'worked a while')
+  assert.equal(failureBackoff(0, 45), 0)
+  assert.equal(failureBackoff(1, 45, 0), 0, 'none asked for')
+
+  // play: the tries of a milestone that fails at once come FAILURE_BACKOFF_TICKS, then twice that, apart
+  const bot = fakeBot()
+  const at: number[] = []
+  const logs: string[] = []
+  const runner = new Runner(bot, {
+    log: (l: string) => logs.push(l),
+    maxFailures: 3,
+    failureBackoffTicks: FAILURE_BACKOFF_TICKS,
+    handlers: { wood: async () => { at.push(bot.survival.tasks.tick); throw new TaskError('NO_PATH', 'no path to the goal') } }
+  })
+  const ticking = setInterval(() => { for (let i = 0; i < 100; i++) bot.emit('physicsTick') }, 1)
+  let r: any
+  try {
+    r = await runner.play()
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.equal(r.reason, 'failed')
+  assert.equal(at.length, 3)
+  assert.ok(at[1] - at[0] >= FAILURE_BACKOFF_TICKS, `${at.join(' ')}`)
+  assert.ok(at[2] - at[1] >= 2 * FAILURE_BACKOFF_TICKS, `${at.join(' ')}`)
+  assert.equal(logs.filter(l => /ticks before its next try/.test(l)).length, 2, logs.join(' | '))
+})
