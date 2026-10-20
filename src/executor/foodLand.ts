@@ -61,6 +61,16 @@ export const FOOD_TRIP_MAX = 640
 export const FAILED_LAND_RADIUS = 160
 /** the rings of the seed's biomes read about home, nearest first (8 points a ring) */
 export const SEED_RINGS = [128, 224, 320, 448]
+/**
+ * the food biome chunks within FOOD_PATCH_RADIUS of a food biome noted that make it wide enough to go to before the
+ * others: a chunk's generation spawns its animals 1 time in 10 (MobCategory.CREATURE's spawn chance), and a patch of
+ * snowy taiga of a few chunks on seed 31337's peaks had no cow (hunt2-b)
+ */
+export const FOOD_PATCH_CHUNKS = 6
+export const FOOD_PATCH_RADIUS = 48
+/** the seed's reads about a food biome ring point (at this offset) of which most are food biomes for a wide one */
+export const SEED_PATCH_OFFSET = 40
+
 /** how far a scouting walks out in its direction */
 export const SCOUT_DISTANCE = 320
 /** the walks a trip to food land takes at most, each while the last got the bot nearer */
@@ -113,6 +123,8 @@ export class BiomeSurvey {
   readonly chunks = new Map<string, ChunkSurface>()
   /** the seed's reads by "x,z" (surveySeed's: a survey cut off by a reflex and run again reads none twice) */
   readonly seedReads = new Map<string, ChunkSurface>()
+  /** the seed's food biome points with most of the reads about them food biomes too (surveySeed's) */
+  readonly seedWide: Array<{ x: number, z: number }> = []
 
   constructor (private readonly bot: Bot, private readonly memory: WorldMemory) {}
 
@@ -157,6 +169,18 @@ export class BiomeSurvey {
     return { chunks, meat }
   }
 
+  /** the food biome chunks surveyed within FOOD_PATCH_RADIUS of a point */
+  patchSize (p: { x: number, z: number }): number {
+    let n = 0
+    for (const s of this.chunks.values()) if (MEAT_BIOMES.has(s.biome) && Math.hypot(s.x - p.x, s.z - p.z) <= FOOD_PATCH_RADIUS) n++
+    return n
+  }
+
+  /** whether a food biome noted is a wide one: FOOD_PATCH_CHUNKS of them surveyed about it, or the seed's reads say so */
+  wide (p: { x: number, z: number }): boolean {
+    return this.patchSize(p) >= FOOD_PATCH_CHUNKS || this.seedWide.some(w => Math.hypot(w.x - p.x, w.z - p.z) <= FOOD_BIOME_SPACING)
+  }
+
   /** the mean surface height of the chunks surveyed in a direction (DIRECTIONS[i]) from `center`, out to `radius` */
   heightToward (center: { x: number, z: number }, i: number, radius = FED_RADIUS * 1.5): number | null {
     const [dx, dz] = DIRECTIONS[i]
@@ -193,12 +217,13 @@ export function foodLandOf (memory: WorldMemory): Vec3 | null {
  * The nearest food biome noted to `from` within FOOD_TRIP_MAX, none near a land whose animals weren't found
  * (FOOD_LAND_FAILED_POI) nor within FED_RADIUS of `away` (the land being left)
  */
-export function nearestFoodBiome (memory: WorldMemory, from: { x: number, z: number }, away?: { x: number, z: number }): { pos: Vec3, biome: string } | null {
+export function nearestFoodBiome (memory: WorldMemory, from: { x: number, z: number }, away?: { x: number, z: number }, only: (p: { x: number, z: number }) => boolean = () => true): { pos: Vec3, biome: string } | null {
   const failed = memory.getPois(FOOD_LAND_FAILED_POI, { dimension: 'overworld' })
   let best: { pos: Vec3, biome: string, d: number } | null = null
   for (const p of memory.getPois(FOOD_BIOME_POI, { dimension: 'overworld' })) {
     if (failed.some(f => Math.hypot(f.x - p.x, f.z - p.z) <= FAILED_LAND_RADIUS)) continue
     if (away != null && Math.hypot(away.x - p.x, away.z - p.z) <= FED_RADIUS) continue
+    if (!only(p)) continue
     const d = Math.hypot(p.x - from.x, p.z - from.z)
     if (d > FOOD_TRIP_MAX || (best != null && d >= best.d)) continue
     best = { pos: new Vec3(p.x, p.y, p.z), biome: p.note ?? '?', d }
@@ -217,20 +242,32 @@ export function ringPoints (center: { x: number, z: number }, radius: number): A
  */
 export async function surveySeed (biomes: SeedBiomes, survey: BiomeSurvey, memory: WorldMemory, center: { x: number, z: number }, signal?: AbortSignal): Promise<number> {
   let n = 0
+  const read = async (x: number, z: number): Promise<ChunkSurface> => {
+    throwIfAborted(signal)
+    const key = `${x},${z}`
+    let s = survey.seedReads.get(key)
+    if (s == null) {
+      const r = await biomes.surface(x, z)
+      s = { x: r.x, y: r.y - 1, z: r.z, biome: r.biome }
+      survey.seedReads.set(key, s)
+      n++
+    }
+    survey.note(s)
+    return s
+  }
   for (const r of SEED_RINGS) {
     let found = false
     for (const p of ringPoints(center, r)) {
-      throwIfAborted(signal)
-      const key = `${p.x},${p.z}`
-      let s = survey.seedReads.get(key)
-      if (s == null) {
-        const read = await biomes.surface(p.x, p.z)
-        s = { x: read.x, y: read.y - 1, z: read.z, biome: read.biome }
-        survey.seedReads.set(key, s)
-        n++
+      if (!MEAT_BIOMES.has((await read(p.x, p.z)).biome)) continue
+      // (wide: most of the reads about it food biomes too)
+      let meat = 1
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        if (MEAT_BIOMES.has((await read(p.x + dx * SEED_PATCH_OFFSET, p.z + dz * SEED_PATCH_OFFSET)).biome)) meat++
       }
-      survey.note(s)
-      if (MEAT_BIOMES.has(s.biome)) found = true
+      if (meat >= 3) {
+        survey.seedWide.push(p)
+        found = true
+      }
     }
     if (found) break
   }
@@ -299,7 +336,9 @@ export async function seekFoodLand (bot: Bot, args: FoodLandArgs, signal?: Abort
     if (memory.getPois(FOOD_LAND_FAILED_POI, { dimension: 'overworld' }).every(f => Math.hypot(f.x - center.x, f.z - center.z) > FED_RADIUS)) memory.addPoi(FOOD_LAND_FAILED_POI, center, 'overworld')
   }
   const why = barren === true ? 'no food biome about home' : `no ${LAND_ANIMALS.join(', ')} found about ${center.toString()}`
-  let dest = nearestFoodBiome(memory, bot.entity.position, center)
+  // a wide food land first (FOOD_PATCH_CHUNKS), the seed's read for one, then a narrow one, then a scouting
+  const wide = (p: { x: number, z: number }): boolean => survey.wide(p)
+  let dest = nearestFoodBiome(memory, bot.entity.position, center, wide)
   // the seed's biomes, once a home
   if (dest == null && args.seed != null && !memory.getPois(SEED_SURVEYED_POI, { dimension: 'overworld' }).some(p => Math.hypot(p.x - center.x, p.z - center.z) <= FED_RADIUS)) {
     const biomes = await (args.openSeed ?? openSeedBiomes)(args.seed, bot.version)
@@ -313,9 +352,10 @@ export async function seekFoodLand (bot: Bot, args: FoodLandArgs, signal?: Abort
       } finally {
         await biomes.dispose().catch(() => {})
       }
-      dest = nearestFoodBiome(memory, bot.entity.position, center)
+      dest = nearestFoodBiome(memory, bot.entity.position, center, wide)
     }
   }
+  dest ??= nearestFoodBiome(memory, bot.entity.position, center)
   // scouted for: out downhill, the chunks surveyed after each hop, until a food biome is noted
   for (let tries = 0; dest == null && tries < SCOUT_DIRECTIONS; tries++) {
     const i = scoutDirection(survey, memory, center)

@@ -154,14 +154,14 @@ test('seekFoodLand with the seed: the rings read about home until one has a food
   const memory = new WorldMemory()
   const survey = new BiomeSurvey(bot, memory)
   const reads: string[] = []
-  const seedLand = { surface: async (x: number, z: number) => { reads.push(`${x} ${z}`); return { x, z, y: 80, biome: z <= -200 && Math.abs(x) < 10 ? 'taiga' : 'grove' } }, dispose: async () => {} }
+  const seedLand = { surface: async (x: number, z: number) => { reads.push(`${x} ${z}`); return { x, z, y: 80, biome: z <= -200 && Math.abs(x) < 60 ? 'taiga' : 'grove' } }, dispose: async () => {} }
   const go = async (target: Vec3): Promise<void> => { bot.entity.position = target.clone() }
   const land = await seekFoodLand(bot, { survey, memory, home: new Vec3(0, 120, 0), misses: () => 0, forgetLand: () => {}, travel: go, seed: '31337', openSeed: async () => seedLand })
   assert.ok(land != null && land.z === -SEED_RINGS[1] && land.x === 0, String(land))
-  assert.equal(reads.length, 16, 'two rings of 8')
+  assert.equal(reads.length, 20, 'two rings of 8, and the 4 about the taiga read (wide: 3 of the 4 taiga too)')
   // read once: a survey run again (a reflex's preemption) reads nothing again
   assert.equal(await surveySeed(seedLand, survey, memory, { x: 0, z: 0 }), 0)
-  assert.equal(reads.length, 16)
+  assert.equal(reads.length, 20)
 })
 
 test('seekFoodLand notes the food land before the trip there: one cut off still has the food work go out about it', async () => {
@@ -186,5 +186,20 @@ test('seekFoodLand walks again while a trip that ended short got the bot nearer,
     await seekFoodLand(bot, { survey: new BiomeSurvey(bot, memory), memory, home: new Vec3(0, 120, 0), misses: () => 0, forgetLand: () => {}, travel: go })
     // 30 a walk: 4 walks (to x -120, 160 blocks short of 40 of it, the tries' end); none: 1
     assert.equal(trips, step > 0 ? 4 : 1)
+  }
+})
+
+test('seekFoodLand goes to a wide food land (FOOD_PATCH_CHUNKS surveyed about it) over a nearer patch of a few chunks; the patch when none is wide', async () => {
+  // a snowy taiga patch of 4 chunks 110 west, plains wide 300 east
+  const land: Land = (x, z) => x > 280 ? { biome: 'plains', y: 64 } : (x > -130 && x < -90 && z > -16 && z < 16) ? { biome: 'snowy_taiga', y: 90 } : { biome: 'grove', y: 120 }
+  for (const plains of [true, false]) {
+    const bot = fakeBot('26.3', land, 30)
+    const memory = new WorldMemory()
+    const survey = new BiomeSurvey(bot, memory)
+    survey.survey(4000)
+    if (!plains) for (const p of memory.getPois(FOOD_BIOME_POI)) if (p.x > 200) memory.removePoi(FOOD_BIOME_POI, p)
+    const to = await seekFoodLand(bot, { survey, memory, home: new Vec3(0, 120, 0), misses: () => 0, forgetLand: () => {}, travel: async (t) => { bot.entity.position = t.clone() } })
+    assert.ok(to != null)
+    assert.ok(plains ? to.x > 280 : to.x < -90, `${String(plains)}: ${to.toString()}`)
   }
 })
