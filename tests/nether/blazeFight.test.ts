@@ -775,3 +775,35 @@ test('fillNook fights off a blaze on the bot (within 3) before the next block, a
   }
   assert.deepEqual(order, ['fight blaze', 'place (-1, 64, 0)', 'place (0, 64, -1)'])
 })
+
+test('fillNook with a shield: a blaze in sight about to shoot is taken on the shield, faced, before the next block goes in, and the block after its volley', async () => {
+  const { fillNook } = await import('../../src/nether/blazeFight')
+  const placeModule = require('../../src/skills/placeBlock')
+  const { fakeBot: fb, item: it, entity: en } = await import('../reflexes/fakeBot')
+  // charged (first seen so: it may shoot at once), 6 off
+  const blaze = en({ name: 'blaze', position: new Vec3(0.5, 64, 6.5), meta: { health: 20, flags: 1 } })
+  const bot = fb({ items: [it('cobblestone', 16), it('stone_sword')], offhand: it('shield'), entities: [blaze] })
+  ;(bot as any).world = { raycast: () => null }
+  bot.equip = async (i: any, dest: string) => { if (dest === 'hand') bot.heldItem = i }
+  const order: string[] = []
+  bot.activateItem = () => { bot.usingHeldItem = true; order.push('shield') }
+  bot.deactivateItem = () => { bot.usingHeldItem = false; order.push('down') }
+  let looked: Vec3 | null = null
+  bot.lookAt = async (p: Vec3) => { looked = p }
+  const realPlace = placeModule.placeBlock
+  placeModule.placeBlock = async (_b: unknown, a: any) => { order.push(`place ${a.pos.toString()}`); return { pos: a.pos, block: a.item, placed: true } }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    const done = fillNook(bot, [new Vec3(-1, 64, 0)])
+    await new Promise(resolve => setTimeout(resolve, 60))
+    assert.deepEqual(order, ['shield'], 'behind the shield, no block yet')
+    assert.ok(looked != null && (looked as Vec3).z > 6, 'faced at it')
+    // its volley over (the flag off) and its fireballs' flight gone by
+    blaze.metadata[16] = 0
+    assert.equal(await done, 0)
+  } finally {
+    clearInterval(ticking)
+    placeModule.placeBlock = realPlace
+  }
+  assert.deepEqual(order, ['shield', 'down', 'place (-1, 64, 0)'])
+})

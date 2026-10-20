@@ -919,6 +919,9 @@ export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: Abort
   return missed
 }
 
+/** the most ticks a nook's next block waits behind the shield for the blazes about to hit the bot (clearBlazesNear) */
+export const NOOK_GUARD_TICKS = 200
+
 /** a blaze this near the bot (in its melee reach soon: BlazeAttackGoal hits within 2) is fought before a nook's next block */
 export const NOOK_BLAZE_CLEAR = 3
 
@@ -929,6 +932,11 @@ export const NOOK_BLAZE_CLEAR = 3
  * full-26.3-fresh-d's spot). Resolves the ones fought.
  */
 export async function clearBlazesNear (bot: Bot, signal?: AbortSignal): Promise<number> {
+  // with a shield: held off where the bot stands till nothing's about to hit it (holdOffBlazes untilSafe: the shield
+  // up toward a blaze about to shoot or a fireball coming, the sword at one in reach): a 26.3 bot with a stone sword
+  // putting up its melee nook 2 off seed 2's throne spawner at (-277, 77, -159) fought the one on it with its back to
+  // the rest, their fireballs unblocked, and burned there, the nook not built, two runs of two (BLAZE_KIT=q3)
+  if (countItems(bot, 'shield') > 0) return (await holdOffBlazes(bot, { signal, maxTicks: NOOK_GUARD_TICKS, untilSafe: true })).kills
   let fought = 0
   for (let i = 0; i < 4; i++) {
     const blaze = Object.values(bot.entities)
@@ -994,6 +1002,11 @@ export interface HoldOffOptions {
   quietTicks?: number
   /** blazes further than this aren't shot (default 24) */
   shootRange?: number
+  /**
+   * done as soon as nothing is about to hit the bot (no blaze that sees it about to shoot, no small fireball coming,
+   * none in the sword's reach), the bow left be: a nook's next block goes in then (fillNook)
+   */
+  untilSafe?: boolean
 }
 
 /**
@@ -1061,6 +1074,7 @@ export async function holdOffBlazes (bot: Bot, opts: HoldOffOptions = {}): Promi
       }
       const eye = eyePosition(bot)
       const close = seeing.find(b => distanceToBox(eye, entityBox(b)) <= 2.9)
+      if (opts.untilSafe === true && close == null && danger.length === 0 && fireball == null) break
       if (close != null) {
         release()
         await hold(bestMeleeWeapon(bot, 'blaze'))
@@ -1074,7 +1088,7 @@ export async function holdOffBlazes (bot: Bot, opts: HoldOffOptions = {}): Promi
         await waitTicks(bot, 1, signal)
         continue
       }
-      const bow = bot.inventory.items().find(i => i.name === 'bow')
+      const bow = opts.untilSafe === true ? undefined : bot.inventory.items().find(i => i.name === 'bow')
       if (bow != null && countItems(bot, ARROWS) > 0) {
         if (drawTarget != null && (!isAlive(bot, drawTarget) || !seeing.includes(drawTarget))) release()
         const target: Entity | null = drawTarget ?? seeing.filter(b => b.position.distanceTo(me) <= shootRange).find(b => aim(bot, b, { leadTicks: FULL_DRAW, world }) != null) ?? null
