@@ -67,6 +67,11 @@ export interface FluidSource {
 export const RARE_FIND = 16000
 /** a cobweb's find when none is in sight or remembered: a mineshaft is a cave's luck */
 export const COBWEB_FIND = 8000
+/**
+ * the blocks found in the caves only (a mineshaft's cobwebs, by the cave spiders' spawners): no source for a bot not fit
+ * for the caves (ObtainOptions.caves, skills/caves caveReady)
+ */
+export const CAVE_BLOCKS = ['cobweb']
 
 function block (name: string, drops: Drop[] | string, find: number, each: number, dimension: Dimension = 'overworld'): BlockSource {
   return { block: name, drops: typeof drops === 'string' ? [{ item: drops, count: 1 }] : drops, dimension, find, each }

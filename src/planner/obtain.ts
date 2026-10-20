@@ -6,7 +6,7 @@ import type { RegistryLike } from '../core/registry'
 import { itemTags } from '../core/tags'
 import { recipesFor, type CraftRecipe } from './recipes'
 import {
-  BARTER, BARTER_FIND, BARTER_TICKS_PER_INGOT, BLOCK_SOURCES, CRAFT_TICKS, DIMENSION_TRAVEL, FIGHT_TICKS, FILL_TICKS, FISHING, FLUIDS,
+  BARTER, BARTER_FIND, BARTER_TICKS_PER_INGOT, BLOCK_SOURCES, CAVE_BLOCKS, CRAFT_TICKS, DIMENSION_TRAVEL, FIGHT_TICKS, FILL_TICKS, FISHING, FLUIDS,
   FUELS, GOLD_ARMOR, MOB_SOURCES, PICKUP_TICKS, SMELTING, WALK_TICKS_PER_BLOCK,
   type BarterOffer, type BlockSource, type FluidSource, type MobSource, type SmeltingRecipe
 } from './sources'
@@ -72,6 +72,11 @@ export interface ObtainOptions {
   findCost?: (target: FindTarget) => number | undefined
   /** only what the bot can get down a mine: no surface blocks (logs, sand, plants), no animals (the night's plans) */
   undergroundOnly?: boolean
+  /**
+   * false: no block found in the caves only (CAVE_BLOCKS, a mineshaft's cobwebs) for a bot not fit for them (the
+   * executor's: skills/caves caveReady); default true
+   */
+  caves?: boolean
   /**
    * ticks until a farm already sown with the crop can be harvested (0 when grown, plus the walk there), undefined when
    * none is: such a farm costs that, not a sowing and a growing
@@ -605,6 +610,7 @@ export class Resolver {
 
   private mine (s: State, src: BlockSource, item: string, n: number, path: string[], limit: number): State | null {
     if (this.opts.undergroundOnly === true && !MINE_BLOCKS.test(src.block)) return null
+    if (this.opts.caves === false && CAVE_BLOCKS.includes(src.block)) return null
     const perBlock = src.drops.find(d => d.item === item)?.count ?? 0
     if (perBlock <= 0) return null
     const blockCount = Math.ceil(n / perBlock - 1e-9)

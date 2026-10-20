@@ -372,3 +372,25 @@ test('a bow\'s string from the cobwebs remembered near (a mineshaft\'s), broken 
   assert.equal(night.ok, true)
   assert.equal(mines(night.steps, 'string')[0]?.block, 'cobweb')
 })
+
+test('a bot not fit for the caves (caves: false) plans no cobweb, even remembered near: the bow\'s string from spiders, the bed\'s wool from sheep, the nether\'s arrows as before', () => {
+  const memory = new WorldMemory()
+  for (let i = 0; i < 12; i++) memory.rememberBlock('cobweb', { x: 6 + i, y: 30, z: 0 })
+  const inventory = { iron_sword: 1, stick: 3, crafting_table: 1 }
+  const at = { x: 0, y: 30, z: 0 }
+  const bow = obtain(registry, 'bow', 1, { inventory, memory, position: at, caves: false })
+  assert.equal(bow.ok, true)
+  assert.equal(mines(bow.steps, 'string').length, 0)
+  assert.equal(kills(bow.steps, 'spider').length, 1)
+  const wool = obtain(registry, 'white_wool', 3, { inventory, memory, position: at, caves: false })
+  assert.equal(wool.ok, true)
+  assert.equal(mines(wool.steps, 'string').length, 0)
+  assert.ok(wool.steps.some(s => s.kind === 'kill'), wool.steps.map(s => `${s.kind} ${s.item}`).join(', '))
+  // (the cobwebs near are the cheapest string for one fit for the caves)
+  assert.equal(mines(obtain(registry, 'white_wool', 3, { inventory, memory, position: at }).steps, 'string').length, 1)
+  // the night's mine (undergroundOnly) has no string to plan then
+  assert.equal(obtain(registry, 'string', 3, { inventory, memory, position: at, undergroundOnly: true, caves: false }).ok, false)
+  const arrows = obtain(registry, 'arrow', 32, { inventory, memory, position: at, caves: false })
+  assert.equal(arrows.ok, true)
+  assert.deepEqual(arrows.steps.filter(s => s.kind === 'mine' || s.kind === 'kill').map(s => `${s.kind} ${(s as any).block ?? (s as any).mob}`).sort(), [...new Set(obtain(registry, 'arrow', 32, { inventory, memory, position: at }).steps.filter(s => s.kind === 'mine' || s.kind === 'kill').map(s => `${s.kind} ${(s as any).block ?? (s as any).mob}`))].sort())
+})

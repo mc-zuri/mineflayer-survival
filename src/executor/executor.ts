@@ -18,6 +18,7 @@ import { checkPlan, type PlanStep, type Station } from '../planner/steps'
 import { BASE_POI, baseRecord, type BaseRecord } from '../base/pois'
 import { storeItems } from '../skills/chest'
 import { craft } from '../skills/craft'
+import { caveReady } from '../skills/caves'
 import { placeBlock } from '../skills/placeBlock'
 import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
@@ -375,6 +376,8 @@ export class Executor {
       dimension: this.bot.game?.dimension,
       exclude: [...this.options.exclude, ...(extra.exclude ?? [])],
       findCost: t => this.sightings.cost(t),
+      // no cobweb's string for a bot not fit for the caves: a mineshaft's, by the cave spiders' spawners (caveReady)
+      caves: caveReady(this.bot),
       farmCost: crop => this.farmCost(crop),
       // the herd's surplus a walk away, its calves once grown
       herd: mob => herdSupply(this.bot, this.memory, mob, Number((this.bot.time as any)?.age ?? 0))
