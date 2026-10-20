@@ -894,3 +894,36 @@ test('fetchDrops: a blaze in the sword\'s reach on the way to the rod is met wit
   await tick(3)
   await done
 })
+
+test('fightFromNook: a charged blaze in front of the nook is blocked whether the eyes\' line finds it sees the bot or not', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, nookAround, inFrontOf } = await import('../../src/nether/blazeFight')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  // charged (first seen so), 3 to the side and 3 in front: past the wall's edge
+  const blaze = entity({ name: 'blaze', position: new Vec3(-2.5, 64, 7.5), meta: { health: 20, flags: 1 } })
+  const behind = entity({ name: 'blaze', position: new Vec3(0.5, 64, 14.5), meta: { health: 20, flags: 1 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), items: [item('diamond_sword'), item('cooked_beef', 16)], offhand: item('shield'), entities: [blaze], world: name })
+  // the eyes' line: always a wall in the way
+  bot.world = { raycast: (from: Vec3) => ({ position: from.floored(), intersect: from, boundingBox: 'block', name: 'cobblestone' }) }
+  const log: string[] = []
+  bot.equip = async (it: any, dest: string) => { if (dest === 'hand') bot.heldItem = it }
+  bot.activateItem = () => { bot.usingHeldItem = true; log.push('shield') }
+  bot.deactivateItem = () => { bot.usingHeldItem = false; log.push('down') }
+  let looked: Vec3 | null = null
+  bot.lookAt = async (p: Vec3) => { looked = p }
+  bot.attack = () => {}
+  bot.game.dimension = 'the_nether'
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  assert.ok(inFrontOf(nook, blaze.position) && !inFrontOf(nook, behind.position))
+  const ac = new AbortController()
+  const done = fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 1000 }, ac.signal).catch(err => err)
+  for (let i = 0; i < 5; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  assert.ok(log.includes('shield') && bot.usingHeldItem === true, log.join(' '))
+  assert.ok(looked != null && (looked as Vec3).x < 0, 'faced at it')
+  ac.abort()
+  for (let i = 0; i < 3; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  await done
+})
