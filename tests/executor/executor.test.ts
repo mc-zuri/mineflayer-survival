@@ -178,8 +178,15 @@ test('a hunt that explored and found no animal makes the next plan go for anothe
   const log: string[] = []
   const runners: Record<string, StepRunner<any>> = {
     ...honestRunners(bot, log),
-    // (the hunt's exploring went by a patch of berry bushes and noted it: the taiga's)
-    kill: async (step) => { log.push(describeStep(step)); bot.survival.memory.rememberBlock('sweet_berry_bush', { x: 40, y: 64, z: 0 }); throw new TaskError('NOT_FOUND', `no ${step.mob} found exploring`) },
+    // (the hunt's exploring went by a patch of berry bushes, ripe, and noted it, and ended in sight of it: the taiga's)
+    kill: async (step) => {
+      log.push(describeStep(step))
+      const bush = new Vec3(30, 64, 0)
+      bot.survival.memory.rememberBlock('sweet_berry_bush', bush)
+      bot.findBlocks = ({ matching }: { matching: number | number[] }) => [matching].flat().includes(registry.blocksByName.sweet_berry_bush.id) ? [bush] : []
+      bot.blockAt = (p: Vec3) => p.equals(bush) ? { name: 'sweet_berry_bush', position: p, getProperties: () => ({ age: 3 }) } : null
+      throw new TaskError('NOT_FOUND', `no ${step.mob} found exploring`)
+    },
     smelt: async (step) => {
       log.push(describeStep(step))
       for (const i of [...step.inputs, ...step.fuel]) bot.take(i.name, i.count)
