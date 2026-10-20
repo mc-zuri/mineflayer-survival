@@ -1,11 +1,11 @@
 import type { Bot } from 'mineflayer'
-import { dig } from '../core/actions'
+import { dig, placeAgainst } from '../core/actions'
 import { isAbort } from './errors'
-import { trace } from './util'
+import { type Block, blockReach, trace, withinReach } from './util'
 import { Vec3 } from 'vec3'
 import { creeperSwelling, lowerShield, raiseShield, SwellCounter } from './fight'
 import { isDangerBlock, steerAway, steerToward, fleeHeading } from './steer'
-import { type Entity, distanceToBox, entityBox, eyePosition, isAlive, type SkillOptions, TaskError, throwIfAborted, waitTicks, yawPitchOf } from './combatUtil'
+import { type Entity, distanceToBox, entityBox, eyePosition, isAlive, type SkillOptions, TaskError, throwIfAborted, waitTicks, waitUntil, yawPitchOf } from './combatUtil'
 import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { hotFloorCell, noteHazardLeft } from './hazardCells'
 
@@ -357,87 +357,436 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
 export interface SurfaceOptions extends SkillOptions {
   /** stay up until bot.oxygenLevel is back to this (0 - 20, default 18) */
   recoverTo?: number
+  /** how far the way to air is looked for (default 8) */
   searchRadius?: number
+  /** the game ticks it takes at most (default 300) */
   maxTicks?: number
+  /** the air back, out of the water onto dry ground beside it when there is some (default true) */
+  climbOut?: boolean
 }
 
 /** blocks a bot under water doesn't dig its way up through */
 const UNBREAKABLE_CEILING = new Set(['bedrock', 'barrier', 'end_portal_frame', 'reinforced_deepslate', 'obsidian', 'crying_obsidian', 'lava'])
 
+/** what the escape's searches look at of a cell */
+export type CellLookup = (pos: Vec3) => { name: string, boundingBox: string, getProperties?: () => Record<string, unknown> } | null
+
+/** water as the eyes take it (Entity.isEyeInFluid): a water or bubble column block, a water plant, anything waterlogged */
+export function isWaterCell (b: ReturnType<CellLookup>): boolean {
+  if (b == null) return false
+  return b.name === 'water' || b.name === 'bubble_column' || UNDERWATER_PLANTS.has(b.name) || b.getProperties?.()?.waterlogged === true
+}
+
+/** a cell a body moves through: nothing solid, no lava or fire (water too) */
+function swimmable (b: ReturnType<CellLookup>): boolean {
+  return b != null && b.boundingBox === 'empty' && !isDangerBlock(b.name)
+}
+
+/** a cell the eyes breathe in: no water in it, nothing solid, no lava or fire */
+export function breathable (b: ReturnType<CellLookup>): boolean {
+  return swimmable(b) && !isWaterCell(b)
+}
+
 /**
  * The block to dig for air when the bot is under a ceiling: up from the eyes' cell through the water (up to 3 cells),
  * the first block that isn't water when it is solid and can be dug (a frozen sea's ice, a cave's roof), else null
- * (air there, or nothing to dig). Ice dug over water turns to water (IceBlock.playerDestroy), with the air over it.
+ * (air there, or nothing to dig). Ice dug over water turns to water (IceBlock.playerDestroy), with the air over it; a
+ * flooded cave's roof dug leaves air in its cell (water flows down and sideways, never up: FlowingFluid.spread), the
+ * eyes come up into.
  */
-export function ceilingToDig (nameAt: (pos: Vec3) => { name: string, boundingBox: string } | null, eyes: Vec3): Vec3 | null {
+export function ceilingToDig (nameAt: CellLookup, eyes: Vec3): Vec3 | null {
   for (let dy = 1; dy <= 3; dy++) {
     const pos = eyes.offset(0, dy, 0)
     const b = nameAt(pos)
     if (b == null) return null
-    if (b.name === 'water' || b.name === 'bubble_column') continue
+    if (isWaterCell(b) && b.boundingBox === 'empty') continue
     if (b.boundingBox !== 'block' || UNBREAKABLE_CEILING.has(b.name)) return null
     return pos
   }
   return null
 }
 
+const SWIM_DIRS = [new Vec3(0, 1, 0), new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, -1, 0)]
+
 /**
- * Swims up to air and stays there until the air bar is back. Under ice with no air in reach (a frozen sea) it digs
- * the ice over its head (ceilingToDig): the jump alone held it against the ice until it drowned (26.3).
+ * The way from the feet's cell to the nearest one whose head room breathes (breathable: air over water or ground),
+ * by a breadth-first search over the cells a body 2 high moves through (water or air, nothing solid, no lava): the
+ * cells, the start left out ([] when the start's head room breathes), or null when none is within radius (blocks from
+ * the start) and maxNodes cells. A cave's water reaches the air round its walls this way, not by a straight line.
+ */
+export function pathToAir (lookup: CellLookup, start: Vec3, radius = 8, maxNodes = 6000): Vec3[] | null {
+  start = start.floored()
+  const ok = (p: Vec3): boolean => swimmable(lookup(p))
+  const key = (p: Vec3): string => `${p.x},${p.y},${p.z}`
+  const parent = new Map<string, Vec3 | null>([[key(start), null]])
+  const queue: Vec3[] = [start]
+  for (let head = 0; head < queue.length && head < maxNodes; head++) {
+    const p = queue[head]
+    if (breathable(lookup(p.offset(0, 1, 0))) && (p.equals(start) || ok(p))) {
+      const path: Vec3[] = []
+      for (let at: Vec3 | null = p; at != null && !at.equals(start); at = parent.get(key(at)) ?? null) path.unshift(at)
+      return path
+    }
+    for (const d of SWIM_DIRS) {
+      const n = p.plus(d)
+      if (parent.has(key(n)) || Math.abs(n.x - start.x) > radius || Math.abs(n.y - start.y) > radius || Math.abs(n.z - start.z) > radius) continue
+      // up: the head comes into the cell over the old head's; down: the feet into the one under; across: both
+      const fits = d.y > 0 ? ok(n) && ok(n.offset(0, 1, 0)) : d.y < 0 ? ok(n) : ok(n) && ok(n.offset(0, 1, 0))
+      if (!fits) continue
+      parent.set(key(n), p)
+      queue.push(n)
+    }
+  }
+  return null
+}
+
+/**
+ * Dry ground to climb out onto from the water's top: a cell beside the feet's (the four sides), level with them or
+ * up to 2 over, solid under it, its cell and the one over it breathable; the nearest, the lowest first. Null when
+ * there's none.
+ */
+export function dryStandBeside (lookup: CellLookup, position: Vec3): Vec3 | null {
+  const feet = position.floored()
+  let best: { cell: Vec3, d: number } | null = null
+  for (const side of CARDINAL_SIDES) {
+    for (let dy = 0; dy <= 2; dy++) {
+      const cell = feet.plus(side).offset(0, dy, 0)
+      if (lookup(cell.offset(0, -1, 0))?.boundingBox !== 'block' || !breathable(lookup(cell)) || !breathable(lookup(cell.offset(0, 1, 0)))) continue
+      // the way over: the room over the bot's head for the climb's rise
+      if (dy >= 1 && !swimmable(lookup(feet.offset(0, dy + 1, 0)))) continue
+      const d = Math.hypot(cell.x + 0.5 - position.x, cell.z + 0.5 - position.z) + dy * 0.1
+      if (best == null || d < best.d) best = { cell, d }
+      break
+    }
+  }
+  return best?.cell ?? null
+}
+
+const CARDINAL_SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1)]
+
+/**
+ * How far the box's middle may be from its column's middle and the box still within the column: its half width (0.3)
+ * from the 0.5 to the column's sides, less a margin. Rising under a ledge, the box must be clear of it: a 26.3 bot
+ * 0.12 into its column, its box under the rock beside the column's air, bumped its head at 36.2 with its eyes 0.07
+ * under the water's top and drowned there (full-26.3-fresh-z, t95955); the reflex had stopped steering 0.4 off.
+ */
+export const COLUMN_TOLERANCE = 0.15
+
+/** ticks a cell of a swim takes, about (LivingEntity.travel in water: 0.02 a tick at 0.8 a tick's drag, ~0.1 a tick) */
+export const SWIM_TICKS_PER_CELL = 10
+
+/** ticks a swim to air may go on with no cell gained before the escape turns to digging */
+export const SWIM_STUCK_TICKS = 40
+
+/** the blocks the escape puts under its feet to dig from, or to seal its head's cell (the ones carried most) */
+const POCKET_FILLERS = CLIMB_FILLERS
+
+/**
+ * The keys the escape holds, put on the bot at the start of each tick (physicsTickBegin, before the move): a goto
+ * called off but still running (navigate's 'left behind') set its own between the escape's, and the bot's yaw went
+ * back and forth a tick each way under the ledge it had to get out from under (full-26.3-fresh-z).
+ */
+class Helm {
+  keys: { forward?: boolean, jump?: boolean, sneak?: boolean } = {}
+  yaw: number | null = null
+  private readonly listener = (): void => this.apply()
+
+  constructor (private readonly bot: Bot) { bot.on('physicsTickBegin' as any, this.listener) }
+
+  set (keys: Helm['keys'], yaw: number | null = null): void { this.keys = keys; this.yaw = yaw; this.apply() }
+
+  apply (): void {
+    for (const k of ['forward', 'back', 'left', 'right', 'sprint'] as const) this.bot.setControlState(k, k === 'forward' && this.keys.forward === true)
+    this.bot.setControlState('jump', this.keys.jump === true)
+    this.bot.setControlState('sneak', this.keys.sneak === true)
+    if (this.yaw != null) void this.bot.look(this.yaw, 0, true)
+  }
+
+  release (): void {
+    this.bot.off('physicsTickBegin' as any, this.listener)
+    this.bot.clearControlStates()
+  }
+}
+
+/** the yaw that faces the point from the bot (mineflayer's: 0 north, toward -z) */
+function yawToward (bot: Bot, x: number, z: number): number {
+  return Math.atan2(-(x - bot.entity.position.x), -(z - bot.entity.position.z))
+}
+
+/** the inventory's item that digs the block soonest (the bare hand if none beats it), with its ticks under water */
+function fastestDigger (bot: Bot, block: Block, onGround: boolean): { item: any | null, ticks: number } {
+  // (the helmet's aqua affinity and the effects counted, as mineflayer's bot.digTime does)
+  const helmet: any[] = (bot.inventory.slots[bot.getEquipmentDestSlot('head')] as any)?.enchants ?? []
+  const effects = (bot.entity as any).effects ?? {}
+  const time = (item: any | null): number => typeof block.digTime === 'function'
+    ? block.digTime(item?.type ?? null, false, true, !onGround, [...(item?.enchants ?? []), ...helmet], effects) / 50
+    : Infinity
+  let best: { item: any | null, ticks: number } = { item: null, ticks: time(null) }
+  for (const item of bot.inventory.items()) {
+    const ticks = time(item)
+    if (ticks < best.ticks) best = { item, ticks }
+  }
+  return best
+}
+
+/**
+ * Swims up to air and stays there until the air bar is back, then climbs out of the water onto dry ground beside it
+ * (climbOut). Each look picks the way the air comes soonest:
+ * - a swim (pathToAir): straight up a column whose top breathes, the box first got within the column
+ *   (COLUMN_TOLERANCE), or round a cave's walls to its air, cell by cell;
+ * - a dig of the ceiling over the head (ceilingToDig) with the best tool carried, from the floor (the bot sunk onto it
+ *   when it's near, else a block put under its feet: a dig in water off the ground is 25 times slower,
+ *   Player.getDestroySpeed); the roof's cell comes out air, the head swum up into it;
+ * - with neither, the head's cell sealed with blocks round it and its water scooped with an empty bucket (bucketPocket).
+ * A swim that gains no cell in SWIM_STUCK_TICKS goes to the dig. Under ice with no air in reach (a frozen sea) the ice
+ * is dug: the jump alone held a 26.3 bot against the ice until it drowned.
  */
 export async function surface (bot: Bot, opts: SurfaceOptions = {}): Promise<{ ticks: number }> {
   const recoverTo = opts.recoverTo ?? 18
   const radius = opts.searchRadius ?? 8
   const maxTicks = opts.maxTicks ?? 300
-  let target: Vec3 | null = null
+  const lookup: CellLookup = p => bot.blockAt(p) as any
+  let ticks = 0
+  const onTick = (): void => { ticks++ }
+  const timeLeft = (): boolean => ticks < maxTicks
+  bot.on('physicsTick', onTick)
+  const helm = new Helm(bot)
+  let path: Vec3[] | null = null
+  let plannedAt = -Infinity
+  let progressAt = 0
+  let progressLeft = Infinity
+  let swimStuck = false
+  let pocketTried = false
+  let climbTicks = 0
+  let climbTo: Vec3 | null = null
+  const failedDigs = new Set<string>()
+  let start: Vec3 | null = null
   try {
-    for (let t = 0; t < maxTicks; t++) {
+    // a goto still under way (one a reflex's preemption called off, not yet back) is told again
+    void (bot.pathfinder as any)?.cancel?.()?.catch?.(() => {})
+    while (timeLeft()) {
       throwIfAborted(opts.signal)
-      if (!headInWater(bot)) {
-        if (bot.oxygenLevel >= recoverTo) return { ticks: t }
-        // keep the head up
-        bot.setControlState('forward', false)
-        bot.setControlState('jump', true)
+      const pos = bot.entity.position
+      // a climb under way goes on through the bobs that put the eyes back under the water's top
+      const climbing = climbTicks > 0 && climbTicks < CLIMB_OUT_TICKS && bot.oxygenLevel > CLIMB_MIN_AIR
+      if (!headInWater(bot) || climbing) {
+        if (bot.oxygenLevel >= recoverTo || climbing) {
+          // out onto dry ground: the foreground's walk starts from it, not from a jump over the water it sinks back
+          // into (the same 26.3 bot came up under the tunnel 260 times a night, the path planned from its jump each
+          // time and failed 'too low' as it sank, until the air ran out: full-26.3-fresh-z)
+          // (done once it stands on the ground out of the water: not on its jump out, over the water still)
+          const inWater = (bot.entity as any).isInWater === true
+          const ashore = bot.entity.onGround && !inWater
+          if (climbTo == null && inWater && !ashore && (opts.climbOut ?? true)) climbTo = dryStandBeside(lookup, pos)
+          if (climbTo == null || ashore || climbTicks >= CLIMB_OUT_TICKS) {
+            if (!headInWater(bot)) return { ticks }
+            climbTicks = CLIMB_OUT_TICKS
+            continue
+          }
+          climbTicks++
+          helm.set({ forward: true, jump: true }, yawToward(bot, climbTo.x + 0.5, climbTo.z + 0.5))
+          await waitTicks(bot, 1, opts.signal)
+          continue
+        }
+        // keep the head up, the box in its column
+        const c = pos.floored()
+        const off = Math.max(Math.abs(c.x + 0.5 - pos.x), Math.abs(c.z + 0.5 - pos.z))
+        helm.set({ forward: off > COLUMN_TOLERANCE, jump: true }, off > COLUMN_TOLERANCE ? yawToward(bot, c.x + 0.5, c.z + 0.5) : null)
         await waitTicks(bot, 1, opts.signal)
         continue
       }
-      // the nearest place the head can be in the air: a free block over water or ground
-      if (target == null || t % 20 === 0) {
-        target = nearestSpot(bot, radius, p => {
-          const name = nameAt(bot, p)
-          return (name === 'water' || passable(bot, p, false)) && passable(bot, p.offset(0, 1, 0), false)
-        })
+      const feet = pos.floored()
+      if (path == null || ticks - plannedAt >= 20 || !(path.some(p => p.equals(feet)) || feet.equals(start as Vec3))) {
+        path = swimStuck ? null : pathToAir(lookup, feet, radius)
+        plannedAt = ticks
+        start = feet
       }
-      bot.setControlState('jump', true)
-      if (target == null && t % 10 === 0) {
-        const ceiling = ceilingToDig(p => bot.blockAt(p) as any, eyePosition(bot).floored())
-        const block = ceiling != null ? bot.blockAt(ceiling) : null
-        if (block != null) {
-          try {
-            await dig(bot, block as any, { signal: opts.signal })
-          } catch (err) {
-            if (isAbort(err)) throw err
-          }
-          target = null
-          continue
-        }
+      // drop the cells reached
+      if (path != null) {
+        const i = path.findIndex(p => p.equals(feet))
+        if (i >= 0) path = path.slice(i + 1)
+        if (path.length < progressLeft) { progressLeft = path.length; progressAt = ticks }
+        if (ticks - progressAt > SWIM_STUCK_TICKS) { swimStuck = true; path = null }
       }
-      if (target != null) {
-        const dx = target.x + 0.5 - bot.entity.position.x
-        const dz = target.z + 0.5 - bot.entity.position.z
-        if (Math.hypot(dx, dz) > 0.4) {
-          void bot.look(Math.atan2(-dx, -dz), 0.6, true)
-          bot.setControlState('forward', true)
-        } else {
-          bot.setControlState('forward', false)
-        }
+      const eyes = eyePosition(bot).floored()
+      const ceiling = ceilingToDig(lookup, eyes)
+      const roof = ceiling != null && !failedDigs.has(ceiling.toString()) ? bot.blockAt(ceiling) : null
+      const digTicks = roof != null ? fastestDigger(bot, roof, true).ticks + 20 : Infinity
+      const swimTicks = path != null ? Math.max(1, path.length) * SWIM_TICKS_PER_CELL : Infinity
+      // the way that fits the breath left, the sooner first; the pocket only when neither fits; else the sooner
+      const left = breathTicksLeft(bot)
+      const pocket = !pocketTried && pocketPossible(bot)
+      const swim = path != null && swimTicks <= left && (swimTicks <= digTicks || digTicks > left)
+      const digNow = !swim && roof != null && (digTicks <= left || !pocket)
+      if (path != null && (swim || (!digNow && !pocket))) {
+        swimStep(bot, helm, feet, path)
+        await waitTicks(bot, 1, opts.signal)
+        continue
       }
+      if (digNow && roof != null && ceiling != null) {
+        trace('surface: digging the ceiling', roof.name, 'at', ceiling.toString(), 'in about', Math.round(digTicks), 'ticks; the swim', swimTicks, 'the breath left', left)
+        const dug = await digCeiling(bot, helm, roof, opts.signal)
+        if (!dug) failedDigs.add(ceiling.toString())
+        // a new look: the roof's cell open, the swim's way may be the column now
+        path = null
+        swimStuck = false
+        progressLeft = Infinity
+        progressAt = ticks
+        continue
+      }
+      if (pocket) {
+        pocketTried = true
+        trace('surface: an air pocket at the head, the swim', swimTicks, 'and the dig', Math.round(digTicks), 'over the breath left', left)
+        if (await bucketPocket(bot, helm, opts.signal)) continue
+      }
+      // nowhere known: swim up and hope, and look again
+      helm.set({ jump: true })
+      if (swimStuck && ticks - progressAt > 2 * SWIM_STUCK_TICKS) { swimStuck = false; progressLeft = Infinity; progressAt = ticks }
       await waitTicks(bot, 1, opts.signal)
     }
     throw new TaskError('TIMEOUT', 'no air reached')
   } finally {
-    bot.clearControlStates()
+    bot.off('physicsTick', onTick)
+    helm.release()
   }
+}
+
+/**
+ * The ticks the bot holds out under water from now, about: its air (15 ticks a bubble), then a drowning hit of 2 every
+ * 20 ticks (LivingEntity.baseTick at -20 air) till the health is gone
+ */
+export function breathTicksLeft (bot: Bot): number {
+  return Math.max(0, bot.oxygenLevel) * 15 + Math.max(0, Math.ceil(bot.health / 2) - 1) * 20
+}
+
+/** an air pocket can be made where the head is (bucketPocket): an empty bucket, a filler, the head's cell a source */
+function pocketPossible (bot: Bot): boolean {
+  const water = bot.blockAt(eyePosition(bot).floored())
+  return water?.name === 'water' && Number(water.getProperties?.()?.level) === 0 &&
+    bot.inventory.items().some(i => i.name === 'bucket') && POCKET_FILLERS.some(n => bot.inventory.items().some(i => i.name === n))
+}
+
+/** ticks the escape tries to climb out of the water onto the ground beside it, its air back */
+export const CLIMB_OUT_TICKS = 60
+
+/** the air (bot.oxygenLevel) under which a climb out with the eyes under water is let go for the way up again */
+export const CLIMB_MIN_AIR = 12
+
+/**
+ * A tick of the swim along a way to air: toward the next cell's middle, up with the jump, down with the sneak (in
+ * water it sinks the body, LocalPlayer.aiStep's goDownInWater); a cell over or under is gone to only with the box in
+ * the column (COLUMN_TOLERANCE)
+ */
+function swimStep (bot: Bot, helm: Helm, feet: Vec3, path: Vec3[]): void {
+  const pos = bot.entity.position
+  const next = path[0] ?? feet
+  const across = next.x !== feet.x || next.z !== feet.z
+  const column = across ? next : feet
+  const dx = column.x + 0.5 - pos.x
+  const dz = column.z + 0.5 - pos.z
+  const off = Math.max(Math.abs(dx), Math.abs(dz))
+  const steer = across ? off > 0.05 : off > COLUMN_TOLERANCE
+  const down = next.y < feet.y || (path[1] != null && path[1].y < next.y && !across)
+  // rising with the box still under a ledge is a head bumped short of the air: centred first
+  const rise = !down && (across || off <= COLUMN_TOLERANCE || next.y === feet.y)
+  helm.set({ forward: steer, jump: rise, sneak: down }, steer ? yawToward(bot, column.x + 0.5, column.z + 0.5) : null)
+}
+
+/**
+ * Digs the ceiling block over the head from a stand: the bot sunk onto the floor under it when that's near enough for
+ * the block to be in reach from it, else a block put under its feet against a solid side, else as it floats. False when
+ * the block stayed (out of reach, the dig refused).
+ */
+async function digCeiling (bot: Bot, helm: Helm, roof: Block, signal?: AbortSignal): Promise<boolean> {
+  const lookup: CellLookup = p => bot.blockAt(p) as any
+  if (!bot.entity.onGround) {
+    const feet = bot.entity.position.floored()
+    let floor: number | null = null
+    for (let dy = 1; dy <= 3 && floor == null; dy++) {
+      const under = lookup(feet.offset(0, -dy, 0))
+      if (under?.boundingBox === 'block') floor = feet.y - dy + 1
+      else if (!swimmable(under)) break
+    }
+    const reach = blockReach(bot)
+    if (floor != null && roof.position.y + 0.5 - (floor + 1.62) <= reach - 0.3) {
+      // down onto it with the sneak, the jump let go
+      helm.set({ sneak: true })
+      await waitUntil(bot, () => bot.entity.onGround, 40, signal)
+    } else {
+      const cell = feet.offset(0, -1, 0)
+      const filler = POCKET_FILLERS.find(n => bot.inventory.items().some(i => i.name === n))
+      if (filler != null && swimmable(lookup(cell)) && bot.entity.position.y - cell.y >= 1) {
+        helm.set({})
+        if (await placeInto(bot, cell, filler, signal)) await waitUntil(bot, () => bot.entity.onGround, 20, signal)
+      }
+    }
+  }
+  helm.set({})
+  const { item } = fastestDigger(bot, roof, bot.entity.onGround)
+  try {
+    if (item != null && bot.heldItem?.type !== item.type) await bot.equip(item, 'hand')
+    await dig(bot, roof, { signal })
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('surface: the ceiling not dug:', (err as Error).message)
+  }
+  // the water about it settles (a fluid's tick is 5)
+  await waitTicks(bot, 2, signal)
+  return bot.blockAt(roof.position)?.boundingBox !== 'block'
+}
+
+/** puts the filler into the (water or air) cell against a solid block beside it, the crosshair on its face */
+async function placeInto (bot: Bot, cell: Vec3, filler: string, signal?: AbortSignal): Promise<boolean> {
+  const item = bot.inventory.items().find(i => i.name === filler)
+  if (item == null) return false
+  for (const face of [new Vec3(0, -1, 0), ...CARDINAL_SIDES, new Vec3(0, 1, 0)]) {
+    const against = bot.blockAt(cell.plus(face))
+    if (against?.boundingBox !== 'block' || !withinReach(bot, against.position)) continue
+    try {
+      if (bot.heldItem?.type !== item.type) await bot.equip(item, 'hand')
+      throwIfAborted(signal)
+      if (await placeAgainst(bot, against as any, face.scaled(-1))) {
+        await waitTicks(bot, 2, signal)
+        if (bot.blockAt(cell)?.boundingBox === 'block') return true
+      }
+    } catch (err) {
+      if (isAbort(err)) throw err
+    }
+  }
+  return false
+}
+
+/**
+ * An air pocket where the head is, with nothing else for it (no way to air, no ceiling to dig): the water cells round
+ * the head's cell (its sides and over it) filled with blocks, then the head's water scooped with an empty bucket
+ * (BucketItem.use takes a source block, and the cell sealed, none flows back into it: FlowingFluid.spread). True when
+ * the head's cell came out of the water.
+ */
+async function bucketPocket (bot: Bot, helm: Helm, signal?: AbortSignal): Promise<boolean> {
+  const bucket = bot.inventory.items().find(i => i.name === 'bucket')
+  const filler = POCKET_FILLERS.find(n => bot.inventory.items().some(i => i.name === n))
+  if (bucket == null || filler == null || !pocketPossible(bot)) return false
+  // up against the ceiling first, if one's near: the sides of the head's cell then have its underside to go against
+  helm.set({ jump: true })
+  await waitUntil(bot, () => bot.blockAt(eyePosition(bot).floored().offset(0, 1, 0))?.boundingBox === 'block', 30, signal)
+  const head = eyePosition(bot).floored()
+  if (!pocketPossible(bot)) return false
+  for (const side of [new Vec3(0, 1, 0), ...CARDINAL_SIDES]) {
+    const cell = head.plus(side)
+    if (!isWaterCell(bot.blockAt(cell) as any)) continue
+    if (!await placeInto(bot, cell, filler, signal)) { trace('surface: the pocket side at', cell.toString(), 'not sealed'); return false }
+  }
+  try {
+    await bot.equip(bucket, 'hand')
+    await bot.lookAt(head.offset(0.5, 0.5, 0.5), true)
+    bot.activateItem()
+    await waitTicks(bot, 2, signal)
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('surface: no pocket scooped:', (err as Error).message)
+  }
+  trace('surface: pocket scooped at', head.toString(), 'now', bot.blockAt(head)?.name)
+  return !headInWater(bot)
 }
 
 export interface EvadeCreeperOptions extends SkillOptions {

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { ceilingToDig, headInWater, inHazard, isSafeStand, nearestSpot } from '../../src/skills/escape'
+import { breathTicksLeft, ceilingToDig, dryStandBeside, headInWater, inHazard, isSafeStand, nearestSpot, pathToAir, type CellLookup } from '../../src/skills/escape'
 import { fakeBot } from '../reflexes/fakeBot'
 
 // a lava pool: x 0 - 3, y 63 - 64 lava, stone around and below
@@ -159,4 +159,64 @@ test('evadeCreeper cornered with no shield (a tunnel): hits the creeper as the s
   bot.waitForTicks = async () => { bot.emit('physicsTick') }
   await evadeCreeper(bot, creeper as any, { maxTicks: 40 }).catch(() => {})
   assert.ok(hits >= 2, `${hits} hits`)
+})
+
+/** a world of named cells from a function, water and air (and seagrass) empty, the rest solid */
+function cells (name: (p: Vec3) => string): CellLookup {
+  return p => {
+    const n = name(p)
+    return { name: n, boundingBox: n === 'water' || n === 'air' || n === 'seagrass' ? 'empty' : 'block' }
+  }
+}
+
+test('pathToAir: straight up a 1-wide flooded hole to its tunnel\'s air, by the ledge beside it (full-26.3-fresh-z)', () => {
+  // the pool x -2 to 0, y 0 to 2, z 0 to 3; the tunnel at y 3 and 4 from x 0 east; stone the rest
+  const hole = cells(p => (p.x >= -2 && p.x <= 0 && p.y >= 0 && p.y <= 2 && p.z >= 0 && p.z <= 3) ? 'water'
+    : (p.x >= 0 && p.x <= 4 && p.y >= 3 && p.y <= 4 && p.z === 0) ? 'air' : 'stone')
+  assert.deepStrictEqual(pathToAir(hole, new Vec3(0, 0, 0)), [new Vec3(0, 1, 0), new Vec3(0, 2, 0)])
+  // from the pool's far side: across to the hole's column, then up
+  const far = pathToAir(hole, new Vec3(-2, 0, 2))
+  assert.ok(far != null)
+  assert.deepStrictEqual(far[far.length - 1], new Vec3(0, 2, 0))
+  assert.strictEqual(far.length, 6)
+  // the head room already breathing: no way to go
+  assert.deepStrictEqual(pathToAir(hole, new Vec3(0, 2, 0)), [])
+})
+
+test('pathToAir: a flooded cave round its walls to the air, none past the radius or in a sealed cave', () => {
+  // a cave of water x -2 to 12, y 0 to 2, z -2 to 2 under stone; open to the air over x 10 to 12
+  const cave = (open: boolean): CellLookup => cells(p => (p.x >= -2 && p.x <= 12 && p.y >= 0 && p.y <= 2 && p.z >= -2 && p.z <= 2) ? 'water'
+    : (open && p.x >= 10 && p.x <= 12 && p.y >= 3 && p.y <= 8 && p.z >= -2 && p.z <= 2) ? 'air' : 'stone')
+  const way = pathToAir(cave(true), new Vec3(0, 0, 0), 12)
+  assert.ok(way != null)
+  const end = way[way.length - 1]
+  assert.deepStrictEqual([end.x, end.y], [10, 2])
+  assert.strictEqual(way.length, 12)
+  // a wall in the way (x 5, but for a gap at z 2, y 0 - 1): round it through the gap, 2 high
+  const walled = cells(p => p.x === 5 && !(p.z === 2 && p.y <= 1) && p.y >= 0 && p.y <= 2 && p.z >= -2 && p.z <= 2 ? 'stone' : (cave(true)(p)?.name ?? 'stone'))
+  const round = pathToAir(walled, new Vec3(0, 0, 0), 12)
+  assert.ok(round?.some(p => p.x === 5 && p.z === 2), 'through the gap')
+  assert.strictEqual(pathToAir(cave(true), new Vec3(0, 0, 0), 8), null)
+  assert.strictEqual(pathToAir(cave(false), new Vec3(0, 0, 0), 12), null)
+  // a 1-high gap is no way for a body 2 high
+  const low = cells(p => p.x === 5 && !(p.z === 2 && p.y === 0) && p.y >= 0 && p.y <= 2 && p.z >= -2 && p.z <= 2 ? 'stone' : (cave(true)(p)?.name ?? 'stone'))
+  assert.strictEqual(pathToAir(low, new Vec3(0, 0, 0), 12), null)
+})
+
+test('dryStandBeside: the tunnel\'s floor beside the hole\'s top; none from the bottom of a lake or in open water', () => {
+  const hole = cells(p => (p.x >= -2 && p.x <= 0 && p.y >= 0 && p.y <= 2 && p.z >= 0 && p.z <= 3) ? 'water'
+    : (p.x >= 0 && p.x <= 4 && p.y >= 3 && p.y <= 4 && p.z === 0) ? 'air' : 'stone')
+  // floating at the top (the feet in the top water cell): the tunnel's first cell, a block up
+  assert.deepStrictEqual(dryStandBeside(hole, new Vec3(0.5, 2.3, 0.5)), new Vec3(1, 3, 0))
+  // on the floor, 3 under it: out of a climb's reach
+  assert.strictEqual(dryStandBeside(hole, new Vec3(0.5, 0, 0.5)), null)
+  const sea = cells(p => p.y < 60 ? 'stone' : p.y < 70 ? 'water' : 'air')
+  assert.strictEqual(dryStandBeside(sea, new Vec3(0.5, 69.3, 0.5)), null)
+})
+
+test('ceilingToDig goes up through seagrass as water; breathTicksLeft counts the air and the hits the health takes', () => {
+  const column = cells(p => p.y <= 61 ? 'water' : p.y === 62 ? 'seagrass' : 'stone')
+  assert.deepStrictEqual(ceilingToDig(column, new Vec3(0, 61, 0)), new Vec3(0, 63, 0))
+  assert.strictEqual(breathTicksLeft({ oxygenLevel: 6, health: 20 } as any), 6 * 15 + 9 * 20)
+  assert.strictEqual(breathTicksLeft({ oxygenLevel: 0, health: 2 } as any), 0)
 })
