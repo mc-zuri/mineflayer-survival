@@ -3,7 +3,7 @@ import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import {
   armorPoints, celestialAngle, defaultDigCost, findShelterSpot, isBrightOutside, isEnclosed, leaveAtDay, monstersPreventingRest, nightPlan, roomForBed, sealItem,
-  shelterAt, skyDarken, undergroundAtWork, rockOverHead, inNarrowPassage, countRest, ticksSinceRest, setTicksSinceRest
+  shelterAt, skyDarken, undergroundAtWork, rockOverHead, inNarrowPassage, countRest, ticksSinceRest, setTicksSinceRest, shelter, shelterRunning
 } from '../../src/skills/shelter'
 import type { BlockLookup } from '../../src/skills/placement'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
@@ -208,4 +208,30 @@ test('roomForBed: the nearest cell with two free cells in a line beside it, over
   assert.ok(room != null)
   assert.ok(room.distanceTo(new Vec3(0, 64, 0)) >= 2)
   assert.deepStrictEqual(roomForBed(world(plains), new Vec3(0.5, 64, 0.5), 6), new Vec3(0, 64, 0))
+})
+
+test('shelter: by day a bot not in a hole digs none (a "wait out the night" task resumed by day dug one 431 times, 26.3)', async () => {
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('dirt', 8)], world: plains })
+  bot.time = { timeOfDay: 1000 }
+  bot.dig = async () => { throw new Error('dug by day') }
+  bot.placeBlock = async () => { throw new Error('placed by day') }
+  const result = await shelter(bot, { torch: false })
+  assert.deepStrictEqual({ dug: result.dug, ticks: result.ticks, left: result.left }, { dug: false, ticks: 0, left: false })
+  assert.strictEqual(shelterRunning(bot), false)
+})
+
+test('shelterRunning: true while a shelter() runs, false once it is done', async () => {
+  // a sealed hole: the feet at 61, the head at 62, dirt all round, over and under
+  const hole = (p: Vec3): string => p.x === 0 && p.z === 0 && (p.y === 61 || p.y === 62) ? 'air' : plains(p)
+  const bot = fakeBot({ position: new Vec3(0.5, 61, 0.5), items: [item('dirt', 3)], world: hole })
+  bot.time = { timeOfDay: 13000 }
+  const during: boolean[] = []
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await shelter(bot, { torch: false, leave: false, until: () => { during.push(shelterRunning(bot)); return during.length >= 2 } })
+  } finally {
+    clearInterval(ticker)
+  }
+  assert.deepStrictEqual(during, [true, true])
+  assert.strictEqual(shelterRunning(bot), false)
 })

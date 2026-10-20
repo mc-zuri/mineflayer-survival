@@ -4,7 +4,7 @@ import { eat, bestFoodInInventory } from '../skills/eat'
 import { escapeHazard, evadeCreeper, fleeFrom, headInWater, inHazard, surface } from '../skills/escape'
 import { creeperSwelling, fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
-import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterToLeave, sleepThroughNight, ticksSinceRest, undergroundAtWork, type NightPlan } from '../skills/shelter'
+import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterRunning, shelterToLeave, sleepThroughNight, ticksSinceRest, undergroundAtWork, type NightPlan } from '../skills/shelter'
 import type { Vec3 } from 'vec3'
 import { bestMeleeWeapon } from '../skills/weapons'
 import { hasLineOfSight, isAlive, type Entity } from '../skills/combatUtil'
@@ -484,12 +484,14 @@ export const nightReflex: Reflex = {
     if (bot.game?.dimension != null && !/overworld/.test(String(bot.game.dimension))) return null
     if (botIsBrightOutside(bot)) {
       sleepFailed.delete(bot)
-      // cut off on its way out of the shelter at sunrise (a fight): out the rest of the way
-      if (shelterToLeave(bot) == null) return null
+      // cut off on its way out of the shelter at sunrise (a fight): out the rest of the way; not while a shelter()
+      // task is running, which climbs out by itself (shelterRunning)
+      if (shelterToLeave(bot) == null || shelterRunning(bot)) return null
       return { name: 'night', priority: config.night.priority, detail: 'leave shelter', run: async (signal) => await leaveShelter(bot, signal) }
     }
-    // the night's mining (the runner's schedule) is on its way down: a staircase is a roof within a few blocks
-    if ((bot as any).survival?.nightWork === true) return null
+    // the night's mining (the runner's schedule) is on its way down: a staircase is a roof within a few blocks; and a
+    // shelter() task (the runner's wait for the day) is the night's shelter already
+    if ((bot as any).survival?.nightWork === true || shelterRunning(bot)) return null
     const plan = cachedNightPlan(ctx)
     if (plan === 'fight') return null
     const underground = cachedUnderground(ctx)

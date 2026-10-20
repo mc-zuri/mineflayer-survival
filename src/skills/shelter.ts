@@ -468,6 +468,29 @@ export function leaveAtDay (bot: Bot, opts: { distance?: number, maxWait?: numbe
  * hole like that just waits.
  */
 export async function shelter (bot: Bot, opts: ShelterOptions = {}): Promise<ShelterResult> {
+  sheltering.set(bot, (sheltering.get(bot) ?? 0) + 1)
+  try {
+    return await shelterOnce(bot, opts)
+  } finally {
+    const n = (sheltering.get(bot) ?? 1) - 1
+    if (n <= 0) sheltering.delete(bot)
+    else sheltering.set(bot, n)
+  }
+}
+
+/** the shelter() calls running for each bot (a task's own way out isn't raced by the night reflex's) */
+const sheltering = new WeakMap<Bot, number>()
+
+/**
+ * A shelter() is running for the bot: it comes out of its hole by itself. The night reflex's 'leave shelter' fired
+ * at a 'wait out the night' task climbing out at sunrise, and the two climbs cut each other's digs off ('Digging
+ * aborted', 26.3 full-26.3-m)
+ */
+export function shelterRunning (bot: Bot): boolean {
+  return (sheltering.get(bot) ?? 0) > 0
+}
+
+async function shelterOnce (bot: Bot, opts: ShelterOptions): Promise<ShelterResult> {
   const signal = opts.signal
   const lookup = blockLookup(bot)
   const eatAt = opts.eatAt ?? 14
@@ -477,6 +500,15 @@ export async function shelter (bot: Bot, opts: ShelterOptions = {}): Promise<She
 
   let feet = bot.entity.position.floored()
   let dug = false
+  // by day there's no night to wait out: no hole dug, only the way out of one the bot is still down. A 26.3 bot's
+  // 'wait out the night' task (a respawn far from its trip kit) was preempted by the night reflex and resumed by day,
+  // dug a new hole each time, was preempted again as it climbed out, and spent 4 days (431 tries) in the ground, its
+  // food down to 6 and its health to 4, till a pillager patrol shot it (full-26.3-m)
+  if (!isEnclosed(lookup, feet) && botIsBrightOutside(bot)) {
+    const left = opts.leave !== false && shelterToLeave(bot) != null
+    if (left) await leaveShelter(bot, signal)
+    return { feet, dug: false, ticks: 0, eaten: 0, left }
+  }
   if (!isEnclosed(lookup, feet)) {
     const hasPickaxe = bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))
     const digCost = defaultDigCost(hasPickaxe)

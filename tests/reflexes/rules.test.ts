@@ -7,7 +7,7 @@ import { DEFAULT_REFLEX_CONFIG, type ReflexConfigInput } from '../../src/reflexe
 import type { Reflex } from '../../src/reflexes/types'
 import { CREEPER_IGNITED_INDEX, CREEPER_SWELL_DIR_INDEX, creeperSwelling } from '../../src/skills/fight'
 import { metadataIndex } from '../../src/skills/combatUtil'
-import { rememberShelter, setTicksSinceRest, shelterToLeave } from '../../src/skills/shelter'
+import { rememberShelter, setTicksSinceRest, shelter, shelterToLeave } from '../../src/skills/shelter'
 import { entity, fakeBot, item, type FakeBotInput } from './fakeBot'
 
 const at = (x: number, y = 64, z = 0.5): Vec3 => new Vec3(0.5 + x, y, z)
@@ -405,4 +405,29 @@ test('a slime, a magma cube, a phantom and a hoglin are hostiles too (minecraft-
   for (const name of ['slime', 'magma_cube', 'phantom', 'hoglin', 'zombie']) assert.strictEqual(isHostile(bot, entity({ name, position: at(3) })), true, name)
   for (const name of ['cow', 'villager']) assert.strictEqual(isHostile(bot, entity({ name, position: at(3) })), false, name)
   assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'slime', position: at(3) })], items: [item('diamond_sword', 1)] }), 'fight slime')
+})
+
+test('night reflex: no shelter by night nor leave-shelter by day while a shelter() task runs (it gets in and out by itself)', async () => {
+  // a bot in a sealed hole, the feet at 61 (its column's surface cell at 64)
+  const hole = (p: Vec3): string => p.x === 0 && p.z === 0 && (p.y === 61 || p.y === 62) ? 'air' : p.y < 64 ? 'dirt' : 'air'
+  const bot = fakeBot({ position: new Vec3(0.5, 61, 0.5), items: [item('dirt', 3)], world: hole })
+  bot.game.dimension = 'overworld'
+  bot.time = { timeOfDay: 13000 }
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const seen: Array<string | null> = []
+  // the runner's 'wait out the night' task in its hole: the night and then the morning
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  await shelter(bot, {
+    torch: false,
+    leave: false,
+    until: () => {
+      seen.push(nightReflex.check(engine.context())?.detail ?? null)
+      bot.time.timeOfDay = 1000
+      return seen.length >= 2
+    }
+  }).finally(() => clearInterval(ticker))
+  assert.deepStrictEqual(seen, [null, null])
+  // the task done (cut off, say) with the bot still down its column: the reflex gets it out
+  assert.strictEqual(nightReflex.check(engine.context())?.detail, 'leave shelter')
+  engine.stop()
 })

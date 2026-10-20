@@ -222,6 +222,17 @@ export function waitOutNightFirst (timeOfDay: number, distance: number, armor: n
   return canSleepNow(timeOfDay, false) && distance > NIGHT_WALK_DISTANCE && armor === 0
 }
 
+/**
+ * The night waited out where the bot is: the bed by if there's one, else a hole dug in the ground (shelter). A try
+ * resumed by day (the task preempted by a reflex) has no night left to wait out.
+ */
+export async function waitOutTheNight (bot: Bot, signal: AbortSignal): Promise<unknown> {
+  if (!canSleepNow(bot.time?.timeOfDay ?? 0, false)) return
+  const bed = typeof bot.findBlock === 'function' ? findBlock(bot, { matching: blockIdsNamed(bot, isBed), maxDistance: 16 }) : null
+  if (bed != null) return await sleepThroughNight(bot, { signal, bedDistance: 16 })
+  return await shelter(bot, { signal })
+}
+
 /** whether a death spot is worth going back to: in this dimension, not underground, in lava or the void, the items not gone yet */
 export function deathSpotWorthIt (death: { x: number, y: number, z: number, dimension: string, seen: number, underground?: boolean } | null, now: { tick: number, dimension: string, position: Vec3, minY: number, blockAt: (pos: Vec3) => { name: string } | null }, maxTicks: number): boolean {
   if (death == null || death.dimension !== now.dimension) return false
@@ -1203,12 +1214,7 @@ export class Runner {
     const far = bot.entity.position.distanceTo(at)
     if (waitOutNightFirst(bot.time?.timeOfDay ?? 0, far, armorPoints(bot))) {
       this.log(`night, ${far.toFixed(0)} blocks from the trip kit with no armor: the night waited out first`)
-      await this.executor.task('wait out the night', async (s) => {
-        // the respawn's bed if it is by, else a hole dug in the ground
-        const bed = typeof bot.findBlock === 'function' ? findBlock(bot, { matching: blockIdsNamed(bot, isBed), maxDistance: 16 }) : null
-        if (bed != null) return await sleepThroughNight(bot, { signal: s, bedDistance: 16 })
-        return await shelter(bot, { signal: s })
-      }, signal).catch(err => {
+      await this.executor.task('wait out the night', async (s) => await waitOutTheNight(bot, s), signal).catch(err => {
         if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
         this.log(`the night: ${(err as Error).message}`)
       })
