@@ -411,3 +411,56 @@ test('collectBlazeRods keeps the spawner from the pathfinder breaking it through
     fightModule.fightFromNook = realFight
   }
 })
+
+test('the camp is out of the spawner\'s spawn volume: 2 off, a melee nook\'s stand, isn\'t one (full-26.3-fresh-d)', async () => {
+  const { atCamp, BLAZE_STAND_OFF } = await import('../../src/nether/fortressSkills')
+  assert.equal(atCamp(2, BLAZE_STAND_OFF), false)
+  assert.equal(atCamp(5, BLAZE_STAND_OFF), false)
+  assert.equal(atCamp(6, BLAZE_STAND_OFF), true)
+  assert.equal(atCamp(9, BLAZE_STAND_OFF), true)
+  assert.equal(atCamp(12.5, BLAZE_STAND_OFF), false)
+})
+
+test('the camp\'s meal waits while a blaze is within 6 (unless starving): it is fought first, then eaten (full-26.3-fresh-d: eating at 19 health, food 7, among two blazes)', async () => {
+  const { campMealDue, collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  assert.equal(campMealDue(7, 19, 12, 2), false)
+  assert.equal(campMealDue(7, 19, 12, 0), true)
+  assert.equal(campMealDue(5, 19, 12, 1), true)
+  assert.equal(campMealDue(16, 10, 12, 0), true)
+  assert.equal(campMealDue(16, 10, 12, 1), false)
+  assert.equal(campMealDue(20, 10, 12, 0), false)
+  const fightModule = require('../../src/skills/fight')
+  const eatModule = require('../../src/skills/eat')
+  const gridModule = require('../../src/skills/gridWalk')
+  const bot = fakeBot({ position: new Vec3(8.5, 64, 0.5), world: (p: any) => p.y < 64 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).health = 19
+  ;(bot as any).food = 7
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  ;(bot as any).lookAt = async () => {}
+  const blaze: any = { id: 9, name: 'blaze', type: 'hostile', position: new Vec3(9.5, 64, 0.5), metadata: [] }
+  bot.entities[9] = blaze
+  const order: string[] = []
+  const realFight = fightModule.fight
+  const realEat = eatModule.eat
+  const realMove = gridModule.moveNear
+  fightModule.fight = async (_b: unknown, target: any) => {
+    order.push(`fight ${target.name}`)
+    delete bot.entities[9]
+    bot.emit('entityDead', blaze)
+    return { killed: true, hits: 3, ticks: 30, lastPosition: blaze.position }
+  }
+  eatModule.eat = async () => { order.push(`eat with ${Object.values(bot.entities).filter((e: any) => e.name === 'blaze').length} blazes`); (bot as any).food = 20 }
+  gridModule.moveNear = async () => {}
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 200, safety: false, nook: false }), /TIMEOUT|rods/)
+  } finally {
+    clearInterval(ticking)
+    fightModule.fight = realFight
+    eatModule.eat = realEat
+    gridModule.moveNear = realMove
+  }
+  assert.deepEqual(order.slice(0, 2), ['fight blaze', 'eat with 0 blazes'], order.join(' | '))
+})

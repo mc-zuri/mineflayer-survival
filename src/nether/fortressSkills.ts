@@ -27,7 +27,7 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, planBlazeNooks, withBlocksKept } from './blazeFight'
+import { SPAWN_RANGE, type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, planBlazeNooks, withBlocksKept } from './blazeFight'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
 
@@ -234,6 +234,32 @@ export const BLAZE_RETREATS = 6
 export const BLAZE_EAT_FOOD = 14
 /** how far from a spawner the blaze fight camps */
 export const BLAZE_STAND_OFF = 9
+
+/**
+ * Whether the bot `distance` from the spawner is at its camp: within standOff + 3, and out of the spawn volume
+ * (BaseSpawner: each blaze comes out within SPAWN_RANGE of the spawner's middle across). A 26.3 bot left on a melee
+ * nook's stand 2 off the spawner, the nook's walls not put up, took that for its camp and fought on there with the
+ * blazes coming out on top of it, and burned (full-26.3-fresh-d)
+ */
+export function atCamp (distance: number, standOff: number): boolean {
+  return distance <= standOff + 3 && distance > SPAWN_RANGE + 1
+}
+
+/** a blaze this near and the camp's meal waits for it to be fought (BlazeAttackGoal hits within 2, every 20 ticks) */
+export const BLAZE_MEAL_CLEAR = 6
+/** at or under this food level the camp eats with blazes on it all the same */
+export const BLAZE_STARVING = 6
+
+/**
+ * Whether the camp's fight eats now: hurt (at `eatAt` or under) with room for it, or the food at BLAZE_EAT_FOOD or
+ * under; not with a blaze within BLAZE_MEAL_CLEAR (`close` of them) unless starving. A 26.3 bot at 19 health and food 7
+ * stood eating with two blazes on it, 0.5 and 2.4 off, punched and burning, 4 and more a hit, and died in 60 ticks
+ * (full-26.3-fresh-d)
+ */
+export function campMealDue (food: number, health: number, eatAt: number, close: number): boolean {
+  const want = (health <= eatAt && food < 20) || food <= BLAZE_EAT_FOOD
+  return want && (close === 0 || food <= BLAZE_STARVING)
+}
 
 /** the health the blaze fight backs off at: higher among 3 blazes or more (their fireballs come together) */
 export function retreatHealth (blazes: number, set?: number): number {
@@ -570,7 +596,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     const spots = campSpots(bot, spawner, standOff)
     /** to a camp spot by the spawner; resolves whether the bot got there (or near the spawner) */
     const camp = async (): Promise<boolean> => {
-      if (bot.entity.position.distanceTo(spawner) <= standOff + 3 && seesFrom(bot, eyePosition(bot), spawner.offset(0.5, 0.5, 0.5), spawner)) return true
+      if (atCamp(bot.entity.position.distanceTo(spawner), standOff) && seesFrom(bot, eyePosition(bot), spawner.offset(0.5, 0.5, 0.5), spawner)) return true
       // from afar (back from the portal after a death): a trip to the fortress first, by the way walked before (the
       // nether's trail) and in hops, not one goto on a straight line across the lava sea
       if (farFrom(spawner)) {
@@ -679,7 +705,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
           lowerShield(bot)
           continue
         }
-        if ((bot.health <= (args.eatAt ?? 12) && bot.food < 20) || bot.food <= BLAZE_EAT_FOOD) {
+        if (campMealDue(bot.food, bot.health, args.eatAt ?? 12, blazesInView(bot, BLAZE_MEAL_CLEAR).length)) {
           try { await eat(bot, { signal }) } catch (err) { if (isAbort(err)) throw err }
         }
         // the spawner's blazes, and any that came at the bot
