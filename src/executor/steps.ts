@@ -108,8 +108,13 @@ export function blockSubstitutes (step: Pick<MineStep, 'block' | 'blocks'>): str
 }
 
 /** animals that will do instead of the step's: any other meat animal for meat */
+/** the meats the meat animals drop: a hunt for one may take another animal's (the plan goes on with that meat) */
+const MEATS = ['beef', 'porkchop', 'mutton', 'chicken', 'rabbit']
+
 export function mobSubstitutes (step: Pick<KillStep, 'mob' | 'item'>): string[] {
-  if (!MEAT_ANIMALS.includes(step.mob)) return []
+  // (for its meat only: a sheep's wool, a cow's leather, a chicken's feather is that animal's; a 26.3 bot hunted pigs
+  // 15 plans in a row 'for white_wool', the base's bed never made)
+  if (!MEAT_ANIMALS.includes(step.mob) || !MEATS.includes(step.item)) return []
   return MEAT_ANIMALS.filter(m => m !== step.mob)
 }
 

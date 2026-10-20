@@ -76,6 +76,10 @@ test('blockSubstitutes and mobSubstitutes: another wood, deepslate for stone, an
   assert.deepEqual(blockSubstitutes({ block: 'stone', blocks: ['stone'] }), ['deepslate'])
   assert.deepEqual(blockSubstitutes({ block: 'iron_ore', blocks: ['iron_ore', 'deepslate_iron_ore'] }), [])
   assert.deepEqual(mobSubstitutes({ mob: 'cow', item: 'beef' }), ['pig', 'sheep', 'chicken', 'rabbit'])
+  // for what only that animal gives, none: a pig's no sheep for the wool
+  assert.deepEqual(mobSubstitutes({ mob: 'sheep', item: 'white_wool' }), [])
+  assert.deepEqual(mobSubstitutes({ mob: 'cow', item: 'leather' }), [])
+  assert.deepEqual(mobSubstitutes({ mob: 'chicken', item: 'feather' }), [])
   assert.deepEqual(mobSubstitutes({ mob: 'blaze', item: 'blaze_rod' }), [])
 })
 
