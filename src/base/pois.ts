@@ -11,8 +11,28 @@ export const BASE_POI = {
   /** a chest position of the blueprint not built yet (placed when the built ones fill) */
   spareChest: 'base_spare_chest',
   /** the box of the base, shell included: min corner, with the max corner in the note as "x,y,z" */
-  bounds: 'base_bounds'
+  bounds: 'base_bounds',
+  /** the build as it was left: at the origin, the note "missing/total" of the blueprint's blocks */
+  build: 'base_build'
 } as const
+
+/** the share of the blueprint's blocks a base may be missing and be built (the base milestone's) */
+export const BASE_MISSING_SHARE = 0.2
+/** the builds of one base after which it's taken as built whatever is missing (the game goes on with what there is) */
+export const BASE_BUILD_TRIES = 3
+
+/**
+ * Whether the base the memory has is built: no build noted (a save from before it was), or at most BASE_MISSING_SHARE
+ * of its blocks missing. hunt2's runs counted 'base built: … 175 missing' a base reached
+ */
+export function baseBuilt (memory: Pick<WorldMemory, 'base' | 'getPois'>): boolean {
+  if (memory.base == null) return false
+  const note = memory.getPois(BASE_POI.build, { dimension: memory.base.dimension })[0]?.note
+  const m = note != null ? /^(\d+)\/(\d+)(?:\/(\d+))?$/.exec(note) : null
+  if (m == null) return true
+  const total = Number(m[2])
+  return total === 0 || Number(m[1]) / total <= BASE_MISSING_SHARE || Number(m[3] ?? 1) >= BASE_BUILD_TRIES
+}
 
 export interface BaseRecord {
   origin: Pos

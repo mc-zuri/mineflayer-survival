@@ -393,7 +393,10 @@ const defaultHandlers: Partial<Record<MilestoneId, MilestoneHandler>> = {
     // creeper-proof base is play's base options' (BASE_BLUEPRINT) for later
     // (by the food land when the bot went to one: the spawn's land has no food, foodLand.ts)
     const land = foodLandOf(executor.memory)
-    await buildBase(bot, { blueprint: HOUSE_BLUEPRINT, depths: HOUSE_DEPTHS, chests: 2, ...(land != null ? { around: land } : {}), ...opts, executor, signal, log })
+    // a base left with most of its blocks missing is built on where it is, not sited again (baseBuilt)
+    const base = executor.memory.base
+    const at = base != null && base.dimension === normalizeDimension(bot.game?.dimension) ? { origin: new Vec3(base.x, base.y, base.z) } : {}
+    await buildBase(bot, { blueprint: HOUSE_BLUEPRINT, depths: HOUSE_DEPTHS, chests: 2, ...(land != null ? { around: land } : {}), ...at, ...opts, executor, signal, log })
   },
   ...MILESTONE_HANDLERS,
   ...EPOCH_HANDLERS

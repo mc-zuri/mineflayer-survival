@@ -333,7 +333,7 @@ export async function buildBase (bot: Bot, opts: BuildBaseOptions): Promise<Buil
   const final = planBuild(blueprint, world, registry)
   const missing = final.placements.filter(p => p.autoPlaced !== true && wanted(p))
   const chests = blueprint.storage.filter(p => bot.blockAt(v(p))?.name === 'chest').map(v)
-  record(bot, executor, blueprint, chests)
+  record(bot, executor, blueprint, chests, { missing: missing.length, total: blueprint.placements.filter(p => (p as any).autoPlaced !== true && wanted(p)).length })
   protectBase(bot, blueprint)
   const safety = checkStorageSafety(world, chests, { bounds: blueprint.bounds, registry })
   log(`base built: ${dug} dug, ${placed} placed, ${missing.length} missing, ${chests.length} chests, ${safety.safe ? 'safe' : `${safety.unsafe.length} chests unsafe`}`)
@@ -357,12 +357,16 @@ async function placeOne (bot: Bot, p: Placement, item: string, signal?: AbortSig
   return true
 }
 
-function record (bot: Bot, executor: Executor, blueprint: Blueprint, chests: Vec3[]): void {
+function record (bot: Bot, executor: Executor, blueprint: Blueprint, chests: Vec3[], build?: { missing: number, total: number }): void {
   const memory = executor.memory
   const dimension = normalizeDimension(bot.game?.dimension)
   const o = blueprint.options.origin
+  // (the builds of this base so far: baseBuilt takes it as built after BASE_BUILD_TRIES)
+  const before = memory.getPois(BASE_POI.build, { dimension }).find(p => p.x === o.x && p.y === o.y && p.z === o.z)
+  const tries = Number(before?.note?.split('/')[2] ?? 0) + 1
   for (const kind of Object.values(BASE_POI)) memory.removePoi(kind)
   memory.setBase(o, dimension)
+  if (build != null) memory.addPoi(BASE_POI.build, o, dimension, `${build.missing}/${build.total}/${tries}`)
   memory.addPoi(BASE_POI.entrance, blueprint.entrance.outside, dimension)
   const b = blueprint.bounds
   memory.addPoi(BASE_POI.bounds, b.min, dimension, `${b.max.x},${b.max.y},${b.max.z}`)

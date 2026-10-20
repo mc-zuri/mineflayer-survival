@@ -1,6 +1,7 @@
 import { Inventory } from '../core/inventory'
 import { parseTool, TOOL_MATERIALS, type ToolKind } from '../core/items'
 import type { WorldMemory } from '../core/memory'
+import { baseBuilt } from '../base/pois'
 import type { RegistryLike } from '../core/registry'
 import { heldFor, obtainAll, type ObtainOptions, type ObtainPlan, type ObtainRequest } from './obtain'
 import type { Station } from './steps'
@@ -217,7 +218,8 @@ export const MILESTONES: readonly Milestone[] = [
     id: 'base',
     title: 'a minimal house: dug in, a door, the table and a furnace, chests, lit, a bed with wool',
     // the base skill builds it (HOUSE_BLUEPRINT); the goals are its materials
-    done: s => s.memory.base != null,
+    // (built: not one left with most of its blocks missing, baseBuilt)
+    done: s => baseBuilt(s.memory),
     goals: () => [
       { item: '#stone_crafting_materials', count: 48 },
       { item: 'torch', count: 8 },
