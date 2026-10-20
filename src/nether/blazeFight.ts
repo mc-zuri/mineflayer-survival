@@ -862,10 +862,15 @@ export async function enterNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal
 
 /** the pathfinder kept from breaking the nook's walls, roof and floor while `fn` runs */
 export async function withNookKept<T> (bot: Bot, nook: BlazeNook, fn: () => Promise<T>): Promise<T> {
+  return await withBlocksKept(bot, [...nook.walls, ...(nook.floor ?? [])], fn)
+}
+
+/** the pathfinder kept from breaking the blocks at `cells` while `fn` runs (the settings it had put back after) */
+export async function withBlocksKept<T> (bot: Bot, cells: readonly Vec3[], fn: () => Promise<T>): Promise<T> {
   const pathfinder: any = (bot as any).pathfinder
   const settings = pathfinder?.defaultMoveSettings
   if (settings == null || typeof pathfinder.setMoveOptions !== 'function') return await fn()
-  const kept = new Set([...nook.walls, ...(nook.floor ?? [])].map(p => p.toString()))
+  const kept = new Set(cells.map(p => p.floored().toString()))
   const brk = (block: any): number => kept.has(new Vec3(block.position.x, block.position.y, block.position.z).toString()) ? 1e9 : 0
   const before = { ...settings }
   pathfinder.setMoveOptions({ ...settings, exclusionAreasBreak: [...(settings.exclusionAreasBreak ?? []), brk] })

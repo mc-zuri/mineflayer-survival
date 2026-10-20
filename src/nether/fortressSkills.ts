@@ -27,7 +27,7 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, planBlazeNooks } from './blazeFight'
+import { type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, planBlazeNooks, withBlocksKept } from './blazeFight'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
 
@@ -554,6 +554,11 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
   }
   const fightForRods = async (): Promise<BlazeRodsResult> => {
     const spawner = args.spawner != null ? v3(args.spawner) : v3(await findBlazeSpawner(bot, { safety: false, exclude: args.exclude ?? unreachableSpawners(bot) }, signal))
+    // the spawner kept from the pathfinder's breaking through the fight (the walks to a nook by it, to the rods on the
+    // throne): a 26.3 bot's way to the melee nook on seed 7741's throne went through it, and no blaze came after
+    return await withBlocksKept(bot, [spawner], async () => await fightAt(spawner))
+  }
+  const fightAt = async (spawner: Vec3): Promise<BlazeRodsResult> => {
     // (from 9 off, out of the swarm the spawner keeps about it, the blazes come one or two at a time and are shot:
     // camped 5 off, among 6 of them, a diamond-armored 26.3 bot burned to death five times at one spawner)
     const standOff = args.standOff ?? BLAZE_STAND_OFF

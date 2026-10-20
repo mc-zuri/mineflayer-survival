@@ -381,3 +381,33 @@ test('collectBlazeRods: a nook with no kill for long (STUCK) is left for the mel
     gridModule.moveNear = realMove
   }
 })
+
+test('collectBlazeRods keeps the spawner from the pathfinder breaking it through the fight, the settings put back after', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/nether/blazeFight')
+  const { item } = await import('../reflexes/fakeBot')
+  const realBuild = fightModule.buildNook
+  const realFight = fightModule.fightFromNook
+  const costs: number[] = []
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('cobblestone', 64), item('bow'), item('arrow', 64)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+  const pathfinder: any = { defaultMoveSettings: { exclusionAreasBreak: [] }, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+  ;(bot as any).pathfinder = pathfinder
+  const cost = (p: Vec3): number => pathfinder.defaultMoveSettings.exclusionAreasBreak.reduce((a: number, f: any) => a + f({ position: p }), 0)
+  fightModule.buildNook = async () => {}
+  fightModule.fightFromNook = async () => {
+    costs.push(cost(new Vec3(0, 64, 0)), cost(new Vec3(1, 64, 0)))
+    bot.inventory.slots[20] = item('blaze_rod')
+    return { kills: 1, shots: 0, blocked: 0, ticks: 10 }
+  }
+  try {
+    bot.game.dimension = 'the_nether'
+    ;(bot as any).world = { raycast: () => null }
+    bot.findBlocks = () => []
+    await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    assert.ok(costs[0] >= 1e9 && costs[1] === 0, costs.join(' '))
+    assert.equal(pathfinder.defaultMoveSettings.exclusionAreasBreak.length, 0)
+  } finally {
+    fightModule.buildNook = realBuild
+    fightModule.fightFromNook = realFight
+  }
+})

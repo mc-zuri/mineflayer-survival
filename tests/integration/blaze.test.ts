@@ -94,6 +94,12 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
         await bot.waitForTicks(10)
       }
     }
+    // the spawner put back when the last run's left it broken (a blaze spawner mined is gone for good)
+    const at = bot.blockAt(SPAWNER)
+    if (at != null && at.name !== 'spawner') {
+      console.log(`blaze runs: the spawner at ${SPAWNER.toString()} is ${at.name}: put back`)
+      await nether(`setblock ${SPAWNER.x} ${SPAWNER.y} ${SPAWNER.z} spawner{SpawnData:{entity:{id:"minecraft:blaze"}}}`)
+    }
   }
 
   async function oneRun (n: number): Promise<RunResult> {
@@ -152,6 +158,9 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
       bot.off('messagestr' as any, onMessage)
     }
     const ticks = bot.lockstep.ticks - t0
+    // where the blazes were at the end, and the bot (a spawner makes none with 6 of them in its box: a run of no kills)
+    const left = Object.values(bot.entities).filter((e: any) => e.name === 'blaze' && e.position.distanceTo(SPAWNER) <= 32)
+    console.log(`blaze run ${n} end: bot at ${bot.entity.position.floored().toString()}; blazes ${left.map((e: any) => e.position.floored().toString()).join(' ')}`)
     const out: RunResult = { run: n, rods: died ? Math.max(rods, result.rods) : countItems(bot, 'blaze_rod'), kills: Math.max(kills, result.kills), died, death, ticks, hurt: Math.round(hurt), health: Math.round(bot.health), error }
     const list = (m: Map<string, number>): string => [...m].map(([k, v]) => `${k} x${v}`).join(', ')
     console.log(`blaze run ${n}: ${out.rods} rods, ${out.kills} kills, ${died ? `died (${death})` : 'alive'}, ${ticks} ticks, ${out.hurt} health lost, health ${out.health}${error !== '' ? `, ${error}` : ''}; hits: ${list(hits)}; reflexes: ${list(reflexes)}`)
