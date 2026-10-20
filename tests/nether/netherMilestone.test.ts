@@ -704,3 +704,20 @@ test('inWarpedForest: the bot within FOREST_EDGE of the seed\'s warped forest co
   assert.equal(inWarpedForest(edge, biomes), true)
   assert.equal(inWarpedForest(fakeBot({ position: new Vec3(2.5, 64, -1.5) }), biomes), false)
 })
+
+test('pearls in the nether: an enderman far under the bot is none to hunt for the search as for the hunt (the search took it for one, the hunt found none, 67 rounds in a tick)', async () => {
+  const { pearlsInTheNether, PEARL_NETHER_LEGS } = await import('../../src/milestones')
+  const { huntable } = await import('../../src/nether/pearls')
+  const { fakeBot, entity } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  bot.game.dimension = 'the_nether'
+  const deep = entity({ name: 'enderman', position: new Vec3(5.5, 40, 0.5) })
+  bot.entities[deep.id] = deep
+  assert.equal(huntable(bot, deep), false)
+  const tasks: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (name: string) => { tasks.push(name); executor.tasks.tick += 100 } }
+  await pearlsInTheNether(bot, executor, 4, new AbortController().signal, () => {})
+  assert.equal(tasks.filter(t => t === 'endermen for pearls').length, 0)
+  assert.deepEqual(tasks, Array(PEARL_NETHER_LEGS).fill('a leg for pearls'))
+})
