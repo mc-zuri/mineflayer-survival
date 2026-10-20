@@ -162,3 +162,35 @@ test('a farm sown further by its water grows its one record; another water is a 
   assert.equal(farmPlots(memory), 4)
   assert.equal(farmPlots(memory, 'the_nether'), 0)
 })
+
+test('nearlyGrownPlots: the grown plots and the ones a stage short; a farm with half of them so is waited for, one with none harvested at once (full-26.3-fresh-d: 2400 ticks three times for nothing)', async () => {
+  const { nearlyGrownPlots } = await import('../../src/skills/farm')
+  const { runFarm } = await import('../../src/executor/steps')
+  const cells = [new Vec3(0, 63, 0), new Vec3(1, 63, 0), new Vec3(2, 63, 0), new Vec3(3, 63, 0)]
+  const ages = [7, 6, 2, 0]
+  const lookup = (p: Vec3): any => {
+    const i = cells.findIndex(c => c.x === p.x && c.z === p.z)
+    if (i >= 0 && p.y === 64) return { name: 'wheat', getProperties: () => ({ age: ages[i] }) }
+    return { name: p.y === 63 ? 'farmland' : 'air' }
+  }
+  assert.deepEqual(nearlyGrownPlots(lookup, cells, 'wheat').map(c => c.x), [0, 1])
+  // runFarm with nothing near grown: no wait (no tick comes in this test: a wait would hang it)
+  const farmModule = require('../../src/skills/farm')
+  const navModule = require('../../src/skills/navigate')
+  const realHarvest = farmModule.harvestFarm
+  const realNav = navModule.navigateNear
+  const memory = new WorldMemory()
+  rememberFarm(memory, { water: new Vec3(0, 63, 1), cells, crop: 'wheat' }, 0)
+  ages.splice(0, 4, 2, 1, 0, 0)
+  const bot: any = { blockAt: lookup, inventory: { items: () => [], slots: [] }, game: { dimension: 'overworld' }, time: { age: 0 }, on () {}, off () {}, removeListener () {} }
+  let harvested = false
+  farmModule.harvestFarm = async () => { harvested = true; return {} }
+  navModule.navigateNear = async () => {}
+  try {
+    await runFarm({ kind: 'farm', item: 'wheat', count: 4, crop: 'wheat', seed: 'wheat_seeds', plots: 0, cycles: 1, cost: 0 } as any, { bot, memory, signal: new AbortController().signal, log: () => {}, home: null, state: {} } as any)
+  } finally {
+    farmModule.harvestFarm = realHarvest
+    navModule.navigateNear = realNav
+  }
+  assert.equal(harvested, true)
+})

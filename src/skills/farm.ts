@@ -3,7 +3,7 @@
 import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
 import { Vec3 } from 'vec3'
-import { FARM_PLOTS, isGrown, type FarmRecord } from '../core/crops'
+import { FARM_PLOTS, GROWN_AGE, isGrown, type FarmRecord } from '../core/crops'
 import type { WorldMemory } from '../core/memory'
 import { SkillError, isAbort, throwIfAborted } from './errors'
 import { collectBlock } from './collectBlock'
@@ -76,6 +76,19 @@ export function findFarmSite (lookup: Lookup, center: Vec3, radius = 24, plots =
 /** the cells of a farm (its farmland) that have a crop of `crop` grown on them */
 export function grownPlots (lookup: Lookup, cells: readonly Vec3[], crop: string): Vec3[] {
   return cells.filter(c => { const b = lookup(c.offset(0, 1, 0)); return b?.name === crop && isGrown(b) })
+}
+
+/**
+ * The plots grown or a stage short of it: the ones a wait of a couple of minutes may see grown (CropBlock.randomTick:
+ * a stage at a random tick's 1 in 25 / speed + 1, minutes a stage)
+ */
+export function nearlyGrownPlots (lookup: Lookup, cells: readonly Vec3[], crop: string): Vec3[] {
+  const grown = GROWN_AGE[crop]
+  return cells.filter(c => {
+    const b = lookup(c.offset(0, 1, 0))
+    if (b?.name !== crop) return false
+    return grown == null || isGrown(b) || Number((b as any).getProperties?.().age ?? 0) >= grown - 1
+  })
 }
 
 async function holdItem (bot: Bot, name: string): Promise<void> {

@@ -9,7 +9,7 @@ import { TaskError } from '../core/errors'
 import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import type { CraftStep, FarmStep, FillStep, KillStep, LootStep, MineStep, PlanStep, SmeltStep } from '../planner/steps'
-import { farmCells, grownPlots, harvestFarm, knownFarms, plantFarm, rememberFarm, SEED_OF, sow } from '../skills/farm'
+import { farmCells, grownPlots, harvestFarm, knownFarms, nearlyGrownPlots, plantFarm, rememberFarm, SEED_OF, sow } from '../skills/farm'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { collectBlock, waterBeside } from '../skills/collectBlock'
 import { craft } from '../skills/craft'
@@ -521,7 +521,11 @@ export const runFarm: StepRunner<FarmStep> = async (step, ctx) => {
   const cells = farmCells(farm)
   await navigateNear(bot, farm.water, 3, signal)
   const lookup = (p: Vec3): any => bot.blockAt(p)
-  await waitUntil(bot, () => grownPlots(lookup, cells, farm.crop).length * 2 >= cells.length, FARM_WAIT_TICKS, signal)
+  // (waited for only when half the plots are a stage short of grown or more: a 26.3 bot back from a death waited out
+  // the 2400 ticks three times at a farm with nothing near grown and harvested nothing, full-26.3-fresh-d)
+  if (nearlyGrownPlots(lookup, cells, farm.crop).length * 2 >= cells.length) {
+    await waitUntil(bot, () => grownPlots(lookup, cells, farm.crop).length * 2 >= cells.length, FARM_WAIT_TICKS, signal)
+  }
   const got = await harvestFarm(bot, { cells, crop: farm.crop }, signal)
   ctx.log(`harvested the ${farm.crop}: ${Object.entries(got).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing grown'}`)
   // sown again: the farm grows from now
