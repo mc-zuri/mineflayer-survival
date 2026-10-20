@@ -4,7 +4,7 @@ import { ReflexEngine } from '../../src/reflexes/engine'
 import { reflexConfig, DEFAULT_REFLEX_CONFIG } from '../../src/reflexes/config'
 import type { Reflex, TaskSink } from '../../src/reflexes/types'
 import { entity, fakeBot, item } from './fakeBot'
-import { hostilesReflex } from '../../src/reflexes/rules'
+import { armorReflex, drowningReflex, eatReflex, hostilesReflex } from '../../src/reflexes/rules'
 import { Vec3 } from 'vec3'
 
 const flush = async (): Promise<void> => await new Promise(resolve => setImmediate(resolve))
@@ -170,4 +170,60 @@ test('leaveAlone keeps the named mobs out of the reflexes\' sight until every ho
   assert.deepStrictEqual(engine.leftAloneNames, [])
   assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'fight blaze')
   engine.stop()
+})
+
+test('the drowning reflex holds those under it with the head under water: no meal there, and at low air nothing but a lethal fight, while it waits to go again too', () => {
+  // the bot's head in the water from y 60 to 69 (the drowning reflex itself out of the way: as in its retry cooldown)
+  const water = (p: Vec3): string => p.y < 60 ? 'stone' : p.y < 70 ? 'water' : 'air'
+  const waiting: Reflex = { ...drowningReflex, check: () => null }
+  const reflexes = [waiting, eatReflex, hostilesReflex, armorReflex]
+  const evaluate = (input: Parameters<typeof fakeBot>[0], setup?: (engine: ReflexEngine) => void): string | null => {
+    const bot = fakeBot(input)
+    bot.world = { raycast: () => null }
+    const engine = new ReflexEngine(bot, { reflexes, enabled: false })
+    setup?.(engine)
+    const task = engine.evaluate()
+    engine.stop()
+    return task?.name ?? null
+  }
+  const food = [item('cooked_porkchop', 4)]
+  // starving (food 6) under water, the air fine or low: no meal; the head out of the water: the meal
+  assert.strictEqual(evaluate({ food: 6, items: food, oxygen: 15, position: new Vec3(0.5, 61, 0.5), world: water }), null)
+  assert.strictEqual(evaluate({ food: 6, items: food, oxygen: 3, position: new Vec3(0.5, 61, 0.5), world: water }), null)
+  assert.strictEqual(evaluate({ food: 6, items: food, oxygen: 3, position: new Vec3(0.5, 70, 0.5), world: water }), 'eat')
+  // the armor reflex under water with air: on; at low air: held
+  const armor = (engine: ReflexEngine): void => { (engine as any).armorChanged = true }
+  assert.strictEqual(evaluate({ items: [item('iron_chestplate')], oxygen: 15, position: new Vec3(0.5, 61, 0.5), world: water }, armor), 'armor')
+  assert.strictEqual(evaluate({ items: [item('iron_chestplate')], oxygen: 3, position: new Vec3(0.5, 61, 0.5), world: water }, armor), null)
+  // a drowned close under water: fought with air; at low air only once it's lethal (hurt by it, at flee health)
+  const drowned = entity({ name: 'drowned', position: new Vec3(2.5, 61, 0.5), meta: { health: 20 } })
+  const fightAt = (oxygen: number, health: number, hurt: boolean): string | null => evaluate(
+    { items: [item('iron_sword')], oxygen, health, entities: [drowned], position: new Vec3(0.5, 61, 0.5), world: water },
+    engine => { if (hurt) { (engine as any).attackers.set(drowned.id, 0); (engine as any).lastHurtTick = 0 } })
+  assert.strictEqual(fightAt(15, 20, false), 'hostiles')
+  assert.strictEqual(fightAt(3, 20, true), null)
+  assert.strictEqual(fightAt(3, 5, false), null)
+  assert.strictEqual(fightAt(3, 5, true), 'hostiles')
+  // inhibited, the drowning reflex holds nothing
+  assert.strictEqual(evaluate({ food: 6, items: food, oxygen: 3, position: new Vec3(0.5, 61, 0.5), world: water }, engine => { engine.inhibit(['drowning']) }), 'eat')
+})
+
+test('a drowning task that failed goes again at once (retryCooldownTicks 0), not after the engine\'s cooldown', async () => {
+  const bot = fakeBot()
+  let runs = 0
+  const failing: Reflex = {
+    name: 'drowning',
+    priority: 85,
+    retryCooldownTicks: 0,
+    check: () => ({ name: 'drowning', priority: 85, run: async () => { runs++; throw new Error('no air reached') } })
+  }
+  const engine = new ReflexEngine(bot, { reflexes: [failing] })
+  bot.emit('physicsTick')
+  await flush()
+  assert.strictEqual(runs, 1)
+  bot.emit('physicsTick')
+  await flush()
+  assert.strictEqual(runs, 2)
+  engine.stop()
+  assert.strictEqual(drowningReflex.retryCooldownTicks, 0)
 })

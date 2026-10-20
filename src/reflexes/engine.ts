@@ -4,7 +4,7 @@ import { armorPiece } from '../skills/armor'
 import { type Entity, isAlive, TaskError } from '../skills/combatUtil'
 import { reflexConfig, type ReflexConfig, type ReflexConfigInput } from './config'
 import { DEFAULT_REFLEXES, isHostile } from './rules'
-import type { Reflex, ReflexContext, TaskSink, UrgentTask } from './types'
+import type { Reflex, ReflexContext, ReflexHold, TaskSink, UrgentTask } from './types'
 
 export interface ReflexEngineOptions {
   config?: ReflexConfigInput
@@ -105,13 +105,15 @@ export class ReflexEngine {
 
   /** the most urgent task the reflexes want now, if it beats the one running */
   evaluate (ctx: ReflexContext = this.context()): UrgentTask | null {
+    const holds = this.holds(ctx)
     let best: UrgentTask | null = null
     for (const reflex of this.reflexes) {
       if ((this.cooldownUntil.get(reflex.name) ?? -Infinity) > this.tick) continue
       if (this.running?.task.name === reflex.name) continue
       if (this.inhibited.has(reflex.name)) continue
       const task = reflex.check(ctx)
-      if (task != null && (best == null || task.priority > best.priority)) best = task
+      if (task == null || holds.some(h => task.priority < h.below && h.except?.(task) !== true)) continue
+      if (best == null || task.priority > best.priority) best = task
     }
     if (best == null) return null
     if (this.running != null && this.running.task.priority >= best.priority) return null
@@ -119,6 +121,17 @@ export class ReflexEngine {
     const current = this.sink?.current
     if (current != null && this.running == null && current.priority >= best.priority) return null
     return best
+  }
+
+  /** the holds the reflexes put on those under them now (Reflex.hold); an inhibited reflex puts none */
+  holds (ctx: ReflexContext): ReflexHold[] {
+    const out: ReflexHold[] = []
+    for (const reflex of this.reflexes) {
+      if (reflex.hold == null || this.inhibited.has(reflex.name)) continue
+      const hold = reflex.hold(ctx)
+      if (hold != null) out.push(hold)
+    }
+    return out
   }
 
   physicsTick (): void {
@@ -166,7 +179,10 @@ export class ReflexEngine {
       (err) => {
         if (this.running === entry) this.running = null
         // preempted by a more urgent reflex: free to fire again; a real failure waits
-        if (!TaskError.is(err, 'PREEMPTED')) this.cooldownUntil.set(task.name, this.tick + this.config.retryCooldownTicks)
+        if (!TaskError.is(err, 'PREEMPTED')) {
+          const cooldown = this.reflexes.find(r => r.name === task.name)?.retryCooldownTicks ?? this.config.retryCooldownTicks
+          this.cooldownUntil.set(task.name, this.tick + cooldown)
+        }
         this.bot.emit('reflexFailed' as any, task.name, err)
       }
     )

@@ -153,10 +153,42 @@ export const hazardReflex: Reflex = {
   }
 }
 
-/** Up for air when it runs low under water. */
+/** the reflexes that eat: none fires with the head under water (the drowning reflex's hold) */
+const EATING_REFLEXES = new Set(['eat', 'emergency eat'])
+
+/**
+ * A hostile the drowning reflex's hold lets fight under water at low air: the bot at the hostiles' flee health or
+ * under, hurt by one of those in range lately (a drowned's trident or a guardian's beam kills sooner than the water)
+ */
+export function lethalHostile (ctx: ReflexContext): boolean {
+  const { bot, config } = ctx
+  if (bot.health > config.hostiles.fleeHealth) return false
+  return ctx.hostiles.some(e => {
+    const at = ctx.attackers.get(e.id)
+    return at != null && ctx.tick - at <= config.combat.hurtTicks && distance(bot, e) <= config.hostiles.range
+  })
+}
+
+/**
+ * Up for air when it runs low under water. With the head under water it holds the reflexes under it (Reflex.hold):
+ * no eating there (the meal's 32 ticks are air gone, and the bot sinks while it eats), and at low air nothing but a
+ * lethal fight (lethalHostile), whether the reflex is under way or waiting to go again (retryCooldownTicks 0: it goes
+ * again at once). A 26.3 bot's surfacing failed, the eat reflex ate a porkchop at 0 air in the 20 ticks of the retry
+ * cooldown, and the bot drowned (full-26.3-fresh-z, t95901).
+ */
 export const drowningReflex: Reflex = {
   name: 'drowning',
   priority: 85,
+  retryCooldownTicks: 0,
+  hold (ctx) {
+    const { bot, config } = ctx
+    if (!config.drowning.enabled || bot.entity == null || !headInWater(bot)) return null
+    const airLow = bot.oxygenLevel <= config.drowning.air
+    return {
+      below: config.drowning.priority,
+      except: (task) => airLow ? task.name === 'hostiles' && lethalHostile(ctx) : !EATING_REFLEXES.has(task.name)
+    }
+  },
   check (ctx) {
     const { bot, config } = ctx
     if (!config.drowning.enabled) return null

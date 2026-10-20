@@ -43,6 +43,21 @@ export interface Reflex {
   /** the priority of the tasks it returns (the engine checks the higher ones first) */
   priority: number
   check: (ctx: ReflexContext) => UrgentTask | null
+  /**
+   * While it returns a hold, the reflexes under `below` (but those `except` lets by) don't fire, whether this one fires
+   * or not (waiting out its retry cooldown, or not due yet): what they'd do costs what this one is for. The drowning
+   * reflex holds the eat reflex under water: a 26.3 bot whose surfacing had failed ate a porkchop at 0 air in the
+   * ticks before the reflex went again, and drowned (full-26.3-fresh-z, t95901).
+   */
+  hold?: (ctx: ReflexContext) => ReflexHold | null
+  /** ticks before it may fire again once its task failed (default config.retryCooldownTicks) */
+  retryCooldownTicks?: number
+}
+
+/** What a reflex's hold keeps from firing: the reflexes under `below`, but a task `except` lets by. */
+export interface ReflexHold {
+  below: number
+  except?: (task: UrgentTask) => boolean
 }
 
 /**
