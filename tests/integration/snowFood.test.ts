@@ -16,7 +16,7 @@ import { FOOD_GOAL } from '../../src/planner/progression'
 import { navigate } from '../../src/skills/navigate'
 import { foodInfo } from '../../src/core/items'
 import { ReflexEngine } from '../../src/reflexes/engine'
-import { fallReflex } from '../../src/reflexes/rules'
+import { drowningReflex, fallReflex } from '../../src/reflexes/rules'
 
 const USERNAME = 'snowbot'
 // the superflat's grass is at y = -61; the bot stands at -60
@@ -249,8 +249,8 @@ describe(`food on a snowy land on a ${DEFAULT_VERSION} server`, { timeout: 60 * 
   }
 
   it('gets 20 food points on a snowy land with only rabbits and a frozen pond', async () => {
-    // the pond: 7 x 7 and 3 deep, frozen over, 10 blocks off
-    await run(`fill ${xyz(at(8, -4, -3))} ${xyz(at(14, -2, 3))} water`)
+    // the pond: 7 x 7 and 2 deep, frozen over, 10 blocks off (over the superflat's bedrock: none dug out of the world)
+    await run(`fill ${xyz(at(8, -3, -3))} ${xyz(at(14, -2, 3))} water`)
     await run(`fill ${xyz(at(8, -1, -3))} ${xyz(at(14, -1, 3))} ice`)
     await run(`fill ${xyz(at(8, 0, -3))} ${xyz(at(14, 0, 3))} air`)
     await give('iron_sword', 1)
@@ -264,8 +264,11 @@ describe(`food on a snowy land on a ${DEFAULT_VERSION} server`, { timeout: 60 * 
     const memory = new WorldMemory()
     memory.setBase(origin)
     const executor = new Executor(bot, { memory, log })
+    // (the reflexes of a game about the water: a step into the ice hole is swum out of)
+    const engine = new ReflexEngine(bot, { reflexes: [drowningReflex, fallReflex], sink: (bot as any).survival.tasks })
     const start = ticks
     const outcome = await executor.obtain([{ item: FOOD_GOAL, count: 20, unit: 'nutrition' }], new AbortController().signal).catch(err => err)
+    engine.stop()
     const took = ticks - start
     console.log(`[snow] food: ${points()} points (${FOOD_GOAL.filter(f => countItems(bot, f) > 0).map(f => `${countItems(bot, f)} ${f}`).join(', ')}) in ${took} ticks`)
     assert.ok(points() >= 20, `${points()} food points in ${took} ticks: ${String(outcome?.message ?? '')}\n${lines.join('\n')}`)
