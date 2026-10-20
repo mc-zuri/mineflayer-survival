@@ -203,12 +203,14 @@ export const drowningReflex: Reflex = {
       run: async (signal) => {
         // the spot kept off a while (its targets, the ways under there: skills/breath drownedNear)
         noteDrowning(bot, bot.entity.position)
-        const out = await surface(bot, { signal, recoverTo: config.drowning.recoverTo, searchRadius: config.drowning.searchRadius, maxTicks: config.drowning.maxTicks })
-        // and out of the water, not left there for the work to sink back (a 1.21.11 bot's smelt in a lake took it down
-        // three times after its surfacings, and it drowned: grimls-2, t83874 to t85228)
-        const { inWater, toShore } = await import('../executor/explore')
-        if (inWater(bot)) await toShore(bot, signal).catch(err => { if (signal.aborted) throw err })
-        return out
+        try {
+          return await surface(bot, { signal, recoverTo: config.drowning.recoverTo, searchRadius: config.drowning.searchRadius, maxTicks: config.drowning.maxTicks })
+        } finally {
+          // and out of the water, surfaced or not, not left there for the work to sink back (a 1.21.11 bot's smelt in
+          // a lake took it down three times after its surfacings, and it drowned: grimls-2, t83874 to t85228)
+          const { inWater, toShore } = await import('../executor/explore')
+          if (!signal.aborted && bot.health > 0 && inWater(bot)) await toShore(bot, signal).catch(err => { if (signal.aborted) throw err })
+        }
       }
     }
   }

@@ -518,9 +518,56 @@ export function nearestShore (lookup: Lookup, from: Vec3): Vec3 | null {
   return null
 }
 
-/** out of the water to the nearest shore (nearestShore), swimming up first; resolves whether the bot is out */
+/** how far across (and up or down: DRY_STAND_RISE) the shore's dry cells are looked for from the water (dryStandNear) */
+export const DRY_STAND_RADIUS = 8
+export const DRY_STAND_RISE = 4
+
+/**
+ * The nearest cell to stand in on dry ground by the water the bot is in: its feet's and head's cells open and no
+ * liquid, a full block under them that isn't one, within DRY_STAND_RADIUS across, DRY_STAND_RISE down and 6 more up
+ * (out of a flooded pit, up its walls). Null when there's none.
+ */
+export function dryStandNear (lookup: Lookup, from: Vec3): Vec3 | null {
+  const f = from.floored()
+  let best: Vec3 | null = null
+  let bestScore = Infinity
+  const dry = (p: Vec3): boolean => { const b = lookup(p); return b != null && b.boundingBox === 'empty' && !LIQUIDS.has(b.name) && !/kelp|seagrass/.test(b.name) }
+  for (let dx = -DRY_STAND_RADIUS; dx <= DRY_STAND_RADIUS; dx++) {
+    for (let dz = -DRY_STAND_RADIUS; dz <= DRY_STAND_RADIUS; dz++) {
+      for (let dy = -DRY_STAND_RISE; dy <= DRY_STAND_RISE + 6; dy++) {
+        const c = f.offset(dx, dy, dz)
+        const score = Math.hypot(dx, dz) + Math.abs(dy) * 0.5
+        if (score >= bestScore) continue
+        if (!dry(c) || !dry(c.offset(0, 1, 0))) continue
+        const under = lookup(c.offset(0, -1, 0))
+        if (under == null || under.boundingBox !== 'block' || LIQUIDS.has(under.name)) continue
+        best = c
+        bestScore = score
+      }
+    }
+  }
+  return best
+}
+
+/**
+ * out of the water onto dry ground: the nearest dry cell by it (dryStandNear) walked to, else the nearest shore
+ * (nearestShore), swimming up first; resolves whether the bot is out. A GoalNearXZ of 2 by the shore's column ended
+ * with the bot still swimming at a flooded pit's top, and the next walk took it down the pit again, the drowning reflex
+ * every 320 ticks (grimls-2, t155000 on)
+ */
 export async function toShore (bot: Bot, signal?: AbortSignal): Promise<boolean> {
   if (headInWater(bot)) await surface(bot, { signal, maxTicks: 200 }).catch(err => { if (isAbort(err)) throw err })
+  const stand = dryStandNear(lookupOf(bot), bot.entity.position)
+  if (stand != null) {
+    trace('explore: in the water: to dry ground at', stand.toString())
+    try {
+      await navigate(bot, { goal: new goals.GoalBlock(stand.x, stand.y, stand.z), maxTicks: 600 }, signal)
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('explore: no way to', stand.toString(), (err as Error).message)
+    }
+    if (!inWater(bot)) return true
+  }
   const shore = nearestShore(lookupOf(bot), bot.entity.position)
   if (shore == null) return !inWater(bot)
   trace('explore: in the water: to the shore at', shore.x, shore.z)

@@ -752,3 +752,18 @@ test('runMine: the logs collectBlock couldn\'t get to are noted unreachable, and
   tick = UNREACHABLE_TICKS
   assert.equal(unreachable.has(logs[0], 'overworld'), false, 'forgotten after its ticks')
 })
+
+test('dryStandNear: out of a flooded pit 7 deep, the dry ground at its rim; none out in a lake', async () => {
+  const { dryStandNear } = await import('../../src/executor/explore')
+  // stone up to y 62, a pit at x 0 z 0 from 56 to 62 full of water, air over the stone
+  const pit = (p: Vec3) => {
+    const name = p.x === 0 && p.z === 0 && p.y >= 56 && p.y <= 62 ? 'water' : p.y <= 62 ? 'stone' : 'air'
+    return { name, boundingBox: name === 'stone' ? 'block' : 'empty' }
+  }
+  const out = dryStandNear(pit, new Vec3(0.5, 56, 0.5))
+  assert.ok(out != null)
+  assert.equal(out.y, 63)
+  assert.ok(Math.hypot(out.x, out.z) <= 1.5, out.toString())
+  const lake = (p: Vec3) => ({ name: p.y >= 50 && p.y <= 62 ? 'water' : p.y < 50 ? 'stone' : 'air', boundingBox: p.y < 50 ? 'block' : 'empty' })
+  assert.equal(dryStandNear(lake, new Vec3(0.5, 60, 0.5)), null)
+})
