@@ -784,3 +784,27 @@ test('naturalObsidian: a ruined portal that was in the sea is left for the shore
   await naturalObsidian(bot, executor, 10, new AbortController().signal, () => {})
   assert.deepEqual(calls, ['to a ruined portal', 'to the shore', 'back from the sea'])
 })
+
+test('the last way to a frame\'s obsidian (the planner\'s mine of any) is held to OBSIDIAN_OBTAIN_TICKS', async () => {
+  const { buildAPortal, OBSIDIAN_OBTAIN_TICKS } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, -55, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1), item('flint_and_steel', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.findBlocks = () => []
+  let budgeted = false
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    task: async () => {},
+    obtain: async (reqs: any[], signal: AbortSignal) => {
+      if (reqs[0].item !== 'obsidian') return
+      // an explore that never ends but for its signal
+      for (let i = 0; i <= OBSIDIAN_OBTAIN_TICKS; i++) bot.emit('physicsTick')
+      budgeted = signal.aborted
+      throw signal.reason ?? new Error('not stopped')
+    }
+  }
+  await assert.rejects(buildAPortal(bot, executor, new AbortController().signal, () => {}))
+  assert.equal(budgeted, true)
+})

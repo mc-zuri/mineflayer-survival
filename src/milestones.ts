@@ -661,7 +661,9 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   }
   }
   log(`a portal frame: no pool to cast by, ${count('obsidian')} obsidian: getting obsidian`)
-  await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], signal)
+  // within OBSIDIAN_OBTAIN_TICKS: the milestone tried again after, its pools and legs anew (an unbounded explore for
+  // obsidian went over the ocean for 48000 ticks, 26.3)
+  await withTickBudget(bot, OBSIDIAN_OBTAIN_TICKS, signal, async (s) => await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], s))
   await placeFromObsidian()
 }
 
@@ -789,6 +791,9 @@ export function castNearSpot (bot: { x: number, y: number, z: number }, lava: Re
 
 /** the empty buckets a cast carried up from far lava takes its lava in, a trip */
 export const LAVA_BUCKETS = 5
+
+/** the ticks the last way to a frame's obsidian (the planner's mine of any in the world) may take */
+export const OBSIDIAN_OBTAIN_TICKS = 24000
 
 /** a frame's obsidian, and the lava sources to cast one from */
 export const PORTAL_OBSIDIAN = 10
