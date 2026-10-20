@@ -8,6 +8,7 @@ import { isAbort } from './errors'
 import { type Entity, distanceToBox, entityBox, eyePosition, hasLineOfSight, isAlive, metadataValue, TaskError, type SkillOptions, waitTicks, waitUntil } from './combatUtil'
 import { BREEDING_FOOD } from './husbandry'
 import { shoot } from './shoot'
+import { pickupDrops } from './pickupDrops'
 
 export interface HuntOptions extends FightOptions {
   /** how far to look for the animal (default 64) */
@@ -172,5 +173,18 @@ export async function hunt (bot: Bot, animal: string | string[] | Entity, opts: 
   const fightOpts = skittish ? skittishFight(opts, async () => await walkNear(bot, target.position, 2, signal)) : opts
   const result = await fight(bot, target, { ...fightOpts, maxDistance: opts.maxDistance ?? 48 })
   const drops = opts.collectDrops === false ? {} : await collectDropsNear(bot, result.lastPosition, { signal })
+  // what lies further off picked up too (pickupDrops: walked to over the ground): a rabbit killed on a hop, its meat
+  // flung down a snowy slope, was left 12 blocks off, and a 26.3 hunt of 3 rabbits came out with 1 meat (snowFood)
+  if (opts.collectDrops !== false && result.killed) {
+    try {
+      const more = await pickupDrops(bot, { near: result.lastPosition, radius: DROPS_RADIUS, waitTicks: 5 }, signal)
+      for (const [name, n] of Object.entries(more.items)) if (n > 0) drops[name] = (drops[name] ?? 0) + n
+    } catch (err) {
+      if (isAbort(err)) throw err
+    }
+  }
   return { killed: result.killed, drops }
 }
+
+/** how far from a kill its drops are gone for after the ones about it (collectDropsNear's 4) */
+export const DROPS_RADIUS = 12
