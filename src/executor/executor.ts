@@ -142,6 +142,12 @@ export const THROW_AWAY_RANGE = 8
 /** ticks the walk off for such a throw may take */
 export const THROW_AWAY_TICKS = 600
 
+/**
+ * Ticks the plan for a chest to put down as a depot may cost, when none is carried nor made from the bag's wood: a
+ * log or two cut near (a 26.3 bot with 7 planks failed 'can't craft 1 chest: short of 1 chest', full-26.3-fresh-f)
+ */
+export const DEPOT_CHEST_TICKS = 1200
+
 /** the memory's point of interest for a chest the bot put down away from the base (a mine depot): its chests count as stock */
 export const DEPOT_POI = 'mine_depot'
 
@@ -749,7 +755,7 @@ export class Executor {
         await this.storeAtBase(needed, signal)
         if (emptySlots(this.bot) >= this.options.minFreeSlots) return
       }
-      await this.stashNearby(needed, signal, run, new Set(thrown.looping.map(t => t.name)))
+      await this.stashNearby(needed, signal, run, new Set(thrown.looping.map(t => t.name)), inTask == null)
       if (thrown.looping.length > 0 && emptySlots(this.bot) < this.options.minFreeSlots) {
         // no chest took them after all: thrown away from here
         await this.tossJunk(needed, false, run, toward, true)
@@ -891,9 +897,11 @@ export class Executor {
    * bag's wood when none is), in a nook dug into the wall beside the bot, off the way back (digDepotNook), or on the
    * floor beside it with room over it (ChestBlock.isChestBlockedAt). The chest is remembered with what went in (the
    * planner fetches from it, the stock counts it: DEPOT_POI); the junk and the stone the stock has enough of are
-   * thrown, not stored, but `also`'s (the stacks a throw keeps getting back: makeRoom). What was stored.
+   * thrown, not stored, but `also`'s (the stacks a throw keeps getting back: makeRoom). `obtainChest` (outside a task:
+   * the executor's own obtain runs its tasks): a chest for the depot obtained first when none is carried and its plan
+   * is within DEPOT_CHEST_TICKS (the bag's planks topped up from a log cut near, chestForDepot). What was stored.
    */
-  async stashNearby (needed: Record<string, number> = {}, signal?: AbortSignal, run: RoomRunner = async (name, fn) => await this.task(name, fn, signal, { room: false }), also: ReadonlySet<string> = new Set()): Promise<Record<string, number>> {
+  async stashNearby (needed: Record<string, number> = {}, signal?: AbortSignal, run: RoomRunner = async (name, fn) => await this.task(name, fn, signal, { room: false }), also: ReadonlySet<string> = new Set(), obtainChest = false): Promise<Record<string, number>> {
     const moved: Record<string, number> = {}
     const { store } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed, protect: this.protect() })
     const worth = store.filter(it => also.has(it.name) || (!JUNK.has(it.name) && !this.isSurplus(it.name)))
@@ -901,6 +909,7 @@ export class Executor {
     const dimension = normalizeDimension(this.bot.game?.dimension)
     let chest: Vec3 | null = this.chestNear()
     if (chest == null) {
+      if (obtainChest && countItems(this.bot, 'chest') === 0) await this.chestForDepot(signal)
       try {
         chest = await run('put down a depot', async (s) => await this.putDownDepot(s))
       } catch (err) {
@@ -930,6 +939,29 @@ export class Executor {
     }
     if (Object.keys(moved).length > 0) this.log(`stashed ${Object.entries(moved).map(([n, c]) => `${c} ${n}`).join(', ')} in a chest at ${at.toString()}`)
     return moved
+  }
+
+  /**
+   * A chest obtained for a depot when the plan for one costs DEPOT_CHEST_TICKS at most (the bag's wood made into it, a
+   * log cut near for the planks short); never called from inside a task. Whether one is carried now.
+   */
+  private async chestForDepot (signal?: AbortSignal): Promise<boolean> {
+    const plan = this.plan([{ item: 'chest', count: 1 }])
+    if (!plan.ok || plan.cost > DEPOT_CHEST_TICKS) {
+      this.log(`no chest for a depot: ${plan.ok ? `a plan of ${Math.round(plan.cost)} ticks, over ${DEPOT_CHEST_TICKS}` : 'no plan'}`)
+      return false
+    }
+    // (the obtain's own needs in place of the work's, put back after)
+    const needed = this.needed
+    try {
+      await this.obtain([{ item: 'chest', count: 1 }], signal)
+    } catch (err) {
+      if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true || isAbort(err)) throw err
+      this.log(`no chest for a depot: ${(err as Error).message}`)
+    } finally {
+      this.needed = needed
+    }
+    return countItems(this.bot, 'chest') > 0
   }
 
   /** a chest put down by the bot for a depot (crafted first when none is carried), or null when there's no way to */

@@ -545,6 +545,37 @@ test('stashNearby puts a depot chest down when no chest is near, stores what isn
   assert.equal(count(bot, 'andesite'), 20)
 })
 
+test('stashNearby with obtainChest gets a chest for the depot first when the bag\'s wood is short of one and the plan is within DEPOT_CHEST_TICKS; not in a task, nor over the budget', async () => {
+  // (26.3 run full-26.3-fresh-f: 7 planks held, 'can't craft 1 chest: short of 1 chest', and no depot)
+  const { DEPOT_CHEST_TICKS } = await import('../../src/executor/executor')
+  const make = (): { bot: any, ex: Executor, chests: number[], log: string[] } => {
+    const bot = fakeBot({ oak_log: 1, oak_planks: 4, raw_iron: 30, iron_pickaxe: 1 })
+    bot.entities = {}
+    bot.blockAt = () => null
+    const log: string[] = []
+    const ex = new Executor(bot, { runners: honestRunners(bot, log), log: line => log.push(line) })
+    const chests: number[] = []
+    ;(ex as any).putDownDepot = async () => { chests.push(count(bot, 'chest')); return null }
+    return { bot, ex, chests, log }
+  }
+  const straight = async (_name: string, fn: any): Promise<any> => await fn(new AbortController().signal)
+  const a = make()
+  await a.ex.stashNearby({}, undefined, straight, new Set(), true)
+  assert.deepEqual(a.chests, [1])
+  assert.ok(a.log.includes('craft 1 chest'), a.log.join(' | '))
+  // in a task (a step's room): no obtain, the depot's own craft from the bag
+  const b = make()
+  await b.ex.stashNearby({}, undefined, straight, new Set(), false)
+  assert.deepEqual(b.chests, [0])
+  // a dear plan: none
+  const c = make()
+  const plan = c.ex.plan.bind(c.ex)
+  ;(c.ex as any).plan = (...args: any[]) => ({ ...plan(...args), cost: DEPOT_CHEST_TICKS + 1 })
+  await c.ex.stashNearby({}, undefined, straight, new Set(), true)
+  assert.deepEqual(c.chests, [0])
+  assert.ok(c.log.some(l => /no chest for a depot: a plan of \d+ ticks, over 1200/.test(l)), c.log.join(' | '))
+})
+
 test('stashNearby keeps what the milestones being worked on need (milestoneNeeds: the nether\'s obsidian, buckets and gold), stashes the rest', async () => {
   const bot = fakeBot({ raw_iron: 2, furnace: 1, obsidian: 6, raw_gold: 2, bucket: 2, lava_bucket: 1, oak_door: 1, iron_pickaxe: 1 })
   bot.entities = {}
