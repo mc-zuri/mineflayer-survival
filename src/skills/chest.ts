@@ -8,6 +8,7 @@ import { navigateToReach } from './navigate'
 import { collectBlock } from './collectBlock'
 import { blockAtOrThrow, countsDelta, itemMatcher, settleInventory, trace, type Block, type ItemCounts, type ItemFilter } from './util'
 import { protectedCounts, type ProtectOptions } from '../executor/keep'
+import { normalizeDimension, type WorldMemory } from '../core/memory'
 
 export interface ChestArgs {
   chest: Vec3
@@ -20,6 +21,40 @@ export interface ChestArgs {
    * arrows, the water bucket, the food's working set), with these options; false: anything asked goes
    */
   protect?: ProtectOptions | false
+  /**
+   * The memory told what the container holds once the window has been worked (rememberContents; default
+   * bot.survival.memory, null for none)
+   */
+  memory?: WorldMemory | null
+}
+
+/** the blocks a container window opens on (Block.getMenuProvider's: the chests, barrels, shulker boxes, hoppers...) */
+const CONTAINERS = /(^|_)(chest|barrel|shulker_box|hopper|dispenser|dropper)$/
+
+/**
+ * A double chest's other half (ChestBlock.getConnectedDirection: clockwise of the facing for the left half,
+ * counter-clockwise for the right), null for a single one
+ */
+export function chestPartner (block: { name: string, position: Vec3, getProperties?: () => Record<string, unknown> }): Vec3 | null {
+  const props = block.getProperties?.() ?? {}
+  const facing = CLOCKWISE[String(props.facing)]
+  if (facing == null || (props.type !== 'left' && props.type !== 'right')) return null
+  const [dx, dz] = props.type === 'left' ? facing : [-facing[0], -facing[1]]
+  return block.position.offset(dx, 0, dz)
+}
+
+/**
+ * What a container holds as its window shows it, remembered (WorldMemory.rememberChest, seen now): every open, store
+ * and take leaves the memory the chest's true contents, whatever was asked of it. A double chest's are all the
+ * clicked half's, the other half's emptied when the memory knows it (one window over both: ChestBlock.
+ * getMenuProvider's CompoundContainer). A rekit's take in a 26.3 whole game was in no checkpoint's memory, and the
+ * worn pickaxe's replacement planned 'loot 1 diamond_pickaxe' from a base chest that held none: 0 gained after a long
+ * walk.
+ */
+export function rememberContents (memory: WorldMemory, block: { name: string, position: Vec3, getProperties?: () => Record<string, unknown> }, items: ItemCounts, dimension: string): void {
+  memory.rememberChest(block.position, items, dimension)
+  const partner = chestPartner(block)
+  if (partner != null && memory.chestAt(partner, dimension) != null) memory.rememberChest(partner, {}, dimension)
 }
 
 export interface ChestResult {
@@ -61,12 +96,8 @@ const CLOCKWISE: Record<string, [number, number]> = { north: [1, 0], east: [0, 1
  */
 export function chestLids (block: { name: string, position: Vec3, getProperties?: () => Record<string, unknown> }): Vec3[] {
   const cells = [block.position.offset(0, 1, 0)]
-  const props = block.getProperties?.() ?? {}
-  const facing = CLOCKWISE[String(props.facing)]
-  if (facing != null && (props.type === 'left' || props.type === 'right')) {
-    const [dx, dz] = props.type === 'left' ? facing : [-facing[0], -facing[1]]
-    cells.push(block.position.offset(dx, 1, dz))
-  }
+  const partner = chestPartner(block)
+  if (partner != null) cells.push(partner.offset(0, 1, 0))
   return cells
 }
 
@@ -104,7 +135,14 @@ export function roomFor (window: { slots: Array<{ type: number, count: number } 
 
 async function transfer (bot: Bot, args: ChestArgs, direction: 'store' | 'retrieve', signal?: AbortSignal): Promise<ChestResult> {
   throwIfAborted(signal)
+  const memory = args.memory !== undefined ? args.memory : ((bot as any).survival?.memory as WorldMemory | undefined) ?? null
+  const dimension = normalizeDimension(bot.game?.dimension)
   let block = blockAtOrThrow(bot, args.chest.floored())
+  // no container there any more (broken, burnt, blown up): forgotten, and no window waited for
+  if (!CONTAINERS.test(block.name)) {
+    memory?.forgetChest(block.position, dimension)
+    throw new SkillError('NOT_FOUND', `no chest at ${block.position.toString()} (${block.name})`, { chest: block.position, moved: {} })
+  }
   await navigateToReach(bot, block.position, signal)
   if (chestLids(block as any).some(cell => isRedstoneConductor(bot.blockAt(cell) as any))) {
     await unblockChest(bot, block, signal)
@@ -163,6 +201,10 @@ async function transfer (bot: Bot, args: ChestArgs, direction: 'store' | 'retrie
       }
     }
   } finally {
+    // what it holds now, whatever moved or failed
+    if (memory != null) {
+      try { rememberContents(memory, block as any, countBy(window.containerItems()), dimension) } catch {}
+    }
     window.close()
   }
   const result = { chest: block.position, moved }

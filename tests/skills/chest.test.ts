@@ -129,3 +129,106 @@ test('storeItems leaves the bag its protected items (keep.ts protectedCounts): t
     clearInterval(ticker)
   }
 })
+
+/** a bot by a chest at (2, 64, 0) (the other half of a double chest at (2, 64, 1) when `double`), its window over `inChest` */
+function chestBot (bag: any[], inChest: Record<string, number>, opts: { double?: boolean, block?: string } = {}): any {
+  const { WorldMemory } = require('../../src/core/memory')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: bag, world: (pos: Vec3) => pos.equals(new Vec3(2, 64, 0)) || (opts.double === true && pos.equals(new Vec3(2, 64, 1))) ? (opts.block ?? 'chest') : pos.y < 64 ? 'stone' : 'air' })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => {
+    const b = blockAt(pos)
+    b.type = registry.blocksByName[b.name].id
+    // facing west, the left half's other half is clockwise: north (z - 1); the right half's south (z + 1)
+    if (b.name === 'chest') b.getProperties = () => ({ facing: 'west', type: opts.double === true ? (pos.z === 0 ? 'right' : 'left') : 'single', waterlogged: false })
+    return b
+  }
+  bot._client = new EventEmitter()
+  bot.pathfinder = { world: {} }
+  bot.survival = { memory: new WorldMemory() }
+  bot.opened = 0
+  bot.openContainer = async () => {
+    bot.opened++
+    return {
+      slots: new Array(63).fill(null),
+      inventoryStart: 27,
+      inventoryEnd: 63,
+      items: () => bot.inventory.items(),
+      containerItems: () => Object.entries(inChest).filter(([, n]) => n > 0).map(([name, n]) => item(name, n)),
+      deposit: async (type: number, _meta: unknown, count: number) => {
+        const slot = bot.inventory.items().find((i: any) => i.type === type)
+        slot.count -= count
+        if (slot.count <= 0) bot.inventory.slots[slot.slot] = null
+        const name = registry.items[type].name
+        inChest[name] = (inChest[name] ?? 0) + count
+      },
+      withdraw: async (type: number, _meta: unknown, count: number) => {
+        const name = registry.items[type].name
+        inChest[name] -= count
+        const free = bot.inventory.slots.findIndex((s: any, i: number) => i >= 9 && i < 45 && s == null)
+        bot.inventory.slots[free] = { ...item(name, count), slot: free }
+      },
+      close: () => {}
+    }
+  }
+  return bot
+}
+
+test('storeItems and retrieveItems leave the memory the chest\'s true contents, what wasn\'t asked of it too, seen now (rememberContents)', async () => {
+  const { retrieveItems } = require('../../src/skills/chest')
+  // the memory says a diamond pickaxe; a run whose memory wasn't saved took it
+  const inChest: Record<string, number> = { raw_iron: 20, bread: 5 }
+  const bot = chestBot([item('cobblestone', 64), item('iron_pickaxe')], inChest)
+  const memory = bot.survival.memory
+  memory.rememberChest(new Vec3(2, 64, 0), { diamond_pickaxe: 1, raw_iron: 20 })
+  memory.now = 500
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    // a take of what isn't there: none moved, the memory set right
+    const res = await retrieveItems(bot, { chest: new Vec3(2, 64, 0), filter: 'diamond_pickaxe', count: 1 })
+    assert.deepStrictEqual(res.moved, {})
+    assert.deepStrictEqual(memory.chestAt(new Vec3(2, 64, 0))?.items, { raw_iron: 20, bread: 5 })
+    assert.strictEqual(memory.chestAt(new Vec3(2, 64, 0))?.seen, 500)
+    // a store: what's in it after, not what was remembered plus what went in
+    await storeItems(bot, { chest: new Vec3(2, 64, 0), filter: ['cobblestone'] })
+    assert.deepStrictEqual(memory.chestAt(new Vec3(2, 64, 0))?.items, { raw_iron: 20, bread: 5, cobblestone: 64 })
+    // a take: what's left
+    await retrieveItems(bot, { chest: new Vec3(2, 64, 0), filter: 'raw_iron', count: 15 })
+    assert.deepStrictEqual(memory.chestAt(new Vec3(2, 64, 0))?.items, { raw_iron: 5, bread: 5, cobblestone: 64 })
+    // memory: null leaves it be
+    await retrieveItems(bot, { chest: new Vec3(2, 64, 0), filter: 'bread', memory: null })
+    assert.strictEqual(memory.chestAt(new Vec3(2, 64, 0))?.items.bread, 5)
+  } finally {
+    clearInterval(ticker)
+  }
+})
+
+test('a double chest\'s contents are the clicked half\'s, the other half\'s emptied (one window over both)', async () => {
+  const { chestPartner } = require('../../src/skills/chest')
+  const inChest: Record<string, number> = { diamond: 3 }
+  const bot = chestBot([item('cobblestone', 64)], inChest, { double: true })
+  const memory = bot.survival.memory
+  assert.strictEqual(chestPartner(bot.blockAt(new Vec3(2, 64, 0))).toString(), new Vec3(2, 64, 1).toString())
+  assert.strictEqual(chestPartner(bot.blockAt(new Vec3(2, 64, 1))).toString(), new Vec3(2, 64, 0).toString())
+  // the diamonds stored through the other half before
+  memory.rememberChest(new Vec3(2, 64, 1), { diamond: 3 })
+  memory.rememberChest(new Vec3(2, 64, 0), {})
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await storeItems(bot, { chest: new Vec3(2, 64, 0), filter: ['cobblestone'] })
+  } finally {
+    clearInterval(ticker)
+  }
+  assert.deepStrictEqual(memory.chestAt(new Vec3(2, 64, 0))?.items, { diamond: 3, cobblestone: 64 })
+  assert.deepStrictEqual(memory.chestAt(new Vec3(2, 64, 1))?.items, {})
+  assert.deepStrictEqual(memory.findItem('diamond').map((f: any) => f.count), [3])
+})
+
+test('a remembered chest that is gone: forgotten, NOT_FOUND, and no window waited for', async () => {
+  const { retrieveItems } = require('../../src/skills/chest')
+  const bot = chestBot([], {}, { block: 'air' })
+  const memory = bot.survival.memory
+  memory.rememberChest(new Vec3(2, 64, 0), { diamond_pickaxe: 1 })
+  await assert.rejects(retrieveItems(bot, { chest: new Vec3(2, 64, 0), filter: 'diamond_pickaxe' }), (err: any) => err.code === 'NOT_FOUND')
+  assert.strictEqual(bot.opened, 0)
+  assert.strictEqual(memory.chestAt(new Vec3(2, 64, 0)), undefined)
+})

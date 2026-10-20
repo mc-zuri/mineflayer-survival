@@ -445,13 +445,8 @@ export const runLoot: StepRunner<LootStep> = async (step, ctx) => {
       const target = door != null ? new Vec3(door.x, door.y, door.z) : chest
       await travel(bot, { target, range: door != null ? 1 : 3, exactY: true }, signal).catch(err => { if (isAbort(err)) throw err })
     }
-    const res = await retrieveItems(bot, { chest, filter: step.item, count: want }, signal)
-    const known = ctx.memory.chestAt(chest, step.from.dimension)
-    if (known != null) {
-      const items = { ...known.items }
-      for (const [name, n] of Object.entries(res.moved)) items[name] = Math.max(0, (items[name] ?? 0) - n)
-      ctx.memory.rememberChest(chest, items, step.from.dimension)
-    }
+    // (the window's contents remembered whatever came out: chest.ts rememberContents)
+    await retrieveItems(bot, { chest, filter: step.item, count: want, memory: ctx.memory }, signal)
   }
   return { gained: countItems(bot, step.item) - start }
 }

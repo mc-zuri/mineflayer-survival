@@ -240,7 +240,7 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
   for (const it of tripKitItems(bot.inventory.items().map(i => ({ name: i.name, count: i.count })))) {
     throwIfAborted(signal)
     try {
-      const res = await storeItems(bot, { chest: pos, filter: it.name, count: it.count }, signal)
+      const res = await storeItems(bot, { chest: pos, filter: it.name, count: it.count, memory }, signal)
       for (const [name, n] of Object.entries(res.moved)) stored[name] = (stored[name] ?? 0) + n
     } catch (err) {
       if (isAbort(err)) throw err
@@ -249,7 +249,8 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
       if (/windowOpen|did not fire|won't open|blocked/i.test((err as Error).message)) break
     }
   }
-  memory.rememberChest(pos, stored, 'overworld')
+  // (each store remembered the chest's contents: chest.ts rememberContents)
+  if (memory.chestAt(pos, 'overworld') == null) memory.rememberChest(pos, stored, 'overworld')
   memory.addPoi(TRIP_KIT, pos, 'overworld', 'spare kit')
   // the respawn point by the kit
   let bed: Vec3 | null = null
@@ -304,9 +305,7 @@ export async function takeTripKit (bot: Bot, memory: WorldMemory, signal?: Abort
   const poi = memory.getPois(TRIP_KIT, { dimension: 'overworld', near: bot.entity.position })[0]
   if (poi == null) return {}
   const chest = new Vec3(poi.x, poi.y, poi.z)
-  const res = await retrieveItems(bot, { chest }, signal)
-  const left = { ...(memory.chestAt(chest, 'overworld')?.items ?? {}) }
-  for (const [name, n] of Object.entries(res.moved)) left[name] = Math.max(0, (left[name] ?? 0) - n)
-  memory.rememberChest(chest, left, 'overworld')
+  // (what's left remembered as the window shows it: chest.ts rememberContents)
+  const res = await retrieveItems(bot, { chest, memory }, signal)
   return res.moved
 }

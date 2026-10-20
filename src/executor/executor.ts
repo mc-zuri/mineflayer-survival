@@ -820,15 +820,14 @@ export class Executor {
     for (const it of worth) {
       throwIfOwnerAborted(signal)
       try {
-        const res = await run(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: at, filter: [it.name], count: it.count, protect: this.protect() }, s))
+        const res = await run(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: at, filter: [it.name], count: it.count, protect: this.protect(), memory: this.memory }, s))
         const n = res.moved[it.name] ?? 0
-        this.rememberStored(at, it.name, n, dimension)
         if (n > 0) moved[it.name] = (moved[it.name] ?? 0) + n
       } catch (err) {
         if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true || isAbort(err)) throw err
         // a full chest, or one that won't open: the rest stays
         const partial = ((err as TaskError).partial as { moved?: Record<string, number> } | undefined)?.moved?.[it.name] ?? 0
-        this.rememberStored(at, it.name, partial, dimension)
+        if (partial > 0) moved[it.name] = (moved[it.name] ?? 0) + partial
         break
       }
     }
@@ -875,7 +874,6 @@ export class Executor {
       for (const [name, n] of Object.entries(res)) {
         if (n <= 0) continue
         moved[name] = (moved[name] ?? 0) + n
-        this.rememberStored(pos, name, n, dimension)
         const rest = (left.get(name) ?? 0) - n
         if (rest > 0) left.set(name, rest)
         else left.delete(name)
@@ -883,7 +881,7 @@ export class Executor {
     }
     const store = async (pos: { x: number, y: number, z: number }, filter: string[], count?: number): Promise<boolean> => {
       try {
-        const res = await this.task(`store ${filter.join(', ')}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter, count, protect: this.protect() }, s), signal, { room: false })
+        const res = await this.task(`store ${filter.join(', ')}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter, count, protect: this.protect(), memory: this.memory }, s), signal, { room: false })
         record(pos, res.moved)
         return true
       } catch (err) {
@@ -914,16 +912,14 @@ export class Executor {
     const base = this.base
     const moved: Record<string, number> = {}
     if (base == null || base.chests.length === 0) return moved
-    const dimension = this.memory.base?.dimension ?? 'overworld'
     for (const it of items) {
       let left = it.count
       for (const pos of base.chests) {
         if (left <= 0) break
         throwIfOwnerAborted(signal)
         try {
-          const res = await this.task(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter: [it.name], count: left, protect: this.protect() }, s), signal, { room: false })
+          const res = await this.task(`store ${it.name}`, async (s) => await storeItems(this.bot, { chest: vec(pos), filter: [it.name], count: left, protect: this.protect(), memory: this.memory }, s), signal, { room: false })
           const n = res.moved[it.name] ?? 0
-          this.rememberStored(pos, it.name, n, dimension)
           moved[it.name] = (moved[it.name] ?? 0) + n
           left -= n
         } catch (err) {
@@ -933,14 +929,6 @@ export class Executor {
     }
     if (Object.keys(moved).length > 0) this.log(`stored ${Object.entries(moved).map(([n, c]) => `${c} ${n}`).join(', ')}`)
     return moved
-  }
-
-  private rememberStored (pos: { x: number, y: number, z: number }, name: string, n: number, dimension: string): void {
-    if (n <= 0) return
-    const known = this.memory.chestAt(pos, dimension)
-    const items = { ...(known?.items ?? {}) }
-    items[name] = (items[name] ?? 0) + n
-    this.memory.rememberChest(pos, items, dimension)
   }
 }
 

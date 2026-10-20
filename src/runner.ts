@@ -1239,11 +1239,9 @@ export class Runner {
         if (bot.entity.position.distanceTo(at) > 4) {
           await this.executor.task('to the kit', async (s) => await overland(bot, { target: at, range: 2, exactY: true }, s), signal).catch(err => { if (TaskError.is(err, 'DIED')) throw err })
         }
-        const res = await this.executor.task('kit', async (s) => await retrieveItems(bot, { chest: at, filter: wanted }, s), signal)
-        const items = { ...(known?.items ?? {}) }
-        for (const [name, n] of Object.entries(res.moved)) items[name] = Math.max(0, (items[name] ?? 0) - n)
+        // (the chest's contents remembered as the window shows them: chest.ts rememberContents)
+        const res = await this.executor.task('kit', async (s) => await retrieveItems(bot, { chest: at, filter: wanted, memory: this.memory }, s), signal)
         for (const [name, n] of Object.entries(res.moved)) took[name] = (took[name] ?? 0) + n
-        this.memory.rememberChest(chest, items, dimension)
       } catch (err) {
         if (TaskError.is(err, 'DIED')) throw err
         this.log(`kit from ${chest.x} ${chest.y} ${chest.z} failed: ${(err as Error).message}`)

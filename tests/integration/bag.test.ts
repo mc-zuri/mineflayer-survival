@@ -6,7 +6,7 @@ import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
-import { storeItems } from '../../src/skills/chest'
+import { retrieveItems, storeItems } from '../../src/skills/chest'
 import { countItems, emptySlots, waitTicks, waitUntil } from '../../src/skills/util'
 import { DEPOT_POI, Executor, LAVA_ROOM } from '../../src/executor/executor'
 import { isThrownDrop } from '../../src/skills/pickupDrops'
@@ -91,6 +91,28 @@ describe(`the bag down a mine on a ${DEFAULT_VERSION} server`, { timeout: 20 * 6
     assert.deepStrictEqual(res.moved, { cobblestone: 64 })
     assert.strictEqual(countItems(bot, 'cobblestone'), 0)
     assert.notStrictEqual(bot.blockAt(chest.offset(0, 1, 0))?.name, 'stone')
+  })
+
+  it('a take from a double chest whose remembered pickaxe is gone: the memory has what the window shows, under the clicked half, the other half emptied', async () => {
+    // (26.3 run full-26.3-j: 'loot 1 diamond_pickaxe' from the base's chest gained 0, taken in a run segment whose
+    // memory wasn't saved)
+    const left = at(3, 0, 0)
+    const right = at(3, 0, 1)
+    await setblock(left, 'chest[facing=west,type=right]{Items:[{Slot:0b,id:"minecraft:bread",count:5}]}')
+    await setblock(right, 'chest[facing=west,type=left]{Items:[{Slot:0b,id:"minecraft:raw_iron",count:20}]}')
+    const memory = bot.survival.memory
+    memory.rememberChest(left, { diamond_pickaxe: 1 })
+    memory.rememberChest(right, { raw_iron: 20, diamond: 2 })
+    const res = await retrieveItems(bot, { chest: left, filter: 'diamond_pickaxe', count: 1 })
+    assert.deepStrictEqual(res.moved, {})
+    assert.deepStrictEqual(memory.chestAt(left)?.items, { bread: 5, raw_iron: 20 })
+    assert.deepStrictEqual(memory.chestAt(right)?.items, {})
+    assert.deepStrictEqual(memory.findItem('diamond_pickaxe'), [])
+    await retrieveItems(bot, { chest: right, filter: 'bread', count: 2 })
+    assert.deepStrictEqual(memory.chestAt(right)?.items, { bread: 3, raw_iron: 20 })
+    assert.deepStrictEqual(memory.chestAt(left)?.items, {})
+    memory.forgetChest(left)
+    memory.forgetChest(right)
   })
 
   /** solid stone round the origin (a mine), with a two-high tunnel along +x from it, `length` long */
