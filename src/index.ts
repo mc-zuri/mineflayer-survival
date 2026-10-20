@@ -14,6 +14,7 @@ import { StockPolicy, type StockOptions } from './planner/stock'
 import { advancementsDone, type AdvancementProgressPacket } from './core/advancements'
 import { SCAFFOLD_ITEMS } from './executor/steps'
 import { dropsWorthATrip } from './executor/keep'
+import { installSculkAvoidance, watchDangers } from './skills/danger'
 import { rememberNetherDeath } from './nether/deaths'
 import { keepNetherTrail, pruneTrail } from './nether/trail'
 
@@ -92,6 +93,9 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     keepOutOfHazardsLeft(bot)
     // no walk or drop onto a stalagmite (impaled, PointedDripstoneBlock.fallOn)
     keepOffDripstone(bot)
+    // the deep dark's sculk seen kept off (its sensors and shriekers: the warden) and looked for every 100 ticks
+    installSculkAvoidance(bot)
+    watchDangers(bot)
     // the ticks since the bot last slept (Stats.TIME_SINCE_REST): the night below the surface is slept only when due
     countRest(bot)
     const tasks = new TaskRunner(bot)

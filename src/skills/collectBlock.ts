@@ -14,6 +14,7 @@ import {
 } from './util'
 import { dig } from '../core/actions'
 import { findBlocks } from '../core/findBlocks'
+import { dangerAt } from './danger'
 
 export interface CollectBlockArgs {
   /** block names to look for, nearest first */
@@ -163,8 +164,10 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       if (target != null) targets.set(vecKey(target), target)
     }
     const avoidLava = args.avoidLava !== false
+    // not in the deep dark's hearing (a sensor's 8 blocks: each block broken a vibration, the shriekers' call for the
+    // warden: dangerAt)
     const found = [...targets.values()]
-      .filter(pos => !tried.has(vecKey(pos)) && args.exclude?.(pos) !== true && !(avoidLava && lavaBeside(p => bot.blockAt(p), pos)))
+      .filter(pos => !tried.has(vecKey(pos)) && args.exclude?.(pos) !== true && !(avoidLava && lavaBeside(p => bot.blockAt(p), pos)) && !dangerAt(bot, pos))
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
     if (found.length === 0) return null
     tried.add(vecKey(found[0]))
