@@ -296,8 +296,11 @@ export async function buildBase (bot: Bot, opts: BuildBaseOptions): Promise<Buil
   try {
     // to the site: the cell outside the outer door (the pathfinder digs its way down)
     const outside = v(blueprint.entrance.outside)
+    // (a death on the way ends the build: the materials went with the bot, and a 1.21.11 build went on without them,
+    // its digs tried from the spawn, then the shell's stone got, 'base built: 0 dug, … 8 missing', no door hung,
+    // ls-1.21.11 t32393)
     await executor.task('to the base site', async (s) => await navigate(bot, { goal: new goals.GoalBlock(outside.x, outside.y, outside.z) }, s), signal).catch(err => {
-      if (isAbort(err)) throw err
+      if (isAbort(err) || TaskError.is(err, 'DIED')) throw err
       log(`no way to the base's entrance: ${(err as Error).message}`)
     })
 

@@ -76,3 +76,25 @@ test('placementFacing: along a bed or a door, back at the player for a chest or 
   assert.equal(yawFor(placementFacing(of('chest', 'east'))!), Math.PI / 2)
   assert.equal(Math.abs(yawFor(placementFacing(of('oak_door', 'south'))!)), Math.PI)
 })
+
+test('buildBase: a death on the way to the site ends the build (DIED), no digging or placing tried after it (ls-1.21.11 t32393)', async () => {
+  const { buildBase, HOUSE_BLUEPRINT } = await import('../../src/base/build')
+  const { TaskError } = await import('../../src/core/errors')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ world: (p: any) => p.y < 76 ? 'stone' : 'air' })
+  bot.pathfinder = { defaultMoveSettings: { exclusionAreasBreak: [], exclusionAreasPlace: [] }, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+  const tasks: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    log: () => {},
+    obtain: async () => ({ plans: 0, steps: 0 }),
+    task: async (name: string) => {
+      tasks.push(name)
+      if (name === 'to the base site') throw new TaskError('DIED', 'the bot died')
+      return false
+    }
+  }
+  await assert.rejects(buildBase(bot, { blueprint: HOUSE_BLUEPRINT, origin: { x: -8, y: 74, z: 120 }, executor, gather: false }), (err: unknown) => TaskError.is(err, 'DIED'))
+  assert.deepEqual(tasks, ['to the base site'])
+  assert.equal(executor.memory.base, null, 'no base recorded')
+})
