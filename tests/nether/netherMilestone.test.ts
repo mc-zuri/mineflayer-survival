@@ -755,3 +755,18 @@ test('a portal with a diamond pickaxe and the seed known goes to the nearest rui
   assert.equal(calls.filter(c => c === 'to a ruined portal').length, 1, calls.join(', '))
   assert.ok(executor.memory.getPois(RUINED_PORTAL_TRIED).some((p: any) => p.x === second.x && p.z === second.z))
 })
+
+test('naturalObsidian passes over obsidian in water (an ocean ruined portal) or by lava', async () => {
+  const { naturalObsidian } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  // obsidian at x 3, 5 and 7 on the ground; water over the one at 5, lava beside the one at 7
+  const world = (p: any): string => p.y === 63 && [3, 5, 7].includes(p.x) && p.z === 0 ? 'obsidian' : (p.x === 5 && p.y === 64 && p.z === 0) ? 'water' : (p.x === 8 && p.y === 63 && p.z === 0) ? 'lava' : p.y < 64 ? 'stone' : 'air'
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe', 1)], world })
+  bot.game.dimension = 'overworld'
+  bot.findBlocks = () => [new Vec3(3, 63, 0), new Vec3(5, 63, 0), new Vec3(7, 63, 0)]
+  const logs: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async () => {} }
+  await naturalObsidian(bot, executor, 10, new AbortController().signal, (l: string) => logs.push(l))
+  assert.ok(logs.some(l => /^obsidian: 1 in sight/.test(l)), logs.join('\n'))
+})

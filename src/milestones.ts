@@ -919,17 +919,19 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
   const have = (): number => countItems(bot, 'obsidian')
   if (have() >= want || countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) return
   const quiet = (err: unknown): void => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err }
-  const lavaNext = (p: Vec3): boolean => [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0], [0, 1, 0]].some(([dx, dy, dz]) => bot.blockAt(p.offset(dx, dy, dz))?.name === 'lava')
-  const mineInSight = async (range: number): Promise<void> => {
+  // (none with lava against it, its drop would burn; none in water, an ocean's ruined portal: a 26.3 bot mined one
+  // 8 deep and drowned there after 160000 ticks of the drowning reflex)
+  const fluidNext = (p: Vec3): boolean => [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0], [0, 1, 0]].some(([dx, dy, dz]) => /^(lava|water|bubble_column)$/.test(bot.blockAt(p.offset(dx, dy, dz))?.name ?? ''))
+  const mineInSight = async (range: number, within: AbortSignal): Promise<void> => {
     const id = bot.registry.blocksByName.obsidian?.id
     if (id == null) return
-    const found = (bot.findBlocks?.({ matching: id, maxDistance: range, count: 64 }) ?? []).filter(p => !lavaNext(p))
+    const found = (bot.findBlocks?.({ matching: id, maxDistance: range, count: 64 }) ?? []).filter(p => !fluidNext(p))
     if (found.length === 0) return
     log(`obsidian: ${found.length} in sight: mining ${Math.min(found.length, want - have())}`)
-    await executor.task('mine the obsidian', async (s) => await withNetherSafety(bot, async () => await collectBlock(bot, { positions: found.slice(0, want - have()), pickup: true, avoidLava: true }, s)), signal, { uses: () => Math.max(0, want - have()) })
+    await executor.task('mine the obsidian', async (s) => await withNetherSafety(bot, async () => await collectBlock(bot, { positions: found.slice(0, want - have()), pickup: true, avoidLava: true }, s)), within, { uses: () => Math.max(0, want - have()) })
       .catch(err => { quiet(err); log(`obsidian: ${(err as Error).message}`) })
   }
-  await mineInSight(64)
+  await withTickBudget(bot, RUINED_PORTAL_TICKS, signal, async (budget) => await mineInSight(64, budget)).catch(err => { quiet(err); log(`obsidian: ${(err as Error).message}`) })
   const seed = (bot as any).survival?.playOptions?.seed as Seed | undefined
   if (have() >= want || seed == null || inNether(bot)) return
   const tried = (c: { x: number, z: number }): boolean => executor.memory.getPois(RUINED_PORTAL_TRIED, { dimension: 'overworld' }).some(p => Math.hypot(p.x - c.x, p.z - c.z) < 32)
@@ -940,7 +942,7 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
   executor.memory.addPoi(RUINED_PORTAL_TRIED, new Vec3(portal.x, 0, portal.z), 'overworld')
   await withTickBudget(bot, RUINED_PORTAL_TICKS, signal, async (budget) => {
     await executor.task('to a ruined portal', async (s) => await overland(bot, { target: at, range: 16 }, s), budget).catch(quiet)
-    await mineInSight(48)
+    await mineInSight(48, budget)
   }).catch(err => { quiet(err); log(`obsidian: the ruined portal: ${(err as Error).message}`) })
 }
 
