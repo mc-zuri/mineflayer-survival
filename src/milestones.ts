@@ -1109,7 +1109,8 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     try {
       // (in already: the kit's stash by the portal walked the bot into it, and 'already in the nether' failed the
       // milestone, full-1.21.11-fresh-i)
-      if (!inNether(bot)) await executor.task('into the nether', async (s) => await enterNether(bot, { build: false }, s), signal)
+      // (and in the task: one cut off by a reflex after the portal took the bot ran again, 'already in the nether')
+      if (!inNether(bot)) await executor.task('into the nether', async (s) => { if (!inNether(bot)) await enterNether(bot, { build: false }, s) }, signal)
       // in, the gate's food is the fight's
       setFoodReserve(bot, 0, 0)
     } catch (err) {
@@ -1121,7 +1122,7 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
         if (Math.hypot(poi.x - bot.entity.position.x, poi.z - bot.entity.position.z) < 32) executor.memory.removePoi('nether_portal', poi, 'overworld')
       }
       await buildAPortal(bot, executor, signal, log)
-      await executor.task('into the nether', async (s) => await enterNether(bot, { build: false }, s), signal)
+      await executor.task('into the nether', async (s) => { if (!inNether(bot)) await enterNether(bot, { build: false }, s) }, signal)
     }
   }
   await goldOnInTheNether(bot, executor, signal, log)

@@ -1135,3 +1135,28 @@ test('the nether milestone walked into the portal by its trip kit\'s stash goes 
   assert.ok(calls.includes('leave a trip kit'), calls.join(' | '))
   assert.ok(!calls.includes('into the nether'), calls.join(' | '))
 })
+
+test('the way into the nether run again after the portal took the bot (a reflex cut the task off) finds it in and does nothing', async () => {
+  const { netherHandler } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('obsidian', 10), ...NETHER_GEAR()] })
+  bot.game.dimension = 'overworld'
+  const memory = new WorldMemory()
+  memory.addPoi('nether_portal', { x: 3, y: 64, z: 0 }, 'overworld', 'built')
+  let ran: unknown = 'not run'
+  const executor: any = {
+    memory,
+    tasks: { tick: 0 },
+    plan: () => ({ ok: false }),
+    obtain: async () => {},
+    task: async (name: string, fn: (s: AbortSignal) => Promise<unknown>) => {
+      if (name !== 'into the nether') return { fortress: { center: { x: 0, y: 64, z: 0 } }, via: 'explore', ticks: 0 }
+      // the portal took it, then the task ran again
+      bot.game.dimension = 'the_nether'
+      ran = await fn(new AbortController().signal).then(() => 'fine', (e: Error) => e.message)
+      throw new Error('stop here')
+    }
+  }
+  await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }).catch(() => {})
+  assert.equal(ran, 'fine')
+})
