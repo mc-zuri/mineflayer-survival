@@ -201,7 +201,12 @@ export function enableLockstep (bot: Bot, opts: LockstepOptions = {}): Lockstep 
     if (helloSent) return
     helloSent = true
     helloTimer = setTimeout(() => {
-      if (!available && mode === 'realtime') bot.emit('lockstepUnavailable')
+      if (!available && mode === 'realtime') {
+        // a real-time server (an anticheat's, Grim's): the player's actions at the start of a tick, as the client's keys
+        // go (mineflayer's actionsInTick: Minecraft.handleKeybinds), not between ticks or after the tick's movement
+        bot.actionsInTick = true
+        bot.emit('lockstepUnavailable')
+      }
     }, options.helloTimeoutMs)
   })
   bot.on('end', () => {

@@ -113,6 +113,8 @@ test('without an answer to hello the bot keeps its timer and says so (lockstepUn
   await sleep(120)
   assert.strictEqual(unavailable, true)
   assert.strictEqual(bot.lockstep.mode, 'realtime')
+  // a real-time server's: the actions at the start of a tick (mineflayer's actionsInTick)
+  assert.strictEqual((bot as any).actionsInTick, true)
   assert.ok(bot.ticks >= 1)
   bot.emit('end')
   const ticks = bot.ticks
