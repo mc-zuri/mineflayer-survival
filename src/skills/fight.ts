@@ -176,13 +176,55 @@ export function inMobReach (mob: { position: Vec3, width?: number, height?: numb
 export const MELEE_GUARD_MARGIN = 1.2
 
 /**
- * What the fight does with the shield against a melee mob this tick: 'swing' (the sword charged and the mob in
- * reach), 'lower' (charged, the shield still up: vanilla's client takes no attack while an item is in use, so it's let
- * down a tick first), 'block' (the mob in its reach, or about to be, and the sword not ready), or 'none' (closing in)
+ * What the fight does with the shield against a melee mob this tick: 'swing' (the sword charged, the mob in reach and
+ * the swing's gap in the shield clear of the mobs' next hits: `opening`), 'lower' (all that, the shield still up:
+ * vanilla's client takes no attack while an item is in use, so it's let down a tick first), 'block' (the mob in its
+ * reach, or about to be, and the sword not ready or its next hit due), or 'none' (closing in)
  */
-export function meleeGuard (inTheirReach: boolean, inOurReach: boolean, charged: boolean, blocking: boolean): 'swing' | 'lower' | 'block' | 'none' {
-  if (inOurReach && charged) return blocking ? 'lower' : 'swing'
+export function meleeGuard (inTheirReach: boolean, inOurReach: boolean, charged: boolean, blocking: boolean, opening = true): 'swing' | 'lower' | 'block' | 'none' {
+  if (inOurReach && charged && (opening || !inTheirReach)) return blocking ? 'lower' : 'swing'
   return inTheirReach ? 'block' : 'none'
+}
+
+/** MeleeAttackGoal.resetAttackCooldown: a melee mob swings again 20 ticks after its last swing at the earliest (adjustedTickDelay(20)) */
+export const MOB_ATTACK_INTERVAL = 20
+/**
+ * the ticks a swing of the bot's leaves it open: the shield let down a tick before (meleeGuard's 'lower'), the swing,
+ * raised again the tick after, its block delay (BlocksAttacks' block_delay_seconds 0.25, 5 ticks) and a tick of lag
+ * each way: a swing begun later than MOB_ATTACK_INTERVAL less this after the mob's own takes its next hit unblocked
+ */
+export const SWING_GAP_TICKS = 10
+/** how much nearer than its reach a melee mob counts as able to hit within a swing's gap (a zombie walks 0.12 a tick) */
+export const SWING_GAP_MARGIN = 0.6
+
+/**
+ * A melee mob's attack cycle as the bot sees it (its swings: the animate packet LivingEntity.swing sends with each
+ * MeleeAttackGoal.checkAndPerformAttack, blocked or not): whether a swing of the bot's now leaves the shield down only
+ * while the mob can't hit. Open while it's out of its reach, in the ticks after its swing (its cooldown runs, 20
+ * ticks), or once it has been in its reach a whole cycle and more without a swing (it can't: no line of sight); shut
+ * from its coming into reach (its cooldown may be over: it hits at once) to its first swing, and from
+ * MOB_ATTACK_INTERVAL - SWING_GAP_TICKS after a swing to the next. The swings at the sword's every charge (12.5 ticks
+ * a diamond sword's) left the shield down 7 ticks in 13 whatever the zombie's cycle, and a 26.3 bot in iron with a
+ * shield took 11 zombie hits of 1.5 in 200 ticks in a mine and died (full-26.3-fresh-l).
+ */
+export class MeleeCycle {
+  private lastSwing = -Infinity
+  private inReachSince: number | null = null
+
+  /** its swing seen at `tick` */
+  swung (tick: number): void {
+    this.lastSwing = tick
+  }
+
+  /** this tick's say: the mob within its reach (and SWING_GAP_MARGIN), the tick; whether the bot may swing now */
+  update (inReach: boolean, tick: number): boolean {
+    if (!inReach) { this.inReachSince = null; return true }
+    if (this.inReachSince == null) this.inReachSince = tick
+    const since = tick - this.lastSwing
+    if (since <= MOB_ATTACK_INTERVAL - SWING_GAP_TICKS) return true
+    const quiet = MOB_ATTACK_INTERVAL + 5
+    return tick - this.inReachSince >= quiet && since > quiet
+  }
 }
 
 /** Pillager.performRangedAttack's bolt (CrossbowItem.performShooting, an arrow) leaves this close to the mob */
@@ -288,8 +330,26 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
   const onDead = (e: Entity): void => { if (e.id === target.id) died = true }
   bot.on('entityDead', onDead)
   const hasShield = (): boolean => useShield && (bot.inventory.slots[45]?.name === 'shield' || findItem(bot, 'shield') != null)
-  // a melee mob's swings taken on the shield (meleeGuard)
+  // a melee mob's swings taken on the shield (meleeGuard), the bot's own between them (MeleeCycle: each melee mob about's)
   const guarded = MELEE_MOBS.has(name) && !isCrossbowMob(bot, target)
+  const cycles = new Map<number, MeleeCycle>()
+  const cycleOf = (e: Entity): MeleeCycle => {
+    let c = cycles.get(e.id)
+    if (c == null) cycles.set(e.id, c = new MeleeCycle())
+    return c
+  }
+  const onSwing = (e: Entity): void => { if (e != null && e !== bot.entity && MELEE_MOBS.has(entityName(e))) cycleOf(e).swung(ticks) }
+  if (guarded) bot.on('entitySwingArm', onSwing)
+  /** whether a swing now is clear of every melee mob's next hit (MeleeCycle) */
+  const opening = (): boolean => {
+    let open = true
+    for (const m of Object.values(bot.entities)) {
+      if (m === bot.entity || !MELEE_MOBS.has(entityName(m))) continue
+      if (!isAlive(bot, m) || m.position.distanceTo(bot.entity.position) > 6) { cycles.delete(m.id); continue }
+      if (!cycleOf(m).update(inMobReach(m, bot.entity.position, SWING_GAP_MARGIN), ticks)) open = false
+    }
+    return open
+  }
 
   try {
     while (isAlive(bot, target)) {
@@ -346,8 +406,8 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
         // shield traded blows with a wither skeleton in a fortress's corridor, its shield never up, and was hit to
         // death and withered (full-26.3-fresh-d)
         // (in our reach only with the swing landing on it or one in front of it: a swing the crosshair refuses keeps
-        // the shield up)
-        const guard = meleeGuard(inMobReach(target, bot.entity.position, MELEE_GUARD_MARGIN), distance <= reach && swingVictim(bot, target) != null, strength.scale(0.5) >= 1, blocking)
+        // the shield up; and only in the mobs' cooldowns, MeleeCycle)
+        const guard = meleeGuard(inMobReach(target, bot.entity.position, MELEE_GUARD_MARGIN), distance <= reach && swingVictim(bot, target) != null, strength.scale(0.5) >= 1, blocking, opening())
         if (guard === 'block') wantBlock = true
         if (guard === 'lower') {
           lowerShield(bot)
@@ -422,6 +482,7 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
   } finally {
     bot.off('entityDead', onDead)
     bot.off('entitySpawn', onSpawn)
+    bot.off('entitySwingArm', onSwing)
     if (blocking) lowerShield(bot)
     bot.clearControlStates()
   }

@@ -185,3 +185,62 @@ test('swingVictim: a neutral mob (an enderman) in front of the target is never h
   assert.strictEqual(swingVictim(bot, target), null)
   assert.strictEqual(swingVictim(bot, enderman)?.id, enderman.id)
 })
+
+test('MeleeCycle: a swing of the bot\'s is let through in the ticks after the mob\'s own (its 20-tick cooldown) and from its coming into reach to its first swing held off; a mob that never swings in its reach is swung at after a cycle', async () => {
+  const { MeleeCycle, MOB_ATTACK_INTERVAL, SWING_GAP_TICKS, meleeGuard } = await import('../../src/skills/fight')
+  const c = new MeleeCycle()
+  assert.strictEqual(c.update(false, 0), true)
+  // in reach at 1: its cooldown may be over, it hits at once
+  for (let t = 1; t < 4; t++) assert.strictEqual(c.update(true, t), false, `before its first swing, ${t}`)
+  c.swung(4)
+  for (let t = 4; t <= 4 + MOB_ATTACK_INTERVAL - SWING_GAP_TICKS; t++) assert.strictEqual(c.update(true, t), true, `in its cooldown, ${t}`)
+  for (let t = 5 + MOB_ATTACK_INTERVAL - SWING_GAP_TICKS; t < 4 + MOB_ATTACK_INTERVAL; t++) assert.strictEqual(c.update(true, t), false, `its next swing due, ${t}`)
+  // knocked out of reach: open; back in: shut till it swings
+  assert.strictEqual(c.update(false, 30), true)
+  assert.strictEqual(c.update(true, 31), false)
+  // in reach and never swinging (no line of sight): open after a cycle and some
+  const quiet = new MeleeCycle()
+  let first = -1
+  for (let t = 0; t < 60 && first < 0; t++) if (quiet.update(true, t)) first = t
+  assert.strictEqual(first, MOB_ATTACK_INTERVAL + 5)
+  // meleeGuard: charged and in both reaches, the swing only in the opening
+  assert.equal(meleeGuard(true, true, true, true, false), 'block')
+  assert.equal(meleeGuard(true, true, true, false, false), 'block')
+  assert.equal(meleeGuard(true, true, true, true, true), 'lower')
+  // out of its reach the opening doesn't matter
+  assert.equal(meleeGuard(false, true, true, false, false), 'swing')
+})
+
+test('fight: a zombie in its reach swinging every 20 ticks: the bot\'s swings come in the ticks after its swing, the shield up again before its next (full-26.3-fresh-l)', async () => {
+  const { fight, MOB_ATTACK_INTERVAL, SWING_GAP_TICKS } = await import('../../src/skills/fight')
+  const zombie = entity({ id: 11, name: 'zombie', position: new Vec3(1.7, 64, 0.5) })
+  const bot = fakeBot({ entities: [zombie], items: [item('diamond_sword')], offhand: item('shield') })
+  bot.heldItem = bot.inventory.slots[9]
+  bot.equip = async () => {}
+  bot.activateItem = () => { bot.usingHeldItem = true }
+  bot.deactivateItem = () => { bot.usingHeldItem = false }
+  let tick = 0
+  const zombieSwings: number[] = []
+  const botSwings: number[] = []
+  // the shield's state on each of the zombie's swings
+  const blockedHits: boolean[] = []
+  bot.attack = () => { botSwings.push(tick) }
+  bot.on('physicsTick', () => {
+    tick++
+    // its swing every 20 ticks from tick 7 on (MeleeAttackGoal), seen the tick after
+    if (tick >= 7 && (tick - 7) % MOB_ATTACK_INTERVAL === 0) {
+      zombieSwings.push(tick)
+      blockedHits.push(bot.usingHeldItem === true)
+      bot.emit('entitySwingArm', zombie)
+    }
+  })
+  bot.waitForTicks = async (n: number) => { for (let i = 0; i < n; i++) bot.emit('physicsTick') }
+  await fight(bot, zombie as any, { maxTicks: 150 }).catch(() => {})
+  assert.ok(botSwings.length >= 4, `${botSwings.length} swings`)
+  for (const s of botSwings) {
+    const last = Math.max(...zombieSwings.filter(z => z <= s))
+    assert.ok(s - last <= MOB_ATTACK_INTERVAL - SWING_GAP_TICKS + 2, `a swing at ${s}, ${s - last} after the zombie's at ${last}`)
+  }
+  // (each of its hits after the first cycle came on the raised shield)
+  assert.ok(blockedHits.slice(1).every(b => b), `the shield on its hits: ${blockedHits.join(', ')}`)
+})
