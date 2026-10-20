@@ -48,6 +48,28 @@ function portalFloor (bot: Bot, near: Vec3, radius = 4): Vec3[] {
     .sort((a, b) => a.distanceTo(near) - b.distanceTo(near))
 }
 
+/**
+ * The portal by the bot remembered as the one it came out of from `from`, when the bot came through without
+ * enterPortal (it walked into the portal stashing its trip kit by it): linked to the `from` portal nearest where this
+ * one leads (PortalForcer's scale), none when one is remembered there already or no portal is within 8. Without it
+ * the way back from the fortress found no portal known, 'no portal near (-166, 86, -180) to light', and the game
+ * stopped (full-1.21.11-fresh-n)
+ */
+export function rememberArrivalHere (bot: Bot, from: Dimension): Vec3 | null {
+  const memory = bot.survival?.memory
+  if (memory == null || bot.entity == null) return null
+  const to = dimensionOf(bot)
+  const here = portalFloor(bot, bot.entity.position, 8)[0] ?? null
+  if (here == null) return null
+  if (memory.getPois('nether_portal', { dimension: to, near: here }).some(p => Math.hypot(p.x - here.x, p.z - here.z) <= 4)) return here
+  const scale = from === 'overworld' && to === 'the_nether' ? 8 : from === 'the_nether' && to === 'overworld' ? 1 / 8 : 1
+  const towards = new Vec3(here.x * scale, here.y, here.z * scale)
+  const back = memory.getPois('nether_portal', { dimension: from, near: towards })[0]
+  memory.addPoi('nether_portal', here, to, portalNote('arrival', back != null ? { dimension: from, pos: new Vec3(back.x, back.y, back.z) } : undefined))
+  trace('rememberArrivalHere: came out by the portal at', here.toString(), back != null ? `from ${back.x} ${back.y} ${back.z}` : '')
+  return here
+}
+
 /** the nearest nether_portal block that stands on something, within `maxDistance` */
 export function findPortal (bot: Bot, maxDistance = 32): Vec3 | null {
   const id = bot.registry.blocksByName.nether_portal.id

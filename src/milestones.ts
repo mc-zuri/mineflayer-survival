@@ -7,6 +7,7 @@ import type { Bot } from 'mineflayer'
 import { BOOKSHELVES, ENCHANTED_ARMOR, EYES_FOR_FRAME, EYES_TARGET, FOOD_GOAL, HUNGRY_FIND_FACTOR, RAW_TO_COOKED, armorAtLeast, eyesForPortal, mealGoals } from './planner/progression'
 import type { MilestoneHandler } from './runner'
 import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, huntable, isAdultPiglin, returnOverworld, wearGold, wearingGold, withNetherSafety } from './nether/skills'
+import { rememberArrivalHere } from './nether/portalTravel'
 import { travel } from './skills/travel'
 import { dayPhase } from './planner/schedule'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
@@ -1114,6 +1115,8 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
       // milestone, full-1.21.11-fresh-i)
       // (and in the task: one cut off by a reflex after the portal took the bot ran again, 'already in the nether')
       if (!inNether(bot)) await executor.task('into the nether', async (s) => { if (!inNether(bot)) await enterNether(bot, { build: false }, s) }, signal)
+      // (in some other way than enterNether, the arrival portal remembered: the way home goes by it)
+      rememberArrivalHere(bot, 'overworld')
       // in, the gate's food is the fight's
       setFoodReserve(bot, 0, 0)
     } catch (err) {

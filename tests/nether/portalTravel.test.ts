@@ -118,3 +118,28 @@ test('frameNear: an unlit frame (a ghast put the portal out) is found from 3 or 
   assert.deepStrictEqual(gapped.missing.map(p => `${p.x},${p.y},${p.z}`), [gap])
   assert.equal(frameNear(fakeBot({ world: world([], 'netherrack') }), remembered), null)
 })
+
+test('rememberArrivalHere: a portal the bot came out of some other way than enterPortal is remembered, linked to the overworld portal it leads from; none twice', async () => {
+  const { rememberArrivalHere, portalLinkOf } = await import('../../src/nether/portalTravel')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { Vec3 } = await import('vec3')
+  const portal = new Set(['-3,51,-3', '-2,51,-3', '-3,52,-3', '-2,52,-3', '-3,53,-3', '-2,53,-3'])
+  const world = (p: any): string => portal.has(`${p.x},${p.y},${p.z}`) ? 'nether_portal' : p.y < 51 ? 'obsidian' : 'air'
+  const bot = fakeBot({ position: new Vec3(-1.5, 51, -1.5), world })
+  bot.game.dimension = 'the_nether'
+  const id = bot.registry.blocksByName.nether_portal.id
+  bot.findBlocks = () => [...portal].map(k => new Vec3(...k.split(',').map(Number) as [number, number, number]))
+  const realBlockAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => { const b = realBlockAt(p); return b?.name === 'nether_portal' ? { ...b, type: id } : b }) as any
+  const memory = new WorldMemory()
+  memory.addPoi('nether_portal', { x: -23, y: 51, z: -25 }, 'overworld', 'built')
+  bot.survival = { memory }
+  const at = rememberArrivalHere(bot, 'overworld')
+  assert.ok(at != null)
+  const pois = memory.getPois('nether_portal', { dimension: 'the_nether' })
+  assert.equal(pois.length, 1)
+  assert.deepStrictEqual(portalLinkOf(pois[0]), { dimension: 'overworld', pos: new Vec3(-23, 51, -25) })
+  rememberArrivalHere(bot, 'overworld')
+  assert.equal(memory.getPois('nether_portal', { dimension: 'the_nether' }).length, 1)
+})
