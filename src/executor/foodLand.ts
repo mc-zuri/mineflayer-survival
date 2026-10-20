@@ -334,9 +334,12 @@ export async function seekFoodLand (bot: Bot, args: FoodLandArgs, signal?: Abort
     return null
   }
   log(`${why}: to the ${dest.biome} at ${dest.pos.x} ${dest.pos.z} for food (${Math.round(Math.hypot(dest.pos.x - bot.entity.position.x, dest.pos.z - bot.entity.position.z))} blocks)`)
-  await go(dest.pos)
+  // (noted before the trip: one cut off (a night's shelter, its ticks out) leaves the food work's explorations going
+  // out about it, not home: a 26.3 bot's trip to a snowy taiga 120 blocks off over seed 31337's peaks ran out of its
+  // ticks with the night, and its meal explored for cows about home again)
   for (const p of memory.getPois(FOOD_LAND_POI, { dimension: 'overworld' })) memory.removePoi(FOOD_LAND_POI, p, 'overworld')
   memory.addPoi(FOOD_LAND_POI, dest.pos, 'overworld', dest.biome)
   args.forgetLand()
+  await go(dest.pos)
   return dest.pos
 }

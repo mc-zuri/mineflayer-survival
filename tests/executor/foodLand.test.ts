@@ -163,3 +163,15 @@ test('seekFoodLand with the seed: the rings read about home until one has a food
   assert.equal(await surveySeed(seedLand, survey, memory, { x: 0, z: 0 }), 0)
   assert.equal(reads.length, 16)
 })
+
+test('seekFoodLand notes the food land before the trip there: one cut off still has the food work go out about it', async () => {
+  const bot = fakeBot('1.21.11', () => ({ biome: 'grove', y: 120 }))
+  const memory = new WorldMemory()
+  memory.addPoi(FOOD_BIOME_POI, { x: -200, y: 80, z: 0 }, 'overworld', 'snowy_taiga')
+  const survey = new BiomeSurvey(bot, memory)
+  let noted: Vec3 | null = null
+  const land = await seekFoodLand(bot, { survey, memory, home: new Vec3(0, 120, 0), misses: () => 0, forgetLand: () => {}, travel: async () => { noted = foodLandOf(memory); throw new Error('cut off') } }).catch(() => null)
+  assert.equal(land, null)
+  assert.ok(noted != null && (noted as Vec3).x === -200, String(noted))
+  assert.ok(foodLandOf(memory)?.x === -200)
+})

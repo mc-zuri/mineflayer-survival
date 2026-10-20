@@ -874,3 +874,23 @@ test('home: the food land while the bot has no base (its farm, herd and base go 
   assert.ok(during.equals(new Vec3(230, 70, -10)))
   assert.ok(runner.home().equals(new Vec3(5, 110, 5)))
 })
+
+test('withinTicks: only the ticks `counts` takes count against the budget (a trip\'s own, not a night\'s shelter that preempted it)', async () => {
+  const bot = fakeBot()
+  const runner: any = new Runner(bot, { log: () => {} })
+  let mine = false
+  let ran = 0
+  const done = runner.withinTicks(10, new AbortController().signal, () => mine, async (s: AbortSignal) => {
+    await new Promise<void>((resolve, reject) => {
+      s.addEventListener('abort', () => reject(s.reason), { once: true })
+      bot.on('physicsTick', () => { ran++ })
+    })
+  }).catch((err: Error) => err)
+  for (let i = 0; i < 50; i++) bot.emit('physicsTick')
+  mine = true
+  for (let i = 0; i < 9; i++) bot.emit('physicsTick')
+  assert.equal(ran, 59)
+  bot.emit('physicsTick')
+  const err = await done
+  assert.ok(TaskError.is(err, 'TIMEOUT'), String(err))
+})

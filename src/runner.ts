@@ -1205,9 +1205,11 @@ export class Runner {
    * found), within FOOD_TRIP_TICKS; the food work goes on from wherever the bot got to
    */
   private async toFoodLand (signal: AbortSignal): Promise<void> {
+    const name = 'to food land'
     try {
-      await this.withinTicks(FOOD_TRIP_TICKS, signal, async (t) => {
-        await this.executor.task('to food land', async (s) => {
+      // (its own ticks: not a night's shelter that preempted it, 9000 ticks of the trip's on seed 31337)
+      await this.withinTicks(FOOD_TRIP_TICKS, signal, () => this.executor.tasks.current?.name === name, async (t) => {
+        await this.executor.task(name, async (s) => {
           await seekFoodLand(this.bot, {
             survey: this.executor.biomes,
             memory: this.memory,
@@ -1225,13 +1227,16 @@ export class Runner {
     }
   }
 
-  async withinTicks (ticks: number, signal: AbortSignal, fn: (s: AbortSignal) => Promise<void>): Promise<void> {
+  async withinTicks (ticks: number, signal: AbortSignal, countsOrFn: (() => boolean) | ((s: AbortSignal) => Promise<void>), maybeFn?: (s: AbortSignal) => Promise<void>): Promise<void> {
+    // (`counts`: whether a tick counts against the budget)
+    const fn = maybeFn ?? countsOrFn as (s: AbortSignal) => Promise<void>
+    const counts = maybeFn != null ? countsOrFn as () => boolean : () => true
     const ctrl = new AbortController()
     const onOuter = (): void => ctrl.abort(signal.reason)
     if (signal.aborted) onOuter()
     signal.addEventListener('abort', onOuter, { once: true })
     let n = 0
-    const count = (): void => { if (++n >= ticks && !ctrl.signal.aborted) ctrl.abort(new TaskError('TIMEOUT', `out of its ${ticks} ticks`)) }
+    const count = (): void => { if (counts() && ++n >= ticks && !ctrl.signal.aborted) ctrl.abort(new TaskError('TIMEOUT', `out of its ${ticks} ticks`)) }
     this.bot.on('physicsTick', count)
     try {
       await fn(ctrl.signal)
