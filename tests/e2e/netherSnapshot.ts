@@ -6,7 +6,9 @@
 // the lava sea, where the pearl legs go from the throne: 58 -585 160 -505 24 90; nether-seed7741-blaze.json.gz, SNAP_SEED
 // 7741, the fortress spawner at 136 77 258 a fresh-seed whole game got no rod at: 104 226 168 290 56 98;
 // nether-seed2-s2fortress.json.gz, the throne spawner at -277 77 -159 the whole game's seeded lookup finds from its
-// portal, its throne room walled in netherrack, the hall under its stairs: -313 -195 -241 -123 50 100)
+// portal, its throne room walled in netherrack, the hall under its stairs: -313 -195 -241 -123 50 100;
+// nether-seed2-s2fortress2.json.gz, that fortress's other throne spawner at -290 77 -209, open in a cave, where
+// full-26.3-fresh-k burned to death: -322 -241 -258 -177 50 100)
 import * as fs from 'node:fs'
 import * as zlib from 'node:zlib'
 import { Vec3 } from 'vec3'

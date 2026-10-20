@@ -935,3 +935,17 @@ test('fightHealth: alight, the fire still to come (BURN_HEALTH) off the health; 
   assert.ok((await run(true)).includes('(0, 64, 9)'), 'the front shut alight')
   assert.deepEqual(await run(false), [])
 })
+
+test('planBlazeNooks at seed 2\'s other throne spawner of that fortress (-290 77 -209, 26.3; open in a cave, full-26.3-fresh-k\'s): the bow\'s nook on the rock over its corridor, 7 off, facing it, seeing most of its spawns; no melee nook', async () => {
+  const { planBlazeNooks } = await import('../../src/nether/blazeFight')
+  const lookup = snapshotLookup('nether-seed2-s2fortress2.json.gz')
+  const spawner = new Vec3(-290, 77, -209)
+  assert.equal(lookup(spawner)?.name, 'spawner')
+  const from = new Vec3(-270.5, 61, -164.5)
+  const far = planBlazeNooks(lookup, spawner, { from })
+  assert.ok(far.length > 0)
+  assert.deepEqual(far[0].stand, new Vec3(-287, 79, -202))
+  assert.deepEqual(far[0].facing, new Vec3(0, 0, -1))
+  assert.ok(spawnView(lookup, spawner, far[0]).seen >= 0.8)
+  assert.deepEqual(planBlazeNooks(lookup, spawner, { from, melee: true }), [])
+})

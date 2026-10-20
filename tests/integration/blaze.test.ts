@@ -15,7 +15,8 @@
 // nether-26.3-q3's at s2fortress; BLAZE_KIT=gate the least the nether's gear gate lets in (gateBow with a plain bow and
 // BLAZE_ARROWS arrows, default 16; gateIron in iron with an iron sword; gateIronBow in iron with a bow, BLAZE_ARROWS
 // arrows, default 32, and BLAZE_FOOD cooked porkchops, default 10; gateDiamond in plain diamond, 64 arrows; gate2 the
-// least the gate lets in since it asks for the iron armor, a bow, 64 arrows and 120 food points).
+// least the gate lets in since it asks for the iron armor, a bow, 64 arrows and 120 food points; freshK
+// full-26.3-fresh-k's bag). BLAZE_AT=s2fortress2: that fortress's other spawner, (-290, 77, -209).
 // BLAZE_HURT_LOG=1 logs each hurt: what hurt the bot, where it stood, its health, whether its shield was up.
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
@@ -36,7 +37,10 @@ const PLACES: Record<string, { seed: string, spawner: Vec3, start: Vec3 }> = {
   s7741: { seed: '7741', spawner: new Vec3(136, 77, 258), start: new Vec3(120.5, 61, 247.5) },
   // seed 2's fortress by the portal of the fresh-seed runs: full-26.3-fresh-d and nether-26.3-q3 died at its melee nook,
   // (-277, 77, -161), three times; the bot put where q3 came in
-  s2fortress: { seed: '2', spawner: new Vec3(-277, 77, -159), start: new Vec3(-270.5, 61, -164.5) }
+  s2fortress: { seed: '2', spawner: new Vec3(-277, 77, -159), start: new Vec3(-270.5, 61, -164.5) },
+  // that fortress's other spawner, where full-26.3-fresh-k burned to death among the blazes 4 off it, alight from 10
+  // health (the bot put where q3 came in, 50 off)
+  s2fortress2: { seed: '2', spawner: new Vec3(-290, 77, -209), start: new Vec3(-270.5, 61, -164.5) }
 }
 const PLACE = PLACES[process.env.BLAZE_AT ?? 's2']
 assert.ok(PLACE != null, `BLAZE_AT is one of ${Object.keys(PLACES).join(', ')}`)
@@ -75,6 +79,12 @@ const KITS: Record<string, Array<[string, number]>> = {
   gateIron: [
     ['iron_sword', 1], ['iron_helmet', 1], ['iron_chestplate', 1], ['iron_leggings', 1], ['golden_boots', 1], ['shield', 1],
     ['cooked_porkchop', 5], ['iron_pickaxe', 1], ['netherrack', 64]
+  ],
+  // full-26.3-fresh-k's at s2fortress2: a diamond sword, iron armor and golden boots, a shield, a bow and 1 arrow, 4 meals
+  freshK: [
+    ['diamond_sword', 1], ['iron_helmet', 1], ['iron_chestplate', 1], ['iron_leggings', 1], ['golden_boots', 1], ['shield', 1],
+    ['bow', 1], ['arrow', 1], ['cobblestone', 121], ['cooked_mutton', 2], ['cooked_porkchop', 2], ['diamond_pickaxe', 1],
+    ['torch', 16], ['oak_log', 37], ['coal', 23], ['water_bucket', 1]
   ],
   // the least the gear gate lets in since it asks for the iron helmet and leggings, a bow, 64 arrows and 120 food points
   gate2: [
