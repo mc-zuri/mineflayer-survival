@@ -286,9 +286,11 @@ export function letBeInNether (bot: Bot, e: Entity, tick: number): boolean {
   const f = netherFightsOf(bot)
   for (const [id, a] of f.anchors) if (bot.entities[id] == null || tick - a.tick > LEASH_TICKS) f.anchors.delete(id)
   for (const id of f.archers.keys()) if (bot.entities[id] == null) f.archers.delete(id)
-  if (RANGED_HOSTILES.has(e.name ?? '') && e.name !== 'blaze') return (f.archers.get(e.id) ?? 0) >= ARCHER_BUDGET
   const a = f.anchors.get(e.id)
-  return a != null && pastLeash(a.at, bot.entity.position)
+  if (a == null || !pastLeash(a.at, bot.entity.position)) return false
+  // (past its leash an archer is held off from there with the bow, ARCHER_BUDGET ticks)
+  if (RANGED_HOSTILES.has(e.name ?? '') && e.name !== 'blaze') return !hasBowAndArrows(bot) || (f.archers.get(e.id) ?? 0) >= ARCHER_BUDGET
+  return true
 }
 
 /** the hostiles reflex's melee against `target` (fight's options) */
@@ -408,8 +410,11 @@ export const hostilesReflex: Reflex = {
     }
     if (nether && !useBow) {
       const f = netherFightsOf(bot)
-      // an archer held off from where the bot stands, never chased (holdOffArcher), ARCHER_BUDGET ticks at most
-      if (RANGED_HOSTILES.has(target.name ?? '') && target.name !== 'blaze') {
+      const anchor = f.anchors.get(target.id)?.at ?? bot.entity.position.clone()
+      f.anchors.set(target.id, { at: anchor, tick: ctx.tick })
+      // an archer past the leash: held off from where the bot stands with the bow, never chased on (holdOffArcher),
+      // ARCHER_BUDGET ticks at most
+      if (RANGED_HOSTILES.has(target.name ?? '') && target.name !== 'blaze' && pastLeash(anchor, bot.entity.position)) {
         const spent = f.archers.get(target.id) ?? 0
         return {
           name: 'hostiles',
@@ -418,9 +423,7 @@ export const hostilesReflex: Reflex = {
           run: async (signal) => await holdOffArcher(bot, target, { signal, maxTicks: Math.min(config.hostiles.fightTicks, ARCHER_BUDGET - spent), onHold: t => f.archers.set(target.id, spent + t), until: turned })
         }
       }
-      // a melee fight on its leash
-      const anchor = f.anchors.get(target.id)?.at ?? bot.entity.position.clone()
-      f.anchors.set(target.id, { at: anchor, tick: ctx.tick })
+      // a fight on its leash
       if (!(target.name === 'blaze' && hasShield(bot))) {
         return {
           name: 'hostiles',

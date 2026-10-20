@@ -461,12 +461,12 @@ test('hostiles reflex: a bare bot\'s fight with a lone spider is given up once a
   engine.stop()
 })
 
-test('hostiles reflex in the nether: an archer is held off from where the bot stands, not chased; a melee mob fought on a leash (nether-26.3-q3: a skeleton chased into the lava sea)', async () => {
+test('hostiles reflex in the nether: a fight on a leash, an archer past it held off from where the bot stands with the bow, not chased on (nether-26.3-q3: a skeleton chased into the lava sea)', async () => {
   const { pastLeash, letBeInNether, NETHER_LEASH, NETHER_FIGHT_DROP, meleeOptions } = await import('../../src/reflexes/rules')
   const { ARCHER_BUDGET } = await import('../../src/nether/safety')
   const nether = (e: ReflexEngine): void => { (e as any).bot.game.dimension = 'the_nether' }
   const kit = [item('diamond_sword'), item('bow'), item('arrow', 32)]
-  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(10) })], items: kit }, {}, nether), 'hold off skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(10) })], items: kit }, {}, nether), 'fight skeleton')
   assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(10) })], items: kit }), 'fight skeleton')
   assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'zombified_piglin', position: at(3) })], items: kit }, {}, (e) => { nether(e); (e as any).onHurt((e as any).bot.entity, (e as any).bot.entities[Object.keys((e as any).bot.entities).find(k => k !== '1') as string]) }), 'fight zombified_piglin')
   assert.strictEqual(meleeOptions({ name: 'wither_skeleton' }, DEFAULT_REFLEX_CONFIG, true).maxDrop, 1)
@@ -476,14 +476,17 @@ test('hostiles reflex in the nether: an archer is held off from where the bot st
   assert.equal(pastLeash(a, new Vec3(0.5 + NETHER_LEASH - 0.5, 64, 0.5)), false)
   assert.equal(pastLeash(a, new Vec3(0.5 + NETHER_LEASH + 0.5, 64, 0.5)), true)
   assert.equal(pastLeash(a, new Vec3(0.5, 64 - NETHER_FIGHT_DROP - 1, 0.5)), true)
-  // an archer held off ARCHER_BUDGET ticks in all is let be
+  // an archer fought from (0.5, 64, 0.5); the bot past its leash, it is held off; held off ARCHER_BUDGET ticks in all, let be
   const bot = fakeBot({ items: kit })
   bot.game.dimension = 'the_nether'
   const skeleton = entity({ name: 'skeleton', position: at(10) })
   bot.entities[skeleton.id] = skeleton
   const engine = new ReflexEngine(bot, { enabled: false })
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'fight skeleton')
+  bot.entity.position = new Vec3(10.5, 63, 0.5)
+  skeleton.position = new Vec3(14.5, 64, 0.5)
   const task = hostilesReflex.check(engine.context())
-  assert.ok(task != null)
+  assert.strictEqual(task?.detail, 'hold off skeleton')
   assert.equal(letBeInNether(bot, skeleton, 0), false)
   const safety = require('../../src/nether/safety')
   const real = safety.holdOffArcher

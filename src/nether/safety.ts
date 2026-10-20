@@ -633,6 +633,8 @@ export async function keepFromGhast (bot: Bot, ghast: Entity, opts: { signal?: A
 
 /** ticks the hostiles reflex holds off one archer in the nether in all, before it's let be and the bot walks on */
 export const ARCHER_BUDGET = 600
+/** ticks an archer out of sight is still held off for */
+export const ARCHER_SIGHT = 40
 /** an archer this near is hit with the sword, not shot (the bow's draw is 20 ticks) */
 export const ARCHER_MELEE = 3.5
 
@@ -655,6 +657,7 @@ export async function holdOffArcher (bot: Bot, archer: Entity, opts: { signal?: 
   let shots = 0
   let ticks = 0
   let noArc = -100
+  let lastSeen = 0
   // (the ticks gone by, a shot's draw and flight among them)
   const onTick = (): void => { ticks++ }
   bot.on('physicsTick', onTick)
@@ -670,7 +673,9 @@ export async function holdOffArcher (bot: Bot, archer: Entity, opts: { signal?: 
     while (ticks < (opts.maxTicks ?? 400)) {
       throwIfAborted(opts.signal)
       const d = archer.position.distanceTo(bot.entity.position)
-      if (!isAlive(bot, archer) || d > (opts.range ?? 24) || !hasLineOfSight(bot, archer) || opts.until?.() === true) break
+      if (hasLineOfSight(bot, archer)) lastSeen = ticks
+      // (out of sight ARCHER_SIGHT ticks: it went off; a moment behind a rise isn't)
+      if (!isAlive(bot, archer) || d > (opts.range ?? 24) || ticks - lastSeen > ARCHER_SIGHT || opts.until?.() === true) break
       opts.onHold?.(ticks)
       bot.clearControlStates()
       await firm()
