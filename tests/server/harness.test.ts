@@ -2,8 +2,10 @@
 // of both versions.
 import { describe, test } from 'node:test'
 import assert from 'node:assert'
-import { grimMods, isJdkOfMajor, parseGrimAlert, parseLogLine, versionSetup, GRIM_CONFIG, VERSIONS } from '../harness/server'
+import { grimDir, grimLockstepMods, grimModJar, grimMods, isJdkOfMajor, parseGrimAlert, parseLogLine, versionSetup, FABRIC_API, GRIM_CONFIG, VERSIONS } from '../harness/server'
 import * as fs from 'node:fs'
+import * as os from 'node:os'
+import * as path from 'node:path'
 
 describe('integration harness', () => {
   test('each version has its loader and Java: 1.21.11 on Java 21 (remapped), 26.3 on Java 25 (unobfuscated)', () => {
@@ -45,5 +47,35 @@ describe('integration harness', () => {
     const alerts = punishments.split(/\r?\n/).filter(l => /^\s+- ".*\[alert\]"/.test(l))
     assert.ok(alerts.length >= 8)
     for (const l of alerts) assert.match(l, /"1:1 \[alert\]"/)
+  })
+
+  test('a lockstep server\'s GrimAC is the local build: its newest jar, built again once its sources are newer', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'grim-'))
+    try {
+      fs.mkdirSync(path.join(dir, 'common', 'src', 'main'), { recursive: true })
+      fs.mkdirSync(path.join(dir, 'fabric', 'build', 'libs'), { recursive: true })
+      const source = path.join(dir, 'common', 'src', 'main', 'GrimClock.java')
+      fs.writeFileSync(source, '')
+      const old = new Date(Date.now() - 60000)
+      fs.utimesSync(source, old, old)
+      const libs = path.join(dir, 'fabric', 'build', 'libs')
+      for (const name of ['grimac-fabric-2.3.74-sources.jar', 'grimac-fabric-2.3.74.jar']) fs.writeFileSync(path.join(libs, name), '')
+      assert.strictEqual(grimModJar(dir), path.join(libs, 'grimac-fabric-2.3.74.jar'))
+      // a source changed since: the build runs (here no Gradle wrapper, so it fails)
+      fs.utimesSync(source, new Date(), new Date(Date.now() + 60000))
+      assert.throws(() => grimModJar(dir), /building GrimAC in .* failed/)
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+    const env = process.env.GRIM_DIR
+    process.env.GRIM_DIR = 'X:/Grim'
+    try {
+      assert.strictEqual(grimDir(), 'X:/Grim')
+    } finally {
+      if (env == null) delete process.env.GRIM_DIR
+      else process.env.GRIM_DIR = env
+    }
+    assert.strictEqual(FABRIC_API['1.21.11'], grimMods('1.21.11')[1])
+    await assert.rejects(grimLockstepMods('26.3'), /no GrimAC build for Minecraft 26\.3/)
   })
 })

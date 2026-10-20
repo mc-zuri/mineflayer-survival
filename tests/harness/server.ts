@@ -189,14 +189,20 @@ export interface ModJar {
   sha1: string
 }
 
+/** the Fabric API GrimAC needs, by version */
+export const FABRIC_API: Record<string, ModJar> = {
+  '1.21.11': { file: 'fabric-api-0.141.6+1.21.11.jar', url: 'https://cdn.modrinth.com/data/P7dR8mSH/versions/6qAuTtLR/fabric-api-0.141.6%2B1.21.11.jar', sha1: 'c98467cbbaf4d197377266795ae015f4130d65b6' }
+}
+
 /**
  * GrimAC (grim.ac: its Fabric build, packetevents in it; Minecraft 1.16.1 to 26.2, no 26.3 yet) and the Fabric API it
- * needs, by version: an anticheat server for a real-time run (no lockstep mod), that the bot plays where Grim watches
+ * needs, by version: an anticheat server for a real-time run (no lockstep mod), that the bot plays where Grim watches.
+ * Grim times its checks by the wall clock; under lockstep it needs the local build (grimLockstepMods).
  */
 export const GRIM_MODS: Record<string, ModJar[]> = {
   '1.21.11': [
     { file: 'grimac-fabric-2.3.74-f5bbe9c.jar', url: 'https://cdn.modrinth.com/data/LJNGWSvH/versions/IwwpOU1A/grimac-fabric-2.3.74-f5bbe9c.jar', sha1: '5521d72c1c14b28b4c50a726b11ffdc86c5afaaf' },
-    { file: 'fabric-api-0.141.6+1.21.11.jar', url: 'https://cdn.modrinth.com/data/P7dR8mSH/versions/6qAuTtLR/fabric-api-0.141.6%2B1.21.11.jar', sha1: 'c98467cbbaf4d197377266795ae015f4130d65b6' }
+    FABRIC_API['1.21.11']
   ]
 }
 
@@ -241,6 +247,60 @@ export async function modJars (mods: readonly ModJar[]): Promise<string[]> {
     out.push(file)
   }
   return out
+}
+
+/**
+ * The GrimAC checkout the lockstep runs build: GRIM_DIR, else a Grim directory next to the repo or one of its parents
+ * (E:/gen/Grim beside E:/gen/mineflayer-survival, also from a worktree in it)
+ */
+export function grimDir (): string {
+  if (process.env.GRIM_DIR != null && process.env.GRIM_DIR !== '') return process.env.GRIM_DIR
+  for (let dir = REPO_DIR; ; dir = path.dirname(dir)) {
+    const grim = path.join(path.dirname(dir), 'Grim')
+    if (fs.existsSync(path.join(grim, 'settings.gradle.kts'))) return grim
+    if (path.dirname(dir) === dir) throw new Error(`no GrimAC checkout beside ${REPO_DIR} or its parents (set GRIM_DIR)`)
+  }
+}
+
+/** the Java major version Grim's Gradle build runs on */
+export const GRIM_GRADLE_JAVA = 21
+
+/**
+ * GrimAC's Fabric jar built from the local checkout (grimDir: fabric/build/libs/grimac-fabric-<version>.jar, its
+ * platforms and packetevents in it), built with its Gradle wrapper when missing or older than its sources. Its
+ * lockstep branch's clock follows the server's ticks when the lockstep mod is loaded (GrimClock), so its checks hold
+ * at lockstep speed; the Modrinth build's wall clock does not.
+ */
+export function grimModJar (dir: string = grimDir(), java: string = findJava(GRIM_GRADLE_JAVA)): string {
+  const libs = path.join(dir, 'fabric', 'build', 'libs')
+  const find = (): string | undefined => fs.existsSync(libs)
+    ? fs.readdirSync(libs).filter(n => /^grimac-fabric-.*\.jar$/.test(n) && !/-(sources|javadoc|dev)\.jar$/.test(n))
+      .map(n => path.join(libs, n)).sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]
+    : undefined
+  let jar = find()
+  const sources = Math.max(
+    newestMtime(path.join(dir, 'common', 'src', 'main')), newestMtime(path.join(dir, 'fabric')), newestMtime(path.join(dir, 'buildSrc')),
+    ...['build.gradle.kts', 'settings.gradle.kts', 'gradle.properties', 'libs.versions.toml'].map(f => newestMtime(path.join(dir, f))))
+  if (jar == null || fs.statSync(jar).mtimeMs < sources) {
+    const win = process.platform === 'win32'
+    const javaHome = java === 'java' ? process.env.JAVA_HOME : path.dirname(path.dirname(java))
+    const gradlew = path.join(dir, win ? 'gradlew.bat' : 'gradlew')
+    const task = [':fabric:build', '-x', 'test', '--no-daemon', '-q']
+    const [cmd, args] = win ? ['cmd.exe', ['/d', '/c', gradlew, ...task]] : [gradlew, task]
+    const run = spawnSync(cmd, args, {
+      cwd: dir, encoding: 'utf8', env: { ...process.env, ...(javaHome != null ? { JAVA_HOME: javaHome } : {}) }
+    })
+    jar = find()
+    if (run.status !== 0 || jar == null) throw new Error(`building GrimAC in ${dir} failed:\n${run.stdout ?? ''}${run.stderr ?? ''}`)
+  }
+  return jar
+}
+
+/** GrimAC for a lockstep server: the local build (grimModJar) and the pinned Fabric API it needs */
+export async function grimLockstepMods (version: string): Promise<string[]> {
+  const api = FABRIC_API[version]
+  if (api == null) throw new Error(`no GrimAC build for Minecraft ${version} (the harness has ${Object.keys(FABRIC_API).join(', ')})`)
+  return [grimModJar(), ...await modJars([api])]
 }
 
 function installDir (version: string): string {
