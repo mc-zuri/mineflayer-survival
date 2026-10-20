@@ -14,6 +14,7 @@ import { type Entity, isAlive, metadataValue, yawPitchOf } from '../skills/comba
 import { BARTER_TICKS_PER_INGOT } from '../planner/sources'
 import { goldForPearls } from './barter'
 import { wearGold } from './safety'
+import { allowStare } from '../skills/gaze'
 
 /** an adult piglin (Piglin.DATA_BABY_ID: babies take gold but don't barter, PiglinAi.isAdmiringItem needs an adult) */
 export function isAdultPiglin (bot: Bot, e: Entity): boolean {
@@ -299,12 +300,15 @@ const ENDERMAN_EYE = 2.55
  * to 64 off), for STARE_TICKS at most; resolves whether it's angry (EnderMan.DATA_CREEPY)
  */
 export async function provokeEnderman (bot: Bot, enderman: Entity, signal?: AbortSignal): Promise<boolean> {
-  for (let t = 0; t < STARE_TICKS && isAlive(bot, enderman) && !isAngryEnderman(bot, enderman); t++) {
-    throwIfAborted(signal)
-    if (enderman.position.distanceTo(bot.entity.position) <= STARE_TELEPORT) break
-    await bot.lookAt(enderman.position.offset(0, ENDERMAN_EYE, 0), true)
-    await waitTicks(bot, 1, signal)
-  }
+  // (a stare on purpose: the gaze guard let be)
+  await allowStare(bot, async () => {
+    for (let t = 0; t < STARE_TICKS && isAlive(bot, enderman) && !isAngryEnderman(bot, enderman); t++) {
+      throwIfAborted(signal)
+      if (enderman.position.distanceTo(bot.entity.position) <= STARE_TELEPORT) break
+      await bot.lookAt(enderman.position.offset(0, ENDERMAN_EYE, 0), true)
+      await waitTicks(bot, 1, signal)
+    }
+  })
   const angry = isAngryEnderman(bot, enderman)
   trace('huntEndermen: stared at enderman', enderman.id, angry ? 'angry' : 'not angry')
   return angry
