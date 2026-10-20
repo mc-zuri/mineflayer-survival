@@ -647,3 +647,46 @@ test('a lower tier spare held does when no tool of the worn one\'s tier can be g
   assert.equal(await ex2.task('step:mine', longDig(fresh.bot, 10, step), undefined, { step: { kind: 'mine' } as any }), 10)
   assert.equal(step.runs, 1)
 })
+
+test('a loot that finds the item gone: the memory has the chest\'s true contents, and the next plan, made at once, goes another way (no retry of the loot)', async () => {
+  const chestModule = require('../../src/skills/chest')
+  const { runLoot } = await import('../../src/executor/steps')
+  const bot = fakeBot({ iron_pickaxe: 1, stick: 2, crafting_table: 1 })
+  bot.blockAt = (pos: Vec3) => ({ name: 'chest', position: pos, boundingBox: 'block' })
+  const chest = new Vec3(4, 64, 0)
+  // the memory of a run segment whose take of the pickaxe wasn't saved
+  bot.survival.memory.rememberChest(chest, { diamond_pickaxe: 1, bread: 3 })
+  const log: string[] = []
+  const lines: string[] = []
+  const runners = honestRunners(bot, log)
+  let loots = 0
+  runners.loot = async (step, ctx) => { log.push(describeStep(step)); return await runLoot(step as any, ctx) }
+  const real = chestModule.retrieveItems
+  // the window as transfer sees it: nothing of the pickaxe, the contents remembered (chest.ts rememberContents)
+  chestModule.retrieveItems = async (_b: unknown, args: any) => { loots++; args.memory.rememberChest(args.chest, { bread: 3 }); return { chest: args.chest, moved: {} } }
+  try {
+    const ex = new Executor(bot, { runners, log: line => lines.push(line), maxStepFailures: 1 })
+    await ex.obtain([{ item: 'diamond_pickaxe', count: 1 }])
+  } finally {
+    chestModule.retrieveItems = real
+  }
+  assert.equal(loots, 1)
+  assert.equal(log[0], 'loot 1 diamond_pickaxe at 4 64 0')
+  assert.equal(log.filter(l => l.startsWith('loot')).length, 1, log.join('; '))
+  assert.equal(log[log.length - 1], 'craft 1 diamond_pickaxe')
+  assert.ok(lines.some(l => /had 0 of the 1 diamond_pickaxe remembered: planning again/.test(l)), lines.join(' | '))
+  assert.deepEqual(bot.survival.memory.chestAt(chest)?.items, { bread: 3 })
+  assert.equal(count(bot, 'diamond_pickaxe'), 1)
+})
+
+test('a loot from a chest that is gone plans again at once (the chest forgotten)', async () => {
+  const { runLoot } = await import('../../src/executor/steps')
+  const bot = fakeBot()
+  bot.blockAt = (pos: Vec3) => ({ name: 'air', position: pos, boundingBox: 'empty' })
+  const chest = new Vec3(4, 64, 0)
+  bot.survival.memory.rememberChest(chest, { diamond_pickaxe: 1 })
+  const lines: string[] = []
+  const out = await runLoot({ kind: 'loot', item: 'diamond_pickaxe', count: 1, from: { x: 4, y: 64, z: 0, dimension: 'overworld' } } as any, { bot, signal: new AbortController().signal, log: (l: string) => lines.push(l), state: {}, memory: bot.survival.memory } as any)
+  assert.deepEqual(out, { gained: 0, replan: true })
+  assert.equal(bot.survival.memory.chestAt(chest), undefined)
+})

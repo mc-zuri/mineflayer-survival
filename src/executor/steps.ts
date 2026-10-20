@@ -446,7 +446,23 @@ export const runLoot: StepRunner<LootStep> = async (step, ctx) => {
       await travel(bot, { target, range: door != null ? 1 : 3, exactY: true }, signal).catch(err => { if (isAbort(err)) throw err })
     }
     // (the window's contents remembered whatever came out: chest.ts rememberContents)
-    await retrieveItems(bot, { chest, filter: step.item, count: want, memory: ctx.memory }, signal)
+    let res
+    try {
+      res = await retrieveItems(bot, { chest, filter: step.item, count: want, memory: ctx.memory }, signal)
+    } catch (err) {
+      // the chest is gone (forgotten by the take): planned again at once, no retry of it
+      if (!isSkillError(err, 'NOT_FOUND') || bot.blockAt(chest) == null) throw err
+      ctx.log(`loot: ${(err as Error).message}: planning again`)
+      return { gained: countItems(bot, step.item) - start, replan: true }
+    }
+    // the chest held less than the memory said (taken in a run whose memory wasn't saved): the memory has its true
+    // contents now, and the plan is made again at once, not the loot tried again (a 26.3 replacement for a worn
+    // pickaxe walked to the base for 'loot 1 diamond_pickaxe' and gained 0)
+    const got = res.moved[step.item] ?? 0
+    if (got < want) {
+      ctx.log(`loot: the chest at ${chest.toString()} had ${got} of the ${want} ${step.item} remembered: planning again`)
+      return { gained: countItems(bot, step.item) - start, replan: true }
+    }
   }
   return { gained: countItems(bot, step.item) - start }
 }
