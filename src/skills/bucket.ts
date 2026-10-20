@@ -6,6 +6,7 @@ import { SkillError, isAbort, throwIfAborted } from './errors'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { navigate, navigateToReach } from './navigate'
 import { isInteractive, isSolid } from './placement'
+import { potionOf } from './potion'
 import { CARDINALS, FACES, blockAtOrThrow, blockReach, canSee, countItems, eyeHeight, eyePosition, findInventoryItem, settleInventory, waitUntil, withinReach, type Block } from './util'
 
 export type Fluid = 'water' | 'lava'
@@ -119,6 +120,41 @@ export async function fillBucket (bot: Bot, args: FillBucketArgs, signal?: Abort
   const ok = await waitUntil(bot, () => countItems(bot, filled) > before, 10, signal)
   if (!ok) throw new SkillError('VERIFY_FAILED', `no ${filled} after using the bucket on ${pos.toString()}`)
   return { pos, item: filled }
+}
+
+export interface FillBottlesArgs {
+  /** bottles to fill (default: every glass bottle carried) */
+  count?: number
+  /** how far a water source may be (default 32) */
+  maxDistance?: number
+}
+
+/**
+ * Glass bottles filled with water, one a use, at the nearest water source (BottleItem.use: the ray from the eyes to a
+ * source, ClipContext.Fluid.SOURCE_ONLY, gives a potion of water); resolves the bottles filled. In the nether there's
+ * no water to fill them at (a bucket's evaporates: BucketItem, dimension ultraWarm)
+ */
+export async function fillBottles (bot: Bot, args: FillBottlesArgs = {}, signal?: AbortSignal): Promise<number> {
+  throwIfAborted(signal)
+  const want = args.count ?? countItems(bot, 'glass_bottle')
+  const water = (): number => bot.inventory.items().filter(i => i.name === 'potion' && potionOf(i) === 0).length
+  let filled = 0
+  while (filled < want) {
+    const bottle = findInventoryItem(bot, 'glass_bottle')
+    if (bottle == null) break
+    const source = bot.findBlock({ matching: (block: any) => isSource(block, 'water'), maxDistance: args.maxDistance ?? 32 })
+    if (source == null) throw new SkillError('NOT_FOUND', 'no water source nearby to fill the bottles at')
+    const pos = source.position
+    const point = await approachToSee(bot, pos, eye => surfacePoints(pos).find(p => canSee(bot, p, undefined, eye)) ?? null, signal)
+    const before = water()
+    await settleInventory(bot, signal)
+    await bot.equip(bottle, 'hand')
+    await bot.lookAt(point, true)
+    bot.activateItem()
+    if (!await waitUntil(bot, () => water() > before, 10, signal)) throw new SkillError('VERIFY_FAILED', `no water bottle after using a glass bottle on ${pos.toString()}`)
+    filled++
+  }
+  return filled
 }
 
 export interface EmptyBucketArgs {
