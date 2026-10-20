@@ -564,3 +564,28 @@ test('the camp\'s fight from in the spawn volume (no camp out of it to be had) i
   assert.ok(untils.length > 0)
   assert.ok(untils.every(u => !u), `the fight cut at once: ${untils.join(' ')}`)
 })
+
+test('collectBlazeRods gives up a spawner whose only floor that sees it is in its spawn volume (a throne walled in): no camp\'s fight in there', async () => {
+  const { collectBlazeRods, unreachableSpawners } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/skills/fight')
+  // a room 7 across round the spawner at 0 64 0, walled in netherrack; the bot in it
+  const bot = fakeBot({ position: new Vec3(2.5, 64, 0.5), world: (p: any) => p.y < 64 || p.y > 66 || Math.abs(p.x) > 3 || Math.abs(p.z) > 3 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  const { WorldMemory } = await import('../../src/core/memory')
+  ;(bot as any).survival = { memory: new WorldMemory() }
+  const fights: string[] = []
+  const realFight = fightModule.fight
+  fightModule.fight = async (_b: unknown, t: any) => { fights.push(t.name) }
+  bot.entities[9] = { id: 9, name: 'blaze', type: 'hostile', position: new Vec3(0.5, 65, 2.5), metadata: [] } as any
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 200, safety: false, nook: false }), /no way to the blaze spawner at \(0, 64, 0\): no camp out of its spawn volume/)
+  } finally {
+    clearInterval(ticking)
+    fightModule.fight = realFight
+  }
+  assert.deepEqual(fights, [])
+  assert.deepEqual(unreachableSpawners(bot).map(p => [p.x, p.y, p.z]), [[0, 64, 0]])
+})

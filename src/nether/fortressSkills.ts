@@ -27,7 +27,7 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, openNook, planBlazeNooks, sealAndHeal, withBlocksKept } from './blazeFight'
+import { SPAWN_RANGE, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, openNook, planBlazeNooks, sealAndHeal, withBlocksKept } from './blazeFight'
 import { walkTo } from '../skills/navigate'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
@@ -639,7 +639,22 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       const fought = await fightFromCover(spawner)
       if (fought != null) return fought
     }
-    const spots = campSpots(bot, spawner, standOff)
+    if (farFrom(spawner)) {
+      await travel(bot, { target: spawner, range: 16, exactY: true }, signal).catch(err => {
+        if (isAbort(err)) throw err
+        trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
+      })
+    }
+    // (out of the spawn volume, where the blazes come out on the bot)
+    const near = campSpots(bot, spawner, standOff)
+    const spots = near.filter(s => !inSpawnVolume(spawner, s))
+    // the only floor that sees it in the volume (a throne room walled in: seed 2's at (-277, 77, -159)): no fight in
+    // there, the spawner given up as one there's no way to (the milestone's next). A 26.3 bot with a stone sword and
+    // no bow fought on in that throne among its blazes, punched from all sides, and died (BLAZE_KIT q3, gate)
+    if (spots.length === 0 && near.length > 0) {
+      markSpawnerUnreachable(bot, spawner)
+      throw new SkillError('NO_PATH', `no way to the blaze spawner at ${spawner.toString()}: no camp out of its spawn volume that sees it`, { rods: countItems(bot, 'blaze_rod'), kills, ticks, spawner })
+    }
     /** to a camp spot by the spawner; resolves whether the bot got there (or near the spawner) */
     const camp = async (): Promise<boolean> => {
       if (atCamp(bot.entity.position.distanceTo(spawner), standOff) && seesFrom(bot, eyePosition(bot), spawner.offset(0.5, 0.5, 0.5), spawner)) return true
