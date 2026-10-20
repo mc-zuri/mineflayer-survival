@@ -42,7 +42,11 @@ export const KEEP_COUNTS: Record<string, number> = {
   splash_potion: Infinity,
   glass_bottle: 3,
   magma_cream: Infinity,
-  nether_wart: 4
+  nether_wart: 4,
+  // and the rest of the brew's (nether/brewing blazeRodsWithBrew): the stand made of the first rod, carried back up
+  // after a brew, and the slime ball the magma cream is made of with a blaze powder (the bowless gate asks for one)
+  brewing_stand: 1,
+  slime_ball: 4
 }
 
 const ARMOR = /_(helmet|chestplate|leggings|boots)$/
@@ -258,16 +262,23 @@ export function neededItems (requests: readonly ObtainRequest[], plan?: ObtainPl
 
 const GOLD = { gold_ingot: Infinity, raw_gold: Infinity, gold_block: Infinity, raw_gold_block: Infinity, gold_nugget: Infinity, golden_helmet: 1, golden_chestplate: 1, golden_leggings: 1, golden_boots: 1 }
 const EYE_MAKINGS = { ender_pearl: Infinity, blaze_rod: Infinity, blaze_powder: Infinity, ender_eye: Infinity }
+/**
+ * the nether's fire resistance brewed in there (milestones' brewKit, nether/brewing): the water bottles (a potion),
+ * the potions, the glass bottles, the wart, the cream and its slime ball, the stand, the crafting table for the
+ * stand's and the cream's crafts, and the stand's cobblestone with the blaze nook's (BREW_STONE, 32)
+ */
+const BREW_MAKINGS = { potion: Infinity, splash_potion: Infinity, glass_bottle: 3, nether_wart: Infinity, magma_cream: Infinity, slime_ball: 2, brewing_stand: 1, crafting_table: 1, cobblestone: 32 }
 
 /**
  * What a milestone's work uses beside its goals and their plan (milestoneNeeds): the enchanting's books, lapis,
  * diamonds and obsidian (the table, the shelves, the anvil's books); the nether's obsidian, the buckets of the lava
- * cast (empty, of water and of lava), the flint and steel and the gold (a golden piece for the piglins, the barters);
+ * cast (empty, of water and of lava), the flint and steel and the gold (a golden piece for the piglins, the barters),
+ * the makings of its fire resistance (BREW_MAKINGS);
  * the eyes' and the End's pearls, rods, powder and eyes
  */
 export const MILESTONE_KIT: Partial<Record<MilestoneId, Readonly<Record<string, number>>>> = {
   enchanting: { book: Infinity, enchanted_book: Infinity, lapis_lazuli: Infinity, diamond: 3, obsidian: 4 },
-  nether: { obsidian: 10, bucket: Infinity, water_bucket: Infinity, lava_bucket: Infinity, flint_and_steel: 1, ...GOLD, ...EYE_MAKINGS },
+  nether: { obsidian: 10, bucket: Infinity, water_bucket: Infinity, lava_bucket: Infinity, flint_and_steel: 1, ...GOLD, ...EYE_MAKINGS, ...BREW_MAKINGS },
   eyes: EYE_MAKINGS,
   end: { ender_eye: Infinity, ender_pearl: Infinity, water_bucket: 1 }
 }

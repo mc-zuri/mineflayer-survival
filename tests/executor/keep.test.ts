@@ -333,3 +333,26 @@ test('the nether\'s fire resistance makings are carried, not stored: the potions
   assert.equal(defaultKeep('glass_bottle'), 3)
   assert.equal(defaultKeep('nether_wart'), 4)
 })
+
+test('the base store after a trip, the stash and a throw for room leave the whole brew kit in the bag while the nether is worked on (the water bottles, the stand, the powder, the slime ball, the table, the stand\'s cobblestone): fresh-v went in without its bottles', async () => {
+  const { MILESTONE_KIT, defaultKeep } = await import('../../src/executor/keep')
+  const { tripKitItems } = await import('../../src/skills/tripKit')
+  const registry = minecraftData('26.3')
+  const needs = MILESTONE_KIT.nether as Record<string, number>
+  const brew = [
+    { name: 'potion', count: 3 }, { name: 'glass_bottle', count: 2 }, { name: 'brewing_stand', count: 1 }, { name: 'blaze_powder', count: 2 },
+    { name: 'slime_ball', count: 2 }, { name: 'magma_cream', count: 1 }, { name: 'nether_wart', count: 5 }, { name: 'crafting_table', count: 1 },
+    { name: 'cobblestone', count: 32 }
+  ]
+  const bag = [...brew, { name: 'diamond_pickaxe', count: 1 }, { name: 'dirt', count: 64 }, { name: 'raw_iron', count: 12 }, { name: 'oak_door', count: 1 }]
+  for (const keep of [defaultKeep, (): number => 0]) {
+    const { store } = splitInventory(bag, { keep, registry, protect: { needs } })
+    assert.deepEqual(store.filter(s => brew.some(b => b.name === s.name)), [], keep === defaultKeep ? 'the default keep' : 'a keep of nothing')
+    assert.deepEqual(storable(bag, bag, registry, { needs }).filter(s => brew.some(b => b.name === s.name)), [])
+    assert.deepEqual(junkToToss(bag, 10, { keep, registry, anything: true, protect: { needs } }).filter(t => brew.some(b => b.name === t.name)), [])
+  }
+  // the trip kit by the portal takes none of it (half the blocks: the stand's 3 left)
+  const kit = tripKitItems(bag)
+  assert.deepEqual(kit.filter(k => brew.some(b => b.name === k.name) && k.name !== 'cobblestone'), [])
+  assert.ok(32 - (kit.find(k => k.name === 'cobblestone')?.count ?? 0) >= 3)
+})
