@@ -120,6 +120,8 @@ test('tendHerd: bred as the cooldown allows, only the surplus slaughtered for th
   assert.ok(!killed.includes(calf.id))
   assert.equal((Object.values(bot.entities) as any[]).filter(e => e.name === 'cow').length, 3)
   assert.ok(tasks.indexOf('breed the cows') < tasks.indexOf('slaughter a cow'), tasks.join(', '))
+  // the chores from inside the pen, its gate shut behind (fed from the gate's cell, the herd walked out, 26.3)
+  assert.ok(tasks.includes('into the pen') && tasks.indexOf('into the pen') < tasks.indexOf('breed the cows'), tasks.join(', '))
   assert.equal(tasks[tasks.length - 1], 'shut the herd in')
   assert.deepEqual(cookedAfter, ['shut the herd in'])
   assert.ok(tasks.indexOf('the herd drops') > tasks.lastIndexOf('slaughter a cow'), tasks.join(', '))

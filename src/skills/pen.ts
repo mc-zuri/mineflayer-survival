@@ -443,6 +443,18 @@ export async function leadIntoPen (bot: Bot, pen: PenPlan, args: LeadIntoPenArgs
   return inside()
 }
 
+/**
+ * into the pen by its gate to its middle, the gate shut behind (the pathfinder's closeGatesBehind; shut by hand from
+ * inside if it was left open), so the herd's chores are done with the herd shut in: a bot feeding a cow from the gate's
+ * cell held it open the breeding's 80 ticks, and a cow and a calf walked out (26.3)
+ */
+export async function enterPen (bot: Bot, pen: PenPlan, signal?: AbortSignal): Promise<void> {
+  if (!inPen(pen, bot.entity.position)) {
+    await navigate(bot, { goal: new goals.GoalNear(pen.center.x, pen.center.y, pen.center.z, 1) }, signal)
+  }
+  if ((bot.blockAt(pen.gate)?.getProperties() as any)?.open === true) await useGate(bot, pen.gate, false, signal)
+}
+
 /** out of the pen to the cell before its gate, the gate shut behind (shut by hand if the pathfinder left it open) */
 export async function leavePen (bot: Bot, pen: PenPlan, signal?: AbortSignal): Promise<void> {
   if (inPen(pen, bot.entity.position)) {

@@ -27,7 +27,7 @@ import { knownFarmableSpawners, nearestXpFarm } from './skills/spawnerFarm'
 import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from './skills/husbandry'
 import { makeWaterHole, plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
-import { herdPen, inPen, leadIntoPen, leavePen, penBroken, protectPen, type PenPlan } from './skills/pen'
+import { enterPen, herdPen, inPen, leadIntoPen, leavePen, penBroken, protectPen, type PenPlan } from './skills/pen'
 import { BREEDERS_KEPT, HERD, HERD_MOBS, MEAT_OF, POINTS_PER_KILL, breedingFoodHeld, chooseHerdMob, herdCap, herdCensus, herdChores, herdFromMemory, herdPenOf, herdSurplus, holdsBreedingFood, noteHerd, rememberHerd, slaughterPick } from './skills/herd'
 import { hunt } from './skills/hunt'
 import { isAlive } from './skills/combatUtil'
@@ -1917,6 +1917,12 @@ export async function tendHerd (bot: Bot, executor: Executor, signal: AbortSigna
     perKill: POINTS_PER_KILL[mob] ?? 9
   })
   log(`herd: ${census.adults.length} ${mob}s and ${census.calves.length} calves: ${chores.breed} pairs to breed, ${chores.slaughter} to slaughter (${opts.want ?? 0} food points wanted)`)
+  // the chores done from inside, the gate shut behind (fed from the gate's cell, the gate stood open and the herd
+  // walked out, 26.3)
+  if (pen != null && chores.breed + chores.slaughter > 0) {
+    const shut = pen
+    await executor.task('into the pen', async (s) => await enterPen(bot, shut, s), signal).catch(fail('not in'))
+  }
   if (chores.breed > 0) {
     const bred = await executor.task(`breed the ${mob}s`, async (s) => await breedAnimals(bot, { mob, pairs: chores.breed, radius: 16 }, s), signal).catch(fail('not bred'))
     if (bred != null && bred.fed >= 2) {
@@ -1946,7 +1952,11 @@ export async function tendHerd (bot: Bot, executor: Executor, signal: AbortSigna
   }
   if (pen != null) {
     const shut = pen
-    await executor.task('shut the herd in', async (s) => await leavePen(bot, shut, s), signal).catch(fail('the gate'))
+    // (the food put away first: the herd follows a bot that holds it, TemptGoal, out by the gate)
+    await executor.task('shut the herd in', async (s) => {
+      if (inPen(shut, bot.entity.position)) await bot.unequip('hand').catch(() => {})
+      await leavePen(bot, shut, s)
+    }, signal).catch(fail('the gate'))
   }
   // the meat cooked out of the pen, in the base's furnace when near (the planner's smelt): a furnace put down among
   // the calves found no room, and the nook dug for it went through the ring (26.3)
