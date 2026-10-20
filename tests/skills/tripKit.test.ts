@@ -303,6 +303,9 @@ test('tripKitItems with the gate kept (the nether\'s kit): the arrows and the fo
   // 136 points, 80 kept: 56 over, the bread first (40), then two beef (16)
   const by = Object.fromEntries(tripKitItems(items, { arrows: 32, food: 80, nutrition }).map(k => [k.name, k.count]))
   assert.deepStrictEqual(by, { arrow: 16, bread: 8, cooked_beef: 2 })
+  // the gate's golden boots stay (one); a spare iron chestplate goes in
+  const gear = Object.fromEntries(tripKitItems([{ name: 'golden_boots', count: 1 }, { name: 'iron_chestplate', count: 1 }], { arrows: 0, food: 0, nutrition }).map(k => [k.name, k.count]))
+  assert.deepStrictEqual(gear, { iron_chestplate: 1 })
   // none over the gate: none of them in
   const none = Object.fromEntries(tripKitItems([{ name: 'arrow', count: 32 }, { name: 'cooked_beef', count: 10 }], { arrows: 32, food: 80, nutrition }).map(k => [k.name, k.count]))
   assert.deepStrictEqual(none, {})

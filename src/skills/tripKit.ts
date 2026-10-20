@@ -182,7 +182,13 @@ export function tripKitItems (items: readonly ItemCount[], keep: TripKitKeep = {
     const n = Math.min(Math.floor(count(b) / 2), 64 - blocks)
     if (n > 0) { add(b, n); blocks += n }
   }
-  for (const i of items) if (ARMOR.test(i.name) && !out.some(o => o.name === i.name)) add(i.name, count(i.name))
+  // (the gate's golden piece stays for the piglins, one of it, with a gate kept: the nether's kit took the golden boots
+  // the gate had just made, and the gate made them again, full-1.21.11-fresh-k)
+  const gate = keep.arrows != null || keep.food != null
+  for (const i of items) {
+    if (!ARMOR.test(i.name) || out.some(o => o.name === i.name)) continue
+    add(i.name, count(i.name) - (gate && i.name.startsWith('golden_') ? 1 : 0))
+  }
   // a shield carried (the one held is in the off hand, not the bag)
   add('shield', count('shield'))
   if (count('golden_apple') >= 2) add('golden_apple', 1)
