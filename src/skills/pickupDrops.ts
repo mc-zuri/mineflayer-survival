@@ -114,9 +114,41 @@ export function markThrown (bot: Bot, drop: Entity, name: string, untilGone = fa
     thrownDrops.set(bot, thrown = map)
     // one the bot picked up (walking over it) lies there no more
     bot.on('playerCollect', (collector: Entity, collected: Entity) => { if (collector === bot.entity) map.delete(collected.id) })
-    bot.on('entityGone', (gone: Entity) => { if (map.get(gone.id)?.untilGone === true) map.delete(gone.id) })
+    bot.on('entityGone', (gone: Entity) => {
+      const t = map.get(gone.id)
+      if (t == null) return
+      if (t.untilGone === true) {
+        map.delete(gone.id)
+        return
+      }
+      // where it lay last, not where it was thrown from (the eyes, 3 blocks over a pit's bottom): an item of its name
+      // there with another id is it
+      t.pos = gone.position.clone()
+      // taken into a stack of its name beside it (ItemEntity.mergeWithNeighbours: the smaller stack goes into the
+      // larger, and its entity is discarded): that one is thrown now, wherever it goes
+      const into = mergedInto(bot, gone, t.name)
+      if (into != null && !map.has(into.id)) map.set(into.id, { ...t, pos: into.position.clone() })
+    })
   }
   thrown.set(drop.id, { name, pos: drop.position.clone(), tick: tickCount(bot), ...(untilGone ? { untilGone } : {}) })
+}
+
+/**
+ * How near an item of the same name a gone item entity was for it to have merged into it: ItemEntity.mergeWithNeighbours
+ * looks over its box inflated by 0.5 horizontally (the boxes 0.25 a side), the client's positions a little stale
+ */
+const MERGE_REACH = 1
+
+/** the item entity of `name` a gone one may have merged into (ItemEntity.mergeWithNeighbours), the nearest; null with none */
+function mergedInto (bot: Bot, gone: Entity, name: string): Entity | null {
+  let best: Entity | null = null
+  for (const e of Object.values(bot.entities)) {
+    if (e === gone || e === bot.entity || e.id === gone.id || !isItemEntity(e)) continue
+    const d = e.position.minus(gone.position)
+    if (Math.abs(d.x) > MERGE_REACH || Math.abs(d.z) > MERGE_REACH || Math.abs(d.y) > MERGE_REACH || droppedName(e) !== name) continue
+    if (best == null || e.position.distanceTo(gone.position) < best.position.distanceTo(gone.position)) best = e
+  }
+  return best
 }
 
 /** the item entities lying about now, by id (to tell the ones a toss makes) */

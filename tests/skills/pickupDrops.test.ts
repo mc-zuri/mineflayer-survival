@@ -187,6 +187,49 @@ test('tossAway into lava throws along the look given, and what it threw counts a
   }
 })
 
+test('a thrown stack merged into a stack of its name in the pit (ItemEntity.mergeWithNeighbours, its entity gone) leaves that one thrown, wherever it goes; one farther off isn\'t', async () => {
+  // (the thrown entity's place was where it was thrown from, the eyes 3 blocks over the pit's bottom, and an item of its
+  // name lying in the pit with another id wasn't taken for it)
+  const { tossAway, isThrownDrop, nearbyDrops } = await import('../../src/skills/pickupDrops')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const registry = require('minecraft-data')('1.21.11')
+  const Item = require('prismarine-item')('1.21.11')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('dirt', 5)] })
+  bot.inventory.inventoryStart = 9
+  bot.inventory.inventoryEnd = 45
+  bot._client = { on: () => {}, off: () => {} }
+  bot.time = { age: 1000 }
+  bot.look = async () => {}
+  const drop = (id: number, name: string, pos: Vec3): any => ({ id, name: 'item', position: pos, getDroppedItem: () => new Item(registry.itemsByName[name].id, 1) })
+  bot.toss = async (_type: number, _meta: unknown, n: number) => {
+    const stack = bot.inventory.items()[0]
+    stack.count -= n
+    if (stack.count <= 0) bot.inventory.slots[stack.slot] = null
+    // spawned at the eyes, less 0.3
+    setTimeout(() => { bot.entities[90] = drop(90, 'dirt', new Vec3(0.5, 65.3, 0.5)) }, 3)
+  }
+  // 20 dirt a block's drop lying in the pit's bottom, 2 under the floor beside the bot, and more dirt 5 off
+  bot.entities[91] = drop(91, 'dirt', new Vec3(0.6, 62, 1.4))
+  bot.entities[92] = drop(92, 'dirt', new Vec3(5.5, 64, 0.5))
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    assert.strictEqual(await tossAway(bot, 'dirt', 5, undefined, { yaw: Math.PI, pitch: -1.2, pit: new Vec3(0, 62, 1) }), 5)
+    // it falls into the pit (the server's moves), and merges into the larger stack there: its entity discarded
+    const thrown = bot.entities[90]
+    thrown.position = new Vec3(0.5, 62, 1.5)
+    delete bot.entities[90]
+    bot.emit('entityGone', thrown)
+    assert.ok(isThrownDrop(bot, bot.entities[91]))
+    assert.deepStrictEqual(nearbyDrops(bot, bot.entity.position, 8).map(e => e.id), [92])
+    // pushed off by a block put in the pit, it's still the one
+    bot.entities[91].position = new Vec3(0.6, 63, 4)
+    assert.ok(isThrownDrop(bot, bot.entities[91]))
+    assert.strictEqual(isThrownDrop(bot, bot.entities[92]), false)
+  } finally {
+    clearInterval(ticker)
+  }
+})
+
 test('settlePickups: waits while an item lies in the bot\'s reach, till it comes in or PICKUP_SETTLE_TICKS are up; none farther off', async () => {
   const { EventEmitter } = await import('node:events')
   const { PICKUP_SETTLE_TICKS, settlePickups } = await import('../../src/skills/pickupDrops')
