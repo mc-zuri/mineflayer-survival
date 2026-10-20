@@ -11,7 +11,9 @@
 // another seed's spawner: s7741, seed 7741's fortress spawner at (136, 77, 258) on its throne over a bridge, where a
 // fresh-seed 26.3 whole game sat 20861 ticks in a nook on the bridge 10 off for no rod (full-26.3-s7741-b), the bot
 // put where that run came in. BLAZE_KIT=run7741 gives that run's bag instead of the nether stage's: iron armor and
-// golden boots, a plain diamond sword and bow, 12 arrows, no shield, 3 raw iron, 59 cobblestone, 6 meals.
+// golden boots, a plain diamond sword and bow, 12 arrows, no shield, 3 raw iron, 59 cobblestone, 6 meals; BLAZE_KIT=q3
+// nether-26.3-q3's at s2fortress; BLAZE_KIT=gate the least the nether's gear gate lets in (gateBow with a plain bow and
+// BLAZE_ARROWS arrows, default 16; gateIron in iron with an iron sword).
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import { appendFileSync } from 'node:fs'
@@ -53,6 +55,22 @@ const KITS: Record<string, Array<[string, number]>> = {
   q3: [
     ['iron_chestplate', 1], ['golden_boots', 1], ['shield', 1], ['stone_sword', 1], ['iron_pickaxe', 1], ['cobblestone', 128],
     ['cooked_porkchop', 4], ['netherrack', 51], ['torch', 16], ['crafting_table', 1], ['coal', 31]
+  ],
+  // the least the nether's gear gate lets in (milestones' netherGearNeeds): a stone sword, an iron chestplate, golden
+  // boots, a shield, 40 food points, no bow; and the nether's 64 blocks (NETHER_BLOCKS, netherrack mined there)
+  gate: [
+    ['stone_sword', 1], ['iron_chestplate', 1], ['golden_boots', 1], ['shield', 1], ['cooked_porkchop', 5],
+    ['iron_pickaxe', 1], ['netherrack', 64]
+  ],
+  // the gate's least with a plain bow and 16 arrows (NETHER_ARROWS)
+  gateBow: [
+    ['stone_sword', 1], ['iron_chestplate', 1], ['golden_boots', 1], ['shield', 1], ['bow', 1], ['arrow', Number(process.env.BLAZE_ARROWS ?? 16)],
+    ['cooked_porkchop', 5], ['iron_pickaxe', 1], ['netherrack', 64]
+  ],
+  // the gate's least in iron: the armor (golden boots), an iron sword, no bow
+  gateIron: [
+    ['iron_sword', 1], ['iron_helmet', 1], ['iron_chestplate', 1], ['iron_leggings', 1], ['golden_boots', 1], ['shield', 1],
+    ['cooked_porkchop', 5], ['iron_pickaxe', 1], ['netherrack', 64]
   ]
 }
 const KIT = KITS[process.env.BLAZE_KIT ?? 'nether']
@@ -123,7 +141,9 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
     await run(`effect give ${USERNAME} minecraft:instant_health 1 10 true`)
     await run(`effect give ${USERNAME} minecraft:saturation 1 20 true`)
     await nether(`tp ${USERNAME} ${START.x} ${START.y} ${START.z}`)
-    assert.ok(await waitUntil(bot, () => countItems(bot, 'cobblestone') > 0 && bot.entity.onGround, 400), 'no kit')
+    // (the kit's last item in: they're given in order)
+    const lastItem = KIT[KIT.length - 1][0].replace(/\[.*$/, '')
+    assert.ok(await waitUntil(bot, () => countItems(bot, lastItem) > 0 && bot.entity.onGround, 400), 'no kit')
     // the armor reflex puts it on
     assert.ok(await waitUntil(bot, () => /_chestplate$/.test(bot.inventory.slots[6]?.name ?? ''), 400), 'the armor isn\'t on')
     await bot.waitForTicks(20)
