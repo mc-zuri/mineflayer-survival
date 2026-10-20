@@ -34,7 +34,15 @@ export const KEEP_COUNTS: Record<string, number> = {
   blaze_rod: Infinity,
   blaze_powder: Infinity,
   golden_apple: Infinity,
-  enchanted_golden_apple: Infinity
+  enchanted_golden_apple: Infinity,
+  // the nether's fire resistance and its makings carried (the water bottles, brewed in there, none to be had there):
+  // the 3 water bottles the nether kit filled were put in a chest by the base as 'potion', and the brew in the nether
+  // found 'no water bottles to brew it in' (full-26.3-fresh-v)
+  potion: Infinity,
+  splash_potion: Infinity,
+  glass_bottle: 3,
+  magma_cream: Infinity,
+  nether_wart: 4
 }
 
 const ARMOR = /_(helmet|chestplate|leggings|boots)$/

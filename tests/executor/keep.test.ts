@@ -324,3 +324,12 @@ test('a full bag in the nether milestone: the stash and the store take the junk 
   const before = splitInventory(bag, { keep: nothing, registry })
   assert.ok(before.store.some(s => s.name === 'obsidian') && before.store.some(s => s.name === 'raw_gold'))
 })
+
+test('the nether\'s fire resistance makings are carried, not stored: the potions (water bottles too), the magma cream, 3 glass bottles, 4 nether wart', async () => {
+  const { defaultKeep } = await import('../../src/executor/keep')
+  assert.equal(defaultKeep('potion'), Infinity)
+  assert.equal(defaultKeep('splash_potion'), Infinity)
+  assert.equal(defaultKeep('magma_cream'), Infinity)
+  assert.equal(defaultKeep('glass_bottle'), 3)
+  assert.equal(defaultKeep('nether_wart'), 4)
+})
