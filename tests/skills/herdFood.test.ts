@@ -152,3 +152,33 @@ test('harvestGrownFarms keeps the herd\'s wheat from the baking', async () => {
   assert.deepEqual(obtained, [{ item: 'bread', count: 4 }])
 })
 
+test('netherKit: short of the gate\'s food, the herd\'s surplus slaughtered and cooked before any other source is planned, its breeders kept', async () => {
+  const { netherKit } = await import('../../src/milestones')
+  const gear = [item('diamond_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('shield', 1), item('bow', 1), item('arrow', 64)]
+  const { bot, memory } = byThePen([{ x: 9, z: 9 }, { x: 10, z: 9 }, { x: 11, z: 9 }, { x: 9, z: 11 }], gear)
+  rememberHerd(memory, { pos: CENTER, mob: 'cow', adults: 4, calves: 0, bred: null })
+  const give = (it: any): void => { bot.inventory.slots[bot.inventory.slots.findIndex((s: any, i: number) => i >= 9 && i < 45 && s == null)] = it }
+  const calls: string[] = []
+  const { executor } = fakeExecutor(bot, memory, async (name, fn) => {
+    calls.push(name)
+    if (name === 'slaughter a cow') return await fn(signal())
+  })
+  executor.obtain = async (reqs: any[]) => {
+    calls.push(`obtain ${reqs.map(r => r.unit === 'nutrition' ? 'food' : r.item).join(',')}`)
+    if (reqs.some(r => r.item === 'cooked_beef')) { for (const s of bot.inventory.slots) if (s?.name === 'beef') bot.inventory.slots[s.slot] = null; give(item('cooked_beef', 4)) }
+    if (reqs.some(r => r.unit === 'nutrition')) give(item('bread', 24))
+  }
+  const huntModule = require('../../src/skills/hunt')
+  const real = huntModule.hunt
+  huntModule.hunt = async (b: any, prey: any) => { delete b.entities[prey.id]; give(item('beef', 2)); return { killed: true } }
+  try {
+    await netherKit(bot, executor, signal(), () => {})
+  } finally {
+    huntModule.hunt = real
+  }
+  const slaughtered = calls.filter(c => c === 'slaughter a cow').length
+  assert.equal(slaughtered, 2, calls.join(', '))
+  assert.ok(calls.indexOf('obtain cooked_beef') > calls.lastIndexOf('slaughter a cow'), calls.join(', '))
+  assert.ok(calls.indexOf('obtain food') > calls.indexOf('obtain cooked_beef'), calls.join(', '))
+  assert.equal((Object.values(bot.entities) as any[]).filter(e => e.name === 'cow').length, 2)
+})

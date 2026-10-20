@@ -647,8 +647,9 @@ export class Runner {
         try {
           this.log(`food low (${state.inventory.foodPoints()} points): getting more before going on`)
           await this.untilDusk(signal, async (s) => {
-            // the renewable food first: the farm's harvest
+            // the renewable food first: the farm's harvest, and the herd's surplus slaughtered and cooked
             await harvestGrownFarms(this.bot, this.executor, s, this.log)
+            await this.tendHerdFor(FOOD_POINTS - ownedInventory(this.bot).foodPoints(), s)
             await this.executor.obtain(restockGoals(progressState(this.bot, this.memory), reachedIds) ?? [], s)
           })
         } catch (err) {
