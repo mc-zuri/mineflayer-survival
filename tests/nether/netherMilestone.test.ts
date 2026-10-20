@@ -298,6 +298,34 @@ test('netherKit: a sword (stone at least), a chestplate and a shield got when mi
   assert.deepStrictEqual(calls, [])
 })
 
+test('netherKit: short of the food, the farm grown by the base is harvested and baked before the gate\'s gathering is planned', async () => {
+  const { netherKit } = await import('../../src/milestones')
+  const { rememberFarm } = await import('../../src/skills/farm')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const gear = NETHER_GEAR().filter((i: any) => i.name !== 'cooked_beef')
+  const bot = fakeBot({ items: gear })
+  bot.game.dimension = 'overworld'
+  bot.time = { age: 100000 }
+  const memory = new WorldMemory()
+  rememberFarm(memory, { crop: 'wheat', water: new Vec3(5, 63, 0), cells: [new Vec3(4, 63, 0), new Vec3(6, 63, 0)] } as any, 0)
+  const calls: string[] = []
+  const executor: any = {
+    memory,
+    tasks: { tick: 0 },
+    farmCost: () => 0,
+    runStep: async (step: any) => { calls.push(`${step.kind} ${step.crop}`); giveTo(bot, [item('wheat', 60)]) },
+    obtain: async (reqs: any[]) => {
+      calls.push(`obtain ${reqs.map(r => r.unit === 'nutrition' ? 'food' : r.item).join(',')}`)
+      if (reqs.some(r => r.item === 'bread')) giveTo(bot, [item('bread', 24)])
+    },
+    task: async (name: string) => { calls.push(name) }
+  }
+  await netherKit(bot, executor, new AbortController().signal, () => {})
+  // the bread covers the gate: nothing else gathered
+  assert.deepStrictEqual(calls, ['farm wheat', 'obtain bread'])
+})
+
 test('goldOnInTheNether: the golden piece put on once in the nether, not in the overworld', async () => {
   const { goldOnInTheNether } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')

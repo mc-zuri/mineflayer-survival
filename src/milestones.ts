@@ -704,6 +704,14 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   // what the bot doesn't go in without, gathered (the gold mined, the armor's iron, food) within NETHER_GEAR_TICKS;
   // still short, the milestone fails and is tried again rather than going in bare
   if (inNether(bot)) return
+  // the renewable food first, the farm's grown wheat harvested and baked, before any other source of the gate's food
+  // is planned (seed 2's kit went exploring for melons and berry bushes, 30000 ticks for none, its farm by the base)
+  if (netherGearNeeds(ownedInventory(bot)).some(r => r.unit === 'nutrition')) {
+    await harvestGrownFarms(bot, executor, signal, log).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`nether kit: the farm: ${(err as Error).message}`)
+    })
+  }
   const missing = netherGearNeeds(ownedInventory(bot))
   if (missing.length === 0) return
   log(`nether kit: getting ${missing.map(describeRequest).join(', ')} before going in`)
