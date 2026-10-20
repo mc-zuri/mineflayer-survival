@@ -96,3 +96,29 @@ test('hostiles reflex: fled from with a door near, in behind it (retreat indoors
   assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'flee')
   engine.stop()
 })
+
+test('retreatIndoors: no cover after all (a threat in sight behind the door, or a hit there): given up, for the flee', async () => {
+  const { retreatIndoors } = await import('../../src/skills/indoors')
+  const refuge = { door: new Vec3(10, 64, 0), inside: new Vec3(11, 64, 0), outside: new Vec3(9, 64, 0) }
+  const ticker = (bot: any): ReturnType<typeof setInterval> => setInterval(() => bot.emit('physicsTick'), 1)
+  // a skeleton in the hut with the bot (a villager's house, its door opened by the villagers)
+  const skeleton = entity({ name: 'skeleton', position: new Vec3(13.5, 64, 0.5) })
+  const seen = hutBot({ position: new Vec3(11.5, 64, 0.5), entities: [skeleton] })
+  let t = ticker(seen)
+  await assert.rejects(retreatIndoors(seen, refuge, { threats: () => [skeleton], goTo: async () => {} }), /a threat in sight/)
+  clearInterval(t)
+  // a hit behind the door
+  const outside = entity({ name: 'skeleton', position: new Vec3(11.5, 64, 10.5) })
+  const hit = hutBot({ position: new Vec3(11.5, 64, 0.5), entities: [outside] })
+  let n = 0
+  hit.on('physicsTick', () => { if (++n === 3) hit.health = 15 })
+  t = ticker(hit)
+  await assert.rejects(retreatIndoors(hit, refuge, { threats: () => [outside], goTo: async () => {} }), /hurt/)
+  clearInterval(t)
+  // shut in, nothing in sight, no hit: waits till they're gone
+  const fine = hutBot({ position: new Vec3(11.5, 64, 0.5), entities: [] })
+  t = ticker(fine)
+  const res = await retreatIndoors(fine, refuge, { threats: () => [], goTo: async () => {}, clearTicks: 10 })
+  clearInterval(t)
+  assert.strictEqual(res.shut, true)
+})

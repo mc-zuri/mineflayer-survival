@@ -6,7 +6,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { SkillError, isAbort, throwIfAborted } from './errors'
 import { navigate } from './navigate'
 import { eat, bestFoodInInventory } from './eat'
-import { isAlive, type Entity } from './combatUtil'
+import { hasLineOfSight, isAlive, type Entity } from './combatUtil'
 import { trace, waitTicks } from './util'
 import type { BlockLookup } from './placement'
 import { findBlocks } from '../core/findBlocks'
@@ -116,6 +116,8 @@ export interface RetreatIndoorsOptions {
   clearTicks?: number
   /** ticks to wait at most behind the door (default 2400) */
   maxTicks?: number
+  /** the way to the cell behind the door (default: navigate there) */
+  goTo?: (cell: Vec3, signal?: AbortSignal) => Promise<unknown>
 }
 
 /**
@@ -130,17 +132,26 @@ export async function retreatIndoors (bot: Bot, refuge: DoorRefuge, opts: Retrea
   const clearTicks = opts.clearTicks ?? 100
   const maxTicks = opts.maxTicks ?? 2400
   const { inside, door } = refuge
-  await navigate(bot, { goal: new goals.GoalBlock(inside.x, inside.y, inside.z), maxTicks: 600 }, signal)
+  await (opts.goTo ?? (async (c: Vec3, s?: AbortSignal) => await navigate(bot, { goal: new goals.GoalBlock(c.x, c.y, c.z), maxTicks: 600 }, s)))(inside, signal)
   if (!bot.entity.position.floored().equals(inside)) throw new SkillError('NO_PATH', `not in behind the door at ${door.toString()}`)
   bot.clearControlStates()
   let shut = await shutDoor(bot, door, signal)
   trace('retreatIndoors: behind the door at', door.toString(), shut ? 'shut' : 'NOT SHUT')
   let clear = 0
   let ticks = 0
+  let health = bot.health
   for (; ticks < maxTicks && clear < clearTicks; ticks++) {
     throwIfAborted(signal)
     const near = opts.threats().filter(e => isAlive(bot, e) && e.position.distanceTo(bot.entity.position) <= clearDistance)
     clear = near.length === 0 ? clear + 1 : 0
+    // no cover after all (a villager's house, its door opened by the villagers, a window, a spider over the wall): a
+    // threat in sight, or a hit, and the bot's out of here (the hostiles reflex then flees): a 1.21.11 bot hid in a
+    // village's house and a skeleton shot it dead in there
+    const hurt = bot.health < health - 1
+    health = Math.max(health, bot.health)
+    if (hurt || (ticks % 5 === 0 && near.some(e => hasLineOfSight(bot, e)))) {
+      throw new SkillError('VERIFY_FAILED', `no cover behind the door at ${door.toString()}: ${hurt ? 'hurt' : 'a threat in sight'}`)
+    }
     if (doorOpen(bot, door)) shut = await shutDoor(bot, door, signal)
     if (bot.health < 20 && bot.food < 18 && bestFoodInInventory(bot) != null) {
       await eat(bot, { signal }).catch(err => { if (isAbort(err)) throw err })
