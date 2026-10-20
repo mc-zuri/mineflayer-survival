@@ -807,3 +807,24 @@ test('fillNook with a shield: a blaze in sight about to shoot is taken on the sh
   }
   assert.deepEqual(order, ['shield', 'down', 'place (-1, 64, 0)'])
 })
+
+test('openNook digs out only the blocks a nook is shut with: a spawner in its front is left be', async () => {
+  const { openNook, nookAround } = await import('../../src/nether/blazeFight')
+  const actions = require('../../src/core/actions')
+  const { fakeBot: fb } = await import('../reflexes/fakeBot')
+  // the front (0 64 9) the spawner, its head (0 65 9) cobblestone
+  const bot = fb({ position: new Vec3(0.5, 64, 10.5), world: (p: Vec3) => p.y < 64 ? 'stone' : p.x === 0 && p.z === 9 ? (p.y === 64 ? 'spawner' : p.y === 65 ? 'cobblestone' : 'air') : 'air' })
+  const blockAt = bot.blockAt
+  bot.blockAt = (p: Vec3) => { const b = blockAt(p); return b.name === 'spawner' ? { ...b, boundingBox: 'block' } : b }
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), new Vec3(0, 64, 10), new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const dug: string[] = []
+  const realDig = actions.dig
+  actions.dig = async (_b: unknown, block: any) => { dug.push(`${block.name as string} ${block.position.toString() as string}`) }
+  try {
+    await openNook(bot, nook)
+  } finally {
+    actions.dig = realDig
+  }
+  assert.deepEqual(dug, ['cobblestone (0, 65, 9)'])
+})

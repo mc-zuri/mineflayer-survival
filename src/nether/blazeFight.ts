@@ -983,11 +983,16 @@ export async function sealAndHeal (bot: Bot, nook: BlazeNook, healTo: number, si
   return true
 }
 
-/** the front opened, the head's block first (the view), then the feet's, with the tool for them */
+/**
+ * the front opened, the head's block first (the view), then the feet's, with the tool for them: only a block the nook
+ * is shut with (NOOK_BLOCKS), never what was there (the camp's box shut round a 26.3 bot 1 off seed 2's throne spawner
+ * at (-277, 77, -159), facing it, took the spawner for its front, and opened it after the healing: mined, gone for good,
+ * BLAZE_KIT=q3)
+ */
 export async function openNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal): Promise<void> {
   for (const p of [nook.front[1], nook.front[0]]) {
     const b = bot.blockAt(p)
-    if (b == null || b.boundingBox !== 'block') continue
+    if (b == null || b.boundingBox !== 'block' || !NOOK_BLOCKS.includes(b.name)) continue
     const tool = (bot as any).pathingUtil?.bestHarvestingTool?.(b)
     if (tool != null && bot.heldItem?.type !== tool.type) await bot.equip(tool, 'hand')
     await dig(bot, b as any, { signal }).catch(err => { if (isAbort(err)) throw err; trace('fightFromNook: open:', (err as Error).message) })
