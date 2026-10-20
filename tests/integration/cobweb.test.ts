@@ -1,7 +1,8 @@
 // A bow from a mineshaft's cobwebs against a real server (SURVIVAL_VERSION, default 1.21.11; the tests/harness lockstep
 // server, a superflat world, no mobs): the bot in a 1-wide tunnel through a block of stone with 4 cobwebs in it 8 to
-// 20 blocks on (a mineshaft's corridor), an iron sword, 3 sticks and a crafting table, no string and no spider in the
-// world, the reflexes on. The executor's look round notes the webs (COBWEB_CHECK_TICKS), and obtain asks for a bow:
+// 20 blocks on (a mineshaft's corridor), an iron sword (enchanted), 3 sticks and a crafting table, no string and no spider in the
+// world, the reflexes on, the bot fit for the caves (enchanted iron and a sword, cooked food: caveReady, the cobweb's
+// string planned for no other). The executor's look round notes the webs (COBWEB_CHECK_TICKS), and obtain asks for a bow:
 // the plan takes the string from the webs (planner/sources' cobweb, broken with the sword: blocks/cobweb drops string
 // to anything but shears) and crafts it. COBWEB_RUNS runs (default 2), each with a fresh tunnel; every one must end
 // with the bow. COBWEB_SHEARS=1 gives shears too (the sword is taken for the webs all the same).
@@ -14,11 +15,17 @@ import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestSer
 import { Executor } from '../../src/executor/executor'
 import { COBWEB_CHECK_TICKS } from '../../src/executor/executor'
 import { countItems, waitUntil } from '../../src/skills/util'
+import { caveReady, caveUnreadiness } from '../../src/skills/caves'
 
 const USER = 'webbot'
 const GROUND = -60
 const RUNS = Number(process.env.COBWEB_RUNS ?? 2)
-const KIT: Array<[string, number]> = [['iron_sword', 1], ['stick', 3], ['crafting_table', 1], ...(process.env.COBWEB_SHEARS != null ? [['shears', 1] as [string, number]] : [])]
+const KIT: Array<[string, number]> = [['iron_sword[enchantments={sharpness:1}]', 1], ['cooked_beef', 8], ['stick', 3], ['crafting_table', 1], ...(process.env.COBWEB_SHEARS != null ? [['shears', 1] as [string, number]] : [])]
+/**
+ * the armor of a bot fit for the caves (skills/caves caveReady: the cobweb's string is planned for no other), worn
+ * with the enchanted sword and the cooked food of KIT
+ */
+const ARMOR: Array<[string, string]> = [['armor.head', 'iron_helmet[enchantments={protection:1}]'], ['armor.chest', 'iron_chestplate[enchantments={protection:1}]'], ['armor.legs', 'iron_leggings'], ['armor.feet', 'iron_boots']]
 
 interface RunResult { run: number, bow: boolean, string: number, webs: number, ticks: number, plan: string, error: string }
 
@@ -65,7 +72,9 @@ describe(`a bow from a tunnel's cobwebs on a ${DEFAULT_VERSION} server`, { timeo
   async function oneRun (n: number): Promise<RunResult> {
     const webs = await freshTunnel()
     for (const [item, count] of KIT) await run(`give ${USER} ${item} ${count}`)
+    for (const [slot, item] of ARMOR) await run(`item replace entity ${USER} ${slot} with ${item}`)
     assert.ok(await waitUntil(bot, () => countItems(bot, KIT[KIT.length - 1][0]) > 0, 200), 'no kit')
+    assert.ok(await waitUntil(bot, () => caveReady(bot), 100), `not cave-ready: ${caveUnreadiness(bot) ?? ''}`)
     const executor = new Executor(bot, { log: line => console.log(`  [executor] ${line}`) })
     // the look round for the webs (every COBWEB_CHECK_TICKS)
     await bot.waitForTicks(COBWEB_CHECK_TICKS + 20)
