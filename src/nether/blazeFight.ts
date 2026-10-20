@@ -202,6 +202,13 @@ function spawnWeight (k: number): number {
 const isSolidBlock = (b: NookBlock | null): boolean => b != null && b.boundingBox === 'block'
 const FREE_NAMES = new Set(['air', 'cave_air', 'void_air', 'fire', 'soul_fire', 'short_grass', 'tall_grass', 'fern', 'warped_roots', 'crimson_roots', 'nether_sprouts', 'red_shrub'])
 const isOpen = (b: NookBlock | null): boolean => b != null && FREE_NAMES.has(b.name)
+/**
+ * a wall or a roof of the nook: a full cube, not a fence, a wall or bars (their collision shapes are posts and
+ * arms: a fireball goes between them, and a blaze sees through; a 26.3 nook on seed 7741's throne, walled by its
+ * nether brick fences at the head, was fireballed through them, the bot dead in it three runs of three)
+ */
+const PART_BLOCK = /(fence|_wall|pane|bars|chain|_slab|stairs|trapdoor|_door|ladder|scaffolding)$/
+const isWallBlock = (b: NookBlock | null): boolean => isSolidBlock(b) && !PART_BLOCK.test(b?.name ?? '')
 /** a floor the nook goes on: a full block but magma (MagmaBlock.stepOn burns) */
 const isFloor = (b: NookBlock | null): boolean => isSolidBlock(b) && b?.name !== 'magma_block'
 
@@ -297,7 +304,7 @@ export function nookAround (lookup: NookLookup, stand: Vec3, facing: Vec3, maxBl
   const todo: Vec3[] = []
   for (const w of walls) {
     const b = lookup(w)
-    if (isSolidBlock(b)) continue
+    if (isWallBlock(b)) continue
     if (!isOpen(b)) return null
     todo.push(w)
   }

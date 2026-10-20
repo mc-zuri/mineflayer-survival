@@ -714,3 +714,11 @@ test('spawnView: a nook facing the spawner on open ground sees most of its spawn
   assert.ok(planBlazeNooks(w.lookup, new Vec3(0, 64, 0)).length > 0)
   assert.equal(planBlazeNooks(w.lookup, new Vec3(0, 64, 0), { minView: 0.99 }).length, 0)
 })
+
+test('nookAround takes no fence for a wall (a fireball goes between its posts): a nook with one at its head is none, with a full block there it is', () => {
+  const at = (name: string): NookLookup => world(p => p.x === 1 && p.y === 65 && p.z === 10 ? name : null).lookup
+  assert.equal(nookAround(at('nether_brick_fence'), new Vec3(0, 64, 10), new Vec3(0, 0, -1)), null)
+  assert.equal(nookAround(at('cobblestone_wall'), new Vec3(0, 64, 10), new Vec3(0, 0, -1)), null)
+  const nook = nookAround(at('nether_bricks'), new Vec3(0, 64, 10), new Vec3(0, 0, -1))
+  assert.ok(nook != null && !nook.build.some(p => p.equals(new Vec3(1, 65, 10))))
+})
