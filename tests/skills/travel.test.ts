@@ -191,3 +191,57 @@ test('tunnelTo never digs a portal frame\'s obsidian or the bot\'s chest', async
   }
   assert.deepEqual(dug, [])
 })
+
+test('a surface trip\'s grid walk keeps to the surface (surfaceGridCost): round a wall by its gap, not down a staircase into a mine under it and up past the wall, the shorter way (full-26.3-fresh-u)', async () => {
+  const { surfaceGridCost } = await import('../../src/executor/explore')
+  // rock to y 63 over x -5..30, z -5..6; a wall on it at x 10 (z -5..4, its gap at z 5); a mine at z 0: a staircase
+  // down from x 2 to y 58 at x 7, a tunnel at 58 to x 13, a staircase up to the surface at x 19, each cell 3 high
+  const carved = (p: Vec3): boolean => {
+    if (p.z !== 0) return false
+    const feet = p.x >= 2 && p.x <= 7 ? 65 - p.x : p.x >= 8 && p.x <= 13 ? 58 : p.x >= 14 && p.x <= 19 ? 45 + p.x : null
+    return feet != null && p.y >= feet && p.y <= feet + 2
+  }
+  const inside = (p: Vec3): boolean => p.x >= -5 && p.x <= 30 && p.z >= -5 && p.z <= 6
+  const solid = (p: Vec3): boolean => !inside(p) || (p.y <= 63 && !carved(p)) || (p.x === 10 && p.z <= 4 && p.y >= 64 && p.y <= 66)
+  const lookup = (p: Vec3): { name: string, boundingBox: string } => solid(p) ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  const base: GridCellView = { free: p => !solid(p), floor: solid }
+  const goal = (c: Vec3): boolean => c.x === 22 && c.z === 0
+  const h = (c: Vec3): number => Math.abs(c.x - 22) + Math.abs(c.z)
+  const free = gridPath(base, new Vec3(0, 64, 0), goal, h)
+  assert.ok(free != null && free.some(c => c.y < 64), 'the mine is the shorter way')
+  const kept = gridPath({ ...base, cellCost: surfaceGridCost(lookup, 64) }, new Vec3(0, 64, 0), goal, h)
+  assert.ok(kept != null)
+  assert.ok(kept.every(c => c.y >= 64), kept.map(c => c.toString()).join(' '))
+  assert.ok(kept.some(c => c.x === 10 && c.z === 5), 'not by the gap')
+  // with no way over the surface: none (the pathfinder's walk, with the surface's step costs, is next)
+  const shut = (p: Vec3): boolean => solid(p) || (p.x === 10 && p.y >= 64 && p.y <= 66)
+  const shutLookup = (p: Vec3): { name: string, boundingBox: string } => shut(p) ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  assert.equal(gridPath({ free: p => !shut(p), floor: shut, cellCost: surfaceGridCost(shutLookup, 64) }, new Vec3(0, 64, 0), goal, h, 5000), null)
+})
+
+test('overland\'s hops keep the grid walk to the surface: travel hands gridWalk the surface\'s cell cost', async () => {
+  const gridModule = require('../../src/skills/gridWalk')
+  const navModule = require('../../src/skills/navigate')
+  const exploreModule = require('../../src/executor/explore')
+  const { overland } = await import('../../src/end/strongholdSkills')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (p: Vec3) => p.y < 64 ? 'stone' : 'air' })
+  ;(bot as any).pathfinder = { pathfinderSettings: {}, defaultMoveSettings: {}, setOptions: () => {}, setMoveOptions: () => {} }
+  ;(bot as any).world = { getColumnAt: () => ({}) }
+  const costs: Array<((c: Vec3) => number) | undefined> = []
+  const real = [gridModule.gridWalk, navModule.navigate, exploreModule.ensureSurface]
+  gridModule.gridWalk = async (_bot: any, args: any) => { costs.push(args.cellCost); bot.entity.position = new Vec3(args.target.x, 64, args.target.z); return { cells: 1 } }
+  navModule.navigate = async () => {}
+  exploreModule.ensureSurface = async () => true
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await overland(bot, { target: new Vec3(20, 64, 0), range: 2 })
+  } finally {
+    clearInterval(ticking)
+    ;[gridModule.gridWalk, navModule.navigate, exploreModule.ensureSurface] = real
+  }
+  assert.ok(costs.length > 0 && costs.every(c => c != null), `${costs.length} grid walks`)
+  // under the rock: never; on it: free
+  assert.equal(costs[0]?.(new Vec3(5, 50, 0)), Infinity)
+  assert.equal(costs[0]?.(new Vec3(5, 64, 0)), 0)
+})

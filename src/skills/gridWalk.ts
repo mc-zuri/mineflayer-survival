@@ -234,12 +234,16 @@ export interface GridWalkArgs {
   /** the range counts x and z only (a hop over unknown heights) */
   horizontal?: boolean
   maxNodes?: number
+  /** cells' worth charged on top for standing in a cell, over the view's own (Infinity: never; a surface trip's) */
+  cellCost?: (c: Vec3) => number
 }
 
 /** walks a grid path to within `range` of the target, block middle to block middle (a jump for each step up) */
 export async function gridWalk (bot: Bot, args: GridWalkArgs, signal?: AbortSignal): Promise<{ cells: number }> {
   throwIfAborted(signal)
-  const view = botGridView(bot)
+  const own = botGridView(bot)
+  const extra = args.cellCost
+  const view: GridCellView = extra == null ? own : { ...own, cellCost: c => (own.cellCost?.(c) ?? 0) + extra(c) }
   const t = args.target.floored()
   const range = args.range ?? 1
   const start = bot.entity.position.floored()

@@ -784,6 +784,23 @@ export function surfaceStepCost (lookup: Lookup, refY: number, range = 64): (blo
   }
 }
 
+/**
+ * surfaceStepCost for a grid walk (GridCellView.cellCost): a cell under a roof or down a ravine is never walked, and
+ * with no way over the surface the grid walk fails and the pathfinder's walk goes on, with the surface's step costs
+ * (onTheSurface). The grid walk had no rule of the sort: a respawned 26.3 bot's walk to its trip kit, an 89-cell grid
+ * walk from its base's way out at (-44, 63, -19), ended down in its old mine at y 5, where a zombie and a creeper
+ * killed it bare (full-26.3-fresh-u, t234260)
+ */
+export function surfaceGridCost (lookup: Lookup, refY: number): (c: Vec3) => number {
+  const step = surfaceStepCost(lookup, refY)
+  return c => step({ position: c }) > 0 ? Infinity : 0
+}
+
+/** surfaceGridCost for the bot's world, from where its feet are */
+export function botSurfaceGridCost (bot: Bot): (c: Vec3) => number {
+  return surfaceGridCost(lookupOf(bot), Math.floor(bot.entity.position.y))
+}
+
 /** the open drop under a block put down that makes it a bridge's (bridgePlaceCost) */
 export const BRIDGE_DROP = 4
 /** what a block put down over such a drop costs a surface trip more (ticks): a way round is walked first */

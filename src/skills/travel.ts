@@ -79,6 +79,8 @@ export interface TravelArgs {
    * set and plans again (turnBackForBlocks; MAX_TURN_BACKS a trip) (default true)
    */
   restock?: boolean
+  /** the grid walk's cell cost on top (gridWalk's cellCost: a surface trip's, overland) */
+  gridCellCost?: (c: Vec3) => number
 }
 
 export interface TravelResult {
@@ -279,7 +281,7 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
         if (args.grid !== false) {
           const end = p.last ? new Vec3(target.x, bot.entity.position.y, target.z) : new Vec3(p.x, bot.entity.position.y, p.z)
           try {
-            await gridWalk(bot, { target: end, range: p.last ? range : Math.max(range, 6), horizontal: args.exactY !== true }, signal)
+            await gridWalk(bot, { target: end, range: p.last ? range : Math.max(range, 6), horizontal: args.exactY !== true, cellCost: args.gridCellCost }, signal)
             if (p.last && args.exactY !== true) return result()
             // the last hop to a height (exactY): the grid's walk is level, so the height is the pathfinder's (a kit
             // chest at y 50 under the bot at y 63 had the grid walk 0 cells over and over, the trip never ending)

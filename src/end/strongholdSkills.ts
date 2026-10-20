@@ -17,7 +17,7 @@ import { TOO_FAR_DISTANCE, inferThrowDirection, type ThrowDirection, type Vec } 
 import { secondThrowPoint, triangulate, type EyeRay, type Triangulation, type XZ } from './triangulate'
 import { guessFromOneThrow, strongholdRings } from './stronghold'
 import { analyzePortalRoom, findPortalFrames, type PortalRoom } from './portalRoom'
-import { ensureSurface, inWater, onTheSurface, toShore } from '../executor/explore'
+import { botSurfaceGridCost, ensureSurface, inWater, onTheSurface, toShore } from '../executor/explore'
 import { findBlocks } from '../core/findBlocks'
 
 // ---- eyes
@@ -319,7 +319,8 @@ export async function overland (bot: Bot, args: TravelArgs, signal?: AbortSignal
   await ensureSurface(bot, signal)
   // to a height (exactY): over the surface to above it, then down to it with the pathfinder's own costs (the surface's
   // keep it from digging down: a kit chest 13 blocks under the ground was never reached)
-  await onTheSurface(bot, async () => await travel(bot, { ...args, exactY: false, range: Math.max(args.range ?? 3, 3) }, signal))
+  // (and the grid walks of its hops kept to the surface too: botSurfaceGridCost)
+  await onTheSurface(bot, async () => await travel(bot, { ...args, exactY: false, range: Math.max(args.range ?? 3, 3), gridCellCost: botSurfaceGridCost(bot) }, signal))
   if (args.exactY !== true) return
   try {
     await travel(bot, args, signal)
