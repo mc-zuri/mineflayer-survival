@@ -168,7 +168,10 @@ export function checkPlan (registry: RegistryLike, steps: readonly PlanStep[], s
       case 'fill':
         return take([{ name: 'bucket', count: step.count }])
       case 'farm':
-        if (inv.countAny(itemTags(registry).resolve('#hoes')) === 0) return 'no hoe'
+        // (a hoe only to till new plots: a farm sown already is harvested and sown again by hand; the plan for one with
+        // no hoe held failed its check 'no hoe' every time, and the nether gate's food with it, five failures and the
+        // game stopped, full-1.21.11-fresh-m)
+        if (step.plots > 0 && inv.countAny(itemTags(registry).resolve('#hoes')) === 0) return 'no hoe'
         if (inv.count(step.seed) < step.plots) return `needs ${step.plots} ${step.seed}, has ${inv.count(step.seed)}`
         return null
       case 'fish':

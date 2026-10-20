@@ -77,3 +77,12 @@ test('iceHole: the 3 x 3 of ice over water about the nearest ice cell with enoug
   const rink = (p: Vec3): any => ({ name: p.y === 63 ? 'ice' : p.y < 63 ? 'stone' : 'air' })
   assert.equal(iceHole(rink, [new Vec3(1, 63, 1)]), null)
 })
+
+test('checkPlan: a farm step harvesting a farm sown already needs no hoe; one sowing new plots does', () => {
+  const registry: any = require('minecraft-data')('26.3')
+  const harvest: any = { kind: 'farm', item: 'wheat', count: 8, crop: 'wheat', seed: 'wheat_seeds', plots: 0, cycles: 1, cost: 100 }
+  assert.ok(checkPlan(registry, [harvest], {}).ok, JSON.stringify(checkPlan(registry, [harvest], {}).error))
+  const sow: any = { ...harvest, plots: 4 }
+  assert.equal(checkPlan(registry, [sow], { wheat_seeds: 4 }).error?.reason, 'no hoe')
+  assert.ok(checkPlan(registry, [sow], { wheat_seeds: 4, wooden_hoe: 1 }).ok)
+})
