@@ -99,7 +99,7 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     const diagnostics = new Diagnostics(bot, options.diagnostics)
     const stock = options.stock === false || options.stock.enabled === false ? null : new StockPolicy(options.stock)
     bot.survival = { options, tasks, memory, reflexes, handlers: {}, advancements: new Set(), play: async (playOptions) => await play(bot, playOptions), diagnostics, stock }
-    bot.on('physicsTick', () => { memory.now = tasks.tick })
+    bot.on('physicsTick', () => { memory.now = memory.tickBase + tasks.tick })
     // where the bot walks the nether, to go that way again (travel by trailRoute)
     keepNetherTrail(bot, memory)
     // the advancements as the server tells them: the End milestone's check is the dragon's minecraft:end/kill_dragon

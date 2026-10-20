@@ -6,7 +6,7 @@ import { WorldMemory } from '../../src/core/memory'
 import { obtain, obtainAll, Resolver } from '../../src/planner/obtain'
 import { checkPlan, type PlanStep, type MineStep, type CraftStep, type SmeltStep, type KillStep } from '../../src/planner/steps'
 import { recipesFor } from '../../src/planner/recipes'
-import { BLOCK_SOURCES, MOB_SOURCES, SMELTING } from '../../src/planner/sources'
+import { BLOCK_SOURCES, MOB_SOURCES, SMELTING, WALK_TICKS_PER_BLOCK } from '../../src/planner/sources'
 import { burnTicks } from '../../src/core/items'
 
 const registry: RegistryLike = minecraftData('1.21.11')
@@ -209,6 +209,29 @@ test('remembered chests are looted before anything is made', () => {
   memory.rememberChest({ x: 10, y: 64, z: 0 }, { diamond: 2 })
   const plan = obtain(registry, 'diamond', 3, { inventory: { iron_pickaxe: 1 }, memory, position: { x: 0, y: 64, z: 0 } })
   assert.deepEqual(plan.steps.map(s => `${s.kind} ${s.item} ${s.count}`), ['loot diamond 2', 'mine diamond 1'])
+})
+
+test('a chest opened more than CHEST_TRUST_TICKS ago is less sure: its walk counted STALE_LOOT_FACTOR times, a chest opened lately looted first', async () => {
+  const { CHEST_TRUST_TICKS, STALE_LOOT_FACTOR } = await import('../../src/planner/obtain')
+  const memory = new WorldMemory()
+  memory.now = 1000
+  memory.rememberChest({ x: 100, y: 64, z: 0 }, { diamond_pickaxe: 1 })
+  const at = { inventory: { iron_pickaxe: 1 }, memory, position: { x: 0, y: 64, z: 0 } }
+  const fresh = obtain(registry, 'diamond_pickaxe', 1, at)
+  assert.deepEqual(fresh.steps.map(s => s.kind), ['loot'])
+  memory.now = 1000 + CHEST_TRUST_TICKS + 1
+  const stale = obtain(registry, 'diamond_pickaxe', 1, at)
+  assert.deepEqual(stale.steps.map(s => s.kind), ['loot'])
+  // the walk's 100 blocks counted twice over, the rest the same
+  assert.equal((stale.steps[0] as any).cost - (fresh.steps[0] as any).cost, (STALE_LOOT_FACTOR - 1) * Math.ceil(100 * WALK_TICKS_PER_BLOCK))
+  // a chest opened since, with fewer of them, goes first
+  memory.rememberChest({ x: 120, y: 64, z: 0 }, { diamond: 2 })
+  memory.now += 10
+  memory.rememberChest({ x: 0, y: 64, z: 80 }, { diamond: 1 })
+  memory.now += 10
+  memory.chestAt({ x: 120, y: 64, z: 0 })!.seen = 0
+  const both = obtain(registry, 'diamond', 1, at)
+  assert.deepEqual(both.steps.map(s => `${s.kind} ${(s as any).from?.z}`), ['loot 80'])
 })
 
 test('obtainAll plans milestone goals into one plan that leaves all of them held', () => {

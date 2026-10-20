@@ -133,6 +133,18 @@ export const FARM_CROPS: Readonly<Record<string, FarmCrop>> = {
 export const FARM_SETUP_TICKS = 300
 export const FARM_PLOT_TICKS = 40
 
+/**
+ * Ticks a chest's remembered contents are taken as sure since it was last opened (KnownChest.seen against the
+ * memory's now); older, a loot from it is less sure and dearer (STALE_LOOT_FACTOR)
+ */
+export const CHEST_TRUST_TICKS = 24000
+/**
+ * How much dearer the walk to a chest seen more than CHEST_TRUST_TICKS ago is counted: the item may be gone (taken in
+ * a run segment whose memory wasn't saved: a 26.3 replacement for a worn pickaxe walked a long way to a base chest for
+ * 'loot 1 diamond_pickaxe' and gained 0), and the walk back and the other way after it are paid too
+ */
+export const STALE_LOOT_FACTOR = 2
+
 /** blocks a mine has besides its ores: what an undergroundOnly plan may mine */
 export const MINE_BLOCKS = /(_ore|^ancient_debris|^deepslate|^obsidian|^stone|^gravel|^dirt|^clay|^tuff|^andesite|^diorite|^granite)$/
 
@@ -638,15 +650,18 @@ export class Resolver {
   private loot (s: State, item: string, n: number, path: string[], limit: number): State | null {
     const memory = this.opts.memory as WorldMemory
     let left = n
-    for (const { chest, count } of memory.findItem(item)) {
+    // the chests opened lately first, then the most
+    const stale = (seen: number): boolean => (memory.now ?? 0) - seen > CHEST_TRUST_TICKS
+    const found = memory.findItem(item).map((f, i) => ({ ...f, i })).sort((a, b) => (Number(stale(a.chest.seen)) - Number(stale(b.chest.seen))) || a.i - b.i)
+    for (const { chest, count } of found) {
       if (left <= 0) break
       const k = `${chest.dimension}:${chest.x},${chest.y},${chest.z}|${item}`
       const available = count - (s.looted.get(k) ?? 0)
       if (available <= 0) continue
       const take = Math.min(available, left)
       const p = this.opts.position
-      const travel = (p == null ? 200 : Math.ceil(Math.hypot(chest.x - p.x, chest.y - p.y, chest.z - p.z) * WALK_TICKS_PER_BLOCK)) +
-        this.dimensionCost(s, chest.dimension) + CRAFT_TICKS
+      const walk = p == null ? 200 : Math.ceil(Math.hypot(chest.x - p.x, chest.y - p.y, chest.z - p.z) * WALK_TICKS_PER_BLOCK)
+      const travel = walk * (stale(chest.seen) ? STALE_LOOT_FACTOR : 1) + this.dimensionCost(s, chest.dimension) + CRAFT_TICKS
       s.cost += travel
       if (s.cost > limit) return null
       s.looted.set(k, (s.looted.get(k) ?? 0) + take)

@@ -444,6 +444,9 @@ export class Runner {
     if (kept.length > 0) keepUnbroken(this.bot, kept)
     this.reached.push(...data.reached)
     this.ticksBefore = data.ticks
+    // the memory's clock goes on from the save's (a chest's age, a death's)
+    this.memory.tickBase = data.ticks
+    this.memory.now = this.tick
     if (Array.isArray(data.reports)) this.diagnostics?.restoreHistory(data.reports)
     this.log(`resumed from ${this.store?.name ?? ''}: ${data.reached.length > 0 ? data.reached.map(r => r.id).join(', ') : 'no milestones yet'}`)
   }
@@ -1115,7 +1118,8 @@ export class Runner {
     if (deadly) this.log(`not back to the death spot at ${death.x} ${death.y} ${death.z}: died there going back before`)
     if (deadly) diag?.recovery({ deathSpot: 'skipped: died there going back before' })
     const worth = !deadly && deathSpotWorthIt(death, {
-      tick: bot.survival.tasks.tick,
+      // (the memory's clock, the death's stamp's)
+      tick: this.memory.now,
       dimension: normalizeDimension(bot.game?.dimension),
       position: bot.entity.position,
       minY: (bot.game as any)?.minY ?? -64,

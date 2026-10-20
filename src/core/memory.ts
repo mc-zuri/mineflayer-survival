@@ -94,6 +94,11 @@ export interface FindOptions {
 export class WorldMemory {
   /** the bot tick stamped on everything remembered from now on */
   now = 0
+  /**
+   * The game's ticks before this run (a resumed game's, its save's ticks): `now` is this and the run's tick
+   * (bot.survival), so the stamps of a save and of the run resumed from it are of one clock and a chest's age holds
+   */
+  tickBase = 0
 
   private readonly blocks = new Map<string, Map<string, RememberedBlock>>()
   private readonly blockAt = new Map<string, string>()

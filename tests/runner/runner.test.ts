@@ -645,3 +645,31 @@ test('the save is written after every chest change, not only at the milestones, 
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(fs.readFileSync(saveFile, 'utf8'), '{}', String(before))
 })
+
+test('a resumed run\'s memory clock goes on from the save\'s ticks (WorldMemory.tickBase): a chest\'s age holds across the runs', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-test-'))
+  const saveFile = path.join(dir, 'save.json')
+  const memory = new WorldMemory()
+  memory.now = 90000
+  memory.rememberChest({ x: 1, y: 40, z: 1 }, { diamond_pickaxe: 1 })
+  fs.writeFileSync(saveFile, JSON.stringify({ version: 1, memory: memory.toJSON(), reached: [], ticks: 100000 }))
+  const bot = fakeBot()
+  let seen: { now: number, base: number, age: number } | null = null
+  const runner = new Runner(bot, {
+    saveFile,
+    until: 'wood',
+    log: () => {},
+    handlers: {
+      wood: async () => {
+        const m = bot.survival.memory
+        seen = { now: m.now, base: m.tickBase, age: m.now - m.chestAt({ x: 1, y: 40, z: 1 }).seen }
+        bot.give('wooden_pickaxe', 1)
+        bot.give('crafting_table', 1)
+      }
+    }
+  })
+  await runner.play()
+  assert.equal(seen!.base, 100000)
+  assert.ok(seen!.now >= 100000, String(seen!.now))
+  assert.ok(seen!.age >= 10000, String(seen!.age))
+})
