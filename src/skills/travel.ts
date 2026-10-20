@@ -9,6 +9,7 @@ import { gridWalk } from './gridWalk'
 import { trace, waitTicks, waitUntil } from './util'
 import { normalizeDimension } from '../core/memory'
 import { trailRoute } from '../nether/trail'
+import { MAX_TURN_BACKS, TURN_BACK_MIN_GAIN, landAt, scaffoldShort, turnBackForBlocks } from '../nether/restock'
 import { FLY_MIN_DISTANCE, canFly, flyTo } from './elytra'
 
 /** the heuristic's ticks a block of the pathfinder's goals (COST_HEURISTIC: 20 / 4.317, a sprint's) */
@@ -72,6 +73,12 @@ export interface TravelArgs {
    * (skills/elytra canFly, flyTo), the rest walked (default true)
    */
   fly?: boolean
+  /**
+   * in the nether, a hop with no path while the bot holds fewer building blocks than the way ahead takes to cross
+   * (nether/restock.ts scaffoldShort) turns back to firm ground along the trail, mines netherrack up to the working
+   * set and plans again (turnBackForBlocks; MAX_TURN_BACKS a trip) (default true)
+   */
+  restock?: boolean
 }
 
 export interface TravelResult {
@@ -200,6 +207,31 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
   // and over kept a CPU core busy for 10 minutes with no game tick run, 26.3)
   let still = 0
   let lastPos: Vec3 | null = null
+  // the nether's turn-backs for blocks (restock), and whether the last got any
+  const tripStart = bot.entity.position.clone()
+  let turnBacks = 0
+  // (the ticks a turn-back takes aren't the trip's: maxTicks is the walk's)
+  let turnBackTicks = 0
+  const turnBack = async (): Promise<boolean> => {
+    if (args.restock === false || turnBacks >= MAX_TURN_BACKS || normalizeDimension(bot.game?.dimension) !== 'the_nether') return false
+    const short = scaffoldShort(bot, target)
+    if (!short.short) return false
+    turnBacks++
+    const t0 = ticks
+    trace('travel: no way on with', short.held, 'blocks held, the crossing ahead takes', short.need, '- back to firm ground for netherrack')
+    const got = await turnBackForBlocks(bot, async (to) => await travel(bot, { target: to, range: 3, restock: false }, signal).catch(err => {
+      if (isAbort(err)) throw err
+      trace('travel: the way back to firm ground failed:', (err as Error).message)
+    }), { fallback: tripStart, signal }).catch(err => {
+      if (isAbort(err)) throw err
+      trace('travel: no netherrack mined:', (err as Error).message)
+      return 0
+    })
+    turnBackTicks += ticks - t0
+    trace('travel: turned back for blocks in', ticks - t0, 'ticks, got', got, 'now', scaffoldShort(bot, target).held)
+    if (got < TURN_BACK_MIN_GAIN) turnBacks = MAX_TURN_BACKS
+    return got > 0
+  }
   try {
     for (;;) {
       throwIfAborted(signal, result())
@@ -213,7 +245,7 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
         if (++still >= TRAVEL_STILL_HOPS) throw new SkillError('NO_PATH', `no way on toward ${target.toString()}: ${still} hops left the bot at ${bot.entity.position.floored().toString()}`, result())
       } else still = 0
       lastPos = bot.entity.position.clone()
-      if (ticks > maxTicks) throw new SkillError('TIMEOUT', `${Math.round(left)} blocks short after ${ticks} ticks`, result())
+      if (ticks - turnBackTicks > maxTicks) throw new SkillError('TIMEOUT', `${Math.round(left)} blocks short after ${ticks} ticks`, result())
       // out at sea (deep water under the feet): swum at the surface toward the hop's point, not left to the
       // pathfinder, whose moves in deep water sank the bot ("bot is too low") until the drowning reflex cut each
       // hop off and the trip started over (1.21.11 seed 2, 8 minutes in one spot of the sea)
@@ -227,6 +259,7 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
       // the chunks ahead come in as the bot moves; wait for the one under the next hop
       let moved = false
       let lastError: unknown = null
+      let restocked = false
       for (const [turn, scale] of DETOURS) {
         if (lost != null) break
         const p = hopPoint(pos, target, hop * scale, turn)
@@ -269,11 +302,19 @@ export async function travel (bot: Bot, args: TravelArgs, signal?: AbortSignal):
             trace('travel: hop', turn.toFixed(2), scale, 'failed:', (err as Error).message)
             // a hop that got some way still counts
             if (bot.entity.position.distanceTo(before) > 8) moved = true
+            // in the nether, short of the blocks to cross off firm ground (a bridge, a ledge): back for netherrack at
+            // once, not the detours first (a bridge's end with 4 blocks tried them all, again and again, 35000 ticks,
+            // full-26.3-fresh-t); on firm ground the detours first, a way round with the blocks held
+            if (!moved && lost == null && !landAt(p => bot.blockAt(p) as any, bot.entity.position) && await turnBack()) { restocked = true; break }
           }
         }
         if (moved) break
       }
       if (lost != null) continue
+      // no detour either, short of the blocks to cross: back for them
+      if (!moved && !restocked && await turnBack()) restocked = true
+      // the blocks got: planned again from where the bot is
+      if (restocked) { lastPos = null; still = 0; continue }
       if (!moved) throw new SkillError('NO_PATH', `no way on toward ${target.toString()} from ${bot.entity.position.toString()}`, result(), { cause: lastError })
       hops++
       if (args.onHop != null && await args.onHop(bot.entity.position.clone())) return result(true)
