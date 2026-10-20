@@ -62,11 +62,12 @@ export const FAILED_LAND_RADIUS = 160
 /** the rings of the seed's biomes read about home, nearest first (8 points a ring) */
 export const SEED_RINGS = [128, 224, 320, 448]
 /**
- * the food biome chunks within FOOD_PATCH_RADIUS of a food biome noted that make it wide enough to go to before the
- * others: a chunk's generation spawns its animals 1 time in 10 (MobCategory.CREATURE's spawn chance), and a patch of
- * snowy taiga of a few chunks on seed 31337's peaks had no cow (hunt2-b)
+ * the food biome chunks within FOOD_PATCH_RADIUS of a food biome noted (of some 29) that make it wide enough to go to
+ * before the others: a chunk's generation spawns its animals 1 time in 10 (MobCategory.CREATURE's spawn chance), and
+ * the snowy taiga patches by seed 31337's peaks, 7 chunks of 29 at (-120, -40) and 7 of 32 by the frozen river at
+ * (224, 0), had no cow (hunt2-b, hunt2-d), the taiga at (0, -224) 26 of 32
  */
-export const FOOD_PATCH_CHUNKS = 6
+export const FOOD_PATCH_CHUNKS = 14
 export const FOOD_PATCH_RADIUS = 48
 /** the seed's reads about a food biome ring point (at this offset) of which most are food biomes for a wide one */
 export const SEED_PATCH_OFFSET = 40
