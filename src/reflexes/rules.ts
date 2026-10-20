@@ -321,6 +321,33 @@ export function unarmedOutmatched (bot: Bot, near: Entity[], config: ReflexConfi
 }
 
 /**
+ * Whether the hostiles reflex flees `near` now rather than fight (an armed bot cornered a while ago fights): at or under
+ * fleeHealth with more than one about or no weapon and armor to fight on with (fightOnArmor), outnumbered (more than
+ * maxFight, a split slime's cubes not counted for an armed bot: SWARMERS), or bare and outmatched (unarmedOutmatched)
+ */
+export function fleeDue (bot: Bot, near: Entity[], config: ReflexConfig, tick: number): boolean {
+  if (near.length === 0) return false
+  const armed = armorPoints(bot) >= config.hostiles.fightOnArmor && bestMeleeWeapon(bot) != null
+  // (an armed and armored bot isn't outnumbered by the cubes of a split slime or magma cube: SWARMERS)
+  const outnumbered = (armed ? near.filter(e => !SWARMERS.has(e.name ?? '')) : near).length > config.hostiles.maxFight
+  return fightTurned(bot, near, config, tick) || (outnumbered && !wasCornered(bot, tick))
+}
+
+/**
+ * Whether a fight the hostiles reflex is in is given up, to flee: fleeDue's odds but the numbers (more coming at a bot
+ * already fighting with its shield up is no reason to turn its back on them: a 26.3 bot in iron fled four zombies in a
+ * cave as each came into range, its fights cut off, and killed none in 2400 ticks)
+ */
+export function fightTurned (bot: Bot, near: Entity[], config: ReflexConfig, tick: number): boolean {
+  if (near.length === 0) return false
+  const armed = armorPoints(bot) >= config.hostiles.fightOnArmor && bestMeleeWeapon(bot) != null
+  const fightOn = near.length === 1 && armed
+  // (cornered a while ago, the flee found no way: an armed bot fights where it stands, not stands there struck)
+  const cornered = wasCornered(bot, tick) && bestMeleeWeapon(bot) != null
+  return !cornered && ((bot.health <= config.hostiles.fleeHealth && !fightOn) || unarmedOutmatched(bot, near, config))
+}
+
+/**
  * ticks after a flee found no way (fleeFrom's 'cornered': a tunnel, a pit) the hostiles reflex fights instead, an armed
  * bot: a 26.3 bot cornered at 4.8 health underground by a skeleton 0.9 off stood there, fleeing and failing every 20
  * ticks, till it was shot dead (full-26.3-fresh-d); one in a tunnel at y 11 fled a creeper, cornered, and was blown up
@@ -365,14 +392,8 @@ export const hostilesReflex: Reflex = {
     const nether = inNether(bot)
     const near = hostilesInRange(ctx).filter(e => !nether || !letBeInNether(bot, e, ctx.tick))
     if (near.length === 0) return null
-    const armed = armorPoints(bot) >= config.hostiles.fightOnArmor && bestMeleeWeapon(bot) != null
-    const fightOn = near.length === 1 && armed
-    // (an armed and armored bot isn't outnumbered by the cubes of a split slime or magma cube: SWARMERS)
-    const outnumbered = (armed ? near.filter(e => !SWARMERS.has(e.name ?? '')) : near).length > config.hostiles.maxFight
-    // (cornered a while ago, the flee found no way: an armed bot fights where it stands, not stands there struck)
     const cornered = wasCornered(bot, ctx.tick) && bestMeleeWeapon(bot) != null
-    const flee = !cornered && ((bot.health <= config.hostiles.fleeHealth && !fightOn) || outnumbered || unarmedOutmatched(bot, near, config))
-    if (flee) {
+    if (fleeDue(bot, near, config, ctx.tick)) {
       // a door near to get in behind (a house, the base's airlock): in there and shut, not a run in the open under
       // the bolts and arrows
       const refuge = cachedRefuge(ctx, near)
@@ -427,10 +448,13 @@ export const hostilesReflex: Reflex = {
       }
     }
     // the odds looked at again each tick of the fight (a skeleton come into sight while the bare bot fought a spider
-    // shot it dead from 6 blocks, 1.21.11): turned, the fight is given up and the reflex flees next
+    // shot it dead from 6 blocks, 1.21.11): turned, the fight is given up and the reflex flees next. The health's too
+    // (fightTurned): the fight went on with one zombie while others hit the bot, 20 health to 1, and the reflex fired
+    // twice in its last 200 ticks, each a new fight (full-26.3-fresh-l, a 26.3 bot in iron in the night's mine)
+    let elapsed = 0
     const turned = (): boolean => {
       const now = hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange) })
-      return now.length > 0 && unarmedOutmatched(bot, now, config)
+      return now.length > 0 && fightTurned(bot, now, config, ctx.tick + elapsed++)
     }
     if (nether && !useBow) {
       const f = netherFightsOf(bot)

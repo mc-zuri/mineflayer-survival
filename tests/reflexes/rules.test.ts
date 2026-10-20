@@ -584,3 +584,31 @@ test('eat reflex: the food kept for a trip (setFoodReserve) is eaten into only s
   bot.survival = { tasks: { tick: 1000 } }
   assert.strictEqual(foodReserve(bot), 0)
 })
+
+test('hostiles reflex: an armed bot\'s fight with one of two zombies is given up once its health falls to fleeHealth (until: fightTurned), to flee; more coming do not end it (full-26.3-fresh-l)', async () => {
+  const { fleeDue, fightTurned } = await import('../../src/reflexes/rules')
+  const zombies = [entity({ name: 'zombie', position: at(2) }), entity({ name: 'zombie', position: at(3) })]
+  const kit = { items: [item('diamond_sword')], armor: { head: item('iron_helmet'), torso: item('iron_chestplate'), legs: item('iron_leggings'), feet: item('golden_boots') } }
+  const bot = fakeBot({ entities: zombies, ...kit, health: 12 })
+  bot.attack = () => {}
+  bot.equip = async () => {}
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const task = hostilesReflex.check(engine.context())
+  assert.strictEqual(task?.detail, 'fight zombie')
+  let ticks = 0
+  bot.waitForTicks = async () => { if (++ticks === 5) bot.health = 5 }
+  const result: any = await task!.run(new AbortController().signal)
+  assert.strictEqual(result.killed, false)
+  assert.ok(ticks <= 6, `the fight went on ${ticks} ticks`)
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'flee')
+  engine.stop()
+  // one zombie: an armed bot fights on at low health; a second, it flees
+  const lone = fakeBot({ entities: [zombies[0]], ...kit, health: 5 })
+  assert.strictEqual(fleeDue(lone, [zombies[0]], DEFAULT_REFLEX_CONFIG, 0), false)
+  assert.strictEqual(fleeDue(lone, zombies, DEFAULT_REFLEX_CONFIG, 0), true)
+  // four at full health: fled before a fight, not a fight given up for
+  const four = [0, 1, 2, 3].map(k => entity({ name: 'zombie', position: at(2 + k) }))
+  const full = fakeBot({ entities: four, ...kit })
+  assert.strictEqual(fleeDue(full, four, DEFAULT_REFLEX_CONFIG, 0), true)
+  assert.strictEqual(fightTurned(full, four, DEFAULT_REFLEX_CONFIG, 0), false)
+})
