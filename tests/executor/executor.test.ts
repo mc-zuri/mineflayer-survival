@@ -545,15 +545,17 @@ test('stashNearby puts a depot chest down when no chest is near, stores what isn
   assert.equal(count(bot, 'andesite'), 20)
 })
 
-test('stashNearby with obtainChest gets a chest for the depot first when the bag\'s wood is short of one and the plan is within DEPOT_CHEST_TICKS; not in a task, nor over the budget', async () => {
+test('stashNearby with obtainChest gets a chest for the depot first when the bag\'s wood is short of one and the plan is within DEPOT_CHEST_TICKS (a log cut near); not in a task, nor over the budget, nor with the wood for one in the bag (putDownDepot crafts it)', async () => {
   // (26.3 run full-26.3-fresh-f: 7 planks held, 'can't craft 1 chest: short of 1 chest', and no depot)
   const { DEPOT_CHEST_TICKS } = await import('../../src/executor/executor')
-  const make = (): { bot: any, ex: Executor, chests: number[], log: string[] } => {
-    const bot = fakeBot({ oak_log: 1, oak_planks: 4, raw_iron: 30, iron_pickaxe: 1 })
+  const make = (bag: Record<string, number> = { oak_planks: 4, crafting_table: 1 }): { bot: any, ex: Executor, chests: number[], log: string[] } => {
+    const bot = fakeBot({ ...bag, raw_iron: 30, iron_pickaxe: 1 })
     bot.entities = {}
     bot.blockAt = () => null
     const log: string[] = []
     const ex = new Executor(bot, { runners: honestRunners(bot, log), log: line => log.push(line) })
+    // a tree by the bot
+    for (let y = 64; y < 68; y++) ex.memory.rememberBlock('oak_log', { x: 4, y, z: 0 })
     const chests: number[] = []
     ;(ex as any).putDownDepot = async () => { chests.push(count(bot, 'chest')); return null }
     return { bot, ex, chests, log }
@@ -562,7 +564,7 @@ test('stashNearby with obtainChest gets a chest for the depot first when the bag
   const a = make()
   await a.ex.stashNearby({}, undefined, straight, new Set(), true)
   assert.deepEqual(a.chests, [1])
-  assert.ok(a.log.includes('craft 1 chest'), a.log.join(' | '))
+  assert.ok(a.log.some(l => /^mine \d+ oak_log/.test(l)) && a.log.includes('craft 1 chest'), a.log.join(' | '))
   // in a task (a step's room): no obtain, the depot's own craft from the bag
   const b = make()
   await b.ex.stashNearby({}, undefined, straight, new Set(), false)
@@ -574,6 +576,11 @@ test('stashNearby with obtainChest gets a chest for the depot first when the bag
   await c.ex.stashNearby({}, undefined, straight, new Set(), true)
   assert.deepEqual(c.chests, [0])
   assert.ok(c.log.some(l => /no chest for a depot: a plan of \d+ ticks, over 1200/.test(l)), c.log.join(' | '))
+  // the wood for one in the bag: left to the depot's own craft
+  const d = make({ oak_log: 2, crafting_table: 1 })
+  await d.ex.stashNearby({}, undefined, straight, new Set(), true)
+  assert.deepEqual(d.chests, [0], d.log.join(" | "))
+  assert.deepEqual(d.log, [])
 })
 
 test('stashNearby keeps what the milestones being worked on need (milestoneNeeds: the nether\'s obsidian, buckets and gold), stashes the rest', async () => {

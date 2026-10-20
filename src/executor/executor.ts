@@ -947,6 +947,8 @@ export class Executor {
    */
   private async chestForDepot (signal?: AbortSignal): Promise<boolean> {
     const plan = this.plan([{ item: 'chest', count: 1 }])
+    // made from the bag's wood alone: putDownDepot's own craft, its table taken back up
+    if (plan.ok && plan.steps.every(st => st.kind === 'craft')) return false
     if (!plan.ok || plan.cost > DEPOT_CHEST_TICKS) {
       this.log(`no chest for a depot: ${plan.ok ? `a plan of ${Math.round(plan.cost)} ticks, over ${DEPOT_CHEST_TICKS}` : 'no plan'}`)
       return false
