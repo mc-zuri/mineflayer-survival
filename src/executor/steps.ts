@@ -208,7 +208,9 @@ export const runMine: StepRunner<MineStep> = async (step, ctx) => {
   // an ore with water against it is left: mined, it lets the water in, and on seed 3 the bot drowned mining iron under
   // a lake (the raw iron floating up out of reach, the drowning reflex too late)
   // (and stone: on seed 4 the cobblestone for a furnace was dug at y 4 by a flooded cave's water, and the bot drowned)
-  const submerged = level != null || STONES.includes(step.block) ? (pos: Vec3): boolean => waterBeside(p => bot.blockAt(p) as any, pos) : () => false
+  // (and a lake's or beach's floor: a 1.21.11 bot dug the sand for its brew's bottles from under a lake, went down
+  // after its drops and drowned, full-1.21.11-fresh-j)
+  const submerged = leftWhenSubmerged(step.blocks, step.block) ? (pos: Vec3): boolean => waterBeside(p => bot.blockAt(p) as any, pos) : () => false
   // what grows on the surface is taken from under the open sky (a tree's leaves and logs over it count as open):
   // the azaleas of a lush cave have oak logs, and on seed 4 the wood for a new pickaxe was cut 55 blocks down one,
   // in the dark among its pools, where a skeleton, a drowned and the water killed the bot four times
@@ -393,6 +395,14 @@ export const runSmelt: StepRunner<SmeltStep> = async (step, ctx) => {
   const gained = countItems(bot, step.item) - start
   if (gained < step.count) throw new SkillError('MISSING_ITEMS', `smelted ${gained} of ${step.count} ${step.item}`, { gained })
   return { gained }
+}
+
+/** the blocks of a lake's or a beach's floor: one with water against it is left (runMine's submerged) */
+export const WATER_FLOOR_BLOCKS = ['sand', 'red_sand', 'gravel', 'clay']
+
+/** whether a mine step leaves its blocks with water against them: the ores', the stones' and a water floor's */
+export function leftWhenSubmerged (blocks: readonly string[], block: string): boolean {
+  return oreLevel([...blocks]) != null || STONES.includes(block) || WATER_FLOOR_BLOCKS.includes(block)
 }
 
 /** how far from home the hunt explores for its animals before it gives up on them */

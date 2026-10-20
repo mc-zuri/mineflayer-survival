@@ -688,3 +688,12 @@ test('bridgePlaceCost: a block put over 4 blocks and more of open air (a bridge 
   // unloaded below: no opinion
   assert.equal(bridgePlaceCost(() => null)({ position: new Vec3(0, 97, 0) }), 0)
 })
+
+test('leftWhenSubmerged: a mine step leaves the ores, the stones and a lake floor (sand, gravel, clay) with water against them; logs not', async () => {
+  const { leftWhenSubmerged } = await import('../../src/executor/steps')
+  assert.equal(leftWhenSubmerged(['sand'], 'sand'), true)
+  assert.equal(leftWhenSubmerged(['gravel'], 'gravel'), true)
+  assert.equal(leftWhenSubmerged(['iron_ore', 'deepslate_iron_ore'], 'iron_ore'), true)
+  assert.equal(leftWhenSubmerged(['stone'], 'stone'), true)
+  assert.equal(leftWhenSubmerged(['oak_log'], 'oak_log'), false)
+})
