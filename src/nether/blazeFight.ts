@@ -752,7 +752,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // FETCH_QUIET: the bow's turn came first and the fetch only with every blaze quiet for 75 ticks, which with two or
       // three about never was, and the nooks at seed 2's spawners at (97, 64, -515) and (925, 64, 123) killed blazes
       // for 20000 ticks with their rods left on the throne (26.3 runs mag-b and mag-d: 0 rods)
-      const drop = drawn === 0 && fightHealth(bot) > sealAt + 4 && (proof || seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)))
+      const drop = drawn === 0 && fetchWanted(fightHealth(bot), sealAt, proof, () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)))
         ? dropsNear(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES)
         : undefined
       if (drop != null) {
@@ -849,6 +849,21 @@ export function dropsNear (bot: Bot, nook: BlazeNook): Entity[] {
 
 /** ticks with no blaze that sees the bot able to shoot that a fetch of the rods on the floor starts in */
 export const FETCH_QUIET = 20
+/**
+ * the health a rod fetch goes at whatever the volleys: with only the quiet's fetches a 26.3 bot in iron armor picked up
+ * 1 of the 10 rods its kills dropped in seed 2's throne at (-277, 77, -159), the rest burnt or despawned there, 5 left
+ * lying at its death (tests/integration/blaze BLAZE_KIT=runIron)
+ */
+export const FETCH_BOLD_HEALTH = 18
+/**
+ * Whether a rod fetch goes now, by the fight's health: over `sealAt` + 4 with every blaze that sees the bot quiet for
+ * FETCH_QUIET, or fire resistant, or at FETCH_BOLD_HEALTH whatever the volleys (the fetch stops behind the shield for a
+ * shot coming)
+ */
+export function fetchWanted (health: number, sealAt: number, proof: boolean, quiet: () => boolean): boolean {
+  return health > sealAt + 4 && (proof || health >= FETCH_BOLD_HEALTH || quiet())
+}
+
 /** times a rod on the floor is gone for */
 export const DROP_TRIES = 4
 /** the most ticks a fetch takes, its waits behind the shield too */

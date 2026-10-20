@@ -1049,3 +1049,13 @@ test('enterNook: a walk that ends on the cell\'s edge, a hair into the next, ste
     navigate.walkTo = realWalk
   }
 })
+
+test('fetchWanted: a rod fetch at full health whatever the volleys (FETCH_BOLD_HEALTH), lower only in a quiet, fire resistant at any health over the seal\'s', async () => {
+  const { fetchWanted, FETCH_BOLD_HEALTH } = await import('../../src/nether/blazeFight')
+  assert.equal(FETCH_BOLD_HEALTH, 18)
+  assert.equal(fetchWanted(20, 10, false, () => false), true)
+  assert.equal(fetchWanted(16, 10, false, () => false), false)
+  assert.equal(fetchWanted(16, 10, false, () => true), true)
+  assert.equal(fetchWanted(16, 10, true, () => false), true)
+  assert.equal(fetchWanted(14, 10, true, () => true), false)
+})
