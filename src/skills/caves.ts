@@ -403,8 +403,8 @@ export function caveOpenings (bot: Bot): Vec3[] {
  * Seals the holes into a cave by the bot (caveOpenings) with a block each (sealItem: cobblestone first); resolves the
  * blocks put. A hole that won't take one (a mob in it) is left.
  */
-export async function sealCaveOpenings (bot: Bot, signal?: AbortSignal): Promise<number> {
-  const holes = caveOpenings(bot)
+export async function sealCaveOpenings (bot: Bot, signal?: AbortSignal, opts: { skip?: (hole: Vec3) => boolean, sealed?: (hole: Vec3) => void } = {}): Promise<number> {
+  const holes = caveOpenings(bot).filter(h => opts.skip?.(h) !== true)
   if (holes.length === 0) return 0
   const { sealItem } = await import('./shelter')
   const { placeBlock } = await import('./placeBlock')
@@ -415,6 +415,7 @@ export async function sealCaveOpenings (bot: Bot, signal?: AbortSignal): Promise
     try {
       await placeBlock(bot, { pos: hole, item }, signal)
       placed++
+      opts.sealed?.(hole)
     } catch (err) {
       if (signal?.aborted === true) throw err
     }

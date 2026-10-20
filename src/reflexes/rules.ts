@@ -23,6 +23,7 @@ import { XP_FARM_POI } from '../skills/spawnerFarm'
 import { SEAL_MAX_BLOCKS, openCells, sealBox, sealIn } from '../skills/sealIn'
 import { sealItem } from '../skills/shelter'
 import { countItems } from '../skills/util'
+import { caveOpenings, sealCaveOpenings } from '../skills/caves'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
 /**
@@ -985,4 +986,56 @@ export const dropsReflex: Reflex = {
   }
 }
 
-export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, wardenReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, dropsReflex, spawnerReflex, nightReflex, armorReflex]
+/**
+ * ticks the caves reflex lets be once a hole it sealed is open again (the work dug it out: its way goes into the cave,
+ * the pathfinder's last resort; sealed each step, the bot would dig itself a walled way through)
+ */
+export const CAVE_RESEAL_TICKS = 2400
+/** ticks between the caves reflex's looks for holes while the feet stay in their cell */
+export const CAVE_LOOK_TICKS = 10
+
+const caveLooks = new WeakMap<Bot, { at: number, feet: string, sealed: Map<string, { cell: Vec3, tick: number }>, letBeUntil: number }>()
+
+/**
+ * The holes from the bot's tunnel into a cave (caveOpenings: a cave's cells against its feet's or head's cells, the bot
+ * in the rock) sealed with a block each, for a bot not fit for the caves (skills/caves caveReady): a tunnel or a
+ * pathfinder's dig that broke into a cave, the way the cave's mobs came in shut. Once a hole it sealed is open again the
+ * work's way goes through it: the holes are let be CAVE_RESEAL_TICKS. The 26.3 bot's mines opened into mineshafts and caves, and their cave
+ * spiders and zombies came along the tunnels and killed it twice at y 20 (ls-26.3).
+ */
+export const cavesReflex: Reflex = {
+  name: 'caves',
+  priority: 55,
+  check (ctx) {
+    const { bot, config } = ctx
+    if (!config.caves.enabled || bot.entity == null) return null
+    const e = bot.entity as any
+    if (e.onGround !== true || e.isInWater === true || e.isInLava === true) return null
+    let look = caveLooks.get(bot)
+    if (look == null) caveLooks.set(bot, look = { at: -Infinity, feet: '', sealed: new Map(), letBeUntil: -Infinity })
+    const feet = bot.entity.position.floored().toString()
+    if (feet === look.feet && ctx.tick - look.at < CAVE_LOOK_TICKS && ctx.tick >= look.at) return null
+    look.at = ctx.tick
+    look.feet = feet
+    const l = look
+    // a block it put in a hole gone again (the work dug it out): its way is into the cave, let be a while
+    for (const [k, s] of l.sealed) {
+      if (ctx.tick - s.tick < 0 || ctx.tick - s.tick >= CAVE_RESEAL_TICKS) { l.sealed.delete(k); continue }
+      if (bot.blockAt(s.cell)?.boundingBox !== 'block') {
+        l.sealed.delete(k)
+        l.letBeUntil = ctx.tick + CAVE_RESEAL_TICKS
+      }
+    }
+    if (ctx.tick < l.letBeUntil && l.letBeUntil - ctx.tick <= CAVE_RESEAL_TICKS) return null
+    const holes = caveOpenings(bot)
+    if (holes.length === 0 || sealItem(bot) == null) return null
+    return {
+      name: 'caves',
+      priority: config.caves.priority,
+      detail: `seal ${holes.length} into a cave`,
+      run: async (signal) => await sealCaveOpenings(bot, signal, { sealed: hole => l.sealed.set(hole.toString(), { cell: hole, tick: ctx.tick }) })
+    }
+  }
+}
+
+export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, wardenReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, cavesReflex, eatReflex, dropsReflex, spawnerReflex, nightReflex, armorReflex]
