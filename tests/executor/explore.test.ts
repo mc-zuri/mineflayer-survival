@@ -717,3 +717,38 @@ test('climbOut: no step dug through what the pathfinder is kept from breaking (b
   assert.equal(await climbOut(bot, { room: async () => {}, maxSteps: 2 }), false)
   assert.ok(digs > 0, 'the roof not kept: its steps tried')
 })
+
+test('runMine: the logs collectBlock couldn\'t get to are noted unreachable, and the next run goes for others (ls-1.21.11: the same log planned 48 times, no path each time); UnreachableBlocks forgets them after UNREACHABLE_TICKS', async (t) => {
+  const { runMine } = await import('../../src/executor/steps')
+  const { UnreachableBlocks, UNREACHABLE_TICKS } = await import('../../src/executor/sight')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const registry = require('minecraft-data')('1.21.11')
+  const logs = Array.from({ length: 24 }, (_, i) => new Vec3(6 + i, 64, 0))
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('stone_axe')], world: (pos: Vec3) => logs.some(l => l.equals(pos)) ? 'oak_log' : pos.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'overworld'
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; b.harvestTools = registry.blocksByName[b.name].harvestTools; return b }
+  bot.findBlocks = () => logs
+  const targets: string[] = []
+  // every walk to a log fails: no path (the bot shut in)
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: (block: any) => { targets.push(block.position.toString()); return null } }
+  bot.pathfinder = { get world () { throw new Error('no path to the goal') } }
+  // (the ticks unstick's walk waits on)
+  const ticker = setInterval(() => { for (let i = 0; i < 20; i++) bot.emit('physicsTick') }, 1)
+  t.after(() => clearInterval(ticker))
+  let tick = 0
+  const unreachable = new UnreachableBlocks(() => tick)
+  const step: any = { kind: 'mine', item: 'oak_log', count: 1, block: 'oak_log', blocks: ['oak_log'], blockCount: 1, tool: null, dimension: 'overworld' }
+  const ctx = (): any => ({ bot, memory: new WorldMemory(), signal: new AbortController().signal, state: {}, log: () => {}, unreachable: { note: (ps: Vec3[]) => unreachable.note(ps, 'overworld'), has: (p: Vec3) => unreachable.has(p, 'overworld') } })
+  await assert.rejects(runMine(step, ctx()))
+  const first = new Set(targets)
+  assert.ok(first.size > 0)
+  for (const t of first) assert.ok(unreachable.has(logs.find(l => l.toString() === t)!, 'overworld'), `${t} noted`)
+  targets.length = 0
+  await assert.rejects(runMine(step, ctx()))
+  assert.ok(targets.length > 0 && targets.every(t => !first.has(t)), `the next run goes for others: ${targets.join(' ')}`)
+  assert.equal(unreachable.has(logs[0], 'the_nether'), false, 'another dimension')
+  tick = UNREACHABLE_TICKS
+  assert.equal(unreachable.has(logs[0], 'overworld'), false, 'forgotten after its ticks')
+})

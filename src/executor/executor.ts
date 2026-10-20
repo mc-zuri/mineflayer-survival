@@ -29,7 +29,7 @@ import { countItems, emptySlots, trace } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
-import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, VILLAGE_RANGE, WATER_MOBS } from './sight'
+import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, UnreachableBlocks, VILLAGE_RANGE, WATER_MOBS } from './sight'
 import { BiomeSurvey, KELP_BIOMES, LAND_FOODS } from './foodLand'
 import { fishableWaterNear } from '../skills/fish'
 import { herdSpares, herdSupply } from '../skills/herd'
@@ -236,6 +236,8 @@ export class Executor {
   readonly tasks: TaskRunner
   /** what's in sight and what wasn't found, for the plans' find costs */
   readonly sightings: Sightings
+  /** the blocks the mine steps couldn't get to lately, left a while (UnreachableBlocks) */
+  readonly unreachable: UnreachableBlocks
   /** the loaded chunks' surface biomes, the food biomes' noted (foodLand.ts) */
   readonly biomes: BiomeSurvey
   /** explorations' progress kept across the plans (StepContext.progress) */
@@ -282,6 +284,7 @@ export class Executor {
     this.hooks = opts.hooks ?? {}
     this.logFn = opts.log ?? (line => trace('executor:', line))
     this.home = opts.home ?? (() => null)
+    this.unreachable = new UnreachableBlocks(() => this.tasks.tick)
     this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos), () => herdSpares(bot, this.memory), () => {
       const at = bot.entity?.position
       return at != null && this.memory.getPois('village', { dimension: normalizeDimension(bot.game?.dimension) }).some(p => Math.hypot(p.x - at.x, p.z - at.z) <= VILLAGE_RANGE)
@@ -753,7 +756,14 @@ export class Executor {
         isNotNear: name => this.sightings.isNotNear(name),
         progress: key => this.exploreProgress.get(key) ?? this.exploreProgress.set(key, { leg: 0 }).get(key) as { leg: number },
         forgetProgress: key => { this.exploreProgress.delete(key) },
-        toolMuted: tool => this.wornMuted(tool)
+        toolMuted: tool => this.wornMuted(tool),
+        unreachable: {
+          note: positions => {
+            this.unreachable.note(positions, normalizeDimension(this.bot.game?.dimension))
+            this.log(`${positions.length} ${step.kind === 'mine' ? step.block : 'block'} out of reach (${positions.slice(0, 3).map(p => p.toString()).join(', ')}): left a while`)
+          },
+          has: pos => this.unreachable.has(pos, normalizeDimension(this.bot.game?.dimension))
+        }
       }
       return await runner(step, stepCtx)
     }, signal, { step, desc: describeStep(step) })

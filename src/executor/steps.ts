@@ -75,6 +75,11 @@ export interface StepContext {
   forgetProgress?: (key: string) => void
   /** a worn tool let be (the executor's: no new one could be made lately), used till it breaks */
   toolMuted?: (tool: WornTool) => boolean
+  /**
+   * notes blocks a mine step couldn't get to (collectBlock's unreachable), and whether a block is one of them: left
+   * by the next steps a while (Executor.unreachable)
+   */
+  unreachable?: { note: (positions: readonly Vec3[]) => void, has: (pos: Vec3) => boolean }
 }
 
 export interface StepOutcome {
@@ -324,7 +329,9 @@ async function mineBlocks (step: MineStep, ctx: StepContext, muted: (tool: WornT
   // in the dark among its pools, where a skeleton, a drowned and the water killed the bot four times
   const lookup = (p: Vec3): any => bot.blockAt(p)
   const underRoof = shallow && SURFACE_BLOCKS.test(step.block) ? (pos: Vec3): boolean => !openSky(lookup, pos) : () => false
-  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos)
+  // (and the blocks the steps lately couldn't get to: a 1.21.11 bot shut in its house planned the same log 7 blocks
+  // off 48 times, every try 'no path', and the game stopped, ls-1.21.11 t103051)
+  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || ctx.unreachable?.has(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos)
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     const subs = blockSubstitutes(step)
@@ -348,13 +355,15 @@ async function mineBlocks (step: MineStep, ctx: StepContext, muted: (tool: WornT
       const batch = kind != null && wornOutTools(bot.inventory.items(), { minUses: 64 }).some(w => w.kind === kind) ? 2 : 8
       const res = await collectBlock(bot, { names, count: Math.min(left, batch), maxDistance: SEARCH_RADIUS, exclude, unwanted: ctx.unwanted, room: ctx.room }, signal)
       for (const pos of res.positions) ctx.memory.forgetBlock(pos, dimensionOf(bot))
+      if (res.unreachable != null) ctx.unreachable?.note(res.unreachable)
       // a crop taken from a farm (a village's) is sown again from what it dropped: the farm grows back
       if (growsAny(step.blocks)) await resow(bot, res.positions, names, signal)
       if (isSub) substituted += res.mined
     } catch (err) {
       if (isAbort(err) || TaskError.is(err, 'NO_TOOL', 'INVENTORY_FULL', 'DIED')) throw err
-      const partial = (err as TaskError).partial as { mined?: number, positions?: Vec3[] } | undefined
+      const partial = (err as TaskError).partial as { mined?: number, positions?: Vec3[], unreachable?: Vec3[] } | undefined
       for (const pos of partial?.positions ?? []) ctx.memory.forgetBlock(pos, dimensionOf(bot))
+      if (partial?.unreachable != null) ctx.unreachable?.note(partial.unreachable)
       if (isSub) substituted += partial?.mined ?? 0
       if (++failures > 4) throw err
       trace('executor: mine failed', (err as Error).message)

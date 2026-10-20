@@ -215,3 +215,37 @@ export class Sightings {
     return pos == null ? null : pos.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position)
   }
 }
+
+/** how long a block a mine step couldn't get to is left by the steps after it (UnreachableBlocks) */
+export const UNREACHABLE_TICKS = 2400
+
+/**
+ * The blocks the mine steps couldn't get to lately (collectBlock's unreachable: no path to them, or a walk that ended
+ * out of reach), left by the steps after for UNREACHABLE_TICKS: they go for others, or explore. A 1.21.11 bot shut in
+ * its house planned 'mine 7 oak_log' 48 times in 487 ticks, the same log 7 blocks off its target each time and 'no
+ * path' each try, and the game stopped (ls-1.21.11 t103051 to t103261)
+ */
+export class UnreachableBlocks {
+  private readonly until = new Map<string, number>()
+
+  constructor (private readonly now: () => number, private readonly ticks = UNREACHABLE_TICKS) {}
+
+  note (positions: readonly Vec3[], dimension: string): void {
+    const now = this.now()
+    if (this.until.size > 1024) for (const [k, t] of this.until) if (t <= now) this.until.delete(k)
+    for (const p of positions) this.until.set(unreachableKey(p, dimension), now + this.ticks)
+  }
+
+  has (pos: Vec3, dimension: string): boolean {
+    const key = unreachableKey(pos, dimension)
+    const t = this.until.get(key)
+    if (t == null) return false
+    if (t > this.now()) return true
+    this.until.delete(key)
+    return false
+  }
+}
+
+function unreachableKey (p: Vec3, dimension: string): string {
+  return `${normalizeDimension(dimension)}:${Math.floor(p.x)},${Math.floor(p.y)},${Math.floor(p.z)}`
+}

@@ -86,6 +86,8 @@ export interface CollectBlockResult {
   items: ItemCounts
   /** items gained: the inventory's gains added up */
   count: number
+  /** the targets the bot couldn't get to (no path, the walk ended out of reach): the caller's to leave a while */
+  unreachable?: Vec3[]
 }
 
 /**
@@ -134,13 +136,14 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
   const minedTypes: number[] = []
   const tried = new Set<string>()
   let lastFailure: SkillError | null = null
-  // targets in a row the bot couldn't get to
+  // targets in a row the bot couldn't get to, and all of them
   let unreachable = 0
+  const unreached: Vec3[] = []
   // blocks broken without a harvest tool (anyTool): they drop nothing
   let toolless = 0
   const result = (): CollectBlockResult => {
     const items = countsDelta(before, inventoryCounts(bot))
-    return { mined: positions.length, positions, items, count: sumPositive(items) }
+    return { mined: positions.length, positions, items, count: sumPositive(items), ...(unreached.length > 0 ? { unreachable: [...unreached] } : {}) }
   }
 
   const nextTarget = (): Block | null => {
@@ -241,6 +244,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
         if (isAbort(err)) throw (err as TaskError).withPartial?.(result()) ?? err
         if (!gone() && !withinReach(bot, pos)) {
           lastFailure = err instanceof SkillError ? err : new SkillError('NO_PATH', (err as Error).message, undefined, { cause: err })
+          unreached.push(pos)
           // the next nearest is most likely as far out of reach (up a cliff from a ravine): the caller decides
           if (++unreachable >= (args.maxUnreachable ?? 3)) break
           continue
@@ -252,6 +256,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     // server refuses a break out of reach, and 'still there after digging it' failed the step 77 times (26.3)
     if (!gone() && !withinReach(bot, pos)) {
       lastFailure = new SkillError('NO_PATH', `${block.name} at ${pos.toString()} is out of reach from ${bot.entity.position.floored().toString()}`)
+      unreached.push(pos)
       if (++unreachable >= (args.maxUnreachable ?? 3)) break
       continue
     }
