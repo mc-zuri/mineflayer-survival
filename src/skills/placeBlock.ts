@@ -1,8 +1,8 @@
 // placeBlock: put an item's block at a position, against one of its solid neighbours, checked in the world.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
-import { SkillError, throwIfAborted } from './errors'
-import { navigateToReach, walkTo } from './navigate'
+import { SkillError, isAbort, throwIfAborted } from './errors'
+import { navigateNear, navigateToReach, walkTo } from './navigate'
 import { boxInCell, cellToStepOff, isFree, isInteractive, isSolid } from './placement'
 import { FACES, blockAtOrThrow, countItems, findInventoryItem, settleInventory, trace, waitTicks, waitUntil, withinReach, type Block } from './util'
 import { placeAgainst } from '../core/actions'
@@ -126,12 +126,28 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
       // against a face the crosshair is on, as vanilla's use goes (useItemOn with the hit's block and face): the one
       // asked for, else any solid block beside the cell with its face toward it in sight; none, the plain place
       const others = args.against != null ? [] : againstCandidates(bot, pos).filter(b => !b.position.equals(against.position))
-      let placedInSight = await placeAgainst(bot, against, face)
-      for (const other of others) {
-        if (placedInSight) break
-        placedInSight = await placeAgainst(bot, other, pos.minus(other.position))
+      const placeInSight = async (): Promise<boolean> => {
+        if (await placeAgainst(bot, against, face)) return true
+        for (const other of others) {
+          if (await placeAgainst(bot, other, pos.minus(other.position))) return true
+        }
+        return false
       }
-      if (!placedInSight) await bot.placeBlock(against, face)
+      let placedInSight = await placeInSight()
+      if (!placedInSight) {
+        // no face in sight from here (one below the eye's height seen from above, one behind a block): from beside the
+        // cell, off it
+        await navigateNear(bot, pos, 2, signal).catch(err => { if (isAbort(err)) throw err })
+        if (shape != null && shape !== 'empty') await stepOff(bot, pos, signal)
+        placedInSight = await placeInSight()
+      }
+      if (!placedInSight) {
+        // a place against a face the eye can't see is one no player makes: with the actions in the ticks (a real-time
+        // server's anticheat: Grim's PositionPlace cancels it, 'No block has been placed', 58 a game) it fails for the
+        // caller to plan another way; without, the plain place
+        if ((bot as any).actionsInTick === true) throw new SkillError('CANNOT_PLACE', `no face to place ${args.item} at ${pos.toString()} against is in sight from ${bot.entity.position.floored().toString()}`)
+        await bot.placeBlock(against, face)
+      }
     }
   } catch (err) {
     // mineflayer's wait for the block can time out though the server placed it: the world tells

@@ -232,3 +232,32 @@ test('placeBlock puts no chest under a solid block (it would never open)', async
   const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('chest', 1)], world: (p: any) => p.y < 64 ? 'stone' : (p.x === 2 && p.y === 65 && p.z === 0 ? 'stone' : 'air') })
   await assert.rejects(placeBlock(bot, { pos: new Vec3(2, 64, 0), item: 'chest' }), /won't open/)
 })
+
+test('placeBlock with no face in sight, the actions in the ticks (an anticheat\'s server): no blind place, CANNOT_PLACE; without: the plain place', async () => {
+  const { placeBlock } = await import('../../src/skills/placeBlock')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const make = (actionsInTick: boolean): any => {
+    const bot: any = fakeBot({ position: new Vec3(0.5, 64, 2.5), items: [item('cobblestone', 4)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+    bot.equip = async () => {}
+    bot._client = new (require('events').EventEmitter)()
+    bot.actionsInTick = actionsInTick
+    bot.blind = 0
+    // (no look: no face is in sight, aimAtFace finds none)
+    bot.lookAt = undefined
+    bot.placeBlock = async () => { bot.blind++; throw new Error('No block has been placed : the block is still air') }
+    return bot
+  }
+  const ticking: any[] = []
+  try {
+    const anticheat = make(true)
+    ticking.push(setInterval(() => anticheat.emit('physicsTick'), 1))
+    await assert.rejects(placeBlock(anticheat, { pos: new Vec3(0, 64, 0), item: 'cobblestone' }), (err: any) => /^CANNOT_PLACE/.test(err.message) && /in sight/.test(err.message))
+    assert.strictEqual(anticheat.blind, 0)
+    const plain = make(false)
+    ticking.push(setInterval(() => plain.emit('physicsTick'), 1))
+    await assert.rejects(placeBlock(plain, { pos: new Vec3(0, 64, 0), item: 'cobblestone' }), /still air/)
+    assert.strictEqual(plain.blind, 1)
+  } finally {
+    for (const t of ticking) clearInterval(t)
+  }
+})
