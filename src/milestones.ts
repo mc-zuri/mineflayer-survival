@@ -4,7 +4,7 @@
 // through, the dragon fought, out by the exit portal). Each skill runs as one foreground task, so the reflexes still
 // preempt it (it starts over after).
 import type { Bot } from 'mineflayer'
-import { BOOKSHELVES, ENCHANTED_ARMOR, EYES_FOR_FRAME, EYES_TARGET, FOOD_GOAL, RAW_TO_COOKED, armorAtLeast, eyesForPortal } from './planner/progression'
+import { BOOKSHELVES, ENCHANTED_ARMOR, EYES_FOR_FRAME, EYES_TARGET, FOOD_GOAL, HUNGRY_FIND_FACTOR, RAW_TO_COOKED, armorAtLeast, eyesForPortal, mealGoals } from './planner/progression'
 import type { MilestoneHandler } from './runner'
 import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, huntable, isAdultPiglin, returnOverworld, wearGold, wearingGold, withNetherSafety } from './nether/skills'
 import { travel } from './skills/travel'
@@ -2218,6 +2218,16 @@ export async function tendHerd (bot: Bot, executor: Executor, signal: AbortSigna
  * the points from the cheapest source
  */
 export const foodHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {
+  // hungry with little food carried: a meal first (mealGoals, what's in sight first), the farm's start (a hoe, the
+  // seeds from the grass) after it: a 26.3 bot at food 4 come to a snowy taiga from seed 31337's peaks made a hoe and
+  // broke 64 short grass for seeds for 3900 ticks with pigs about, then sheltered from the night unfed (hunt2-a)
+  const meal = mealGoals(bot.food ?? 20, ownedInventory(bot))
+  if (meal != null) {
+    await executor.obtain(meal, signal, { unseenFactor: HUNGRY_FIND_FACTOR }).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`no meal first: ${(err as Error).message}`)
+    })
+  }
   try {
     await harvestGrownFarms(bot, executor, signal, log)
     await startFarm(bot, executor, signal, log)
