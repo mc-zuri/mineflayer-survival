@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { afterEating, canEat, chooseFood, foodScore } from '../../src/skills/food'
+import { afterEating, canEat, chooseFood, foodScore, mealFits, mealWorthIt } from '../../src/skills/food'
 import { bestFoodInInventory } from '../../src/skills/eat'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
@@ -70,4 +70,24 @@ test('the ominous bottle (the drop of a patrol captain) is never eaten or drunk,
     const bot = fakeBot({ version, food: 2, health: 4, items: [item('ominous_bottle', 1, undefined, version)] })
     assert.strictEqual(bestFoodInInventory(bot), null, version)
   }
+})
+
+test('mealWorthIt: a meal that fits the bar whole, else one the health needs (FoodData.eat caps the bar at 20; FoodData.tick heals from 18 up)', () => {
+  assert.strictEqual(mealFits(12, 8), true)
+  assert.strictEqual(mealFits(13, 8), false)
+  const marks = { hurtAt: 14 }
+  // the nook's porkchop at 19 and 14 health: 7 of 8 over the bar, the bar healing yet: not
+  assert.strictEqual(mealWorthIt({ food: 19, health: 14 }, 8, marks), false)
+  assert.strictEqual(mealWorthIt({ food: 18, health: 14 }, 8, marks), false)
+  // under 18 the bar heals nothing: hurt at 14, eaten
+  assert.strictEqual(mealWorthIt({ food: 17, health: 14 }, 8, marks), true)
+  assert.strictEqual(mealWorthIt({ food: 17, health: 15 }, 8, marks), false)
+  // urgent (10): whatever the bar
+  assert.strictEqual(mealWorthIt({ food: 19, health: 10 }, 8, marks), true)
+  assert.strictEqual(mealWorthIt({ food: 19, health: 12 }, 8, { hurtAt: 14, urgentAt: 12 }), true)
+  // fits; full bar never; starving
+  assert.strictEqual(mealWorthIt({ food: 12, health: 20 }, 8, marks), true)
+  assert.strictEqual(mealWorthIt({ food: 20, health: 2 }, 8, marks), false)
+  assert.strictEqual(mealWorthIt({ food: 6, health: 20 }, 10, marks), true)
+  assert.strictEqual(mealWorthIt({ food: 7, health: 20 }, 14, marks), false)
 })

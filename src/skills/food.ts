@@ -56,6 +56,42 @@ export function foodScore (state: HungerState, food: FoodValues, wastePenalty = 
   return gained - wastePenalty * wasted
 }
 
+/** FoodData.tick heals the bot only with the bar at 18 or more (slowly, of the bar; quickly at 20, of the saturation) */
+export const HEAL_FOOD = 18
+/** at or under this health a meal is eaten whether it fits the bar or not (the eat reflex's own health mark) */
+export const MEAL_URGENT_HEALTH = 10
+
+/** whether a meal of `nutrition` goes into the bar whole (FoodData.eat: the food level capped at 20) */
+export function mealFits (food: number, nutrition: number): boolean {
+  return food + nutrition <= 20
+}
+
+/** the marks mealWorthIt goes by */
+export interface MealMarks {
+  /** hurt at or under this health, a meal that doesn't fit is eaten once the bar is under HEAL_FOOD */
+  hurtAt: number
+  /** at or under this health one is eaten whatever the bar (default MEAL_URGENT_HEALTH) */
+  urgentAt?: number
+  /** at or under this food level one is eaten whatever (default 6: no sprinting under it) */
+  starving?: number
+}
+
+/**
+ * Whether a meal of `nutrition` is worth eating now, as FoodData adds it up: one that fits the bar whole (nutrition
+ * over 20 is lost, FoodData.eat), or one the health needs: at `urgentAt` health whatever the bar, or hurt at `hurtAt`
+ * with the bar under HEAL_FOOD (FoodData.tick heals nothing under 18: the bar's top and the saturation are what heal,
+ * so a meal at 17 heals as much as one at 12), or starving. A 26.3 bot in the blaze nook ate a porkchop at food 18
+ * and 19 each time its health was 14 or under, most of its 8 nutrition over the bar, some 71% of its food's worth
+ * got, and its 15 porkchops were gone before its 2 rods (tests/integration/blaze BLAZE_BREW=1).
+ */
+export function mealWorthIt (state: Pick<HungerState, 'food' | 'health'>, nutrition: number, marks: MealMarks): boolean {
+  if (state.food >= 20) return false
+  if (mealFits(state.food, nutrition)) return true
+  if (state.food <= (marks.starving ?? DEFAULT_FOOD_CHOICE.starvingFood)) return true
+  if (state.health <= (marks.urgentAt ?? MEAL_URGENT_HEALTH)) return true
+  return state.food < HEAL_FOOD && state.health <= marks.hurtAt
+}
+
 export function canEat (state: HungerState, name: string): boolean {
   return state.food < 20 || ALWAYS_EDIBLE.has(name)
 }

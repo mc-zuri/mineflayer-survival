@@ -1,6 +1,6 @@
 import type { Bot } from 'mineflayer'
 import { armorUpgrades, equipArmor, equipTotem } from '../skills/armor'
-import { eat, bestFoodInInventory, reserveAllows } from '../skills/eat'
+import { eat, dueMeal, reserveAllows } from '../skills/eat'
 import { escapeHazard, evadeCreeper, fleeFrom, headInWater, inHazard, surface } from '../skills/escape'
 import { creeperSwelling, fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
@@ -543,7 +543,9 @@ export const hostilesReflex: Reflex = {
 
 /**
  * Eat at or below the food threshold out of combat, or at low health when no hostile is in reach, or hurt out of
- * combat with the food level under 18 (FoodData.tick heals only from 18 up: a bot at food 15 to 17 never healed).
+ * combat with the food level under 18 (FoodData.tick heals only from 18 up: a bot at food 15 to 17 never healed); a
+ * meal that doesn't fit the bar whole only when the health needs it (dueMeal: at fitHealth or under with the bar under
+ * 18, or at the reflex's health).
  */
 export const eatReflex: Reflex = {
   name: 'eat',
@@ -558,11 +560,12 @@ export const eatReflex: Reflex = {
     // starved to 1 health, at food 0, for 30000 ticks)
     const starving = bot.food <= config.eat.starving
     if (!hungry && !hurt && !regen && !starving) return null
-    const food = bestFoodInInventory(bot)
+    // a meal that doesn't fit the bar waits till it does, unless the health needs it (dueMeal)
+    const food = dueMeal(bot, { hurtAt: config.eat.fitHealth, urgentAt: config.eat.health, starving: config.eat.starving })
     if (food == null) return null
     // the food kept for a trip is eaten into only in need: starving, or hurt (the reflex's health)
     if (!starving && bot.health > config.eat.health && !reserveAllows(bot, food)) return null
-    return { name: 'eat', priority: config.eat.priority, run: async (signal) => await eat(bot, { signal }) }
+    return { name: 'eat', priority: config.eat.priority, run: async (signal) => await eat(bot, { signal, food }) }
   }
 }
 

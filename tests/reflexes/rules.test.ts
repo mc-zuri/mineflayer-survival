@@ -187,7 +187,7 @@ test('hostiles reflex: a skeleton shooting from 12 blocks is taken on (the ones 
 test('eat reflex: hurt and out of combat, eat up to food 18, where the health comes back (FoodData.tick)', () => {
   const bread = [item('bread', 5)]
   assert.strictEqual(check(eatReflex, { food: 16, health: 14, items: bread }), 'eat')
-  assert.strictEqual(check(eatReflex, { food: 17, health: 19, items: bread }), 'eat')
+  assert.strictEqual(check(eatReflex, { food: 15, health: 19, items: bread }), 'eat')
   // full health, or food 18 already: no need
   assert.strictEqual(check(eatReflex, { food: 16, health: 20, items: bread }), null)
   assert.strictEqual(check(eatReflex, { food: 18, health: 14, items: bread }), null)
@@ -568,16 +568,16 @@ test('eat reflex: the food kept for a trip (setFoodReserve) is eaten into only s
   }
   // 16 cooked beef, 128 points, 120 kept: one eaten leaves 120
   const beef = (n: number): any[] => [item('cooked_beef', n)]
-  assert.strictEqual(run({ food: 14, items: beef(16) }, 120), 'eat')
-  // 15, 120 points: kept whole at food 14
-  assert.strictEqual(run({ food: 14, items: beef(15) }, 120), null)
+  assert.strictEqual(run({ food: 12, items: beef(16) }, 120), 'eat')
+  // 15, 120 points: kept whole at food 12
+  assert.strictEqual(run({ food: 12, items: beef(15) }, 120), null)
   // starving, or hurt: eaten
   assert.strictEqual(run({ food: 6, items: beef(15) }, 120), 'eat')
-  assert.strictEqual(run({ food: 14, health: 9, items: beef(15) }, 120), 'eat')
+  assert.strictEqual(run({ food: 12, health: 9, items: beef(15) }, 120), 'eat')
   // none kept: eaten
-  assert.strictEqual(run({ food: 14, items: beef(15) }, 0), 'eat')
+  assert.strictEqual(run({ food: 12, items: beef(15) }, 0), 'eat')
   // in the nether the food is the fight's
-  assert.strictEqual(run({ food: 14, items: beef(15) }, 120, 'the_nether'), 'eat')
+  assert.strictEqual(run({ food: 12, items: beef(15) }, 120, 'the_nether'), 'eat')
   const bot = fakeBot()
   setFoodReserve(bot, 120, 1000)
   assert.strictEqual(foodReserve(bot), 120)
@@ -659,4 +659,22 @@ test('spawner reflex: a dark spawner the bot sees within 16, out of a fight, wit
   assert.strictEqual(run({ zombie: true }), null)
   assert.strictEqual(run({ nether: true }), null)
   assert.strictEqual(run({ farm: true }), null)
+})
+
+test('eat reflex: a meal that does not fit the bar whole (FoodData.eat caps it at 20) waits till it does, unless the health needs it', () => {
+  const pork = [item('cooked_porkchop', 5)]
+  // 8 nutrition: in whole at 12, not at 14 (hungry) nor at 17 (hurt a little)
+  assert.strictEqual(check(eatReflex, { food: 12, items: pork }), 'eat')
+  assert.strictEqual(check(eatReflex, { food: 14, items: pork }), null)
+  assert.strictEqual(check(eatReflex, { food: 17, health: 19, items: pork }), null)
+  // hurt at fitHealth (16) with the bar under 18 (no healing there): eaten
+  assert.strictEqual(check(eatReflex, { food: 17, health: 16, items: pork }), 'eat')
+  assert.strictEqual(check(eatReflex, { food: 17, health: 16, items: pork }, { eat: { fitHealth: 14 } }), null)
+  // at 18 and 19 the bar heals: only at the reflex's health (10)
+  assert.strictEqual(check(eatReflex, { food: 19, health: 12, items: pork }), null)
+  assert.strictEqual(check(eatReflex, { food: 19, health: 10, items: pork }), 'eat')
+  // a smaller meal that fits is eaten where the porkchop isn't
+  assert.strictEqual(check(eatReflex, { food: 14, items: [...pork, item('bread', 2)] }), 'eat')
+  // starving: whatever
+  assert.strictEqual(check(eatReflex, { food: 6, items: [item('rabbit_stew', 1)] }), 'eat')
 })

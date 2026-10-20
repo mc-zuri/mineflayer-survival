@@ -18,7 +18,7 @@ import { blazeCharged, fight, lowerShield, raiseShield } from '../skills/fight'
 import { aim, arrowWorld } from '../skills/shoot'
 import { motionTrackerOf } from '../skills/motion'
 import { attackStrengthOf, bestMeleeWeapon } from '../skills/weapons'
-import { eat, bestFoodInInventory } from '../skills/eat'
+import { eat, bestFoodInInventory, dueMeal } from '../skills/eat'
 import { chooseFood } from '../skills/food'
 import { placeBlock } from '../skills/placeBlock'
 import { collectDropsNear } from '../skills/hunt'
@@ -740,11 +740,13 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         continue
       }
 
-      // a meal, when nothing can shoot before it's eaten (32 ticks)
+      // a meal, when nothing can shoot before it's eaten (32 ticks), and one that fits the bar unless the health needs
+      // it (dueMeal: under 18 the bar heals nothing; at 18 and 19 a porkchop's nutrition was mostly lost over it)
       const hungry = (bot.health <= eatAt && bot.food < 20) || bot.food <= eatFood
-      if (hungry && drawn === 0 && bestFoodInInventory(bot) != null && seeing.every(b => volleys.quietFor(b.id, tick, 34))) {
+      const meal = hungry && drawn === 0 ? dueMeal(bot, { hurtAt: eatAt }) : null
+      if (meal != null && seeing.every(b => volleys.quietFor(b.id, tick, 34))) {
         unblock()
-        try { await eat(bot, { signal }) } catch (err) { if (isAbort(err)) throw err; trace('fightFromNook: eat:', (err as Error).message) }
+        try { await eat(bot, { signal, food: meal }) } catch (err) { if (isAbort(err)) throw err; trace('fightFromNook: eat:', (err as Error).message) }
         continue
       }
 

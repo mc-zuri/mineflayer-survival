@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { campSpots, levelSeed, seesFrom } from '../../src/nether/fortressSkills'
 import { parseSeed } from '../../src/worldgen/random'
-import { fakeBot } from '../reflexes/fakeBot'
+import { fakeBot, item } from '../reflexes/fakeBot'
 
 test('levelSeed reads text as the server does', () => {
   assert.equal(levelSeed('4'), parseSeed('4'))
@@ -430,10 +430,16 @@ test('the camp\'s meal waits while a blaze is within 6 (unless starving): it is 
   assert.equal(campMealDue(16, 10, 12, 0), true)
   assert.equal(campMealDue(16, 10, 12, 1), false)
   assert.equal(campMealDue(20, 10, 12, 0), false)
+  // a porkchop (8) that doesn't fit: at 18 and 19 only at 10 health, under 18 hurt at eatAt
+  assert.equal(campMealDue(19, 12, 12, 0, 8), false)
+  assert.equal(campMealDue(19, 10, 12, 0, 8), true)
+  assert.equal(campMealDue(17, 12, 12, 0, 8), true)
+  assert.equal(campMealDue(14, 19, 12, 0, 8), false)
+  assert.equal(campMealDue(12, 19, 12, 0, 8), true)
   const fightModule = require('../../src/skills/fight')
   const eatModule = require('../../src/skills/eat')
   const gridModule = require('../../src/skills/gridWalk')
-  const bot = fakeBot({ position: new Vec3(8.5, 64, 0.5), world: (p: any) => p.y < 64 ? 'netherrack' : 'air' })
+  const bot = fakeBot({ position: new Vec3(8.5, 64, 0.5), world: (p: any) => p.y < 64 ? 'netherrack' : 'air', items: [item('cooked_porkchop', 4)] })
   bot.game.dimension = 'the_nether'
   ;(bot as any).health = 19
   ;(bot as any).food = 7

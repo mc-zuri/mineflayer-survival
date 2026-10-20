@@ -1,6 +1,6 @@
 import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
-import { chooseFood, type FoodChoiceOptions, type HungerState } from './food'
+import { chooseFood, mealFits, mealWorthIt, type FoodChoiceOptions, type HungerState, type MealMarks } from './food'
 import { ALWAYS_EDIBLE, foodInfo } from '../core/items'
 import { TaskError, type SkillOptions, waitTicks } from './combatUtil'
 
@@ -74,6 +74,26 @@ export function bestFoodInInventory (bot: Bot, opts: FoodChoiceOptions = {}): It
   const offhand = bot.inventory.slots[45]
   if (offhand != null) items.push(offhand)
   return chooseFood(items, bot.registry.foodsByName as any, hungerState(bot), opts)
+}
+
+/** the nutrition of a food (FoodProperties.nutrition; 0 for what isn't one) */
+export function nutritionOf (bot: Bot, item: Pick<Item, 'name'>): number {
+  return foodInfo(bot.registry as any, item.name)?.nutrition ?? 0
+}
+
+/**
+ * The meal worth eating now, or null: the one chooseFood picks when it's worth it (mealWorthIt: it fits the bar, or
+ * the health needs it), else the best of the ones that fit the bar whole (bread at 14 where a porkchop's 8 don't)
+ */
+export function dueMeal (bot: Bot, marks: MealMarks, opts: FoodChoiceOptions = {}): Item | null {
+  const best = bestFoodInInventory(bot, opts)
+  if (best == null) return null
+  const state = hungerState(bot)
+  if (mealWorthIt(state, nutritionOf(bot, best), marks)) return best
+  const items = bot.inventory.items()
+  const offhand = bot.inventory.slots[45]
+  if (offhand != null) items.push(offhand)
+  return chooseFood(items.filter(i => mealFits(state.food, nutritionOf(bot, i))), bot.registry.foodsByName as any, state, opts)
 }
 
 /**

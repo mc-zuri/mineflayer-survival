@@ -13,7 +13,8 @@ import { travel } from '../skills/travel'
 import { moveNear } from '../skills/gridWalk'
 import { tunnelTo } from '../skills/tunnel'
 import { countItems, trace, waitTicks } from '../skills/util'
-import { eat } from '../skills/eat'
+import { eat, dueMeal, nutritionOf } from '../skills/eat'
+import { mealWorthIt } from '../skills/food'
 import { craft } from '../skills/craft'
 import { chooseFuel, smelt } from '../skills/smelt'
 import { drinkPotion, findPotion, hasEffect } from '../skills/potion'
@@ -255,11 +256,11 @@ export const BLAZE_STARVING = 6
  * Whether the camp's fight eats now: hurt (at `eatAt` or under) with room for it, or the food at BLAZE_EAT_FOOD or
  * under; not with a blaze within BLAZE_MEAL_CLEAR (`close` of them) unless starving. A 26.3 bot at 19 health and food 7
  * stood eating with two blazes on it, 0.5 and 2.4 off, punched and burning, 4 and more a hit, and died in 60 ticks
- * (full-26.3-fresh-d)
+ * (full-26.3-fresh-d). A meal of `nutrition` that doesn't fit the bar only when the health needs it (mealWorthIt).
  */
-export function campMealDue (food: number, health: number, eatAt: number, close: number): boolean {
+export function campMealDue (food: number, health: number, eatAt: number, close: number, nutrition = 0): boolean {
   const want = (health <= eatAt && food < 20) || food <= BLAZE_EAT_FOOD
-  return want && (close === 0 || food <= BLAZE_STARVING)
+  return want && (close === 0 || food <= BLAZE_STARVING) && mealWorthIt({ food, health }, nutrition, { hurtAt: eatAt, starving: BLAZE_STARVING })
 }
 
 /** the health the blaze fight backs off at: higher among 3 blazes or more (their fireballs come together) */
@@ -761,7 +762,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
           await putOutFiresNear(bot, 2, signal)
           // healed up behind the shield, held toward the nearest blaze (it takes their fireballs)
           for (let i = 0; i < 12 && bot.health < 18; i++) {
-            if (bot.food < 20) { try { await eat(bot, { signal }) } catch (err) { if (isAbort(err)) throw err } }
+            const meal = dueMeal(bot, { hurtAt: 18 })
+            if (meal != null) { try { await eat(bot, { signal, food: meal }) } catch (err) { if (isAbort(err)) throw err } }
             for (let k = 0; k < 8; k++) {
               const near = blazesInView(bot, 32).sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
               if (near != null) {
@@ -774,8 +776,9 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
           lowerShield(bot)
           continue
         }
-        if (campMealDue(bot.food, bot.health, args.eatAt ?? 12, blazesInView(bot, BLAZE_MEAL_CLEAR).length)) {
-          try { await eat(bot, { signal }) } catch (err) { if (isAbort(err)) throw err }
+        const meal = dueMeal(bot, { hurtAt: args.eatAt ?? 12, starving: BLAZE_STARVING })
+        if (meal != null && campMealDue(bot.food, bot.health, args.eatAt ?? 12, blazesInView(bot, BLAZE_MEAL_CLEAR).length, nutritionOf(bot, meal))) {
+          try { await eat(bot, { signal, food: meal }) } catch (err) { if (isAbort(err)) throw err }
         }
         // the spawner's blazes, and any that came at the bot
         const blazes = blazesInView(bot, 24)
