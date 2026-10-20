@@ -826,3 +826,36 @@ test('a hungry bot short of food gets a meal first: mealDue in the overworld, th
   full.food = 18
   assert.equal(new Runner(full, { log: () => {} }).mealDue(), null)
 })
+
+test('the night down the mine starts in the nearest slime chunk from the seed when the slime balls of the brew are short and the iron is got; not with the balls, nor without the seed', async () => {
+  const { nearestSlimeChunk } = await import('../../src/skills/slimeChunk')
+  const travelModule = require('../../src/skills/travel')
+  const real = travelModule.travel
+  const walks: string[] = []
+  travelModule.travel = async (b: any, a: any) => { walks.push(a.target.toString()); b.entity.position = a.target.offset(0.5, 0, 0.5) }
+  const night = async (items: Record<string, number>, seed?: string): Promise<string[]> => {
+    const bot = fakeBot({ iron_pickaxe: 1, cooked_beef: 8, oak_log: 4, ...items })
+    bot.time = { timeOfDay: 14000, day: 1 }
+    bot.food = 20
+    bot.entity.position = new Vec3(0.5, 70, 0.5)
+    // (the surface: open sky from 70 up)
+    bot.blockAt = (p: Vec3) => ({ name: p.y >= 70 ? 'air' : 'stone', boundingBox: p.y >= 70 ? 'empty' : 'block', position: p })
+    const lines: string[] = []
+    const runner = new Runner(bot, { log: l => lines.push(l), seed, skip: ['base'], executor: { log: () => {} } })
+    runner.reached.push(...['wood', 'stone', 'food', 'iron'].map(id => ({ id: id as any, title: '', tick: 0, wallMs: 0 })))
+    walks.length = 0
+    await runner.mineTheNight([])
+    return lines.filter(l => /slime/.test(l))
+  }
+  try {
+    const target = nearestSlimeChunk('2', 0.5, 0.5, 70)
+    assert.ok(target != null)
+    assert.deepEqual(await night({}, '2'), [`night: the mine in the slime chunk at ${target.x} ${target.z}, for slime balls`])
+    assert.deepEqual(walks, [target.toString()])
+    assert.deepEqual(await night({ slime_ball: 2 }, '2'), [])
+    assert.deepEqual(await night({}), [])
+    assert.deepEqual(walks, [])
+  } finally {
+    travelModule.travel = real
+  }
+})

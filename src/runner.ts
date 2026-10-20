@@ -35,6 +35,7 @@ import { TRIP_KIT, keepUnbroken, takeTripKit } from './skills/tripKit'
 import { armorPoints, shelter, sleepThroughNight, undergroundAtWork } from './skills/shelter'
 import { overland } from './end/strongholdSkills'
 import { unstick } from './executor/explore'
+import { slimeBallsShort, toSlimeChunk } from './skills/slimeChunk'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import type { Diagnostics, ReportSummary, WatchdogOptions } from './diagnostics'
 import { isDeathMessage } from './diagnostics/death'
@@ -1202,6 +1203,17 @@ export class Runner {
             this.log(`night: no wood: ${(err as Error).message}`)
           })
         }
+      }
+      // the slime balls of the nether's fire resistance short (its magma cream) and the seed known: the mine started in
+      // the nearest slime chunk, where slimes spawn under y 40 (worldgen/slime), their balls left for the drops reflex
+      const seed = this.options.seed
+      if (seed != null && !ctrl.signal.aborted && this.reached.some(r => r.id === 'iron') && slimeBallsShort(bot) &&
+        normalizeDimension(bot.game?.dimension) === 'overworld' && typeof bot.blockAt === 'function' && onSurface(p => bot.blockAt(p) as any, bot.entity.position.floored())) {
+        const at = await this.executor.task('to a slime chunk', async (s) => await toSlimeChunk(bot, seed, s), ctrl.signal).catch(err => {
+          if (signal?.aborted === true || TaskError.is(err, 'DIED') || bot.health <= 0) throw err
+          return null
+        })
+        this.log(at != null ? `night: the mine in the slime chunk at ${at.x} ${at.z}, for slime balls` : 'night: no slime chunk to mine in')
       }
       for (const goal of goals) {
         if (ctrl.signal.aborted) break
