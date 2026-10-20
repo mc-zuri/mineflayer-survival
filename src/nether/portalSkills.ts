@@ -10,7 +10,7 @@ import { emptyBucket, fillBucket, isSource } from '../skills/bucket'
 import { collectBlock } from '../skills/collectBlock'
 import { craft } from '../skills/craft'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
-import { navigate, navigateToReach } from '../skills/navigate'
+import { navigate, navigateToReach, pickaxeForTheWay } from '../skills/navigate'
 import { placeBlock } from '../skills/placeBlock'
 import { findPlacement } from '../skills/placement'
 import { countItems, findInventoryItem, settleInventory, trace, waitTicks, waitUntil, withinReach } from '../skills/util'
@@ -200,6 +200,9 @@ function portalSiteCells (origin: Pos, axis: Axis, cast: boolean): Pos[] {
  * (a cave's bot with 11 obsidian found 'no flat clear ground' and the milestone failed five times at once, 26.3)
  */
 export async function preparePortalSite (bot: Bot, signal?: AbortSignal, cast = false): Promise<{ origin: Vec3, axis: Axis }> {
+  // a pickaxe for the rock first (made from what's carried): a 26.3 bot whose pickaxes had broken left 22 blocks of
+  // deepslate in the site, 'drops nothing without one of its harvest tools', and the cast had nowhere to go
+  await pickaxeForTheWay(bot, signal)
   const getBlock = blockGetter(bot)
   const feet = bot.entity.position.floored()
   const site = chooseDigSite(getBlock, feet, cast)

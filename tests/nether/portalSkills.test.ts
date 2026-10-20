@@ -137,3 +137,22 @@ test('castFrame: a lava source the bucket finds no spot to reach is passed over 
   assert.equal(tried[0], new Vec3(first.pos.x, first.pos.y, first.pos.z).toString())
   assert.notEqual(tried[1], tried[0])
 })
+
+test('preparePortalSite makes a pickaxe from what is carried first when the bag has none', async () => {
+  const exploreModule = require('../../src/executor/explore')
+  const collectModule = require('../../src/skills/collectBlock')
+  const { preparePortalSite } = await import('../../src/nether/portalSkills')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  // stone to y 67 (a cave's rock), the bot in a cell of air
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('cobblestone', 16), item('stick', 2)], world: (p: Vec3) => (p.x === 0 && p.z === 0 && (p.y === 64 || p.y === 65)) ? 'air' : p.y <= 67 ? 'stone' : 'air' })
+  const calls: string[] = []
+  const real = [exploreModule.ensurePickaxe, collectModule.collectBlock]
+  exploreModule.ensurePickaxe = async () => { calls.push('ensurePickaxe'); return 'stone_pickaxe' }
+  collectModule.collectBlock = async () => { calls.push('collectBlock'); throw new Error('stop here') }
+  try {
+    await preparePortalSite(bot).catch(() => {})
+  } finally {
+    [exploreModule.ensurePickaxe, collectModule.collectBlock] = real
+  }
+  assert.deepEqual(calls.slice(0, 2), ['ensurePickaxe', 'collectBlock'])
+})
