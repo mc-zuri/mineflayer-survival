@@ -19,6 +19,7 @@ import { isFree, isSolid, type BlockLookup, type BlockView } from './placement'
 import { experience, gainLevels, type GainLevelsArgs } from './xp'
 import { REPLACEABLE_BLOCKS, countItems, inventoryItems, resyncInventory, settleInventory, trace, waitTicks, waitUntil, type Block } from './util'
 import { findBlock } from '../core/findBlocks'
+import { JUNK } from '../executor/keep'
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The bookshelves
@@ -582,6 +583,20 @@ export async function enchant (bot: Bot, args: EnchantArgs, signal?: AbortSignal
   return await withArmorHeld(bot, async () => await enchantHeld(bot, args, signal))
 }
 
+/**
+ * A slot made free in a full bag for a worn piece to come off into (Inventory.add: none free, bot.unequip leaves it on):
+ * a stack of junk (JUNK) thrown. The enchanting's room dug round the table filled a 26.3 bot's bag, and its iron armor,
+ * worn, was left plain, 'no unenchanted iron_chestplate' (full-26.3-fresh-e)
+ */
+export async function roomForOne (bot: Bot, signal?: AbortSignal): Promise<void> {
+  if ((bot.inventory.emptySlotCount?.() ?? 1) > 0) return
+  const junk = inventoryItems(bot).filter(i => JUNK.has(i.name)).sort((a, b) => a.count - b.count)[0]
+  if (junk == null) return
+  trace('enchant: a full bag: tossing', junk.count, junk.name)
+  await bot.tossStack(junk)
+  await settleInventory(bot, signal)
+}
+
 async function enchantHeld (bot: Bot, args: EnchantArgs, signal?: AbortSignal): Promise<EnchantResult> {
   throwIfAborted(signal)
   const block = findEnchantingTable(bot, { table: args.table, memory: args.memory })
@@ -598,6 +613,7 @@ async function enchantHeld (bot: Bot, args: EnchantArgs, signal?: AbortSignal): 
     const dest = ARMOR_DESTINATIONS[kind]
     if (dest != null && plain(bot.inventory.slots[bot.getEquipmentDestSlot(dest)])) {
       await settleInventory(bot, signal)
+      await roomForOne(bot, signal)
       await bot.unequip(dest)
       worn = dest
     }

@@ -399,3 +399,25 @@ test('enchantingLevels: the top offer\'s levels and 3 for each of the armor\'s e
   assert.strictEqual(enchantingLevels(0), 17)
   assert.strictEqual(enchantingLevels(15), 30)
 })
+
+test('roomForOne: a full bag throws its smallest stack of junk for a worn piece to come off into; one with room, nothing', async () => {
+  const { roomForOne } = await import('../../src/skills/enchant')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { EventEmitter } = await import('node:events')
+  for (const full of [true, false]) {
+    const items = [item('dirt', 40), item('cobbled_deepslate', 12), item('diamond', 2)]
+    while (full && items.length < 36) items.push(item('cobblestone', 64))
+    const bot = fakeBot({ items })
+    bot._client = new EventEmitter()
+    bot.inventory.emptySlotCount = () => bot.inventory.slots.slice(9, 45).filter((s: unknown) => s == null).length
+    const tossed: string[] = []
+    bot.tossStack = async (it: any) => { tossed.push(`${String(it.count)} ${String(it.name)}`); bot.inventory.slots[it.slot] = null }
+    const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+    try {
+      await roomForOne(bot)
+    } finally {
+      clearInterval(ticking)
+    }
+    assert.deepStrictEqual(tossed, full ? ['12 cobbled_deepslate'] : [])
+  }
+})
