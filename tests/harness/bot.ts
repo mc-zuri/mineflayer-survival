@@ -14,11 +14,16 @@ export interface ConnectOptions extends Partial<BotOptions> {
   op?: boolean
   /** how long to wait for the first lockstep tick (default 60 s) */
   timeoutMs?: number
+  /**
+   * a server with no lockstep mod (a real-time one: an anticheat's): the bot ticks on its own 50 ms timer once the
+   * server leaves its hello unanswered (lockstepUnavailable)
+   */
+  realtime?: boolean
 }
 
-/** A bot on the server, resolved once the server ticks it (lockstepStart) */
+/** A bot on the server, resolved once the server ticks it (lockstepStart), or its own timer does (realtime) */
 export async function connectLockstepBot (server: TestServer, options: ConnectOptions = {}): Promise<Bot> {
-  const { op = true, timeoutMs = 60000, ...botOptions } = options
+  const { op = true, timeoutMs = 60000, realtime = false, ...botOptions } = options
   // the stuck reports of the bot's trips: a failed test's error has the diagnosis and the report's file
   if (process.env.SURVIVAL_STUCK_DIR == null || process.env.SURVIVAL_STUCK_DIR === '') process.env.SURVIVAL_STUCK_DIR = STUCK_DIR
   const bot = createLockstepBot({ host: server.host, port: server.port, username: 'Bot', version: server.version, auth: 'offline', ...botOptions })
@@ -31,12 +36,15 @@ export async function connectLockstepBot (server: TestServer, options: ConnectOp
     const done = (): void => {
       clearTimeout(timer)
       bot.off('lockstepStart', onStart)
+      bot.off('lockstepUnavailable', onUnavailable)
       bot.off('error', onError)
       bot.off('kicked', onKicked)
       bot.off('end', onEnd)
     }
     const onStart = (): void => { done(); resolve() }
+    const onUnavailable = (): void => { if (realtime) onStart() }
     bot.on('lockstepStart', onStart)
+    bot.on('lockstepUnavailable', onUnavailable)
     bot.on('error', onError)
     bot.on('kicked', onKicked)
     bot.on('end', onEnd)

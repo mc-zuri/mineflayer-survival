@@ -2,7 +2,8 @@
 // of both versions.
 import { describe, test } from 'node:test'
 import assert from 'node:assert'
-import { isJdkOfMajor, parseLogLine, versionSetup, VERSIONS } from '../harness/server'
+import { grimMods, isJdkOfMajor, parseGrimAlert, parseLogLine, versionSetup, GRIM_CONFIG, VERSIONS } from '../harness/server'
+import * as fs from 'node:fs'
 
 describe('integration harness', () => {
   test('each version has its loader and Java: 1.21.11 on Java 21 (remapped), 26.3 on Java 25 (unobfuscated)', () => {
@@ -26,5 +27,23 @@ describe('integration harness', () => {
     assert.deepStrictEqual(parseLogLine('[21:41:02] [Server thread/INFO]: System chat: Game rule spawn_mobs is now set to false'),
       { thread: 'Server thread', level: 'INFO', message: 'Game rule spawn_mobs is now set to false' })
     assert.strictEqual(parseLogLine('not a log line'), null)
+  })
+
+  test('a Grim alert\'s player, check, violations and verbose; other lines none', () => {
+    assert.deepStrictEqual(parseGrimAlert('Grim » probe failed Simulation (x3) .113131 /gl 3'), { player: 'probe', check: 'Simulation', vl: 3, verbose: '.113131 /gl 3' })
+    assert.deepStrictEqual(parseGrimAlert('Grim » probe failed BadPacketsN* (x1)'), { player: 'probe', check: 'BadPacketsN', vl: 1, verbose: '' })
+    assert.strictEqual(parseGrimAlert('Grim » Alerts enabled'), null)
+    assert.strictEqual(parseGrimAlert('probe joined the game'), null)
+  })
+
+  test('GrimAC is pinned for 1.21.11 (with the Fabric API), its config alerting each violation', () => {
+    const mods = grimMods('1.21.11')
+    assert.deepStrictEqual(mods.map(m => m.file), ['grimac-fabric-2.3.74-f5bbe9c.jar', 'fabric-api-0.141.6+1.21.11.jar'])
+    for (const m of mods) assert.match(m.sha1, /^[0-9a-f]{40}$/)
+    assert.throws(() => grimMods('26.3'), /no GrimAC build for Minecraft 26\.3/)
+    const punishments = fs.readFileSync(Object.values(GRIM_CONFIG)[0], 'utf8')
+    const alerts = punishments.split(/\r?\n/).filter(l => /^\s+- ".*\[alert\]"/.test(l))
+    assert.ok(alerts.length >= 8)
+    for (const l of alerts) assert.match(l, /"1:1 \[alert\]"/)
   })
 })

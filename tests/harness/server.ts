@@ -2,6 +2,7 @@
 // vanilla server and the loader's libraries) once into tests/.servers/<version>, installs the lockstep mod, and starts
 // an instance in its own directory with offline mode, a free port and the test's world settings.
 import { spawn, spawnSync, ChildProcessWithoutNullStreams } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import * as fs from 'node:fs'
 import * as net from 'node:net'
@@ -77,6 +78,8 @@ export interface ServerOptions {
   lockstepTimeoutMs?: number
   /** more mod jars to install */
   mods?: string[]
+  /** files copied into the instance before the start, by their path in it: a mod's config (GRIM_CONFIG) */
+  files?: Record<string, string>
   /** players to op once the server is up */
   ops?: string[]
   /** the java binary; default: findJava of the version's Java (21 for 1.21.11, 25 for 26.x) */
@@ -177,6 +180,67 @@ async function download (url: string, file: string): Promise<void> {
   const tmp = `${file}.${process.pid}.part`
   fs.writeFileSync(tmp, Buffer.from(await res.arrayBuffer()))
   fs.renameSync(tmp, file)
+}
+
+/** A mod jar from Modrinth, pinned by its sha1 */
+export interface ModJar {
+  file: string
+  url: string
+  sha1: string
+}
+
+/**
+ * GrimAC (grim.ac: its Fabric build, packetevents in it; Minecraft 1.16.1 to 26.2, no 26.3 yet) and the Fabric API it
+ * needs, by version: an anticheat server for a real-time run (no lockstep mod), that the bot plays where Grim watches
+ */
+export const GRIM_MODS: Record<string, ModJar[]> = {
+  '1.21.11': [
+    { file: 'grimac-fabric-2.3.74-f5bbe9c.jar', url: 'https://cdn.modrinth.com/data/LJNGWSvH/versions/IwwpOU1A/grimac-fabric-2.3.74-f5bbe9c.jar', sha1: '5521d72c1c14b28b4c50a726b11ffdc86c5afaaf' },
+    { file: 'fabric-api-0.141.6+1.21.11.jar', url: 'https://cdn.modrinth.com/data/P7dR8mSH/versions/6qAuTtLR/fabric-api-0.141.6%2B1.21.11.jar', sha1: 'c98467cbbaf4d197377266795ae015f4130d65b6' }
+  ]
+}
+
+/**
+ * Grim's config for a test: an alert for each violation, printed to the console (its defaults alert at 5 to 100 and
+ * log the rest to a database, which has no SQLite driver on Fabric: 'failed to initialise storage')
+ */
+export const GRIM_CONFIG: Record<string, string> = {
+  [path.join('config', 'GrimAC', 'punishments.yml')]: path.join(__dirname, 'grim', 'punishments.yml')
+}
+
+/** A Grim alert's console line: "Grim » player failed Simulation (x3) offset: 0.012", its check and violations */
+export interface GrimAlert {
+  player: string
+  check: string
+  vl: number
+  verbose: string
+}
+
+export function parseGrimAlert (message: string): GrimAlert | null {
+  const m = /^Grim\s*»\s*(\S+) failed ([A-Za-z][\w]*)\S*?\s*\(x(\d+)\)\s*(.*)$/.exec(message)
+  return m == null ? null : { player: m[1], check: m[2], vl: Number(m[3]), verbose: m[4] }
+}
+
+export function grimMods (version: string): ModJar[] {
+  const mods = GRIM_MODS[version]
+  if (mods == null) throw new Error(`no GrimAC build for Minecraft ${version} (the harness has ${Object.keys(GRIM_MODS).join(', ')})`)
+  return mods
+}
+
+/** the mod jars' files, downloaded once into tests/.servers/mods and checked against their sha1 */
+export async function modJars (mods: readonly ModJar[]): Promise<string[]> {
+  const out: string[] = []
+  for (const mod of mods) {
+    const file = path.join(SERVERS_DIR, 'mods', mod.file)
+    if (!fs.existsSync(file)) await download(mod.url, file)
+    const sha1 = createHash('sha1').update(fs.readFileSync(file)).digest('hex')
+    if (sha1 !== mod.sha1) {
+      fs.rmSync(file)
+      throw new Error(`${mod.file}: sha1 ${sha1}, not the pinned ${mod.sha1}`)
+    }
+    out.push(file)
+  }
+  return out
 }
 
 function installDir (version: string): string {
@@ -314,6 +378,10 @@ export async function startServer (options: ServerOptions = {}): Promise<TestSer
   const mods = [...(options.lockstep ?? true ? [lockstepModJar(version)] : []), ...(options.mods ?? [])]
   for (const mod of mods) fs.copyFileSync(mod, path.join(dir, 'mods', path.basename(mod)))
   if (options.world != null) copyWorld(options.world, path.join(dir, 'world'))
+  for (const [rel, from] of Object.entries(options.files ?? {})) {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true })
+    fs.copyFileSync(from, path.join(dir, rel))
+  }
 
   fs.writeFileSync(path.join(dir, 'eula.txt'), 'eula=true\n')
   fs.writeFileSync(path.join(dir, 'server.properties'), propertiesFile({

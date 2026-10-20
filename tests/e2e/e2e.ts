@@ -8,14 +8,18 @@
 // and play from that save: a later stage tried again from where a real run got to it.
 //
 //   pnpm e2e [--seed 2] [--max-ticks 3000000] [--until <milestone>] [--resume <checkpoint dir>] [--stage dragon]
-//            [--checkpoints <dir>] [--version 1.21.11] [--username player] [--server-log <file>]
+//            [--checkpoints <dir>] [--version 1.21.11] [--username player] [--server-log <file>] [--realtime] [--grim]
+//
+// --seed random: a seed of its own (logged). --realtime: no lockstep mod, the server and the bot each on their 50 ms.
+// --grim: --realtime on a server with GrimAC (tests/harness GRIM_MODS), each of its flags counted by check and logged.
+import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { Bot } from 'mineflayer'
 import { createPlugin } from '../../src'
 import type { MilestoneEvent, PlayResult } from '../../src/runner'
 import type { MilestoneId } from '../../src/planner/progression'
-import { connectLockstepBot, copyWorld, quitBot, startServer, DEFAULT_VERSION, type TestServer } from '../harness'
+import { connectLockstepBot, copyWorld, grimMods, modJars, parseGrimAlert, parseLogLine, quitBot, startServer, DEFAULT_VERSION, GRIM_CONFIG, type TestServer } from '../harness'
 import { STAGES, giveKit, stageSave } from '../integration/stageKits'
 
 export interface E2EOptions {
@@ -31,6 +35,15 @@ export interface E2EOptions {
   serverLog?: string
   /** a status line every this many wall ms (default 60000) */
   statusMs: number
+  /** no lockstep mod: the server ticks every 50 ms, the bot on its own timer */
+  realtime: boolean
+  /** GrimAC on the server (realtime) */
+  grim: boolean
+}
+
+/** a random world seed: a signed 64-bit number, as level-seed takes it (WorldOptions.parseSeed) */
+export function randomSeed (): string {
+  return randomBytes(8).readBigInt64BE().toString()
 }
 
 export function parseArgs (argv: string[]): E2EOptions {
@@ -40,7 +53,9 @@ export function parseArgs (argv: string[]): E2EOptions {
     username: 'player',
     maxTicks: 3000000,
     checkpoints: '',
-    statusMs: 60000
+    statusMs: 60000,
+    realtime: false,
+    grim: false
   }
   for (let i = 0; i < argv.length; i++) {
     const [flag, inline] = argv[i].split('=', 2)
@@ -60,9 +75,12 @@ export function parseArgs (argv: string[]): E2EOptions {
       case '--checkpoints': opts.checkpoints = value(); break
       case '--server-log': opts.serverLog = value(); break
       case '--status-ms': opts.statusMs = Number(value()); break
+      case '--realtime': opts.realtime = true; break
+      case '--grim': opts.grim = opts.realtime = true; break
       default: throw new Error(`unknown option ${argv[i]}`)
     }
   }
+  if (opts.seed === 'random') opts.seed = randomSeed()
   if (opts.checkpoints === '') {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     opts.checkpoints = path.join(__dirname, '..', '.e2e', `${opts.seed}-${stamp}`)
@@ -130,6 +148,26 @@ export function playOptions (opts: Pick<E2EOptions, 'maxTicks' | 'until' | 'seed
   return { saveFile, maxTicks: opts.maxTicks, until: opts.until, seed: opts.seed }
 }
 
+/** Grim's alerts so far: the count by check, most first ("Simulation 12, GroundSpoof 3") */
+export class GrimFlags {
+  readonly byCheck = new Map<string, number>()
+  total = 0
+
+  /** a server log line: true when it was an alert, counted */
+  add (line: string): boolean {
+    const alert = parseGrimAlert(parseLogLine(line)?.message ?? line)
+    if (alert == null) return false
+    this.total++
+    this.byCheck.set(alert.check, (this.byCheck.get(alert.check) ?? 0) + 1)
+    return true
+  }
+
+  toString (): string {
+    if (this.total === 0) return 'no Grim flags'
+    return `${this.total} Grim flags: ${[...this.byCheck].sort((a, b) => b[1] - a[1]).map(([c, n]) => `${c} ${n}`).join(', ')}`
+  }
+}
+
 export function testPassed (lines: readonly string[]): boolean {
   return lines.some(l => /^Test passed/.test(l))
 }
@@ -152,14 +190,21 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
   const log = (line: string): void => console.log(`[e2e] ${line}`)
   // the stuck reports (bot.survival.diagnostics) next to the checkpoints
   if (process.env.SURVIVAL_STUCK_DIR == null || process.env.SURVIVAL_STUCK_DIR === '') process.env.SURVIVAL_STUCK_DIR = path.join(opts.checkpoints, 'stuck')
-  log(`seed ${opts.seed}, ${opts.version}, normal difficulty, survival, ${opts.maxTicks} ticks at most${opts.resume != null ? `, resumed from ${opts.resume}` : ''}; checkpoints in ${opts.checkpoints}, stuck reports in ${process.env.SURVIVAL_STUCK_DIR}`)
+  log(`seed ${opts.seed}, ${opts.version}, normal difficulty, survival, ${opts.maxTicks} ticks at most${opts.resume != null ? `, resumed from ${opts.resume}` : ''}${opts.grim ? ', GrimAC, real time' : opts.realtime ? ', real time' : ''}; checkpoints in ${opts.checkpoints}, stuck reports in ${process.env.SURVIVAL_STUCK_DIR}`)
   const serverLog = opts.serverLog
+  // each Grim alert in the e2e log as it comes (the bot set back, or a check to look at), the count by check at the end
+  const grim = new GrimFlags()
   const server = await startServer({
     version: opts.version,
     seed: opts.seed,
     difficulty: 'normal',
     world: resumeWorld,
-    log: serverLog != null ? line => fs.appendFileSync(serverLog, `${line}\n`) : undefined
+    lockstep: !opts.realtime,
+    ...(opts.grim ? { mods: await modJars(grimMods(opts.version)), files: GRIM_CONFIG } : {}),
+    log: line => {
+      if (serverLog != null) fs.appendFileSync(serverLog, `${line}\n`)
+      if (opts.grim && grim.add(line)) log(`grim: ${parseLogLine(line)?.message ?? line}`)
+    }
   })
   let bot: Bot | null = null
   const wall0 = Date.now()
@@ -167,7 +212,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
   let noTicks: NodeJS.Timeout | null = null
   let blocked: NodeJS.Timeout | null = null
   try {
-    bot = await connectLockstepBot(server, { username: opts.username, op: false, timeoutMs: 120000 })
+    bot = await connectLockstepBot(server, { username: opts.username, op: false, timeoutMs: 120000, realtime: opts.realtime })
     const b = bot
     await b.waitForChunksToLoad()
     if (opts.stage != null && opts.resume == null) {
@@ -185,7 +230,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
     status = setInterval(() => {
       const k = b.lockstep.ticks
       const now = Date.now()
-      log(`status: ${formatWall(now - wall0)} wall, ${k - k0} ticks, ${((k - lastK) / Math.max(0.001, (now - lastWall) / 1000)).toFixed(1)} ticks/s now; ${where(b)}`)
+      log(`status: ${formatWall(now - wall0)} wall, ${k - k0} ticks, ${((k - lastK) / Math.max(0.001, (now - lastWall) / 1000)).toFixed(1)} ticks/s now; ${where(b)}${opts.grim ? `; ${grim.toString()}` : ''}`)
       lastK = k
       lastWall = now
     }, opts.statusMs)
@@ -237,6 +282,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
     const wallMs = Date.now() - wall0
     log(`play stopped: ${result.reason}${result.stoppedAt != null ? ` at ${result.stoppedAt}` : ''}${result.error != null ? `: ${(result.error as Error).message}` : ''}`)
     log(`${where(b)}`)
+    if (opts.grim) log(grim.toString())
     for (const line of summary(result.reached, result.reached.length > 0 ? Math.max(ticks, result.reached[result.reached.length - 1].tick) : ticks, wallMs, ticks)) log(line)
     if (opts.until != null) {
       const ok = result.reason === 'until'
