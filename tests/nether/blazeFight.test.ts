@@ -678,7 +678,7 @@ function snapshotLookup (file: string): NookLookup {
   }
 }
 
-test('planBlazeNooks at seed 7741\'s fortress spawner (136 77 258, 26.3): on the bridge 10 off facing its throne, seeing 0.4 of its spawns; the melee nook on the throne by it, half its spawns within the sword\'s reach', async () => {
+test('planBlazeNooks at seed 7741\'s fortress spawner (136 77 258, 26.3): on the bridge 10 off facing its throne, seeing 0.4 of its spawns; no melee nook (the throne by it is in its spawn volume)', async () => {
   const { planBlazeNooks, SPAWNER_ACTIVATION } = await import('../../src/nether/blazeFight')
   const lookup = snapshotLookup('nether-seed7741-blaze.json.gz')
   const spawner = new Vec3(136, 77, 258)
@@ -693,13 +693,35 @@ test('planBlazeNooks at seed 7741\'s fortress spawner (136 77 258, 26.3): on the
     assert.ok(n.stand.offset(0.5, 0, 0.5).distanceTo(spawner.offset(0.5, 0.5, 0.5)) < SPAWNER_ACTIVATION)
     assert.ok(spawnView(lookup, spawner, n).seen >= 0.4, n.stand.toString())
   }
-  const melee = planBlazeNooks(lookup, spawner, { from, melee: true })
-  assert.ok(melee.length > 0)
-  for (const n of melee) {
-    assert.ok(n.stand.distanceTo(spawner) <= 2.3, n.stand.toString())
-    assert.equal(n.stand.y, 77)
-    assert.ok(spawnView(lookup, spawner, n).reach >= 0.45, n.stand.toString())
+  // (the throne's stands 2 off had the blazes come out on the bot)
+  assert.deepEqual(planBlazeNooks(lookup, spawner, { from, melee: true }), [])
+})
+
+test('inSpawnVolume: the cells a spawned blaze\'s box can be in, 3 across of the spawner and 2 over or under; not 4 off, nor 3 under', async () => {
+  const { inSpawnVolume } = await import('../../src/nether/blazeFight')
+  const S = new Vec3(10, 64, 10)
+  for (const p of [new Vec3(10, 64, 12), new Vec3(13, 66, 7), new Vec3(7, 62, 13)]) assert.ok(inSpawnVolume(S, p), p.toString())
+  for (const p of [new Vec3(14, 64, 10), new Vec3(10, 64, 6), new Vec3(10, 61, 10), new Vec3(10, 67, 10)]) assert.ok(!inSpawnVolume(S, p), p.toString())
+})
+
+test('planBlazeNooks at seed 2\'s throne spawner (-277 77 -159, 26.3; the whole game\'s from its portal): the bow\'s nook in the hall under the throne\'s stairs, facing up them, seeing near half its spawns; no melee nook (the throne room is all in its spawn volume)', async () => {
+  const { planBlazeNooks, inSpawnVolume } = await import('../../src/nether/blazeFight')
+  const lookup = snapshotLookup('nether-seed2-s2fortress.json.gz')
+  const spawner = new Vec3(-277, 77, -159)
+  assert.equal(lookup(spawner)?.name, 'spawner')
+  // where nether-26.3-q3 came in
+  const from = new Vec3(-270.5, 61, -164.5)
+  const far = planBlazeNooks(lookup, spawner, { from })
+  assert.ok(far.length > 0)
+  for (const n of far) {
+    assert.equal(n.stand.y, 74, n.stand.toString())
+    assert.ok(n.stand.z <= -168, n.stand.toString())
+    assert.deepEqual(n.facing, new Vec3(0, 0, 1))
+    assert.ok(spawnView(lookup, spawner, n).seen >= 0.4, n.stand.toString())
   }
+  // the melee nook the runs died in, 2 off at the stairs' top: in the volume
+  assert.ok(inSpawnVolume(spawner, new Vec3(-277, 77, -161)))
+  assert.deepEqual(planBlazeNooks(lookup, spawner, { from, melee: true }), [])
 })
 
 test('spawnView: a nook facing the spawner on open ground sees most of its spawns, none with the front walled up; planBlazeNooks leaves out a nook seeing fewer than minView', async () => {

@@ -194,6 +194,21 @@ export function spawnView (lookup: NookLookup, spawner: Vec3, nook: BlazeNook): 
   return all > 0 ? { seen: seen / all, reach: reach / all } : { seen: 0, reach: 0 }
 }
 
+/**
+ * Whether a blaze the spawner makes may come out with its box in the bot's cells at `stand` (its feet and head): the
+ * spawn's middle within SPAWN_RANGE of the spawner's across, its feet at the spawner's height or one either side, its
+ * box 0.6 wide and 1.8 high (BaseSpawner.serverTick, EntityType.BLAZE). The cells 4 off take a sliver of a box only
+ * (2 spawns in 100 along that axis): left in. A nook in it is no cover: in the melee nook 2 off seed 2's throne
+ * spawner at (-277, 77, -159) the blazes came out in its stand and its front, on the bot, punching it from beside and
+ * behind its shield, and 26.3 bots died in it with a stone sword (BLAZE_KIT q3, gate) and in iron with a bow
+ * (gateIronBow, its bow's nook STUCK), and in the one by seed 7741's throne spawner the same
+ */
+export function inSpawnVolume (spawner: Vec3, stand: Vec3): boolean {
+  const S = spawner.floored()
+  const dy = stand.y - S.y
+  return Math.abs(stand.x - S.x) <= SPAWN_RANGE - 1 && Math.abs(stand.z - S.z) <= SPAWN_RANGE - 1 && dy >= -2 && dy <= 2
+}
+
 /** the share of the spawns whose x (or z) is in the cell `k` off the spawner's: the triangle over (k - 0.5, k + 0.5) */
 function spawnWeight (k: number): number {
   const f = (u: number): number => Math.max(0, SPAWN_RANGE - Math.abs(u))
@@ -264,6 +279,7 @@ export function planBlazeNooks (lookup: NookLookup, spawner: Vec3, opts: NookOpt
       for (let dy = -4; dy <= 2; dy++) {
         const stand = S.offset(dx, dy, dz)
         if (stand.offset(0.5, 0, 0.5).distanceTo(S.offset(0.5, 0.5, 0.5)) >= SPAWNER_ACTIVATION - 1) continue
+        if (inSpawnVolume(S, stand)) continue
         if (!isOpen(lookup(stand)) || !isOpen(lookup(stand.plus(UP))) || !isFloor(lookup(stand.offset(0, -1, 0)))) continue
         // facing the spawner: the cardinal way nearest it
         const to = new Vec3(-dx, 0, -dz).scaled(1 / h)
