@@ -58,6 +58,13 @@ export interface StepContext {
   room?: (toward?: Vec3) => Promise<void>
   /** the explorations for a name lately that found none, in a row (Executor.sightings) */
   misses?: (name: string) => number
+  /**
+   * an exploration's progress kept across steps (the executor's, by `key`): a hunt's plan made again (a stock top-up
+   * between, a death) started its spiral over, and it never came to its end to go further out
+   */
+  progress?: (key: string) => { leg: number }
+  /** forgets an exploration's progress (its spiral ran out) */
+  forgetProgress?: (key: string) => void
 }
 
 export interface StepOutcome {
@@ -399,6 +406,16 @@ export function outOfTheWay (bot: Bot, pos: Vec3): boolean {
   return openSky(lookup, bot.entity.position.floored()) && !openSky(lookup, pos.floored())
 }
 
+/**
+ * A hunt's exploring progress for its animals at a radius: the executor's, kept across the plans (a hunt's plan made
+ * again, a top-up between or a death, started its spiral over and never came to its end to go further out, 26.3 seed
+ * 31337), else the step's own, kept across its preemptions
+ */
+export function huntProgress (ctx: Pick<StepContext, 'progress' | 'state'>, mobs: readonly string[], radius: number): { key: string, progress: { leg: number } } {
+  const key = `hunt:${[...mobs].sort().join(',')}:${radius}`
+  return { key, progress: ctx.progress?.(key) ?? (ctx.state.explore ??= { leg: 0 }) }
+}
+
 export const runKill: StepRunner<KillStep> = async (step, ctx) => {
   const { bot, signal } = ctx
   const start = startCount(ctx, 'start', () => countItems(bot, step.item))
@@ -420,12 +437,15 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
         passed.clear()
         // not far out: none in HUNT_EXPLORE_RADIUS of home is a land without them (a snowy taiga's rabbits only), and
         // the plan goes for another food then; the food that grows is noted on the way for it
-        ctx.state.explore ??= { leg: 0 }
         // further out once the nearer land had none, its spiral not walked again (skipWithin)
         const misses = Math.min(...[step.mob, ...subs].map(m => ctx.misses?.(m) ?? 0))
         const radius = huntRadius(misses)
-        const found = await exploreSurface(bot, { found: () => nearest([step.mob, ...subs], 32) != null, center: ctx.home ?? undefined, maxRadius: radius, skipWithin: misses > 0 ? huntRadius(misses - 1) : undefined, memory: ctx.memory, remember: SIGHTED_BLOCKS, progress: ctx.state.explore }, signal)
-        if (!found) throw new SkillError('NOT_FOUND', `no ${step.mob} found exploring`)
+        const { key, progress } = huntProgress(ctx, [step.mob, ...subs], radius)
+        const found = await exploreSurface(bot, { found: () => nearest([step.mob, ...subs], 32) != null, center: ctx.home ?? undefined, maxRadius: radius, skipWithin: misses > 0 ? huntRadius(misses - 1) : undefined, memory: ctx.memory, remember: SIGHTED_BLOCKS, progress }, signal)
+        if (!found) {
+          ctx.forgetProgress?.(key)
+          throw new SkillError('NOT_FOUND', `no ${step.mob} found exploring`)
+        }
         continue
       }
     }

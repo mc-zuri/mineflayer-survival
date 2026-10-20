@@ -654,3 +654,19 @@ test('the hunt explores twice as far after each exploration that found none, to 
   assert.equal(firstLegBeyond(wps, center), 0)
   assert.equal(firstLegBeyond(spiralWaypoints(center, 16, 96), center, 96), spiralWaypoints(center, 16, 96).length)
 })
+
+test("huntProgress: the spiral walked so far is the executor's across the plans (a plan made again goes on from its leg), by animals and radius; the step's own without it", async () => {
+  const { huntProgress } = await import('../../src/executor/steps')
+  const kept = new Map<string, { leg: number }>()
+  const ctx = () => ({ state: {}, progress: (key: string) => kept.get(key) ?? kept.set(key, { leg: 0 }).get(key) as { leg: number } })
+  const first = huntProgress(ctx(), ['cow', 'pig'], 96)
+  first.progress.leg = 9
+  // the next plan's step, a new state: on from leg 9
+  assert.equal(huntProgress(ctx(), ['pig', 'cow'], 96).progress.leg, 9)
+  // further out, a spiral of its own
+  assert.equal(huntProgress(ctx(), ['cow', 'pig'], 192).progress.leg, 0)
+  // no executor's: the step's state
+  const state: Record<string, any> = {}
+  huntProgress({ state }, ['cow'], 96).progress.leg = 3
+  assert.equal(huntProgress({ state }, ['cow'], 96).progress.leg, 3)
+})

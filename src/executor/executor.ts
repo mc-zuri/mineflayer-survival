@@ -225,6 +225,8 @@ export class Executor {
   readonly tasks: TaskRunner
   /** what's in sight and what wasn't found, for the plans' find costs */
   readonly sightings: Sightings
+  /** explorations' progress kept across the plans (StepContext.progress) */
+  private readonly exploreProgress = new Map<string, { leg: number }>()
   readonly options: Required<Omit<ExecutorOptions, 'memory' | 'tasks' | 'runners' | 'hooks' | 'log' | 'home'>>
   private readonly runners: Record<PlanStep['kind'], StepRunner<any>>
   private readonly hooks: ExecutorHooks
@@ -656,7 +658,9 @@ export class Executor {
         replacingTools: this.replacing,
         unwanted: name => this.unwantedDrop(name),
         room: async (toward) => await this.makeRoomDuringStep(taskSignal, toward),
-        misses: name => this.sightings.misses(name)
+        misses: name => this.sightings.misses(name),
+        progress: key => this.exploreProgress.get(key) ?? this.exploreProgress.set(key, { leg: 0 }).get(key) as { leg: number },
+        forgetProgress: key => { this.exploreProgress.delete(key) }
       }
       return await runner(step, stepCtx)
     }, signal, { step, desc: describeStep(step) })
