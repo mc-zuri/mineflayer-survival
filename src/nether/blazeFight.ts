@@ -464,6 +464,9 @@ export function meleeWindow (bot: Bot, volleys: BlazeVolleys, tick: number, seei
   return !Object.values(bot.entities).some(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 8))
 }
 
+/** the sword's reach a blaze is met in out of the nook (the eyes to its box: the player's interaction range, 3, less a margin) */
+export const MELEE_REACH = 2.9
+
 /** the melee mobs (besides the blazes) the nook's fight meets itself, with the sword once in reach */
 export const NOOK_MELEE = ['magma_cube']
 
@@ -830,6 +833,17 @@ export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch
       .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
     return danger ?? Object.values(bot.entities).find(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 24)) ?? null
   }
+  // a blaze in the sword's reach (BlazeAttackGoal: one within 2 hits instead of shooting, every 20 ticks): met with the
+  // sword, the shield up toward it between the swings. The rods lie in the throne the bow's nook shoots into, and a
+  // fetch there walked on with the throne's blazes punching it, 6 hits in 50 ticks, and a 26.3 bot in iron died there
+  // with its rods round it (tests/integration/blaze BLAZE_AT=s2fortress BLAZE_KIT=gateIronBow)
+  const strength = attackStrengthOf(bot)
+  const closeBlaze = (): Entity | null => {
+    const eye = eyePosition(bot)
+    return Object.values(bot.entities)
+      .filter(e => e.name === 'blaze' && isAlive(bot, e) && distanceToBox(eye, entityBox(e)) <= MELEE_REACH && seenPoint(bot, e) != null)
+      .sort((a, b) => distanceToBox(eye, entityBox(a)) - distanceToBox(eye, entityBox(b)))[0] ?? null
+  }
   trace('fightFromNook: drops at', item.position.toString())
   try {
     while (bot.entities[item.id] === item && watch.now() - start < FETCH_TICKS && bot.health > watch.sealAt) {
@@ -847,11 +861,27 @@ export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch
         await waitTicks(bot, 1, signal)
         continue
       }
+      const close = closeBlaze()
+      if (close != null) {
+        bot.clearControlStates()
+        const sword = bestMeleeWeapon(bot, 'blaze')
+        if (sword != null && bot.heldItem?.type !== sword.type) await bot.equip(sword, 'hand')
+        if (strength.ticksToFull() <= 0) {
+          if (blocking) { lowerShield(bot); blocking = false }
+          await bot.lookAt(meleeAimPoint(bot, close), true)
+          strength.attack(close)
+        } else {
+          if (!blocking || (bot as any).usingHeldItem !== true) blocking = await raiseShield(bot).catch(() => false)
+          await bot.lookAt(blazeEye(close), true)
+        }
+        await waitTicks(bot, 1, signal)
+        continue
+      }
       if (blocking) { lowerShield(bot); blocking = false }
       const cut = new AbortController()
       const onParent = (): void => cut.abort(signal?.reason)
       signal?.addEventListener('abort', onParent, { once: true })
-      const onTick = (): void => { if (threat() != null) cut.abort(new Error('a blaze about to shoot')) }
+      const onTick = (): void => { if (threat() != null || closeBlaze() != null) cut.abort(new Error('a blaze about to shoot or in reach')) }
       bot.on('physicsTick', onTick)
       try {
         await collectDropsNear(bot, item.position.clone(), { signal: cut.signal, radius: 3, maxTicks: 120 })
