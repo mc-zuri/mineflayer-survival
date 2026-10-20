@@ -50,6 +50,8 @@ import { nearestBiomeSpot, pearlLeg } from './nether/ground'
 import { endermenFromCover, forgetCover } from './nether/endermanCover'
 import { NetherBiomeSource } from './worldgen/netherBiomes'
 import { blazeRodsWithBrew, resetBrewTries } from './nether/brewing'
+import { waterBottles } from './skills/brew'
+import { fillBottles } from './skills/bucket'
 import { ruinedPortalCandidates } from './worldgen/placement'
 import type { Seed } from './worldgen/random'
 import { excludedSpawner, levelSeed, unreachableSpawners } from './nether/fortressSkills'
@@ -777,7 +779,9 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   // the gate's food kept from the eat reflex while the rest is got, and till the bot is in (setFoodReserve)
   setFoodReserve(bot, gate.food, NETHER_GEAR_TICKS * 2)
   const missing = netherGearNeeds(ownedInventory(bot), gate)
-  if (missing.length === 0) return
+  // (the gate passed: the water bottles for fire resistance brewed in there, none to be had in the nether, when they
+  // can be got; not a reason not to go in)
+  if (missing.length === 0) return await brewKit(bot, executor, signal, log)
   log(`nether kit: getting ${missing.map(describeRequest).join(', ')} before going in`)
   // the gear within NETHER_GEAR_TICKS; the food short after it within NETHER_FOOD_TICKS, near home: the rest is
   // banked over the tries (farm, herd), not one long search (seed 2's 120 points took 90000 ticks of exploring)
@@ -814,12 +818,52 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
       foodPoints: heldFor(ownedInventory(bot), FOOD_GOAL, { unit: 'nutrition' })
     })
   }
+  await brewKit(bot, executor, signal, log)
 }
 
 /** the ticks a try of the nether kit spends on the gate's food after the gear (the rest banked over the tries) */
 export const NETHER_FOOD_TICKS = 12000
 /** the ticks a try of the nether kit spends on the gate's arrows after the rest of the gear */
 export const NETHER_ARROW_TICKS = 12000
+
+/** the water bottles carried into the nether for fire resistance brewed there (a brew's 3: brewing's blazeRodsWithBrew) */
+export const BREW_BOTTLES = 3
+/** the ticks the bottles, the crafting table and the stand's cobblestone may take to get */
+export const BREW_KIT_TICKS = 12000
+/** the cobblestone the brew kit carries: the stand's 3, with the blaze nook's blocks to spare (its first) */
+export const BREW_STONE = 32
+/** the brew kit's tries a bot makes */
+export const BREW_KIT_TRIES = 2
+const brewKitTries = new WeakMap<Bot, number>()
+
+/**
+ * The makings of fire resistance the overworld gives, got before the nether within BREW_KIT_TICKS: BREW_BOTTLES glass
+ * bottles (sand smelted to glass) filled with water (fillBottles: the nether has none, a bucket's evaporates there), a
+ * crafting table and 3 cobblestone for the brewing stand; none of it a reason not to go in. With 2 potions of fire
+ * resistance 26.3 bots in iron armor got their 8 rods by seed 2's throne at (-277, 77, -159) 3 runs of 3, with none 0
+ * of 3 (tests/integration/blaze BLAZE_KIT=runIron)
+ */
+export async function brewKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  if (inNether(bot) || waterBottles(bot) >= BREW_BOTTLES) return
+  // (BREW_KIT_TRIES at most a game: none to be had near, the gate's tries aren't spent on it again and again)
+  const tries = brewKitTries.get(bot) ?? 0
+  if (tries >= BREW_KIT_TRIES) return
+  brewKitTries.set(bot, tries + 1)
+  await withTickBudget(bot, BREW_KIT_TICKS, signal, async (s) => {
+    const want = BREW_BOTTLES - waterBottles(bot)
+    const need: ObtainRequest[] = []
+    if (countItems(bot, 'glass_bottle') < want) need.push({ item: 'glass_bottle', count: want })
+    if (countItems(bot, 'crafting_table') === 0) need.push({ item: 'crafting_table', count: 1 })
+    // (the stand's 3, and the blaze nook's blocks besides: they're the first it builds with)
+    if (countItems(bot, ['cobblestone', 'cobbled_deepslate', 'blackstone']) < BREW_STONE) need.push({ item: 'cobblestone', count: BREW_STONE })
+    if (need.length > 0) await executor.obtain(need, s)
+    await executor.task('fill the water bottles', async (ts) => await fillBottles(bot, { count: want, maxDistance: 48 }, ts), s)
+  }).catch(err => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`nether kit: no water bottles: ${(err as Error).message}`)
+  })
+  log(`nether kit: ${waterBottles(bot)} water bottles for fire resistance`)
+}
 
 const GOLD_PIECES = ['golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots']
 const SWORDS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'golden_sword', 'wooden_sword']

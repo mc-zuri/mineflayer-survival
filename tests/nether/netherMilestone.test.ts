@@ -55,7 +55,7 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
   assert.equal(calls[0], 'down to the deep lava')
   assert.equal(calls.slice(0, from).filter(c => c === 'a leg for lava').length, PORTAL_LEGS)
   // (the nether's kit got before the way in)
-  assert.deepStrictEqual(calls.slice(from).filter(c => !/iron_sword|stone_sword|shield/.test(c)).slice(0, 4), ['obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
+  assert.deepStrictEqual(calls.slice(from).filter(c => !/iron_sword|stone_sword|shield|glass_bottle|water bottles/.test(c)).slice(0, 4), ['obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
 })
 
 test('pearls in the nether: the endermen in sight hunted, else a leg on to find piglins or endermen, a few legs at most', async () => {
@@ -291,11 +291,13 @@ test('netherKit: a sword (stone at least), a chestplate and a shield got when mi
     task: async (name: string) => { calls.push(name) }
   }
   await netherKit(bot, executor, new AbortController().signal, () => {})
-  assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate,shield', 'obtain stone_sword', 'obtain golden_boots'])
+  // (then the brewing's bottles: brewKit)
+  assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate,shield', 'obtain stone_sword', 'obtain golden_boots', 'obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])
   calls.length = 0
   const armed = fakeBot({ items: [item('diamond_sword', 1), item('diamond_chestplate', 1), item('diamond_helmet', 1), item('diamond_leggings', 1), item('shield', 1), item('golden_boots', 1), item('bread', 24), item('bow', 1), item('arrow', 64)] })
   await netherKit(armed, executor, new AbortController().signal, () => {})
-  assert.deepStrictEqual(calls, [])
+  // (the bottles alone)
+  assert.deepStrictEqual(calls, ['obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])
 })
 
 test('netherKit: short of the food, the farm grown by the base is harvested and baked before the gate\'s gathering is planned', async () => {
@@ -323,7 +325,7 @@ test('netherKit: short of the food, the farm grown by the base is harvested and 
   }
   await netherKit(bot, executor, new AbortController().signal, () => {})
   // the bread covers the gate: nothing else gathered
-  assert.deepStrictEqual(calls, ['farm wheat', 'obtain bread'])
+  assert.deepStrictEqual(calls.filter(c => !/glass_bottle|water bottles/.test(c)), ['farm wheat', 'obtain bread'])
 })
 
 test('netherGate: 80 food points with a farm or a herd known, else 120, the play option over both; 16 arrows with 2 fire resistance potions, 32 once no chicken was found, else 64', async () => {
@@ -978,4 +980,29 @@ test('a cast away takes the pool\'s lava round the pool, wherever the bot has go
     gridModule.moveNear = realMove
   }
   assert.equal(given, 12)
+})
+
+test('brewKit: before the nether, 3 glass bottles, a crafting table and 3 cobblestone got and the bottles filled with water; with 3 water bottles, nothing; a failure no reason not to go in', async () => {
+  const { brewKit } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const water = (): any => { const p = item('potion'); p.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: 0, customEffects: [] } }]]); return p }
+  const bot = fakeBot({ items: [item('cobblestone', 20)] })
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async (reqs: any[]) => { calls.push(`obtain ${reqs.map(r => `${r.count} ${r.item}`).join(', ')}`); giveTo(bot, [item('glass_bottle', 3), item('crafting_table', 1), item('cobblestone', 12)]) },
+    task: async (name: string) => { calls.push(name); giveTo(bot, [water(), water(), water()]) }
+  }
+  const lines: string[] = []
+  await brewKit(bot, executor, new AbortController().signal, l => lines.push(l))
+  assert.deepStrictEqual(calls, ['obtain 3 glass_bottle, 1 crafting_table, 32 cobblestone', 'fill the water bottles'])
+  assert.match(lines.join(' | '), /3 water bottles for fire resistance/)
+  calls.length = 0
+  await brewKit(bot, executor, new AbortController().signal, () => {})
+  assert.deepStrictEqual(calls, [])
+  const dry = fakeBot({ items: [] })
+  executor.obtain = async () => { throw new Error('no sand found') }
+  await brewKit(dry, executor, new AbortController().signal, l => lines.push(l))
+  assert.match(lines.join(' | '), /no water bottles: no sand found/)
 })
