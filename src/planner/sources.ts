@@ -59,6 +59,13 @@ export interface FluidSource {
   find: number
 }
 
+/**
+ * the find estimate of the food of one biome only (melons of the jungles, berry bushes of the taigas), unless one is in
+ * sight or remembered: a 26.3 bot on seed 2, neither near, explored 32000 ticks for melons for the nether gate's food
+ * at 4000, and 14000 for berry bushes (full-26.3-fresh-m, fresh-l)
+ */
+export const RARE_FIND = 16000
+
 function block (name: string, drops: Drop[] | string, find: number, each: number, dimension: Dimension = 'overworld'): BlockSource {
   return { block: name, drops: typeof drops === 'string' ? [{ item: drops, count: 1 }] : drops, dimension, find, each }
 }
@@ -95,7 +102,7 @@ export const BLOCK_SOURCES: BlockSource[] = [
   block('dark_oak_leaves', [{ item: 'apple', count: 0.005 }, { item: 'dark_oak_sapling', count: 0.05 }, { item: 'stick', count: 0.03 }], 1500, 3),
   // food that grows: only grown ones are broken (src/core/crops.ts). A ripe sweet berry bush (age 3) drops 2 to 3
   // berries and one at age 2 1 to 2 (blocks/sweet_berry_bush); the bushes come in patches in the taigas.
-  block('sweet_berry_bush', [{ item: 'sweet_berries', count: 2 }], 4000, 15),
+  block('sweet_berry_bush', [{ item: 'sweet_berries', count: 2 }], RARE_FIND, 15),
   // a village's farms: a grown crop (age 7) drops 1 and binomial(3, 0.5714) more carrots or potatoes, wheat 1 and the
   // seeds; beetroots grow to age 3 (blocks/carrots, potatoes, wheat, beetroots, without Fortune)
   block('carrots', [{ item: 'carrot', count: 2.7 }], 5000, 4),
@@ -108,7 +115,7 @@ export const BLOCK_SOURCES: BlockSource[] = [
   block('cactus', 'cactus', 3000, 10),
   block('pumpkin', 'pumpkin', 3000, 20),
   // 3 to 7 slices (blocks/melon): melons grow wild in the jungles
-  block('melon', [{ item: 'melon_slice', count: 5 }], 4000, 20),
+  block('melon', [{ item: 'melon_slice', count: 5 }], RARE_FIND, 20),
   block('bamboo', 'bamboo', 4000, 5),
   block('kelp_plant', 'kelp', 1000, 5),
   block('kelp', 'kelp', 1000, 5),

@@ -16,13 +16,19 @@ export const SIGHT_RADIUS = 64
 /** how long a block or mob looked for and not found stays dear (half a day) */
 export const SCARCE_TICKS = 12000
 
-/** how many times the source's estimate one not found costs */
-export const SCARCE_FACTOR = 8
+/**
+ * how many times the source's estimate one not found costs (16: an exploration that found none walked some 20000
+ * ticks; at 8 a missed hunt, 3200, was still cheaper than a village's crops, and was walked again)
+ */
+export const SCARCE_FACTOR = 16
 
 /** misses in a row (each within GIVE_UP_TICKS of the last) after which a source is given up on for GIVE_UP_TICKS */
 export const GIVE_UP_MISSES = 2
 /** misses count as in a row when each is within this of the last (three days: a hunt's tries were a day apart and more) */
 export const MISS_STREAK_TICKS = 72000
+/** the sources of one biome only (RARE_FIND): given up on at their first miss */
+export const RARE_SOURCES = ['melon', 'sweet_berry_bush']
+
 /** how long a source missed GIVE_UP_MISSES times is given up on (a day) */
 export const GIVE_UP_TICKS = 24000
 /** how many times the source's estimate one given up on costs: the last resort, when nothing else is to be had */
@@ -71,7 +77,8 @@ export class Sightings {
    */
   givenUp (name: string): boolean {
     const last = this.missed.get(name)
-    return last != null && last.misses >= GIVE_UP_MISSES && this.now() - last.at < GIVE_UP_TICKS
+    const misses = RARE_SOURCES.includes(name) ? 1 : GIVE_UP_MISSES
+    return last != null && last.misses >= misses && this.now() - last.at < GIVE_UP_TICKS
   }
 
   /** the find cost for the planner: in sight, a walk; not found lately, SCARCE_FACTOR times the estimate */

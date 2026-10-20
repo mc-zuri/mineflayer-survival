@@ -74,28 +74,39 @@ test('sightings: a source missed twice in a row is given up on for a day (the la
   let now = 0
   const bot = fakeBot([])
   const s = new Sightings(bot, () => now)
-  const melon = { name: 'melon', kind: 'block' as const, dimension: 'overworld' as const, find: 4000 }
-  s.missing(['melon'])
+  const melon = { name: 'carrots', kind: 'block' as const, dimension: 'overworld' as const, find: 4000 }
+  s.missing(['carrots'])
   assert.equal(s.cost(melon), 4000 * SCARCE_FACTOR)
   now += SCARCE_TICKS
   assert.equal(s.cost(melon), undefined)
   // explored for again, half a day after: none again
-  s.missing(['melon'])
+  s.missing(['carrots'])
   assert.equal(s.cost(melon), 4000 * GIVE_UP_FACTOR)
-  assert.ok(s.givenUp('melon') && s.isScarce('melon'))
+  assert.ok(s.givenUp('carrots') && s.isScarce('carrots'))
   now += SCARCE_TICKS
   assert.equal(s.cost(melon), 4000 * GIVE_UP_FACTOR)
   now += GIVE_UP_TICKS - SCARCE_TICKS
   assert.equal(s.cost(melon), undefined)
   // a miss three days and more after the last: one miss again
   now += MISS_STREAK_TICKS
-  s.missing(['melon'])
+  s.missing(['carrots'])
   assert.equal(s.cost(melon), 4000 * SCARCE_FACTOR)
-  assert.equal(s.misses('melon'), 1)
+  assert.equal(s.misses('carrots'), 1)
   // and a day and a half later another: two in a row, given up on
   now += GIVE_UP_TICKS * 1.5
-  assert.equal(s.misses('melon'), 1)
-  s.missing(['melon'])
-  assert.equal(s.misses('melon'), 2)
+  assert.equal(s.misses('carrots'), 1)
+  s.missing(['carrots'])
+  assert.equal(s.misses('carrots'), 2)
   assert.equal(s.cost(melon), 4000 * GIVE_UP_FACTOR)
+})
+
+test('sightings: a rare source (melons, berry bushes: of one biome) is given up on at its first miss', () => {
+  let now = 0
+  const s = new Sightings(fakeBot([]), () => now)
+  const melon = { name: 'melon', kind: 'block' as const, dimension: 'overworld' as const, find: 16000 }
+  s.missing(['melon', 'carrots'])
+  assert.equal(s.cost(melon), 16000 * GIVE_UP_FACTOR)
+  assert.equal(s.cost({ ...melon, name: 'carrots', find: 5000 }), 5000 * SCARCE_FACTOR)
+  now += GIVE_UP_TICKS
+  assert.equal(s.cost(melon), undefined)
 })
