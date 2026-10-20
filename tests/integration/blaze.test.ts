@@ -222,6 +222,25 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
     bot.on('reflex' as any, onReflex)
     const onDeath = (): void => { died = true }
     const onMessage = (m: string): void => { if (typeof m === 'string' && m.startsWith(`${USERNAME} `)) death = m }
+    // the rods dropped by the kills: picked up, or gone otherwise (burnt in a fire, in lava, despawned), and where
+    const drops = new Map<number, { at: any, t: number }>()
+    const rodFate = { dropped: 0, picked: 0, gone: [] as string[] }
+    const isRod = (e: any): boolean => { try { return e.getDroppedItem?.()?.name === 'blaze_rod' } catch { return false } }
+    const onItem = (e: any): void => { if (isRod(e) && !drops.has(e.id)) { drops.set(e.id, { at: e.position.clone(), t: bot.lockstep.ticks }); rodFate.dropped++ } }
+    const onCollect = (collector: any, collected: any): void => { if (drops.has(collected.id)) { drops.delete(collected.id); if (collector === bot.entity) rodFate.picked++ } }
+    const onGone = (e: any): void => {
+      const d = drops.get(e.id)
+      if (d == null) return
+      drops.delete(e.id)
+      const at = e.position.floored()
+      const where = [bot.blockAt(at)?.name, bot.blockAt(at.offset(0, -1, 0))?.name].join('/')
+      rodFate.gone.push(`${at.toString()} ${where} after ${bot.lockstep.ticks - d.t}${e.position.distanceTo(bot.entity.position) > 48 ? ' far' : ''}`)
+    }
+    const meals = (): number => bot.inventory.items().filter(i => (bot.registry as any).foodsByName[i.name] != null).reduce((n, i) => n + i.count, 0)
+    const mealsBefore = meals()
+    bot.on('itemDrop' as any, onItem)
+    bot.on('playerCollect', onCollect)
+    bot.on('entityGone', onGone)
     bot.on('health', onHealth)
     bot.on('death', onDeath)
     bot.on('messagestr' as any, onMessage)
@@ -240,7 +259,11 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
       bot.off('reflex' as any, onReflex)
       bot.off('death', onDeath)
       bot.off('messagestr' as any, onMessage)
+      bot.off('itemDrop' as any, onItem)
+      bot.off('playerCollect', onCollect)
+      bot.off('entityGone', onGone)
     }
+    console.log(`blaze run ${n} rods: ${rodFate.dropped} dropped, ${rodFate.picked} picked up, ${rodFate.gone.length} gone otherwise${rodFate.gone.length > 0 ? ` (${rodFate.gone.join('; ')})` : ''}, ${drops.size} left lying; meals eaten ${died ? '?' : mealsBefore - meals()} of ${mealsBefore}`)
     const ticks = bot.lockstep.ticks - t0
     // where the blazes were at the end, and the bot (a spawner makes none with 6 of them in its box: a run of no kills)
     const left = Object.values(bot.entities).filter((e: any) => e.name === 'blaze' && e.position.distanceTo(SPAWNER) <= 32)
