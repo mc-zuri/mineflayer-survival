@@ -1464,10 +1464,30 @@ export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortS
  * Runs `fn` under a signal that also aborts after `ticks` game ticks (or with `signal`); throws what `fn` throws, an
  * abort for the budget gone included
  */
+/** the tasks a budget's work waits on that aren't its work: the night's sleep and its wait (the runner's) */
+const NOT_THE_WORK = new Set(['sleep', 'wait out the night'])
+
+/**
+ * Whether the tick goes to something else than the budget's work: the bot asleep, a reflex's task running (a fight,
+ * the night's shelter or sleep, eating), or the runner's night sleep or wait: a trip kit's 6000 ticks went to a
+ * night's sleep in the middle of its planks, 'over the budget', and no kit was left (full-26.3-fresh-l)
+ */
+export function tickNotTheWork (bot: Bot): boolean {
+  if ((bot as any).isSleeping === true) return true
+  const survival = (bot as any).survival
+  if (survival?.reflexes?.current != null) return true
+  const task = survival?.tasks?.current?.name
+  return typeof task === 'string' && (NOT_THE_WORK.has(task) || task.startsWith('reflex:'))
+}
+
 export async function withTickBudget<T> (bot: Bot, ticks: number, signal: AbortSignal, fn: (s: AbortSignal) => Promise<T>): Promise<T> {
   const ctrl = new AbortController()
   let n = 0
-  const onTick = (): void => { if (++n >= ticks) ctrl.abort(new TaskError('TIMEOUT', `over the budget of ${ticks} ticks`)) }
+  // (the ticks of a sleep, a reflex or the night's wait aren't the work's: not counted)
+  const onTick = (): void => {
+    if (tickNotTheWork(bot)) return
+    if (++n >= ticks) ctrl.abort(new TaskError('TIMEOUT', `over the budget of ${ticks} ticks`))
+  }
   const onAbort = (): void => { ctrl.abort(signal.reason) }
   bot.on('physicsTick', onTick)
   signal.addEventListener('abort', onAbort, { once: true })

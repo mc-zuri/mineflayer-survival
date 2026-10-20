@@ -161,6 +161,39 @@ test('withTickBudget: the work is aborted once its ticks are gone', async () => 
   }
 })
 
+test('withTickBudget: the ticks of a sleep, a reflex or the night\'s wait are not counted (full-26.3-fresh-l: a trip kit\'s budget went to a night\'s sleep)', async () => {
+  const { withTickBudget, tickNotTheWork } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const bot = fakeBot()
+  bot.survival = { reflexes: { current: null }, tasks: { current: { name: 'craft' } } }
+  assert.strictEqual(tickNotTheWork(bot), false)
+  let aborted = false
+  const work = withTickBudget(bot, 10, new AbortController().signal, async (s) => await new Promise<string>((resolve, reject) => {
+    s.addEventListener('abort', () => { aborted = true; reject(s.reason) })
+    bot.once('done', () => resolve('done'))
+  }))
+  // 30 ticks asleep, 30 of a reflex, 30 of the runner's night wait: none counted
+  bot.isSleeping = true
+  for (let i = 0; i < 30; i++) bot.emit('physicsTick')
+  bot.isSleeping = false
+  bot.survival.reflexes.current = { name: 'night', priority: 40 }
+  for (let i = 0; i < 30; i++) bot.emit('physicsTick')
+  bot.survival.reflexes.current = null
+  bot.survival.tasks.current = { name: 'wait out the night' }
+  for (let i = 0; i < 30; i++) bot.emit('physicsTick')
+  bot.survival.tasks.current = { name: 'reflex:hostiles' }
+  for (let i = 0; i < 30; i++) bot.emit('physicsTick')
+  bot.survival.tasks.current = { name: 'craft' }
+  for (let i = 0; i < 9; i++) bot.emit('physicsTick')
+  assert.strictEqual(aborted, false)
+  bot.emit('done')
+  assert.strictEqual(await work, 'done')
+  // the work's own ticks still run out
+  const over = withTickBudget(bot, 10, new AbortController().signal, async (s) => await new Promise((_resolve, reject) => s.addEventListener('abort', () => reject(s.reason))))
+  for (let i = 0; i < 10; i++) bot.emit('physicsTick')
+  await assert.rejects(over, /budget of 10 ticks/)
+})
+
 test('tripKitItems: the pickaxes but the best go in (a respawn with no pickaxe digs no way)', async () => {
   const { tripKitItems } = await import('../../src/skills/tripKit')
   const by = Object.fromEntries(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 1 }]).map(k => [k.name, k.count]))
