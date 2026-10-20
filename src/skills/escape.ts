@@ -458,6 +458,14 @@ export interface EvadeResult {
 }
 
 /**
+ * ticks fleeFrom keeps running from a threat after it was last among its threats (in sight): the flee ended as a
+ * skeleton or a creeper went out of sight a step on, the task walked back into its sight, and the reflex fled a step
+ * again, 230 times in 3400 ticks; a 26.3 bot bare by its death spot dithered so in a skeleton's sight till it was shot
+ * dead twice (full-26.3-fresh-d), and one hunting a cow at a creeper's edge of sight till it blew (nether-26.3-q3)
+ */
+export const FLEE_MEMORY = 60
+
+/**
  * Gets clear of a creeper: sprints away past its blast (and past the 7 blocks it stops swelling at), or, cornered or
  * about to be caught by the blast, faces it with the shield up (explosions are blocked from the front).
  */
@@ -503,10 +511,13 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
 export async function fleeFrom (bot: Bot, threats: () => Entity[], opts: SkillOptions & { distance?: number, maxTicks?: number } = {}): Promise<{ ticks: number }> {
   const distance = opts.distance ?? 16
   const maxTicks = opts.maxTicks ?? 300
+  // each threat kept FLEE_MEMORY ticks after it was last among `threats` (out of sight behind a tree or a rise)
+  const seen = new Map<number, { e: Entity, at: number }>()
   try {
     for (let t = 0; t < maxTicks; t++) {
       throwIfAborted(opts.signal)
-      const near = threats().filter(e => isAlive(bot, e) && e.position.distanceTo(bot.entity.position) < distance)
+      for (const e of threats()) seen.set(e.id, { e, at: t })
+      const near = [...seen.values()].filter(s => t - s.at <= FLEE_MEMORY).map(s => s.e).filter(e => isAlive(bot, e) && bot.entities[e.id] != null && e.position.distanceTo(bot.entity.position) < distance)
       if (near.length === 0) return { ticks: t }
       const centroid = near.reduce((sum, e) => sum.plus(e.position), new Vec3(0, 0, 0)).scaled(1 / near.length)
       if (!steerAway(bot, centroid)) throw new TaskError('NO_PATH', 'cornered')

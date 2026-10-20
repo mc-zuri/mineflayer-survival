@@ -131,3 +131,18 @@ test('inHazard: on a magma block (the hot floor), unless sneaking or off the gro
   assert.strictEqual(isSafeStand(bot, new Vec3(0, 64, 0)), false)
   assert.strictEqual(isSafeStand(bot, new Vec3(1, 64, 0)), true)
 })
+
+test('fleeFrom keeps running from a threat FLEE_MEMORY ticks after it went out of sight, till it is fleeDistance off (full-26.3-fresh-d: the flee ended a step on, 230 times)', async () => {
+  const { fleeFrom, FLEE_MEMORY } = await import('../../src/skills/escape')
+  const { entity } = await import('../reflexes/fakeBot')
+  const skeleton = entity({ name: 'skeleton', position: new Vec3(8.5, 64, 0.5) })
+  const bot = fakeBot({ entities: [skeleton] })
+  let t = 0
+  // the bot walks 0.3 a tick west while its steer holds forward, the skeleton in sight only the first tick
+  bot.waitForTicks = async () => { t++; if (bot.controls.forward === true) bot.entity.position = bot.entity.position.offset(-0.3, 0, 0) }
+  const res = await fleeFrom(bot, () => t === 0 ? [skeleton as any] : [], { distance: 16 })
+  // 16 off takes about 25 ticks at 0.3 a tick: on past the tick it went out of sight, not a step
+  assert.ok(res.ticks > 10 && res.ticks <= FLEE_MEMORY + 1, `${res.ticks} ticks`)
+  assert.ok(bot.entity.position.distanceTo(skeleton.position) >= 15.5, bot.entity.position.toString())
+})
+
