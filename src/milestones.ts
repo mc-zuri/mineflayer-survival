@@ -43,6 +43,7 @@ import { findBlocks } from './core/findBlocks'
 import { nearestBiomeSpot, pearlLeg } from './nether/ground'
 import { endermenFromCover, forgetCover } from './nether/endermanCover'
 import { NetherBiomeSource } from './worldgen/netherBiomes'
+import { ruinedPortalCandidates } from './worldgen/placement'
 import type { Seed } from './worldgen/random'
 import { excludedSpawner, levelSeed, unreachableSpawners } from './nether/fortressSkills'
 
@@ -549,6 +550,9 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
       log(`a portal frame: a diamond pickaxe: ${(err as Error).message}`)
     })
   }
+  // the obsidian in the world first (in sight, a ruined portal's): no lava worked for what's there
+  await naturalObsidian(bot, executor, PORTAL_OBSIDIAN, signal, log)
+  if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
   const tries = (p: { x: number, y: number, z: number }): number => {
     const poi = executor.memory.getPois('lava_tried', { dimension: 'overworld' }).find(t => Math.hypot(t.x - p.x, t.z - p.z) < 16 && Math.abs(t.y - p.y) < 16)
     return poi == null ? 0 : Number(/tries=(\d+)/.exec(poi.note ?? '')?.[1] ?? 1)
@@ -891,6 +895,48 @@ export const TABLE_OBSIDIAN = 4
  * `count` obsidian made from the lava about (the portal's way: obsidianFromLava at the nearest pools not tried, then
  * the deep lakes), a bucket, its water and a diamond pickaxe got first; resolves whether they're held
  */
+/** how far (along the ground) a ruined portal is gone to for its obsidian */
+export const RUINED_PORTAL_TRIP = 400
+/** the ticks a trip to a ruined portal and its mining may take */
+export const RUINED_PORTAL_TICKS = 12000
+/** the POI of a ruined portal's candidate gone to (not again) */
+export const RUINED_PORTAL_TRIED = 'ruined_portal_tried'
+
+/**
+ * Obsidian already in the world, mined before any lava is worked, while a diamond pickaxe is held: the obsidian in
+ * the loaded chunks (none with lava against it: its drop would burn), then, with the seed known, the nearest ruined
+ * portal's within RUINED_PORTAL_TRIP (ruinedPortalCandidates; its crying obsidian is another block, not taken),
+ * within RUINED_PORTAL_TICKS. Up to `want` held in all.
+ */
+export async function naturalObsidian (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  const have = (): number => countItems(bot, 'obsidian')
+  if (have() >= want || countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) return
+  const quiet = (err: unknown): void => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err }
+  const lavaNext = (p: Vec3): boolean => [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0], [0, 1, 0]].some(([dx, dy, dz]) => bot.blockAt(p.offset(dx, dy, dz))?.name === 'lava')
+  const mineInSight = async (range: number): Promise<void> => {
+    const id = bot.registry.blocksByName.obsidian?.id
+    if (id == null) return
+    const found = (bot.findBlocks?.({ matching: id, maxDistance: range, count: 64 }) ?? []).filter(p => !lavaNext(p))
+    if (found.length === 0) return
+    log(`obsidian: ${found.length} in sight: mining ${Math.min(found.length, want - have())}`)
+    await executor.task('mine the obsidian', async (s) => await withNetherSafety(bot, async () => await collectBlock(bot, { positions: found.slice(0, want - have()), pickup: true, avoidLava: true }, s)), signal, { uses: () => Math.max(0, want - have()) })
+      .catch(err => { quiet(err); log(`obsidian: ${(err as Error).message}`) })
+  }
+  await mineInSight(64)
+  const seed = (bot as any).survival?.playOptions?.seed as Seed | undefined
+  if (have() >= want || seed == null || inNether(bot)) return
+  const tried = (c: { x: number, z: number }): boolean => executor.memory.getPois(RUINED_PORTAL_TRIED, { dimension: 'overworld' }).some(p => Math.hypot(p.x - c.x, p.z - c.z) < 32)
+  const portal = ruinedPortalCandidates(seed, bot.entity.position).find(c => c.distance <= RUINED_PORTAL_TRIP && !tried(c))
+  if (portal == null) return
+  const at = new Vec3(portal.x + 8, bot.entity.position.y, portal.z + 8)
+  log(`obsidian: to the ruined portal at ${portal.x} ${portal.z} (${portal.distance.toFixed(0)} blocks)`)
+  executor.memory.addPoi(RUINED_PORTAL_TRIED, new Vec3(portal.x, 0, portal.z), 'overworld')
+  await withTickBudget(bot, RUINED_PORTAL_TICKS, signal, async (budget) => {
+    await executor.task('to a ruined portal', async (s) => await overland(bot, { target: at, range: 16 }, s), budget).catch(quiet)
+    await mineInSight(48)
+  }).catch(err => { quiet(err); log(`obsidian: the ruined portal: ${(err as Error).message}`) })
+}
+
 export async function obsidianFromPools (bot: Bot, executor: Executor, count: number, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
   const have = (): number => countItems(bot, 'obsidian')
   if (have() >= count) return true
@@ -898,6 +944,8 @@ export async function obsidianFromPools (bot: Bot, executor: Executor, count: nu
   if (countItems(bot, ['water_bucket', 'bucket']) === 0) await executor.obtain([{ item: 'bucket', count: 1 }], signal).catch(quiet)
   await refillWater(bot, signal)
   if (countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) await executor.obtain([{ item: 'diamond_pickaxe', count: 1 }], signal).catch(quiet)
+  // the obsidian in the world first (in sight, a ruined portal's)
+  await naturalObsidian(bot, executor, count, signal, log)
   for (let depth = 0; depth < 2 && have() < count; depth++) {
     if (depth === 1 && bot.entity.position.y >= DEEP_LAVA_Y + 10) {
       await executor.task('down to the deep lava', async (s) => await descendTo(bot, DEEP_LAVA_Y, {}, s), signal).catch(quiet)

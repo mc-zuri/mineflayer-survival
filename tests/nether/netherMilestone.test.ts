@@ -721,3 +721,33 @@ test('pearls in the nether: an enderman far under the bot is none to hunt for th
   assert.equal(tasks.filter(t => t === 'endermen for pearls').length, 0)
   assert.deepEqual(tasks, Array(PEARL_NETHER_LEGS).fill('a leg for pearls'))
 })
+
+test('a portal with a diamond pickaxe and the seed known goes to the nearest ruined portal for its obsidian before any lava', async () => {
+  const { buildAPortal, RUINED_PORTAL_TRIED } = await import('../../src/milestones')
+  const { ruinedPortalCandidates } = await import('../../src/worldgen/placement')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 70, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1), item('flint_and_steel', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.survival = { ...(bot.survival ?? {}), playOptions: { seed: '2' } }
+  bot.findBlocks = () => []
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async () => { throw new Error('stop here') },
+    task: async (name: string) => { calls.push(name) }
+  }
+  await buildAPortal(bot, executor, new AbortController().signal, () => {}).catch(() => {})
+  const nearest = ruinedPortalCandidates('2', { x: 0.5, z: 0.5 })[0]
+  assert.ok(calls.includes('to a ruined portal'), calls.join(', '))
+  assert.ok(!calls.slice(0, calls.indexOf('to a ruined portal')).includes('to the lava'), calls.join(', '))
+  // noted, and not gone to again
+  assert.ok(executor.memory.getPois(RUINED_PORTAL_TRIED).some((p: any) => p.x === nearest.x && p.z === nearest.z))
+  calls.length = 0
+  await buildAPortal(bot, executor, new AbortController().signal, () => {}).catch(() => {})
+  // the next time, the next candidate (the first is noted as gone to)
+  const second = ruinedPortalCandidates('2', { x: 0.5, z: 0.5 })[1]
+  assert.equal(calls.filter(c => c === 'to a ruined portal').length, 1, calls.join(', '))
+  assert.ok(executor.memory.getPois(RUINED_PORTAL_TRIED).some((p: any) => p.x === second.x && p.z === second.z))
+})

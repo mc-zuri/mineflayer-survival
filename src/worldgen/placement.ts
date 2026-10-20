@@ -151,3 +151,30 @@ export const END_CITIES: StructureSet<RandomSpreadPlacement> = {
   placement: { spacing: 20, separation: 11, salt: 10387313, spreadType: 'triangular' },
   structures: [{ structure: 'end_city', weight: 1 }]
 }
+
+/**
+ * data/minecraft/worldgen/structure_set/ruined_portals.json (StructureSets: RandomSpreadStructurePlacement(40, 15,
+ * LINEAR, 34222645), the same in 1.21.11 and 26.3): a ruined portal of the biome's kind in every overworld biome
+ */
+export const RUINED_PORTALS: StructureSet<RandomSpreadPlacement> = {
+  placement: { spacing: 40, separation: 15, salt: 34222645, spreadType: 'linear' },
+  structures: [{ structure: 'ruined_portal', weight: 1 }]
+}
+
+/**
+ * The ruined portals' candidate chunks about `from` (block coordinates) for a known seed, one per region of `radius`
+ * regions out (default 1: 3 x 3 regions, some 1900 blocks across), at their locate position; nearest first.
+ */
+export function ruinedPortalCandidates (levelSeed: Seed, from: { x: number, z: number }, radius = 1): Array<{ x: number, z: number, chunkX: number, chunkZ: number, distance: number }> {
+  const placement = RUINED_PORTALS.placement
+  const region = regionOf(placement, Math.floor(Math.floor(from.x) / 16), Math.floor(Math.floor(from.z) / 16))
+  const out: Array<{ x: number, z: number, chunkX: number, chunkZ: number, distance: number }> = []
+  for (let rx = region.x - radius; rx <= region.x + radius; rx++) {
+    for (let rz = region.z - radius; rz <= region.z + radius; rz++) {
+      const chunk = getPotentialStructureChunk(placement, levelSeed, rx * placement.spacing, rz * placement.spacing)
+      const at = locatePos(chunk)
+      out.push({ x: at.x, z: at.z, chunkX: chunk.x, chunkZ: chunk.z, distance: Math.hypot(at.x - from.x, at.z - from.z) })
+    }
+  }
+  return out.sort((a, b) => a.distance - b.distance)
+}
