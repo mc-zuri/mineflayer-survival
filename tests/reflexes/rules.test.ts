@@ -446,3 +446,17 @@ test('hostiles reflex: with fists only, the ones that shoot and more than one ar
   assert.strictEqual(check(hostilesReflex, { entities: [mob('skeleton', 6)], items: [item('stone_axe')] }), 'fight skeleton')
   assert.strictEqual(check(hostilesReflex, { entities: [mob('skeleton', 6)], items: [item('stone_pickaxe')] }), 'flee')
 })
+
+test('hostiles reflex: a bare bot\'s fight with a lone spider is given up once a skeleton comes into sight (until), to flee', async () => {
+  const spider = entity({ name: 'spider', position: at(3) })
+  const bot = fakeBot({ entities: [spider] })
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const task = hostilesReflex.check(engine.context())
+  assert.strictEqual(task?.detail, 'fight spider')
+  const skeleton = entity({ name: 'skeleton', position: at(8) })
+  bot.entities[skeleton.id] = skeleton
+  const result: any = await task!.run(new AbortController().signal)
+  assert.strictEqual(result.killed, false)
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'flee')
+  engine.stop()
+})

@@ -343,13 +343,19 @@ export const hostilesReflex: Reflex = {
         run: async (signal) => await holdOffBlazes(bot, { signal, maxTicks: config.hostiles.fightTicks })
       }
     }
+    // the odds looked at again each tick of the fight (a skeleton come into sight while the bare bot fought a spider
+    // shot it dead from 6 blocks, 1.21.11): turned, the fight is given up and the reflex flees next
+    const turned = (): boolean => {
+      const now = hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange) })
+      return now.length > 0 && unarmedOutmatched(bot, now, config)
+    }
     return {
       name: 'hostiles',
       priority: config.hostiles.priority,
       detail: `${useBow ? 'shoot' : 'fight'} ${target.name ?? ''}`,
       run: async (signal) => useBow
         ? await shoot(bot, target, { signal, maxShots: 3 })
-        : await fight(bot, target, { signal, ...meleeOptions(target, config) })
+        : await fight(bot, target, { signal, ...meleeOptions(target, config), until: turned })
     }
   }
 }

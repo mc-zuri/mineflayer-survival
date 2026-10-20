@@ -88,3 +88,13 @@ test('the crossbow mobs: a pillager and a piglin, charging by is_charging_crossb
     assert.strictEqual(isCrossbowMob(bot, entity({ name: 'skeleton', position: new Vec3(5, 64, 0), version })), false)
   }
 })
+
+test('fight: given up, not killed, once its until holds (the hostiles reflex\'s odds turned)', async () => {
+  const { fight } = await import('../../src/skills/fight')
+  const spider = entity({ name: 'spider', position: new Vec3(5.5, 64, 0.5) })
+  const bot = fakeBot({ entities: [spider] })
+  bot.on = bot.on.bind(bot)
+  const result = await fight(bot, spider, { until: () => true })
+  assert.strictEqual(result.killed, false)
+  assert.strictEqual(result.hits, 0)
+})

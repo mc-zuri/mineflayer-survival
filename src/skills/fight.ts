@@ -30,6 +30,8 @@ export interface FightOptions extends SkillOptions {
    * keeps the fight on the bot's own level (steerToward's maxDrop)
    */
   maxDrop?: number
+  /** given up (returned, not killed) once this holds: the fight's odds turned (the hostiles reflex's flee) */
+  until?: () => boolean
 }
 
 export interface FightResult {
@@ -232,6 +234,7 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
     while (isAlive(bot, target)) {
       throwIfAborted(signal)
       if (ticks++ >= maxTicks) throw new TaskError('TIMEOUT', `${name} still alive after ${maxTicks} ticks`)
+      if (opts.until?.() === true) break
       lastPosition = target.position.clone()
       const eye = eyePosition(bot)
       const box = entityBox(target)
