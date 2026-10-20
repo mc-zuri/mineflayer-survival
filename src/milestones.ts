@@ -834,7 +834,7 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   // mark): a 1.21.11 bot with no bow, its bottles and no cream went in, the brew skipped for want of the cream, and
   // fought seed 2's other throne at (-290, 77, -209) with its sword alone and burned (full-1.21.11-fresh-e)
   if (gate.bow === false && still.length === 0) {
-    await brewKit(bot, executor, signal, log)
+    await brewKit(bot, executor, signal, log, true)
     bowlessBrewGate(bot)
     return
   }
@@ -907,11 +907,13 @@ const brewKitTries = new WeakMap<Bot, number>()
  * resistance 26.3 bots in iron armor got their 8 rods by seed 2's throne at (-277, 77, -159) 3 runs of 3, with none 0
  * of 3 (tests/integration/blaze BLAZE_KIT=runIron)
  */
-export async function brewKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+export async function brewKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, required = false): Promise<void> {
   if (inNether(bot) || waterBottles(bot) >= BREW_BOTTLES) return
-  // (BREW_KIT_TRIES at most a game: none to be had near, the gate's tries aren't spent on it again and again)
+  // (BREW_KIT_TRIES at most a game: none to be had near, the gate's tries aren't spent on it again and again; not when
+  // the gate requires them, no bow to be had: the bowless gate's 3 tries gone, it failed at 'without a bow or 3 water
+  // bottles' for good, full-26.3-fresh-u)
   const tries = brewKitTries.get(bot) ?? 0
-  if (tries >= BREW_KIT_TRIES) return
+  if (tries >= BREW_KIT_TRIES && !required) return
   brewKitTries.set(bot, tries + 1)
   await withTickBudget(bot, BREW_KIT_TICKS, signal, async (s) => {
     const want = BREW_BOTTLES - waterBottles(bot)
@@ -974,6 +976,9 @@ export const NETHER_FOOD_POINTS_RENEWABLE = 80
 export const NETHER_ARROWS_FIRE_RESISTANT = 16
 /** the arrows the gate asks for when no chicken is to be found for the feathers: what the bow and the night's skeletons give */
 export const NETHER_ARROWS_NO_FEATHERS = 32
+/** the bots whose gate went without the arrows' chickens once (netherGate) */
+const chickensMissed = new WeakSet<Bot>()
+
 /** the fire resistance potions that let the gate ask for fewer arrows */
 export const NETHER_FIRE_POTIONS = 2
 
@@ -988,7 +993,10 @@ export function netherGate (bot: Bot, executor: Pick<Executor, 'memory'> & { sig
   const renewable = knownFarms(executor.memory, 'overworld').length > 0 || executor.memory.getPois(HERD, { dimension: 'overworld' }).length > 0
   const food = Number.isFinite(option) && option > 0 ? option : renewable ? NETHER_FOOD_POINTS_RENEWABLE : NETHER_FOOD_POINTS
   const fireRes = bot.inventory.items().filter(i => (POTION_IDS.fire_resistance ?? []).includes(potionOf(i) ?? -1)).reduce((n, i) => n + i.count, 0)
-  const noChickens = (executor.sightings?.misses('chicken') ?? 0) > 0
+  // (once missed, for the game: a chicken seen after clears the sightings' miss, and the gate went back to 64 arrows
+  // and its hunt for 7 chickens, full-1.21.11-fresh-f)
+  if ((executor.sightings?.misses('chicken') ?? 0) > 0) chickensMissed.add(bot)
+  const noChickens = chickensMissed.has(bot)
   const arrows = fireRes >= NETHER_FIRE_POTIONS ? NETHER_ARROWS_FIRE_RESISTANT : noChickens ? NETHER_ARROWS_NO_FEATHERS : NETHER_ARROWS
   // no bow held and no spider found for its string: none asked for
   const bow = bot.inventory.items().some(i => i.name === 'bow') || countItems(bot, 'string') >= 3 || (executor.sightings?.misses('spider') ?? 0) === 0

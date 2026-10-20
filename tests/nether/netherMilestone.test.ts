@@ -343,6 +343,8 @@ test('netherGate: 80 food points with a farm or a herd known, else 120, the play
   bot.survival = { playOptions: { netherFood: 60 } }
   assert.equal(netherGate(bot, { memory }).food, 60)
   assert.equal(netherGate(bot, { memory, sightings: { misses: (n: string) => n === 'chicken' ? 1 : 0 } }).arrows, 32)
+  // and so on, a chicken seen since (its miss cleared)
+  assert.equal(netherGate(bot, { memory, sightings: { misses: () => 0 } }).arrows, 32)
   const potion = (id: number): any => Object.assign(item('potion', 1), { componentMap: new Map([['potion_contents', { data: { potionId: id } }]]) })
   const brewed = fakeBot({ items: [potion(11), potion(12)] })
   assert.equal(netherGate(brewed, { memory }).arrows, 16)
@@ -1095,4 +1097,17 @@ test('netherKit: no bow to be had, the water bottles held but no slime ball nor 
   const ready = fakeBot({ items: [...gear, item('slime_ball', 1)] })
   ready.game.dimension = 'overworld'
   assert.equal(await netherKit(ready, executor, new AbortController().signal, () => {}).then(() => null, e => e), null)
+})
+
+test('brewKit: its tries spent, it tries no more unless the gate requires the bottles (no bow to be had)', async () => {
+  const { brewKit, BREW_KIT_TRIES } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [] })
+  bot.game.dimension = 'overworld'
+  let obtains = 0
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async () => { obtains++ }, task: async () => {} }
+  for (let i = 0; i < BREW_KIT_TRIES + 2; i++) await brewKit(bot, executor, new AbortController().signal, () => {})
+  assert.equal(obtains, BREW_KIT_TRIES)
+  await brewKit(bot, executor, new AbortController().signal, () => {}, true)
+  assert.equal(obtains, BREW_KIT_TRIES + 1)
 })
