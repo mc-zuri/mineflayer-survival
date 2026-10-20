@@ -61,10 +61,11 @@ async function respawnRun (): Promise<RespawnRun> {
   await waitFor(() => Math.abs(bot.entity.position.x - x - 0.5) < 1, 100)
   await bot.waitForChunksToLoad()
   await run(`fill ${x - 16} ${GROUND} -16 ${x + 30} ${GROUND + 6} 16 minecraft:air`)
-  // the hut: x0..x0+4 by -2..2, 4 high, its door in the west wall facing east, a torch and the kit's chest inside
+  // the hut: x0..x0+4 by -2..2, its floor in the ground and 3 high inside, its door in the west wall facing east, a
+  // torch and the kit's chest inside
   const x0 = x
   if (WITH_BASE) {
-    await run(`fill ${x0} ${GROUND} -2 ${x0 + 4} ${GROUND + 3} 2 minecraft:cobblestone hollow`)
+    await run(`fill ${x0} ${GROUND - 1} -2 ${x0 + 4} ${GROUND + 3} 2 minecraft:cobblestone hollow`)
     await run(`setblock ${x0} ${GROUND} 0 minecraft:oak_door[facing=east,half=lower,hinge=left,open=false]`)
     await run(`setblock ${x0} ${GROUND + 1} 0 minecraft:oak_door[facing=east,half=upper,hinge=left,open=false]`)
     await run(`setblock ${x0 + 3} ${GROUND} 1 minecraft:chest[facing=west]{Items:[{Slot:0b,id:"minecraft:stone_sword",count:1},{Slot:1b,id:"minecraft:iron_chestplate",count:1},{Slot:2b,id:"minecraft:cooked_beef",count:8}]}`)
@@ -100,14 +101,12 @@ async function respawnRun (): Promise<RespawnRun> {
   await waitFor(() => countItems(bot, 'torch') > 0, 100)
   await run(`summon minecraft:zombie ${spot.x + 1.5} ${GROUND} ${spot.z + 0.5} {NoAI:1b,PersistenceRequired:1b,Tags:["killer"]}`)
   await waitFor(() => bot.nearestEntity(e => e.name === 'zombie') != null, 100)
-  await run('gamerule advance_time true')
-  // the respawn: two zombies by the bed as the bot comes back
-  const onSpawn = (): void => {
-    bot.off('spawn', onSpawn)
-    void run(`summon minecraft:zombie ${bed.x - 5 + 0.5} ${GROUND} ${bed.z + 0.5} {PersistenceRequired:1b}`)
-    void run(`summon minecraft:zombie ${bed.x - 4 + 0.5} ${GROUND} ${bed.z + 4.5} {PersistenceRequired:1b}`)
+  // two zombies by the bed, held (no AI, the bot not drawn to them) till the bot is dead
+  for (const [dx, dz] of [[-5, 0], [-4, 4]]) {
+    const out = await run(`summon minecraft:zombie ${bed.x + dx + 0.5} ${GROUND} ${bed.z + dz + 0.5} {NoAI:1b,PersistenceRequired:1b,Tags:["bedzombie"]}`)
+    if (!out.some(l => /Summoned/.test(l))) throw new Error(`no zombie by the bed: ${out.join(' | ')}`)
   }
-  bot.on('spawn', onSpawn)
+  await run('gamerule advance_time true')
   let deaths = 0
   const onDeath = (): void => { deaths++ }
   bot.on('death', onDeath)
@@ -115,16 +114,22 @@ async function respawnRun (): Promise<RespawnRun> {
   await run(`damage ${USER} 100 minecraft:mob_attack by @e[tag=killer,limit=1]`)
   await waitFor(() => bot.health <= 0, 100)
   await run('kill @e[tag=killer]')
+  // the zombies by the bed let go before the bot's back there (held, they don't keep it from its bed: the night slept
+  // through)
+  const released = await run('execute as @e[tag=bedzombie] run data merge entity @s {NoAI:0b}')
   const ctrl = new AbortController()
   let ticks = 0
   const onTick = (): void => { if (++ticks >= RECOVERY_TICKS) ctrl.abort(new Error('the recovery ran out of ticks')) }
   bot.on('physicsTick', onTick)
   try {
-    await runner.recover(ctrl.signal).catch(err => { lines.push(`recover threw: ${(err as Error).message}`) })
+    const recovering = runner.recover(ctrl.signal).catch(err => { lines.push(`recover threw: ${(err as Error).message}`) })
+    await waitFor(() => bot.health > 0 && bot.entity.position.distanceTo(bed.offset(0.5, 0, 0.5)) < 4, 200)
+    const p = bot.entity.position
+    lines.push(`respawned at ${p.x.toFixed(1)} ${p.y.toFixed(1)} ${p.z.toFixed(1)}, the zombies ${Object.values(bot.entities).filter(e => e.name === 'zombie').map(e => e.position.distanceTo(p).toFixed(1)).join(', ')} off (${released.length} let go)`)
+    await recovering
   } finally {
     bot.off('physicsTick', onTick)
     bot.off('death', onDeath)
-    bot.off('spawn', onSpawn)
     bot.survival.reflexes!.enabled = false
     await run('gamerule advance_time false')
   }
@@ -137,7 +142,7 @@ async function respawnRun (): Promise<RespawnRun> {
     day: (bot.time?.timeOfDay ?? 0) < 12542 || (bot.time?.timeOfDay ?? 0) > 23460
   }
   console.log(`[respawn] run ${runs} on ${DEFAULT_VERSION}: ${result.alive ? 'alive' : `DIED ${result.deaths} more times`}, ${result.kit ? 'the kit' : 'NO KIT'}, ${result.picked ? 'the death spot\'s items back' : 'the death spot\'s items not back'}, ${ticks} ticks, time ${bot.time?.timeOfDay ?? '?'}`)
-  for (const l of lines.filter(l => /after the respawn|refuge|death spot|kit|night/.test(l))) console.log(`[respawn]   ${l}`)
+  for (const l of lines.filter(l => /respawned at|after the respawn|refuge|death spot|kit|night|sleep/.test(l))) console.log(`[respawn]   ${l}`)
   return result
 }
 
