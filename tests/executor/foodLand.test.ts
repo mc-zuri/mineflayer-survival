@@ -275,3 +275,24 @@ test('BiomeSurvey.wide: a patch of 7 food biome chunks of the 29 about it is not
   assert.equal(survey.wide({ x: -112, z: -40 }), false)
   assert.equal(survey.wide({ x: 0, z: -224 }), true)
 })
+
+test('seekFoodLand takes the scouting under way up again after a preemption, not the next direction (hunt2-e: all 8 started within 4000 ticks, none walked)', async () => {
+  const { TaskError } = await import('../../src/core/errors')
+  const bot = fakeBot('26.3', peaks)
+  const memory = new WorldMemory()
+  const survey = new BiomeSurvey(bot, memory)
+  const trips: string[] = []
+  let preempt = 2
+  const go = async (target: Vec3, onHop?: () => boolean): Promise<void> => {
+    trips.push(`${target.x} ${target.z}`)
+    if (preempt-- > 0) throw new TaskError('PREEMPTED', 'a fight')
+    bot.entity.position = target.clone()
+    onHop?.()
+  }
+  const args = { survey, memory, home: new Vec3(0, 120, 0), misses: () => 0, forgetLand: () => {}, travel: go }
+  for (let i = 0; i < 2; i++) await assert.rejects(seekFoodLand(bot, args), /a fight/)
+  const land = await seekFoodLand(bot, args)
+  assert.deepEqual(trips.slice(0, 3), ['320 0', '320 0', '320 0'])
+  assert.ok(land != null && land.x > 200)
+  assert.equal(memory.getPois('food_scouted').length, 1)
+})

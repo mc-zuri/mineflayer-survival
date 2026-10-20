@@ -177,7 +177,15 @@ export class BiomeSurvey {
   }
 
   /** the seed's reads under way: about a home, their promise */
-  private seedRun: { center: { x: number, z: number }, done: Promise<void> } | null = null
+  private seedRun: { center: { x: number, z: number }, done: Promise<void>, read: boolean } | null = null
+  /** the scouting under way (seekFoodLand's): from a home, its direction */
+  scouting: { center: { x: number, z: number }, i: number } | null = null
+
+  /** whether the seed's reads about `center` are in */
+  seedRead (center: { x: number, z: number }): boolean {
+    const run = this.seedRun
+    return run != null && run.read && Math.hypot(run.center.x - center.x, run.center.z - center.z) <= FED_RADIUS
+  }
 
   /**
    * The seed's biomes read about `center` in the background (surveySeed with the generator `open` gives): the reads
@@ -198,7 +206,9 @@ export class BiomeSurvey {
         await biomes.dispose().catch(() => {})
       }
     })()
-    this.seedRun = { center: { x: center.x, z: center.z }, done }
+    const record = { center: { x: center.x, z: center.z }, done, read: false }
+    void done.then(() => { record.read = true })
+    this.seedRun = record
     return done
   }
 
@@ -410,17 +420,22 @@ export async function seekFoodLand (bot: Bot, args: FoodLandArgs, signal?: Abort
   const wide = (p: { x: number, z: number }): boolean => survey.wide(p)
   let dest = nearestFoodBiome(memory, bot.entity.position, center, wide)
   // scouted for: out downhill, the chunks surveyed after each hop, until `enough`; false with no direction left
+  // (the scouting under way taken up again after a preemption, not the next direction: a 26.3 bot's fights at night
+  // had it start all 8 of seed 31337's directions within 4000 ticks, none walked, hunt2-e)
   const scout = async (enough: () => boolean): Promise<boolean> => {
-    const i = scoutDirection(survey, memory, center)
+    const under = survey.scouting
+    const i = under != null && Math.hypot(under.center.x - center.x, under.center.z - center.z) <= FED_RADIUS ? under.i : scoutDirection(survey, memory, center)
     if (i == null) return false
-    memory.addPoi(FOOD_SCOUTED_POI, center.offset(i, 0, 0), 'overworld', String(i))
+    survey.scouting = { center: { x: center.x, z: center.z }, i }
     const [dx, dz] = DIRECTIONS[i]
     const target = new Vec3(Math.round(center.x + dx * SCOUT_DISTANCE), center.y, Math.round(center.z + dz * SCOUT_DISTANCE))
-    log(`${why}: scouting for food land toward ${target.x} ${target.z}`)
+    if (under?.i !== i) log(`${why}: scouting for food land toward ${target.x} ${target.z}`)
     await go(target, () => {
       survey.survey()
       return enough()
     })
+    survey.scouting = null
+    memory.addPoi(FOOD_SCOUTED_POI, center.offset(i, 0, 0), 'overworld', String(i))
     survey.survey()
     return true
   }
@@ -429,9 +444,8 @@ export async function seekFoodLand (bot: Bot, args: FoodLandArgs, signal?: Abort
   const seed = args.seed
   if (dest == null && seed != null && !memory.getPois(SEED_SURVEYED_POI, { dimension: 'overworld' }).some(p => Math.hypot(p.x - center.x, p.z - center.z) <= FED_RADIUS)) {
     const reads = survey.readSeed(center, async () => await (args.openSeed ?? openSeedBiomes)(seed, bot.version))
-    let read = false
-    void reads.then(() => { read = true })
-    if (!read) await scout(() => read || nearestFoodBiome(memory, bot.entity.position, center, wide) != null)
+    const read = (): boolean => survey.seedRead(center)
+    if (!read()) await scout(() => read() || nearestFoodBiome(memory, bot.entity.position, center, wide) != null)
     await untilDone(reads, signal)
     dest = nearestFoodBiome(memory, bot.entity.position, center, wide)
   }
