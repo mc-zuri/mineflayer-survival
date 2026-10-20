@@ -9,7 +9,8 @@ import { navigate, walkTo } from '../skills/navigate'
 import { isSolid } from '../skills/placement'
 import { travel } from '../skills/travel'
 import { tunnelTo } from '../skills/tunnel'
-import { trace, waitTicks, waitUntil } from '../skills/util'
+import { countItems, trace, waitTicks, waitUntil } from '../skills/util'
+import { placeBlock } from '../skills/placeBlock'
 import { portalDestination } from './coords'
 import { blockGetter, buildPortal, lightPortal, type BuildPortalArgs } from './portalSkills'
 import { checkPortalFrame, portalFrame, type PortalFrame } from './portal'
@@ -69,6 +70,43 @@ export function unlitFrameAt (bot: Bot, near: Vec3): PortalFrame | null {
     }
   }
   return null
+}
+
+/** how far round a remembered portal its frame is looked for (frameNear) */
+export const FRAME_SEARCH_RADIUS = 8
+/** the frame's obsidian a frame found may be missing, put back from what's carried */
+export const FRAME_GAPS = 4
+
+/**
+ * A portal frame (4 by 5, either axis) within `radius` of `near` whose inside is empty or lit, with at most `maxMissing`
+ * of its obsidian missing, the nearest and the most whole first; its missing cells. A ghast's fireball puts a portal
+ * out (its blast breaks the portal blocks, not the obsidian), and a 1.21.11 bot back at its arrival portal stood 3 or
+ * 4 blocks off it: unlitFrameAt, at the remembered block only, found none, and the bot built another in the nether
+ * by a lava cast it couldn't make, till the game stopped (full-1.21.11-fresh-l)
+ */
+export function frameNear (bot: Bot, near: Vec3, radius = FRAME_SEARCH_RADIUS, maxMissing = FRAME_GAPS): { frame: PortalFrame, missing: Vec3[] } | null {
+  const getBlock = blockGetter(bot)
+  const c = near.floored()
+  let best: { frame: PortalFrame, missing: Vec3[], score: number } | null = null
+  for (let dy = -radius; dy <= radius; dy++) {
+    for (let da = -radius; da <= radius; da++) {
+      for (let db = -radius; db <= radius; db++) {
+        for (const axis of ['x', 'z'] as const) {
+          const origin = { x: c.x + da, y: c.y + dy, z: c.z + db }
+          // (the frame's bottom middle obsidian there, or no frame: the quick test first)
+          const frame = portalFrame(origin, axis)
+          const first = getBlock(frame.obsidian[0])
+          const second = getBlock(frame.obsidian[1])
+          if (first?.name !== 'obsidian' && second?.name !== 'obsidian') continue
+          const check = checkPortalFrame(getBlock, frame)
+          if (check.blocked.length > 0 || check.missing.length > maxMissing) continue
+          const score = check.missing.length * 100 + Math.hypot(da, dy, db)
+          if (best == null || score < best.score) best = { frame, missing: check.missing.map(p => new Vec3(p.x, p.y, p.z)), score }
+        }
+      }
+    }
+  }
+  return best == null ? null : { frame: best.frame, missing: best.missing }
 }
 
 /** a cell the bot can stand in: solid below, two cells clear, not a portal, lava or fire */
@@ -297,10 +335,15 @@ async function takePortal (bot: Bot, to: Dimension, args: EnterNetherArgs, signa
       // the frame there gone out (no portal blocks in it): lit again with the flint and steel (a 26.3 bot back from
       // three nights' pearl hunt found its portal out and tried to build another, five times at once)
       if (portal == null) {
-        const frame = unlitFrameAt(bot, at)
-        if (frame != null) {
-          trace('takePortal: the frame at', at.toString(), 'is out: lighting it')
-          await lightPortal(bot, frame, signal).catch(err => { if (isAbort(err)) throw err; trace('takePortal: not lit:', (err as Error).message) })
+        const found = unlitFrameAt(bot, at) != null ? { frame: unlitFrameAt(bot, at) as PortalFrame, missing: [] as Vec3[] } : frameNear(bot, at)
+        if (found != null) {
+          trace('takePortal: the frame by', at.toString(), 'is out:', found.missing.length > 0 ? `${found.missing.length} obsidian put back,` : '', 'lighting it')
+          // its gaps filled from the obsidian carried (a blast that took some)
+          for (const cell of found.missing) {
+            if (countItems(bot, 'obsidian') === 0) break
+            await placeBlock(bot, { pos: cell, item: 'obsidian' }, signal).catch(err => { if (isAbort(err)) throw err; trace('takePortal: obsidian not put back at', cell.toString(), (err as Error).message) })
+          }
+          await lightPortal(bot, found.frame, signal).catch(err => { if (isAbort(err)) throw err; trace('takePortal: not lit:', (err as Error).message) })
           portal = findPortal(bot, 16)
         }
       }
@@ -308,7 +351,13 @@ async function takePortal (bot: Bot, to: Dimension, args: EnterNetherArgs, signa
   }
   if (portal == null) {
     if (args.build === false) throw new SkillError('NOT_FOUND', `no portal to ${to} known near ${bot.entity.position.toString()}`)
-    const built = await buildPortal(bot, typeof args.build === 'object' ? args.build : {}, signal)
+    // in the nether a frame is of obsidian, never cast: its water boils away (a cast's 'no empty bucket to carry the
+    // lava in', 'no site to cast', five times, and the game stopped, full-1.21.11-fresh-l)
+    const opts = typeof args.build === 'object' ? args.build : {}
+    if (here === 'the_nether' && opts.method !== 'obsidian' && countItems(bot, 'obsidian') < 10) {
+      throw new SkillError('MISSING_ITEMS', `no portal near ${bot.entity.position.floored().toString()} to light and ${countItems(bot, 'obsidian')} obsidian of the 10 a frame takes in the nether`)
+    }
+    const built = await buildPortal(bot, here === 'the_nether' ? { ...opts, method: 'obsidian' } : opts, signal)
     portal = built.portal[0]
   }
   const result = await enterPortal(bot, { ...args, portal }, signal)

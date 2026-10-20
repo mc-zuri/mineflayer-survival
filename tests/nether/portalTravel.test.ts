@@ -92,3 +92,29 @@ test('enterPortal digs a stair to beside the portal when no path gets there', as
   }
   assert.ok(calls.some(c => c.startsWith('tunnel')), calls.join(', '))
 })
+
+test('frameNear: an unlit frame (a ghast put the portal out) is found from 3 or 4 blocks off the remembered portal, a gap or two in it noted; none with its inside blocked', async () => {
+  const { frameNear } = await import('../../src/nether/portalTravel')
+  const { portalFrame } = await import('../../src/nether/portal')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const frame = portalFrame({ x: 10, y: 64, z: 0 }, 'x')
+  const obsidian = new Set(frame.obsidian.map(p => `${p.x},${p.y},${p.z}`))
+  const world = (gaps: string[] = [], inside = 'air') => (p: any) => {
+    const k = `${p.x},${p.y},${p.z}`
+    if (obsidian.has(k) && !gaps.includes(k)) return 'obsidian'
+    if (frame.interior.some(c => c.x === p.x && c.y === p.y && c.z === p.z)) return inside
+    return p.y < 64 ? 'netherrack' : 'air'
+  }
+  // the remembered spot 3 off along z and 1 along x
+  const remembered = new Vec3(12, 65, 3)
+  const found = frameNear(fakeBot({ world: world() }), remembered)
+  assert.ok(found != null)
+  assert.deepStrictEqual(found.frame.origin, { x: 10, y: 64, z: 0 })
+  assert.deepStrictEqual(found.missing, [])
+  const gap = `${frame.obsidian[3].x},${frame.obsidian[3].y},${frame.obsidian[3].z}`
+  const gapped = frameNear(fakeBot({ world: world([gap]) }), remembered)
+  assert.ok(gapped != null)
+  assert.deepStrictEqual(gapped.missing.map(p => `${p.x},${p.y},${p.z}`), [gap])
+  assert.equal(frameNear(fakeBot({ world: world([], 'netherrack') }), remembered), null)
+})
