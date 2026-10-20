@@ -190,6 +190,7 @@ export function describeStep (step: PlanStep): string {
     case 'mine': return `mine ${step.count} ${step.item} (${step.blockCount} ${step.block})`
     case 'kill': return `kill ${step.kills} ${step.mob} for ${step.count} ${step.item}`
     case 'smelt': return `smelt ${step.count} ${step.item}`
+    case 'fish': return `fish ${step.count} ${step.item} (${step.catches} catches)`
     case 'farm': return `farm ${step.count} ${step.item} (${step.plots > 0 ? `${step.plots} plots sown, ` : ''}${step.cycles} harvests)`
     case 'loot': return `loot ${step.count} ${step.item} at ${step.from.x} ${step.from.y} ${step.from.z}`
     default: return `${step.kind} ${step.count} ${step.item}`
@@ -462,7 +463,7 @@ export class Executor {
     if (!TaskError.is(err, 'NOT_FOUND')) return
     const names = step.kind === 'kill'
       ? [step.mob, ...mobSubstitutes(step)]
-      : step.kind === 'mine' ? step.blocks.filter(b => SIGHTED_BLOCKS.includes(b)) : []
+      : step.kind === 'mine' ? step.blocks.filter(b => SIGHTED_BLOCKS.includes(b)) : step.kind === 'fish' ? ['water'] : []
     if (names.length === 0) return
     this.sightings.missing(names)
     this.log(`none of ${names.join(', ')} found: the plans go for another source for a while`)

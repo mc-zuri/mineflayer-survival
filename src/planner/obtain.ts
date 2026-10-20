@@ -6,7 +6,7 @@ import type { RegistryLike } from '../core/registry'
 import { itemTags } from '../core/tags'
 import { recipesFor, type CraftRecipe } from './recipes'
 import {
-  BARTER, BARTER_FIND, BARTER_TICKS_PER_INGOT, BLOCK_SOURCES, CRAFT_TICKS, DIMENSION_TRAVEL, FIGHT_TICKS, FILL_TICKS, FLUIDS,
+  BARTER, BARTER_FIND, BARTER_TICKS_PER_INGOT, BLOCK_SOURCES, CRAFT_TICKS, DIMENSION_TRAVEL, FIGHT_TICKS, FILL_TICKS, FISHING, FLUIDS,
   FUELS, GOLD_ARMOR, MOB_SOURCES, PICKUP_TICKS, SMELTING, WALK_TICKS_PER_BLOCK,
   type BarterOffer, type BlockSource, type FluidSource, type MobSource, type SmeltingRecipe
 } from './sources'
@@ -395,6 +395,7 @@ export class Resolver {
     if (use('fill')) { const f = this.fluids.get(item); if (f != null) out.push((s, p, l) => this.fill(s, f, n, p, l)) }
     if (use('kill') && this.opts.undergroundOnly !== true) for (const m of this.mobSources.get(item) ?? []) out.push((s, p, l) => this.kill(s, m, item, n, p, l))
     if (use('farm') && this.opts.undergroundOnly !== true) { const f = FARM_CROPS[item]; if (f != null) out.push((s, p, l) => this.farm(s, f, item, n, p, l)) }
+    if (use('fish') && this.opts.undergroundOnly !== true && FISHING.drops.some(d => d.item === item)) out.push((s, p, l) => this.fish(s, item, n, p, l))
     if (use('barter')) { const o = this.barter.get(item); if (o != null) out.push((s, p, l) => this.trade(s, o, n, p, l)) }
     return out
   }
@@ -648,6 +649,28 @@ export class Resolver {
     s.dims.add(src.dimension)
     s.steps.push({ kind: 'kill', item, count: n, mob: src.mob, kills, weapon: s.inv.bestTool('sword'), dimension: src.dimension, cost: own, ...(extra.length > 0 ? { extra } : {}) })
     return s
+  }
+
+  /**
+   * Fishing (FISHING): a rod (kept), water to fish in (in sight or known, else found: FindTarget 'water'), and the
+   * catches the fish needs, the other fish they bring along
+   */
+  private fish (s: State, item: string, n: number, path: string[], limit: number): State | null {
+    const per = FISHING.drops.find(d => d.item === item)?.count ?? 0
+    if (per <= 0) return null
+    const catches = Math.ceil(n / per - 1e-9)
+    const own = this.dimensionCost(s, 'overworld') + this.findCost(s, 'water', 'block', 'overworld', FISHING.find, 0) + catches * FISHING.catchTicks
+    s.cost += own
+    if (s.cost > limit) return null
+    const t = this.meet(s, [{ alts: ['fishing_rod'], count: 1 }], path, limit)
+    if (t == null) return null
+    const extra = [...(this.opts.exactYields === true ? [] : surplus(item, n, catches * per)), ...extras(FISHING.drops, item, catches)]
+    t.inv.add(item, n)
+    for (const e of extra) t.inv.add(e.name, e.count)
+    t.visited.add('water')
+    t.dims.add('overworld')
+    t.steps.push({ kind: 'fish', item, count: n, catches, dimension: 'overworld', cost: own, ...(extra.length > 0 ? { extra } : {}) })
+    return t
   }
 
   private trade (s: State, offer: BarterOffer, n: number, path: string[], limit: number): State | null {

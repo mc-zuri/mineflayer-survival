@@ -158,9 +158,10 @@ export const MOB_SOURCES: MobSource[] = [
   mob('sheep', [{ item: 'mutton', count: 1.5 }, { item: 'white_wool', count: 1 }], 400, 100),
   mob('chicken', [{ item: 'chicken', count: 1 }, { item: 'feather', count: 1 }], 400, 100),
   mob('rabbit', [{ item: 'rabbit', count: 0.5 }, { item: 'rabbit_hide', count: 0.5 }, { item: 'rabbit_foot', count: 0.1 }], 1500, 200),
-  // in the water, a swim and a fight there (the hunt's): dearer than the animals on land
-  mob('cod', [{ item: 'cod', count: 1 }], 3000, 150),
-  mob('salmon', [{ item: 'salmon', count: 1 }], 3000, 150),
+  // in the water, a swim and a fight there (the hunt's): dearer than the animals on land, and than the rod's fishing
+  // in water near (FISHING), where a river's or the sea's fish aren't seen
+  mob('cod', [{ item: 'cod', count: 1 }], 6000, 150),
+  mob('salmon', [{ item: 'salmon', count: 1 }], 6000, 150),
   mob('squid', [{ item: 'ink_sac', count: 2 }], 1000, 200),
   mob('spider', [{ item: 'string', count: 1 }, { item: 'spider_eye', count: 0.33 }], 1200, 300),
   mob('zombie', [{ item: 'rotten_flesh', count: 1 }], 600, 200),
@@ -172,6 +173,18 @@ export const MOB_SOURCES: MobSource[] = [
   mob('ghast', [{ item: 'ghast_tear', count: 0.5 }, { item: 'gunpowder', count: 1 }], 3000, 600, 'the_nether'),
   mob('wither_skeleton', [{ item: 'coal', count: 0.33 }, { item: 'bone', count: 1 }, { item: 'wither_skeleton_skull', count: 0.025 }], 8000, 400, 'the_nether')
 ]
+
+/**
+ * Fishing with a rod in any water (FishingHook and the gameplay/fishing loot table, no luck of the sea, the same in
+ * 1.21.11 and 26.3): fish 85 of 100 (junk 10, treasure 5), of the fish cod 60, salmon 25, pufferfish 13, tropical fish
+ * 2. A catch takes timeUntilLured's 100 to 600 ticks and timeUntilHooked's 20 to 80 (under the open sky; half again
+ * under a roof), and the cast's flight and the reel. Water is near most places, and a frozen lake's ice is broken for it.
+ */
+export const FISHING = {
+  drops: [{ item: 'cod', count: 0.51 }, { item: 'salmon', count: 0.2125 }, { item: 'pufferfish', count: 0.1105 }, { item: 'tropical_fish', count: 0.017 }] as Drop[],
+  catchTicks: 450,
+  find: 600
+}
 
 /** vanilla furnace recipes (data/minecraft/recipe/*_from_smelting and the plain smelting ones; the same 73 in 26.3) */
 export const SMELTING: SmeltingRecipe[] = [

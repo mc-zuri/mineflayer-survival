@@ -9,6 +9,7 @@ import type { FindTarget } from '../planner/obtain'
 import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
 import { nearestOfType } from '../skills/hunt'
 import { findNear } from './explore'
+import { fishableWaterNear } from '../skills/fish'
 
 /** how far an animal or block counts as in sight */
 export const SIGHT_RADIUS = 64
@@ -125,6 +126,12 @@ export class Sightings {
       const spared = this.spared()
       const e = nearestOfType(bot, [t.name], SIGHT_RADIUS, e => spared.has(e.id) || this.outOfTheWay(e.position))
       return e == null ? null : e.position.distanceTo(bot.entity.position)
+    }
+    // water to fish in (the planner's fishing): open water, or ice over it to break
+    if (t.name === 'water') {
+      if (typeof bot.findBlocks !== 'function') return null
+      const w = fishableWaterNear(bot, bot.entity.position, SIGHT_RADIUS)
+      return w == null ? null : w.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position)
     }
     if (!SIGHTED_BLOCKS.includes(t.name) || typeof bot.findBlocks !== 'function') return null
     const pos = findNear(bot, [t.name], SIGHT_RADIUS, p => !isGrown(bot.blockAt(p) as any))

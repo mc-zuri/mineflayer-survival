@@ -98,7 +98,15 @@ export interface FarmStep extends StepBase {
   cycles: number
 }
 
-export type PlanStep = MineStep | CraftStep | SmeltStep | KillStep | BarterStep | LootStep | FillStep | FarmStep
+/** fish with a rod in water (the fish skill): a frozen one's ice broken open first */
+export interface FishStep extends StepBase {
+  kind: 'fish'
+  /** expected catches */
+  catches: number
+  dimension: Dimension
+}
+
+export type PlanStep = MineStep | CraftStep | SmeltStep | KillStep | BarterStep | LootStep | FillStep | FarmStep | FishStep
 
 export interface CheckResult {
   ok: boolean
@@ -163,6 +171,8 @@ export function checkPlan (registry: RegistryLike, steps: readonly PlanStep[], s
         if (inv.countAny(itemTags(registry).resolve('#hoes')) === 0) return 'no hoe'
         if (inv.count(step.seed) < step.plots) return `needs ${step.plots} ${step.seed}, has ${inv.count(step.seed)}`
         return null
+      case 'fish':
+        return inv.has('fishing_rod') ? null : 'no fishing_rod'
       case 'kill':
       case 'loot':
         return null

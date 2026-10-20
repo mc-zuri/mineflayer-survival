@@ -358,6 +358,57 @@ export interface FishResult {
   done: boolean
 }
 
+/** a frozen lake's ice: ice with water under it and air over (broken without silk touch, it turns to water: IceBlock.playerDestroy) */
+export function iceOverWater (lookup: FishLookup, pos: Vec3): boolean {
+  return lookup(pos)?.name === 'ice' && isWater(lookup(pos.offset(0, -1, 0))) && AIRS.has(lookup(pos.offset(0, 1, 0))?.name ?? '')
+}
+
+/** the least ice cells a hole to fish in is broken of */
+export const ICE_HOLE_MIN = 5
+
+/**
+ * A hole to fish in from ice over water (iceOverWater) among `ices` (nearest first): the 3 x 3 of it about the first
+ * whose 3 x 3 has ICE_HOLE_MIN or more such cells, the middle first; null when none has
+ */
+export function iceHole (lookup: FishLookup, ices: readonly Vec3[]): Vec3[] | null {
+  for (const c of ices) {
+    if (!iceOverWater(lookup, c)) continue
+    const cells: Vec3[] = [c]
+    for (let dx = -1; dx <= 1; dx++) {
+      for (let dz = -1; dz <= 1; dz++) {
+        if (dx === 0 && dz === 0) continue
+        const p = c.offset(dx, 0, dz)
+        if (iceOverWater(lookup, p)) cells.push(p)
+      }
+    }
+    if (cells.length >= ICE_HOLE_MIN) return cells
+  }
+  return null
+}
+
+/** the bot's ice hole to break near `center` (iceHole over the ice blocks within `radius`) */
+export function iceHoleFor (bot: Bot, center: Vec3, radius = 32): Vec3[] | null {
+  const ice = bot.registry.blocksByName.ice?.id
+  if (ice == null) return null
+  const ices = bot.findBlocks({ matching: ice, maxDistance: radius, count: 256, point: center })
+  return iceHole(pos => bot.blockAt(pos) as any, ices)
+}
+
+/**
+ * The nearest water to fish in within `radius`: a water source with air over it, or ice over water to break, else null
+ * (the planner's find cost for fishing, Sightings)
+ */
+export function fishableWaterNear (bot: Bot, center: Vec3, radius = 64): Vec3 | null {
+  const ids = ['water', 'ice'].map(n => bot.registry.blocksByName[n]?.id).filter((id): id is number => id != null)
+  if (ids.length === 0 || typeof bot.findBlocks !== 'function') return null
+  const lookup: FishLookup = pos => bot.blockAt(pos) as any
+  for (const pos of bot.findBlocks({ matching: ids, maxDistance: radius, count: 512, point: center })) {
+    const b = lookup(pos)
+    if (b?.name === 'ice' ? iceOverWater(lookup, pos) : isWaterSource(b) && AIRS.has(lookup(pos.offset(0, 1, 0))?.name ?? '')) return pos
+  }
+  return null
+}
+
 /** the bot's best guess at where to fish from: findFishingSpot over the water blocks within `radius` */
 export function fishingSpotFor (bot: Bot, center: Vec3, radius = 32, open = true): CastPlan | null {
   const water = bot.registry.blocksByName.water?.id

@@ -8,7 +8,9 @@ import { Vec3 } from 'vec3'
 import { TaskError } from '../core/errors'
 import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
-import type { CraftStep, FarmStep, FillStep, KillStep, LootStep, MineStep, PlanStep, SmeltStep } from '../planner/steps'
+import type { CraftStep, FarmStep, FillStep, FishStep, KillStep, LootStep, MineStep, PlanStep, SmeltStep } from '../planner/steps'
+import { fish, fishingSpotFor, iceHoleFor } from '../skills/fish'
+import { FISHING } from '../planner/sources'
 import { farmCells, grownPlots, harvestFarm, knownFarms, nearlyGrownPlots, plantFarm, rememberFarm, SEED_OF, sow } from '../skills/farm'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { collectBlock, waterBeside } from '../skills/collectBlock'
@@ -636,6 +638,59 @@ export const runFarm: StepRunner<FarmStep> = async (step, ctx) => {
   return { gained: countItems(bot, item) - start, replan: true }
 }
 
+/** how many times a fish step's expected ticks (its catches') it fishes at most before it hands back */
+export const FISH_STEP_FACTOR = 3
+/** how far from the bot a fish step looks for water to fish in (the fish skill's radius) */
+export const FISH_RADIUS = 32
+
+/**
+ * A fish step: the rod cast into water near (any, open or not), until the step's fish is had. With no water to fish in,
+ * a frozen lake's ice broken open (iceHoleFor: a 3 x 3 hole, the ice turns to water), else explored for out to
+ * HUNT_EXPLORE_RADIUS (NOT_FOUND then: the plans go for another food). It hands back after FISH_STEP_FACTOR times its
+ * catches' expected ticks.
+ */
+export const runFish: StepRunner<FishStep> = async (step, ctx) => {
+  const { bot, signal } = ctx
+  const start = startCount(ctx, 'start', () => countItems(bot, step.item))
+  const target = start + step.count
+  const budget = step.catches * FISHING.catchTicks * FISH_STEP_FACTOR
+  const fished = (): number => Number(ctx.state.fished ?? 0)
+  const water = (): boolean => fishingSpotFor(bot, bot.entity.position, FISH_RADIUS, false) != null
+  for (let tries = 0; tries < 4 && countItems(bot, step.item) < target && fished() < budget; tries++) {
+    throwIfAborted(signal)
+    if (!water()) {
+      const hole = iceHoleFor(bot, bot.entity.position, FISH_RADIUS)
+      if (hole != null) {
+        ctx.log(`breaking the ice at ${hole[0].toString()} to fish`)
+        try {
+          await collectBlock(bot, { positions: hole, count: hole.length, pickup: false, anyTool: true }, signal)
+        } catch (err) {
+          if (isAbort(err) || TaskError.is(err, 'DIED')) throw err
+          trace('executor: the ice hole', (err as Error).message)
+        }
+        continue
+      }
+      ctx.log('exploring for water to fish in')
+      ctx.state.explore ??= { leg: 0 }
+      const found = await exploreSurface(bot, { found: () => water() || iceHoleFor(bot, bot.entity.position, FISH_RADIUS) != null, center: ctx.home ?? undefined, maxRadius: HUNT_EXPLORE_RADIUS, memory: ctx.memory, remember: SIGHTED_BLOCKS, progress: ctx.state.explore }, signal)
+      if (!found) throw new SkillError('NOT_FOUND', 'no water to fish in found exploring')
+      continue
+    }
+    try {
+      const res = await fish(bot, { until: b => countItems(b, step.item) >= target, radius: FISH_RADIUS, open: false, maxTicks: budget - fished() }, signal)
+      ctx.state.fished = fished() + res.ticks
+      trace('executor: fished', JSON.stringify(res.caught), 'in', res.casts, 'casts')
+    } catch (err) {
+      const partial = (err as TaskError).partial as { ticks?: number } | undefined
+      ctx.state.fished = fished() + (partial?.ticks ?? 0)
+      if (isAbort(err) || TaskError.is(err, 'DIED', 'MISSING_ITEMS', 'INVENTORY_FULL')) throw err
+      trace('executor: fishing', (err as Error).message)
+      if (TaskError.is(err, 'TIMEOUT')) break
+    }
+  }
+  return { gained: countItems(bot, step.item) - start }
+}
+
 /** bartering with piglins is the nether skills' (not wired yet): the plan has to do without it */
 export const runBarter: StepRunner = async (step) => {
   throw new TaskError('FAILED', `bartering for ${step.item} is not wired yet`)
@@ -649,5 +704,6 @@ export const DEFAULT_RUNNERS: { [K in PlanStep['kind']]: StepRunner<Extract<Plan
   loot: runLoot,
   fill: runFill,
   barter: runBarter,
-  farm: runFarm
+  farm: runFarm,
+  fish: runFish
 }
