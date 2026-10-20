@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { facingDir, liquidAround, oreLevel, spiralWaypoints, staircaseStep, tunnelStep, unsafeStep } from '../../src/executor/explore'
+import { facingDir, floorHeld, liquidAround, oreLevel, spiralWaypoints, staircaseStep, tunnelStep, unsafeStep } from '../../src/executor/explore'
 
 const SOLID = new Set(['stone', 'deepslate', 'cobblestone', 'dirt'])
 const world = (blocks: Record<string, string>, fill = 'stone') => (pos: Vec3) => {
@@ -577,4 +577,30 @@ test('lavaThrow: a look that lands the stack in the lake\'s lava below the rim w
   assert.equal(lavaThrow(walled, feet), null)
   // no lava
   assert.equal(lavaThrow(pos => ({ name: pos.y < 64 ? 'stone' : 'air', boundingBox: pos.y < 64 ? 'block' : 'empty' }), feet), null)
+})
+
+test("floorHeld: a step's floor is there, or can be put against a block beside it the step doesn't open; on a bridge in the air, a step down off it has none (26.3 seed 31337: the staircase cut the bridge behind the bot)", () => {
+  // a bridge of cobblestone at y 143 along z, the bot on it at (41, 144, 14), air all round
+  const bridge: Record<string, string> = {}
+  for (let z = -20; z <= 50; z++) bridge[`41,143,${z}`] = 'cobblestone'
+  const air = (pos: Vec3) => {
+    const name = bridge[`${pos.x},${pos.y},${pos.z}`] ?? 'air'
+    return { name, boundingBox: SOLID.has(name) ? 'block' : 'empty' }
+  }
+  const feet = new Vec3(41, 144, 14)
+  for (const dir of [new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(1, 0, 0), new Vec3(-1, 0, 0)]) {
+    const down = staircaseStep(feet, dir)
+    // the bridge block it opens is the only one by its floor: nothing to put a floor against, so it isn't dug
+    assert.equal(floorHeld(air, down, true), false, `down ${dir}`)
+  }
+  // along the bridge: its block is the floor
+  assert.equal(floorHeld(air, tunnelStep(feet, new Vec3(0, 0, -1)), false), true)
+  // off its side: a floor put against the bridge block under the bot, with a block to put
+  assert.equal(floorHeld(air, tunnelStep(feet, new Vec3(1, 0, 0)), true), true)
+  assert.equal(floorHeld(air, tunnelStep(feet, new Vec3(1, 0, 0)), false), false)
+  // a staircase over a cave in the rock: the floor put against the rock beside it
+  const cave = world({ '1,18,0': 'air', '1,17,0': 'air' })
+  assert.equal(floorHeld(cave, staircaseStep(new Vec3(0, 20, 0), new Vec3(1, 0, 0)), true), true)
+  assert.equal(floorHeld(cave, staircaseStep(new Vec3(0, 20, 0), new Vec3(1, 0, 0)), false), false)
+  assert.equal(floorHeld(world({}), staircaseStep(new Vec3(0, 20, 0), new Vec3(1, 0, 0)), false), true)
 })

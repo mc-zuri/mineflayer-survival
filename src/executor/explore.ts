@@ -124,6 +124,24 @@ export function unsafeStep (lookup: Lookup, step: { open: Vec3[], floor: Vec3 })
   return null
 }
 
+/**
+ * Whether a step's floor is there to stand on, or can be put there (`plug`: a building block carried) against a solid
+ * block beside it that the step doesn't open: checked before the step's cells are dug. A staircase down from a bridge
+ * the pathfinder built over a valley (26.3 seed 31337, at y 144) opened the bridge's block behind it each step, found
+ * no floor under it (nothing left to put one against), and turned to a level step along the bridge: 32 steps cut it
+ * behind the bot, which was left on one block in the air with no way anywhere ('no safe way down', then noPath for
+ * every goal, and the game stopped).
+ */
+export function floorHeld (lookup: Lookup, step: { open: Vec3[], floor: Vec3 }, plug: boolean): boolean {
+  if (lookup(step.floor)?.boundingBox === 'block') return true
+  if (!plug) return false
+  const opened = (p: Vec3): boolean => step.open.some(o => o.equals(p))
+  return [new Vec3(0, -1, 0), new Vec3(0, 1, 0), ...CARDINALS].some(d => {
+    const p = step.floor.plus(d)
+    return !opened(p) && lookup(p)?.boundingBox === 'block'
+  })
+}
+
 /** blocks a pickaxe doesn't break (Blocks' destroyTime -1) or a nook isn't dug into */
 const UNBREAKABLE = new Set(['bedrock', 'barrier', 'end_portal_frame', 'reinforced_deepslate', 'obsidian', 'crying_obsidian', 'spawner'])
 
@@ -650,6 +668,7 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
       // the step stands on the block ahead: it has to be there (or be put there)
       const why = unsafeStep(lookup, { open: step.open, floor: step.floor })
       if (why != null) { trace('explore: climb turns from', d.toString(), why); continue }
+      if (!floorHeld(lookup, step, hasPlug(bot))) { trace('explore: climb turns from', d.toString(), 'no floor at', step.floor.toString()); continue }
       try {
         await open(bot, step.open, signal)
         if (!(await ensureFloor(bot, step.floor, signal))) continue
@@ -841,6 +860,9 @@ async function open (bot: Bot, cells: Vec3[], signal?: AbortSignal): Promise<voi
 
 const PLUG_BLOCKS = ['cobblestone', 'cobbled_deepslate', 'dirt', 'netherrack', 'stone', 'deepslate']
 
+/** whether a block to put under a step is carried (ensureFloor's) */
+const hasPlug = (bot: Bot): boolean => PLUG_BLOCKS.some(n => countItems(bot, n) > 0)
+
 /** puts a block under `floor`'s cell when it's open (a cave below), from whatever building block the bot has */
 async function ensureFloor (bot: Bot, floor: Vec3, signal?: AbortSignal): Promise<boolean> {
   const b = bot.blockAt(floor)
@@ -948,6 +970,7 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
       const step = staircaseStep(feet, d)
       const why = unsafeStep(lookup, step)
       if (why != null) { trace('explore: staircase turns from', d.toString(), why); continue }
+      if (!floorHeld(lookup, step, hasPlug(bot))) { trace('explore: staircase turns from', d.toString(), 'no floor at', step.floor.toString()); continue }
       try {
         await open(bot, step.open, signal)
         if (!(await ensureFloor(bot, step.floor, signal))) continue
@@ -995,7 +1018,7 @@ async function levelStep (bot: Bot, lookup: Lookup, feet: Vec3, dirs: Vec3[], si
   for (const d of dirs) {
     const step = tunnelStep(feet, d)
     const why = unsafeStep(lookup, step)
-    if (why != null) continue
+    if (why != null || !floorHeld(lookup, step, hasPlug(bot))) continue
     try {
       await open(bot, step.open, signal)
       if (!(await ensureFloor(bot, step.floor, signal))) continue
@@ -1063,6 +1086,7 @@ export async function tunnel (bot: Bot, args: DigRouteArgs & { length?: number, 
       const step = tunnelStep(feet, dir)
       const why = unsafeStep(lookup, step)
       if (why != null) { trace('explore: tunnel stops,', why); blocked++; break }
+      if (!floorHeld(lookup, step, hasPlug(bot))) { trace('explore: tunnel stops, no floor at', step.floor.toString()); blocked++; break }
       try {
         await open(bot, step.open, signal)
         if (!(await ensureFloor(bot, step.floor, signal))) break
