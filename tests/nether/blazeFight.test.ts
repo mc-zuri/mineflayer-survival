@@ -949,3 +949,22 @@ test('planBlazeNooks at seed 2\'s other throne spawner of that fortress (-290 77
   assert.ok(spawnView(lookup, spawner, far[0]).seen >= 0.8)
   assert.deepEqual(planBlazeNooks(lookup, spawner, { from, melee: true }), [])
 })
+
+test('fillNook unguarded (a box shut in low, sealAndHeal\'s front): the block goes in at once, no wait behind the shield for a blaze about to shoot', async () => {
+  const { fillNook } = await import('../../src/nether/blazeFight')
+  const placeModule = require('../../src/skills/placeBlock')
+  const { fakeBot: fb, item: it, entity: en } = await import('../reflexes/fakeBot')
+  const blaze = en({ name: 'blaze', position: new Vec3(0.5, 64, 6.5), meta: { health: 20, flags: 1 } })
+  const bot = fb({ items: [it('cobblestone', 16), it('stone_sword')], offhand: it('shield'), entities: [blaze] })
+  ;(bot as any).world = { raycast: () => null }
+  const order: string[] = []
+  bot.activateItem = () => { order.push('shield') }
+  const realPlace = placeModule.placeBlock
+  placeModule.placeBlock = async (_b: unknown, a: any) => { order.push(`place ${a.pos.toString()}`); return { pos: a.pos, block: a.item, placed: true } }
+  try {
+    assert.equal(await fillNook(bot, [new Vec3(-1, 64, 0)], undefined, false), 0)
+  } finally {
+    placeModule.placeBlock = realPlace
+  }
+  assert.deepEqual(order, ['place (-1, 64, 0)'])
+})

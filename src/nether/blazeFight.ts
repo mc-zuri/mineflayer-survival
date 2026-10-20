@@ -947,10 +947,10 @@ export async function withBlocksKept<T> (bot: Bot, cells: readonly Vec3[], fn: (
  * The nook's open cells filled from inside it; resolves how many couldn't be. A cell with nothing solid beside it to
  * go against has the open cell under it filled first (the front's floor dug out: the walk there came up through it)
  */
-export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: AbortSignal): Promise<number> {
+export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: AbortSignal, guard = true): Promise<number> {
   let missed = 0
   // (the blazes come out of the spawner within its 4 of a melee nook: one on the bot is fought off first)
-  await clearBlazesNear(bot, signal)
+  await clearBlazesNear(bot, signal, guard)
   const solidAt = (p: Vec3): boolean => bot.blockAt(p)?.boundingBox === 'block'
   const backed = (p: Vec3): boolean => [p.offset(0, -1, 0), p.offset(0, 1, 0), ...SIDES.map(s => p.plus(s))].some(solidAt)
   for (const cell of cells) {
@@ -968,7 +968,7 @@ export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: Abort
         trace('blaze nook: no block under', cell.toString(), (err as Error).message)
       }
     }
-    await clearBlazesNear(bot, signal)
+    await clearBlazesNear(bot, signal, guard)
     try {
       await placeBlock(bot, { pos: cell, item }, signal)
     } catch (err) {
@@ -992,12 +992,15 @@ export const NOOK_BLAZE_CLEAR = 3
  * of a wall's cell with two blazes come out on it punching, 5 a hit, and died there twice (nether-26.3-q3,
  * full-26.3-fresh-d's spot). Resolves the ones fought.
  */
-export async function clearBlazesNear (bot: Bot, signal?: AbortSignal): Promise<number> {
+export async function clearBlazesNear (bot: Bot, signal?: AbortSignal, guard = true): Promise<number> {
   // with a shield: held off where the bot stands till nothing's about to hit it (holdOffBlazes untilSafe: the shield
   // up toward a blaze about to shoot or a fireball coming, the sword at one in reach): a 26.3 bot with a stone sword
   // putting up its melee nook 2 off seed 2's throne spawner at (-277, 77, -159) fought the one on it with its back to
   // the rest, their fireballs unblocked, and burned there, the nook not built, two runs of two (BLAZE_KIT=q3)
-  if (countItems(bot, 'shield') > 0) return (await holdOffBlazes(bot, { signal, maxTicks: NOOK_GUARD_TICKS, untilSafe: true })).kills
+  // (not when shutting in low: each block waited on the volleys, up to 200 ticks, with the bot burning and shot from
+  // its sides the while; a 26.3 bot at 13 health alight took 600 ticks over its box by seed 2's open throne at
+  // (-290, 77, -209) and burned to death in it, BLAZE_AT=s2fortress2 BLAZE_KIT=freshK)
+  if (guard && countItems(bot, 'shield') > 0) return (await holdOffBlazes(bot, { signal, maxTicks: NOOK_GUARD_TICKS, untilSafe: true })).kills
   let fought = 0
   for (let i = 0; i < 4; i++) {
     const blaze = Object.values(bot.entities)
@@ -1012,12 +1015,12 @@ export async function clearBlazesNear (bot: Bot, signal?: AbortSignal): Promise<
 }
 
 /** to the nook's cell and its walls and roof put up; throws when they can't all be */
-export async function buildNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal): Promise<void> {
+export async function buildNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal, guard = true): Promise<void> {
   await enterNook(bot, nook, signal)
   if (!inNook(bot, nook)) throw new SkillError('VERIFY_FAILED', `the bot is at ${bot.entity.position.toString()}, not in the nook at ${nook.stand.toString()}`)
   // (in the middle of its cell: half in a wall's, the wall's block walked the bot out and back three times, 26.3)
   await walkTo(bot, nook.stand.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal)
-  const missed = await fillNook(bot, nook.build, signal)
+  const missed = await fillNook(bot, nook.build, signal, guard)
   if (missed > 0) throw new SkillError('CANNOT_PLACE', `${missed} of the nook's ${nook.build.length} blocks not put`)
 }
 
@@ -1028,7 +1031,7 @@ export async function buildNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal
  */
 export async function sealAndHeal (bot: Bot, nook: BlazeNook, healTo: number, signal?: AbortSignal): Promise<boolean> {
   trace('fightFromNook: health', bot.health, 'shutting the nook')
-  await fillNook(bot, nook.front, signal)
+  await fillNook(bot, nook.front, signal, false)
   const shut = (): boolean => nook.front.every(p => bot.blockAt(p)?.boundingBox === 'block')
   if (!shut()) { trace('fightFromNook: the front not shut'); return false }
   for (let t = 0; t < 1200 && bot.health < healTo; t += 10) {

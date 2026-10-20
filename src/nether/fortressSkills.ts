@@ -294,7 +294,7 @@ export async function healSealed (bot: Bot, toward: Vec3, signal?: AbortSignal):
   // (the body in the middle of its cell: half in a wall's cell, the wall's block would walk it out of the box)
   await walkTo(bot, feet.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal)
   try {
-    await buildNook(bot, nook, signal)
+    await buildNook(bot, nook, signal, false)
   } catch (err) {
     if (isAbort(err)) throw err
     trace('collectBlazeRods: no box:', (err as Error).message)
