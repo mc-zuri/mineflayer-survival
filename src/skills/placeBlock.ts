@@ -28,6 +28,11 @@ export function yawFor (dir: Vec3): number {
   return Math.atan2(-dir.x, -dir.z)
 }
 
+/** whether a look of this yaw (mineflayer's radians) faces the cardinal way, within 45 degrees (Direction.fromYRot) */
+export function lookFaces (yaw: number, dir: Vec3): boolean {
+  return -Math.sin(yaw) * dir.x - Math.cos(yaw) * dir.z > Math.SQRT1_2
+}
+
 export interface PlaceBlockResult {
   pos: Vec3
   /** the block now there */
@@ -117,11 +122,24 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
   const windowBefore = bot.currentWindow
   try {
     if (args.facing != null) {
-      // the server takes the facing from the player's rotation at the use (ServerboundUseItemOnPacket carries none)
-      await bot.look(yawFor(args.facing), -Math.PI / 4, true)
-      // the rotation goes out with the tick's move packet (LocalPlayer.sendPosition): one tick before the use
-      await waitTicks(bot, 1, signal)
-      await (bot as any)._placeBlockWithOptions(against, face, { swingArm: 'right', forceLook: 'ignore' })
+      // the server takes the facing from the player's rotation at the use (ServerboundUseItemOnPacket carries none): a
+      // point of a face in sight whose look faces that way (BlockPlaceContext.getHorizontalDirection, within 45 degrees
+      // of it), so the look hits what the use clicks (Grim's RotationPlace: a look down the facing way, past the block,
+      // missed it and the places after it were cancelled); none, the look down that way
+      const facing = args.facing
+      const facesWay = (): boolean => lookFaces(bot.entity.yaw, facing)
+      const others = args.against != null ? [] : againstCandidates(bot, pos).filter(b => !b.position.equals(against.position))
+      let placed = await placeAgainst(bot, against, face, facesWay)
+      for (const other of others) {
+        if (placed) break
+        placed = await placeAgainst(bot, other, pos.minus(other.position), facesWay)
+      }
+      if (!placed) {
+        await bot.look(yawFor(facing), -Math.PI / 4, true)
+        // the rotation goes out with the tick's move packet (LocalPlayer.sendPosition): one tick before the use
+        await waitTicks(bot, 1, signal)
+        await (bot as any)._placeBlockWithOptions(against, face, { swingArm: 'right', forceLook: 'ignore' })
+      }
     } else {
       // against a face the crosshair is on, as vanilla's use goes (useItemOn with the hit's block and face): the one
       // asked for, else any solid block beside the cell with its face toward it in sight; none, the plain place

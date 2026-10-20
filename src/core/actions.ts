@@ -32,8 +32,9 @@ function faceNumber (face: Vec3): number {
 /**
  * Turns the bot toward a point of the block's face that the crosshair hits it at (the face's centre first): the point,
  * relative to the block (what a place sends as its cursor), or null when no point of that face is in sight from here
+ * (and, with `accept`, none it takes: a look that faces the way a block placed must)
  */
-export async function aimAtFace (bot: Bot, block: Block, face: Vec3): Promise<Vec3 | null> {
+export async function aimAtFace (bot: Bot, block: Block, face: Vec3, accept: () => boolean = () => true): Promise<Vec3 | null> {
   if (typeof bot.lookAt !== 'function' || bot.entity?.position == null) return null
   const reach = blockReach(bot)
   const want = faceNumber(face)
@@ -48,7 +49,7 @@ export async function aimAtFace (bot: Bot, block: Block, face: Vec3): Promise<Ve
           : new Vec3(u, v, face.z > 0 ? 1 : 0)
       await bot.lookAt(block.position.plus(rel), true)
       const hit = crosshairBlock(bot, reach)
-      if (hit != null && hit.block.position.equals(block.position) && hit.face === want) return rel
+      if (hit != null && hit.block.position.equals(block.position) && hit.face === want && accept()) return rel
     }
   }
   return null
@@ -58,8 +59,8 @@ export async function aimAtFace (bot: Bot, block: Block, face: Vec3): Promise<Ve
  * Places the held block against the face of `against`, with the crosshair on that face as vanilla's use is
  * (useItemOn with the hit's block, face and point). False when no point of the face is in sight: nothing is placed.
  */
-export async function placeAgainst (bot: Bot, against: Block, face: Vec3): Promise<boolean> {
-  const delta = await aimAtFace(bot, against, face)
+export async function placeAgainst (bot: Bot, against: Block, face: Vec3, accept?: () => boolean): Promise<boolean> {
+  const delta = await aimAtFace(bot, against, face, accept)
   if (delta == null) return false
   await (bot as any)._placeBlockWithOptions(against, face, { delta, forceLook: true, swingArm: 'right' })
   return true

@@ -261,3 +261,13 @@ test('placeBlock with no face in sight, the actions in the ticks (an anticheat\'
     for (const t of ticking) clearInterval(t)
   }
 })
+
+test('lookFaces: a look within 45 degrees of a cardinal way faces it (Direction.fromYRot), the point a facing place aims at on its face', async () => {
+  const { lookFaces, yawFor } = await import('../../src/skills/placeBlock')
+  const north = new Vec3(0, 0, -1)
+  assert.strictEqual(lookFaces(yawFor(north), north), true)
+  assert.strictEqual(lookFaces(yawFor(north) + 0.7, north), true)
+  assert.strictEqual(lookFaces(yawFor(north) + 0.9, north), false)
+  assert.strictEqual(lookFaces(yawFor(new Vec3(1, 0, 0)), north), false)
+  assert.strictEqual(lookFaces(yawFor(new Vec3(1, 0, 0)), new Vec3(1, 0, 0)), true)
+})
