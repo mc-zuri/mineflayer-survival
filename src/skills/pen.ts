@@ -29,6 +29,17 @@ export const PEN_FILLERS = ['dirt', 'cobblestone', 'cobbled_deepslate', 'stone',
 
 /** blocks the bot leads an animal before it waits for it to catch up (leadIntoPen) */
 export const LEAD_LEG = 5
+/** blocks out in front of the gate the lead comes to before going in (the stray then follows in head on) */
+export const LEAD_FRONT = 2
+/** times a stray left behind on the way is gone back for */
+export const LEAD_RETURNS = 2
+/** times those still out by the gate are called in from just inside it */
+export const LEAD_CALLS = 2
+
+/** whether a stray being led is still about (tracked, alive) */
+function isAliveStray (bot: Bot, e: any): boolean {
+  return bot.entities[e.id] === e && (e.health == null || e.health > 0)
+}
 
 /** the smallest pen: a 3 × 3 inside */
 export const MIN_PEN_SIZE = 5
@@ -399,7 +410,10 @@ export async function leadIntoPen (bot: Bot, pen: PenPlan, args: LeadIntoPenArgs
     throwIfAborted(signal)
     // (out with the gate shut and the food away first: those in would follow the bot out)
     if (inPen(pen, bot.entity.position)) await shutIn()
-    const strays = herd().filter(e => !inPen(pen, e.position) && e.position.distanceTo(pen.center) <= (args.radius ?? 48))
+    // (one in the gate's cell is no stray: the gate shut pushes it in or out, and a trip for it went nowhere, four in
+    // a row, 26.3)
+    const atGate = (e: any): boolean => Math.floor(e.position.x) === pen.gate.x && Math.floor(e.position.z) === pen.gate.z
+    const strays = herd().filter(e => !inPen(pen, e.position) && !atGate(e) && e.position.distanceTo(pen.center) <= (args.radius ?? 48))
       .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))
     if (strays.length === 0) break
     try {
@@ -413,17 +427,29 @@ export async function leadIntoPen (bot: Bot, pen: PenPlan, args: LeadIntoPenArgs
     await bot.equip(item, 'hand')
     // till the stray follows (an animal let go of lately waits out its calm down first, TemptGoal.calmDown)
     const stray = strays[0]
-    await waitUntil(bot, () => stray.position.distanceTo(bot.entity.position) <= 4, 100, signal)
-    // to the gate in legs of LEAD_LEG blocks, each waited at till the stray is near again (it follows at its own
-    // pace, and one left 10 blocks behind is let go: TemptGoal.canUse)
-    for (let leg = 0; leg < 12 && Math.hypot(bot.entity.position.x - pen.outside.x - 0.5, bot.entity.position.z - pen.outside.z - 0.5) > LEAD_LEG; leg++) {
+    const following = async (): Promise<boolean> => await waitUntil(bot, () => stray.position.distanceTo(bot.entity.position) <= 4, 100, signal)
+    await following()
+    // to the cells in front of the gate in legs of LEAD_LEG blocks, each waited at till the stray is near again (it
+    // follows at its own pace, and one left 10 blocks behind is let go: TemptGoal.canUse); one left behind gone back
+    // for (LEAD_RETURNS), and the gate come at head on: a cow led straight at the gate from behind the pen caught on
+    // its far ring as the bot went in, and stayed there (26.3)
+    const front = pen.outside.plus(SIDE_DIRS[pen.side].scaled(LEAD_FRONT))
+    let returns = 0
+    let lost = false
+    for (let leg = 0; leg < 16 && Math.hypot(bot.entity.position.x - front.x - 0.5, bot.entity.position.z - front.z - 0.5) > 1.5; leg++) {
       throwIfAborted(signal)
       const p = bot.entity.position
-      const d = new Vec3(pen.outside.x + 0.5 - p.x, 0, pen.outside.z + 0.5 - p.z)
-      const to = p.plus(d.scaled(LEAD_LEG / d.norm())).floored()
-      await navigate(bot, { goal: new goals.GoalNear(to.x, pen.outside.y, to.z, 2) }, signal).catch(err => trace('leadIntoPen: a leg:', (err as Error).message))
-      if (!(await waitUntil(bot, () => stray.position.distanceTo(bot.entity.position) <= 4, 100, signal))) break
+      const d = new Vec3(front.x + 0.5 - p.x, 0, front.z + 0.5 - p.z)
+      const to = d.norm() <= LEAD_LEG ? front : p.plus(d.scaled(LEAD_LEG / d.norm())).floored()
+      await navigate(bot, { goal: new goals.GoalNear(to.x, pen.outside.y, to.z, to === front ? 0 : 2) }, signal).catch(err => trace('leadIntoPen: a leg:', (err as Error).message))
+      if (await following()) continue
+      if (returns++ >= LEAD_RETURNS || !isAliveStray(bot, stray)) { lost = true; break }
+      trace('leadIntoPen: the', mob, 'left behind at', stray.position.floored().toString(), ': back for it')
+      await navigateNear(bot, stray.position, 3, signal).catch(err => trace('leadIntoPen: no way back to it:', (err as Error).message))
+      await following()
     }
+    // (it follows no more: not led in, the next trip's)
+    if (lost && stray.position.distanceTo(bot.entity.position) > 10) continue
     // in at a walk, by the gate left open behind, to the far side of the inside (a tempted animal stops 2.5 blocks
     // off the player, TemptGoal.tick: by the gate it would stop in it); then a wait for those that followed to come in
     const before = pathfinder?.defaultMoveSettings
@@ -435,7 +461,20 @@ export async function leadIntoPen (bot: Bot, pen: PenPlan, args: LeadIntoPenArgs
       if (before != null) pathfinder.setMoveOptions(before)
     }
     const near = (): number => herd().filter(e => !inPen(pen, e.position) && e.position.distanceTo(bot.entity.position) <= 10).length
-    await waitUntil(bot, () => near() === 0, 300, signal)
+    // those still out by the gate called in from just inside it, then led to the far side again (two cows stood in
+    // front of the open gate 7 blocks off the bot and came no nearer, 26.3)
+    for (let call = 0; call < LEAD_CALLS && !(await waitUntil(bot, () => near() === 0, 300, signal)); call++) {
+      const by = pen.inside.minus(SIDE_DIRS[pen.side])
+      if (before != null) pathfinder.setMoveOptions({ ...before, closeGatesBehind: false, allowSprinting: false })
+      try {
+        await navigate(bot, { goal: new goals.GoalBlock(by.x, by.y, by.z) }, signal).catch(err => trace('leadIntoPen: not by the gate:', (err as Error).message))
+        await waitUntil(bot, () => herd().some(e => !inPen(pen, e.position) && e.position.distanceTo(bot.entity.position) <= 3), 100, signal)
+        const far = pen.center.minus(SIDE_DIRS[pen.side].scaled(Math.max(0, Math.floor(pen.size / 2) - 2)))
+        await navigate(bot, { goal: new goals.GoalBlock(far.x, far.y, far.z) }, signal).catch(err => trace('leadIntoPen: not in:', (err as Error).message))
+      } finally {
+        if (before != null) pathfinder.setMoveOptions(before)
+      }
+    }
     trace('leadIntoPen: trip', trip, 'bot', bot.entity.position.floored().toString(), 'gate', (bot.blockAt(pen.gate)?.getProperties() as any)?.open, bot.heldItem?.name, 'herd', herd().map(e => e.position.floored().toString()).join(' '))
   }
   if (inPen(pen, bot.entity.position) || (bot.blockAt(pen.gate)?.getProperties() as any)?.open === true) await shutIn()

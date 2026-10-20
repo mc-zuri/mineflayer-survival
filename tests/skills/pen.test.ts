@@ -126,3 +126,27 @@ test('penBroken: a gap in the ring or no gate; blocks not loaded are not known b
   assert.deepStrictEqual(ringOut(plan, plan.gate).toArray(), [0, 0, 1])
   assert.deepStrictEqual(ringOut(plan, new Vec3(-2, 64, 1)).toArray(), [-1, 0, 0])
 })
+
+test('leadIntoPen: a cow in the gate\'s cell is no stray to go out for (four trips for it went nowhere, 26.3)', async () => {
+  const { leadIntoPen, planPen: plan } = await import('../../src/skills/pen')
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const nav = require('../../src/skills/navigate')
+  const pen = plan(() => ({ name: 'air', boundingBox: 'empty' }), new Vec3(10, 64, 10), 7, 'west')
+  const bot = fakeBot({
+    position: new Vec3(3.5, 64, 10.5),
+    items: [item('wheat', 4)],
+    entities: [entity({ name: 'cow', position: pen.gate.offset(0.5, 0, 0.5) }), entity({ name: 'cow', position: new Vec3(10.5, 64, 10.5) })]
+  })
+  bot.unequip = async () => {}
+  const blockAt = bot.blockAt
+  bot.blockAt = (p: Vec3) => ({ ...blockAt(p), getProperties: () => ({ open: false }) })
+  const real = nav.navigateNear
+  const trips: string[] = []
+  nav.navigateNear = async (_b: any, pos: Vec3) => { trips.push(pos.toString()) }
+  try {
+    assert.equal(await leadIntoPen(bot, pen, { mob: 'cow' }), 1)
+  } finally {
+    nav.navigateNear = real
+  }
+  assert.deepEqual(trips, [])
+})
