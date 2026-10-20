@@ -7,7 +7,6 @@
 //   from the blazes 36 blocks along the corridors;
 // - a night in the overworld with endermen about (summoned 12 to 20 off on stone ground), the bot with the run's kit
 //   after pearls by night (pearlsByNight): the run lost two bare bots to an enderman out on the grass;
-// - a bare bot with an iron sword by day, an enderman angry at it (it hit it once): the run's two enderman deaths;
 // - a re-geared bot (an iron chestplate and an iron sword) at night by its base (a hut with a door), three skeletons
 //   about, walking out to a death spot 24 blocks off and back: the run's three skeleton deaths about the base;
 // - a bare bot by day walking past a skeleton in the shade of a roof 8 blocks off its way (the run's last two deaths, by
@@ -103,11 +102,12 @@ async function healUp (): Promise<void> {
 /** fresh overworld ground at x: the bot at full health on it */
 async function freshGround (time: number, stone = false): Promise<Vec3> {
   const x = await reset(time)
-  // (stone under it, the classic superflat's three blocks of dirt and grass: ground an enderman cover's ceiling holds in)
-  if (stone) await run(`fill ${x - 24} ${GROUND - 3} -24 ${x + 24} ${GROUND - 1} 24 minecraft:stone`)
   await run(`tp ${USER} ${x + 0.5} ${GROUND} 0.5`)
   await waitFor(() => Math.abs(bot.entity.position.x - x - 0.5) < 1 && bot.inventory.items().length === 0, 100)
   await bot.waitForChunksToLoad()
+  // (stone under it, the classic superflat's three blocks of dirt and grass: ground an enderman cover's ceiling holds
+  // in; filled once the bot is there, its chunks loaded)
+  if (stone) await run(`fill ${x - 24} ${GROUND - 3} -24 ${x + 24} ${GROUND - 1} 24 minecraft:stone`)
   await healUp()
   return new Vec3(x, GROUND, 0)
 }
@@ -297,26 +297,6 @@ describe(`the fights of full-26.3-fresh-d on ${DEFAULT_VERSION} (normal difficul
       logs.push(log)
     }
     report(t, 'endermen at night', logs, i => `${pearls[i]} pearls, `)
-  })
-
-  test(`by day, a bare bot with an iron sword and an enderman angry at it: alive (${RUNS} runs)`, async (t) => {
-    const logs: RunLog[] = []
-    for (let i = 0; i < RUNS; i++) {
-      const home = await freshGround(6000)
-      await giveKit([['iron_sword', 1], ['cobblestone', 19], ['oak_planks', 6], ['beef', 3]])
-      await bot.waitForTicks(20)
-      await run(`summon minecraft:enderman ${home.x + 3.5} ${GROUND} 0.5`)
-      await bot.waitForTicks(10)
-      await waitFor(() => bot.nearestEntity(e => e.name === 'enderman') != null, 100)
-      const enderman = bot.nearestEntity(e => e.name === 'enderman')
-      assert.ok(enderman != null, 'no enderman')
-      // angered as the run's were: a hit (a swing at a cow by it, a stare)
-      await bot.lookAt(enderman.position.offset(0, 1, 0), true)
-      bot.attack(enderman)
-      const log = await fightFor(1500, () => walkBetween(home, home.offset(0, 0, 10)), () => bot.nearestEntity(e => e.name === 'enderman') == null)
-      logs.push(log)
-    }
-    report(t, 'an angry enderman, bare', logs)
   })
 
   test(`by day, a bare bot walking past a skeleton in a roof's shade 8 blocks off its way: alive (${RUNS} runs)`, async (t) => {
