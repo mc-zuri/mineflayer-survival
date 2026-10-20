@@ -135,6 +135,31 @@ test('startFarm with no water near and a water bucket held digs a water hole for
   assert.deepStrictEqual(tasks, ['a water hole for the farm'])
 })
 
+test('startFarm with no water near and an empty bucket fills it first (refillWater), then digs the water hole once it holds water; with no water to fill it from, no farm', async () => {
+  const { startFarm } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const tasks: string[] = []
+  const lines: string[] = []
+  const executor: any = { memory: new WorldMemory(), task: async (name: string) => { tasks.push(name) } }
+  const bot = fakeBot({ items: [item('bucket', 1), item('wheat_seeds', 8)] })
+  bot.game.dimension = 'overworld'
+  // no water in the world about: the fill fails, no hole
+  bot.findBlocks = () => []
+  bot.findBlock = () => null
+  assert.strictEqual(await startFarm(bot, executor, new AbortController().signal, l => lines.push(l)), false)
+  assert.ok(lines.some(l => /the bucket filled for a water hole/.test(l)), lines.join(' | '))
+  assert.ok(lines.some(l => /no farm yet/.test(l)), lines.join(' | '))
+  assert.deepStrictEqual(tasks, [])
+  // the bucket full already: the hole dug at once
+  lines.length = 0
+  const full = fakeBot({ items: [item('water_bucket', 1), item('bucket', 1), item('wheat_seeds', 8)] })
+  full.game.dimension = 'overworld'
+  await startFarm(full, executor, new AbortController().signal, l => lines.push(l))
+  assert.ok(!lines.some(l => /the bucket filled/.test(l)), lines.join(' | '))
+  assert.deepStrictEqual(tasks, ['a water hole for the farm'])
+})
+
 test('leatherFromHerd pens the herd first, and leads the cows outside the pen back in, not a 96-block gather', async () => {
   const { leatherFromHerd } = await import('../../src/milestones')
   const { WorldMemory } = await import('../../src/core/memory')

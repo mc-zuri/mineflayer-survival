@@ -707,6 +707,11 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   // the renewable food first, the farm's grown wheat harvested and baked, before any other source of the gate's food
   // is planned (seed 2's kit went exploring for melons and berry bushes, 30000 ticks for none, its farm by the base)
   if (netherGearNeeds(ownedInventory(bot)).some(r => r.unit === 'nutrition')) {
+    // (and one sown when there's none yet, for the kits after a death)
+    await startFarm(bot, executor, signal, log).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`nether kit: no farm: ${(err as Error).message}`)
+    })
     await harvestGrownFarms(bot, executor, signal, log).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`nether kit: the farm: ${(err as Error).message}`)
@@ -1650,7 +1655,13 @@ export async function startFarm (bot: Bot, executor: Executor, signal: AbortSign
   if (dimension !== 'overworld' || knownFarms(executor.memory, dimension).length > 0) return false
   const home = executor.memory.base != null ? new Vec3(executor.memory.base.x, executor.memory.base.y, executor.memory.base.z) : bot.entity.position
   let site = findFarmSite(pos => bot.blockAt(pos) as any, home, 24)
-  // no water near: a hole dug and filled from the water bucket held (the herd's wheat farm on 26.3 had none)
+  // no water near: a hole dug and filled from the water bucket held (the herd's wheat farm on 26.3 had none), the
+  // empty bucket filled first where there's water within REFILL_RANGE (a 26.3 bot on a mountain with an empty bucket
+  // had 'no water with ground by it near: no farm yet', and no farm all game, seed 31337)
+  if (site == null && countItems(bot, 'water_bucket') === 0 && countItems(bot, 'bucket') > 0) {
+    log('no water by ground near for a farm: the bucket filled for a water hole')
+    await refillWater(bot, signal)
+  }
   if (site == null && countItems(bot, 'water_bucket') > 0) {
     await executor.task('a water hole for the farm', async (s) => await makeWaterHole(bot, home, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
     site = findFarmSite(pos => bot.blockAt(pos) as any, home, 24)
