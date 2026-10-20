@@ -134,7 +134,26 @@ describe(`a ${REALTIME ? 'real-time' : 'lockstep'} ${VERSION} server with GrimAC
   })
 
   step('craft', async () => {
-    await give('oak_log', 4)
+    await give('oak_log', 6)
+    // a bag all but full, as one late in a game: a stack the server can't put back drops (InventoryMenu.removed)
+    await run(`give ${USERNAME} cobblestone ${64 * 30}`)
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'cobblestone') >= 64 * 30, 60))
+    // in the inventory's grid with a key down (the edge guard's sneak: its clicks wait for a tick with the keys let go,
+    // the menu's close after them; GRIM_CRAFT_KEY=forward walks)
+    await bot.look(Math.PI / 4, 0, true)
+    bot.setControlState(process.env.GRIM_CRAFT_KEY as any ?? 'sneak', true)
+    const planks = countItems(bot, 'oak_planks')
+    try {
+      await craft(bot, { item: 'oak_planks', count: 8 })
+      assert.strictEqual(countItems(bot, 'oak_planks'), planks + 8)
+      const tables = countItems(bot, 'crafting_table')
+      await craft(bot, { item: 'crafting_table', count: 1 })
+      assert.strictEqual(countItems(bot, 'crafting_table'), tables + 1)
+      assert.strictEqual(countItems(bot, 'oak_planks'), planks + 4)
+    } finally {
+      bot.clearControlStates()
+    }
+    await run(`clear ${USERNAME} cobblestone`)
     await craft(bot, { item: 'crafting_table', count: 1 })
     await craft(bot, { item: 'wooden_pickaxe', count: 1 })
     assert.strictEqual(countItems(bot, 'wooden_pickaxe'), 1)
