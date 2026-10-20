@@ -1111,3 +1111,27 @@ test('brewKit: its tries spent, it tries no more unless the gate requires the bo
   await brewKit(bot, executor, new AbortController().signal, () => {}, true)
   assert.equal(obtains, BREW_KIT_TRIES + 1)
 })
+
+test('the nether milestone walked into the portal by its trip kit\'s stash goes on in the nether: no \'into the nether\' from there', async () => {
+  const { netherHandler } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const calls: string[] = []
+  const bot = fakeBot({ items: [item('obsidian', 10), ...NETHER_GEAR()] })
+  bot.game.dimension = 'overworld'
+  const memory = new WorldMemory()
+  memory.addPoi('nether_portal', { x: 3, y: 64, z: 0 }, 'overworld', 'built')
+  const executor: any = {
+    memory,
+    tasks: { tick: 0 },
+    plan: () => ({ ok: true, cost: 10 }),
+    obtain: async () => {},
+    task: async (name: string) => {
+      calls.push(name)
+      if (name === 'leave a trip kit') { bot.game.dimension = 'the_nether'; throw new Error('cut off') }
+      return { fortress: { center: { x: 0, y: 64, z: 0 } }, via: 'explore', ticks: 0 }
+    }
+  }
+  await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }).catch(() => {})
+  assert.ok(calls.includes('leave a trip kit'), calls.join(' | '))
+  assert.ok(!calls.includes('into the nether'), calls.join(' | '))
+})

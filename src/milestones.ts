@@ -1107,7 +1107,9 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     // (the kit took only what's over the gate: still met, the bottles' brew kit made after it again if it took them)
     await netherKit(bot, executor, signal, log)
     try {
-      await executor.task('into the nether', async (s) => await enterNether(bot, { build: false }, s), signal)
+      // (in already: the kit's stash by the portal walked the bot into it, and 'already in the nether' failed the
+      // milestone, full-1.21.11-fresh-i)
+      if (!inNether(bot)) await executor.task('into the nether', async (s) => await enterNether(bot, { build: false }, s), signal)
       // in, the gate's food is the fight's
       setFoodReserve(bot, 0, 0)
     } catch (err) {
