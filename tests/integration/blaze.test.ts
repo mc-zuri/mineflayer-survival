@@ -134,6 +134,8 @@ const BREW = process.env.BLAZE_BREW != null
 if (BREW) FIRE_RES.push(['potion[potion_contents={potion:"minecraft:water"}]', 3], ['crafting_table', 1], ['cobblestone', 32])
 // BLAZE_CREAM=n: n magma cream in the kit too (the brew's making the deltas' cubes give: their cream got before)
 if (process.env.BLAZE_CREAM != null) FIRE_RES.push(['magma_cream', Number(process.env.BLAZE_CREAM)])
+// BLAZE_TORCHES=n: n torches in the kit too (a whole game's carry 64: the spawner's lighting, spawnerLight)
+if (process.env.BLAZE_TORCHES != null) FIRE_RES.push(['torch', Number(process.env.BLAZE_TORCHES)])
 assert.ok(KITS[process.env.BLAZE_KIT ?? 'nether'] != null, `BLAZE_KIT is one of ${Object.keys(KITS).join(', ')}`)
 const KIT = [...FIRE_RES, ...KITS[process.env.BLAZE_KIT ?? 'nether']]
 const RUNS = Number(process.env.BLAZE_RUNS ?? 3)
@@ -188,7 +190,7 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
   async function resetArea (): Promise<void> {
     const cmds = ['kill @e[type=blaze]', 'kill @e[type=wither_skeleton]', 'kill @e[type=zombified_piglin]', 'kill @e[type=item]', 'kill @e[type=small_fireball]']
     // (in slabs under /fill's 32768 blocks)
-    for (let y = SPAWNER.y - 9; y < SPAWNER.y + 27; y += 8) for (const b of ['fire', 'cobblestone']) cmds.push(`fill ${SPAWNER.x - 30} ${y} ${SPAWNER.z - 32} ${SPAWNER.x + 30} ${y + 7} ${SPAWNER.z + 30} air replace ${b}`)
+    for (let y = SPAWNER.y - 9; y < SPAWNER.y + 27; y += 8) for (const b of ['fire', 'cobblestone', 'torch', 'wall_torch']) cmds.push(`fill ${SPAWNER.x - 30} ${y} ${SPAWNER.z - 32} ${SPAWNER.x + 30} ${y + 7} ${SPAWNER.z + 30} air replace ${b}`)
     for (const cmd of cmds) {
       for (let i = 0; i < 20; i++) {
         const out = await nether(cmd)

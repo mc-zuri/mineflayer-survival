@@ -214,7 +214,7 @@ export function inSpawnVolume (spawner: Vec3, stand: Vec3, margin = 0): boolean 
 }
 
 /** the share of the spawns whose x (or z) is in the cell `k` off the spawner's: the triangle over (k - 0.5, k + 0.5) */
-function spawnWeight (k: number): number {
+export function spawnWeight (k: number): number {
   const f = (u: number): number => Math.max(0, SPAWN_RANGE - Math.abs(u))
   return (f(k - 0.5) + 4 * f(k) + f(k + 0.5)) / 6 / (SPAWN_RANGE * SPAWN_RANGE)
 }

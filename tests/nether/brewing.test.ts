@@ -180,3 +180,31 @@ test('getMagmaCream: no cube near, a fortress cube in sight (bricks by it, no la
   delete bot.entities[fort.id]
   assert.equal(fortressCube(bot, spawner), null)
 })
+
+test('blazeRodsWithBrew: with the makings and LIGHT_TORCHES torches the spawner is lit first (spawnerLight), once a trip; with fewer torches not', async () => {
+  const { blazeRodsWithBrew, resetBrewTries, LIGHT_TORCHES } = await import('../../src/nether/brewing')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const fortress = require('../../src/nether/fortressSkills')
+  const light = require('../../src/nether/spawnerLight')
+  const real = { rods: fortress.collectBlazeRods, light: light.lightBlazeSpawner }
+  const water = (): any => { const p = item('potion'); p.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: 0, customEffects: [] } }]]); return p }
+  const calls: string[] = []
+  const run = async (torches: number): Promise<string[]> => {
+    calls.length = 0
+    const bot = fakeBot({ items: [water(), item('nether_wart'), item('magma_cream'), item('bow'), item('arrow', 32), ...(torches > 0 ? [item('torch', torches)] : [])], position: new Vec3(0.5, 64, 30.5) })
+    bot.entity.effects = {}
+    bot.pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
+    resetBrewTries(bot)
+    fortress.collectBlazeRods = async (_b: unknown, a: any) => { calls.push(`rods ${String(a.count)}`); throw new Error('stop here') }
+    light.lightBlazeSpawner = async (_b: unknown, s: Vec3) => { calls.push(`light ${s.toString()}`); return [] }
+    try {
+      await blazeRodsWithBrew(bot, { count: 8, spawner: new Vec3(0, 64, 0), away: new Vec3(0.5, 64, 30.5) }).catch(() => {})
+    } finally {
+      fortress.collectBlazeRods = real.rods
+      light.lightBlazeSpawner = real.light
+    }
+    return calls.slice()
+  }
+  assert.deepEqual((await run(LIGHT_TORCHES)).slice(0, 2), ['light (0, 64, 0)', 'rods 1'])
+  assert.deepEqual((await run(LIGHT_TORCHES - 1)).slice(0, 1), ['rods 1'])
+})

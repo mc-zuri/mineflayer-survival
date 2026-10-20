@@ -22,7 +22,8 @@ import { drinkPotion, findPotion, hasEffect } from '../skills/potion'
 import { countItems, trace, waitTicks } from '../skills/util'
 import { findBlocks } from '../core/findBlocks'
 import { withNetherSafety } from './safety'
-import { fillNook } from './blazeFight'
+import { fillNook, planBlazeNooks } from './blazeFight'
+import { lightBlazeSpawner } from './spawnerLight'
 import { collectBlazeRods, findBlazeSpawner, healSealed, unreachableSpawners, SEAL_HEAL_TO, type BlazeRodsArgs, type BlazeRodsResult } from './fortressSkills'
 
 /** the brew (two of BREW_TICKS in a box) is made no nearer the spawner than this: its blazes shoot from 16 off and more */
@@ -338,17 +339,20 @@ export async function brewingBox (bot: Bot, signal?: AbortSignal): Promise<Vec3 
   return feet.plus(dir)
 }
 
+/** the torches the spawner's lighting takes at the least (planSpawnerTorches' 4 light some 3 in 4 of seed 2's throne's spawns) */
+export const LIGHT_TORCHES = 4
+
 /** the brews a bot tries to their end (the makings looked for, the rods got a rod at a time, brewed or given up) */
 export const BREW_TRIES = 2
 /**
  * a bot's brew so far: the tries ended, and whether the wart and the cubes were looked for (the task begun again after
  * a reflex cut it off goes on from there, not off on the wart's legs again: 26.3 seed 2's every restart looked anew)
  */
-interface BrewState { tries: number, wartSought: boolean, creamSought: boolean, said: boolean }
+interface BrewState { tries: number, wartSought: boolean, creamSought: boolean, said: boolean, lit: boolean }
 const brewStates = new WeakMap<Bot, BrewState>()
 function brewState (bot: Bot): BrewState {
   let s = brewStates.get(bot)
-  if (s == null) brewStates.set(bot, s = { tries: 0, wartSought: false, creamSought: false, said: false })
+  if (s == null) brewStates.set(bot, s = { tries: 0, wartSought: false, creamSought: false, said: false, lit: false })
   return s
 }
 
@@ -396,6 +400,14 @@ export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count
       // (a slime ball counts for the cream: a rod's 2 powder are the fuel's and the cream's)
       const makings = (): boolean => countItems(bot, 'nether_wart') > 0 && (countItems(bot, 'magma_cream') > 0 || countItems(bot, 'slime_ball') > 0)
       if (countItems(bot, 'nether_wart') === 0) trace('blazeRodsWithBrew: no nether wart for fire resistance')
+      // the spawner lit but for a patch by the nook first (spawnerLight: its blazes come one at a time, there)
+      if (countItems(bot, 'nether_wart') > 0 && countItems(bot, 'torch') >= LIGHT_TORCHES && !state.lit) {
+        state.lit = true
+        const nook = planBlazeNooks(p => bot.blockAt(p) as any, spawner, { from: away })[0]
+        const eye = nook != null ? nook.stand.offset(0.5, 1.62, 0.5) : away
+        const put = await withNetherSafety(bot, async () => await lightBlazeSpawner(bot, spawner, eye, signal))
+        say(`${put.length} torches by the spawner, its spawns but a patch by the nook lit`)
+      }
       // a rod at a time till the brew has its rods and its cream (the wart got, the count short of the whole)
       while (countItems(bot, 'nether_wart') > 0 && countItems(bot, 'blaze_rod') < args.count && (!makings() || countItems(bot, 'blaze_rod') < rodsFor())) {
         throwIfAborted(signal)
