@@ -652,7 +652,7 @@ export class Resolver {
     let left = n
     // the chests opened lately first, then the most
     const stale = (seen: number): boolean => (memory.now ?? 0) - seen > CHEST_TRUST_TICKS
-    const found = memory.findItem(item).map((f, i) => ({ ...f, i })).sort((a, b) => (Number(stale(a.chest.seen)) - Number(stale(b.chest.seen))) || a.i - b.i)
+    const found = memory.findItem(item).map((f, i) => ({ ...f, i, stale: stale(f.chest.seen) ? 1 : 0 })).sort((a, b) => a.stale !== b.stale ? a.stale - b.stale : a.i - b.i)
     for (const { chest, count } of found) {
       if (left <= 0) break
       const k = `${chest.dimension}:${chest.x},${chest.y},${chest.z}|${item}`
