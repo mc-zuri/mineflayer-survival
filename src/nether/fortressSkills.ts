@@ -669,7 +669,12 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     // seed 2's throne at (-277, 77, -159), over its stairs, 26.3 bots with a stone sword fought among the blazes that
     // spill out of it there, 26 about at the last, and died three runs of three, BLAZE_KIT=q3)
     const near = campSpots(bot, spawner, standOff)
-    const spots = near.filter(s => !inSpawnVolume(spawner, s, CAMP_MARGIN))
+    // fire resistant (on, or a potion of it held), the spawn volume's floors too: its fireballs and their fire do
+    // nothing then, and a throne walled in has no other (seed 2's at (-277, 77, -159): 26.3 bots brewed, shot their 64
+    // arrows down with 5 to 7 rods of 8, found no melee nook and no camp out of the volume, and gave the spawner up)
+    const fireRes = (): boolean => hasEffect(bot, 'fire_resistance') || findPotion(bot, 'fire_resistance') != null
+    const inVolumeCamp = fireRes() && near.length > 0 && near.every(s => inSpawnVolume(spawner, s, CAMP_MARGIN))
+    const spots = near.filter(s => inVolumeCamp || !inSpawnVolume(spawner, s, CAMP_MARGIN))
     // the only floor that sees it in the volume (a throne room walled in: seed 2's at (-277, 77, -159)): no fight in
     // there, the spawner given up as one there's no way to (the milestone's next). A 26.3 bot with a stone sword and
     // no bow fought on in that throne among its blazes, punched from all sides, and died (BLAZE_KIT q3, gate)
@@ -755,6 +760,11 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       while (countItems(bot, 'blaze_rod') < count) {
         throwIfAborted(signal)
         await putOutFireOnBot(bot, signal)
+        // camped in the volume, the fire resistance gone and none left to drink: out, the spawner given up
+        if (inVolumeCamp && !fireRes()) {
+          markSpawnerUnreachable(bot, spawner)
+          throw new SkillError('NO_PATH', `no way to the blaze spawner at ${spawner.toString()}: the fire resistance out in its spawn volume`, { rods: countItems(bot, 'blaze_rod'), kills, ticks, spawner })
+        }
         if (dimensionOf(bot) !== 'the_nether' || bot.health <= 0) throw new SkillError('VERIFY_FAILED', `the bot ${bot.health > 0 ? 'left the nether' : 'died'} by the spawner`, { rods: countItems(bot, 'blaze_rod'), kills, ticks })
         // fire resistance through the fight when there's a potion of it (the fireballs set the bot alight)
         if (args.fireResistance !== false && !hasEffect(bot, 'fire_resistance') && findPotion(bot, 'fire_resistance') != null) {

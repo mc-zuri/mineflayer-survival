@@ -708,3 +708,39 @@ test('collectBlazeRods: the kept nook the bot finds no way back into is followed
     fightModule.fightFromNook = real.fight
   }
 })
+
+test('collectBlazeRods: fire resistant (a potion of it held), the walled throne\'s floors in the spawn volume are camped on, not given up; the resistance out, given up then', async () => {
+  const { collectBlazeRods, unreachableSpawners } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/skills/fight')
+  const potionModule = require('../../src/skills/potion')
+  const { item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ position: new Vec3(2.5, 64, 0.5), world: (p: any) => p.y < 64 || p.y > 66 || Math.abs(p.x) > 3 || Math.abs(p.z) > 3 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  const { WorldMemory } = await import('../../src/core/memory')
+  ;(bot as any).survival = { memory: new WorldMemory() }
+  const potion = item('potion')
+  potion.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: potionModule.POTION_IDS.fire_resistance[0], customEffects: [] } }]])
+  bot.inventory.slots[20] = potion
+  const real = { fight: fightModule.fight, drink: potionModule.drinkPotion }
+  const fights: string[] = []
+  fightModule.fight = async (_b: unknown, t: any) => { fights.push(t.name) }
+  // (the drink fails: the potion stays held, the camp goes on)
+  potionModule.drinkPotion = async () => { throw new Error('no drink here') }
+  bot.entities[9] = { id: 9, name: 'blaze', type: 'hostile', position: new Vec3(0.5, 65, 2.5), metadata: [] } as any
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    const err: any = await collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 200, safety: false, nook: false }).then(() => null, e => e)
+    assert.ok(!/no camp out of its spawn volume/.test(String(err?.message)), String(err?.message))
+    assert.deepEqual(unreachableSpawners(bot), [])
+    // the potion gone: out, given up
+    bot.inventory.slots[20] = null
+    const out: any = await collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 200, safety: false, nook: false }).then(() => null, e => e)
+    assert.match(String(out?.message), /no camp out of its spawn volume|the fire resistance out/)
+  } finally {
+    clearInterval(ticking)
+    fightModule.fight = real.fight
+    potionModule.drinkPotion = real.drink
+  }
+})
