@@ -158,17 +158,32 @@ function protectSite (bot: Bot, blueprint: Blueprint): () => void {
 }
 
 /**
- * Keeps the built base from being broken by the pathfinder from now on (every block of its box), and from being
- * built in (the room and the airlock).
+ * Keeps the built base from being broken by the pathfinder from now on (its shell, and the blueprint's own blocks in
+ * the room and the airlock: the chests, table, furnace, bed, doors and torches), and from being built in (the room
+ * and the airlock). Anything else in a cell of the room or the airlock is in the way, the pathfinder's to break: a
+ * 1.21.11 build whose bot died before its digging left the ground in the outer doorway's upper cell, no door hung,
+ * and the bot was shut in by its own base, every way out unbreakable (ls-1.21.11, t102577)
  */
-export function protectBase (bot: Bot, blueprint: Pick<Blueprint, 'bounds' | 'dig'>): void {
+export function protectBase (bot: Bot, blueprint: Pick<Blueprint, 'bounds' | 'dig' | 'placements'>): void {
   const pathfinder: any = bot.pathfinder
   const settings = pathfinder?.defaultMoveSettings
   if (settings == null) return
   const carved = new Set(blueprint.dig.map(c => posKey(c.x, c.y, c.z)))
+  const own = new Map<string, string>()
+  for (const p of blueprint.placements) {
+    const key = posKey(p.pos.x, p.pos.y, p.pos.z)
+    if (carved.has(key)) own.set(key, p.block)
+  }
   const { min, max } = blueprint.bounds
   const inBounds = (p: Vec3): boolean => p.x >= min.x && p.y >= min.y && p.z >= min.z && p.x < max.x && p.y < max.y && p.z < max.z
-  const keep = (block: any): number => inBounds(block.position) ? 1e9 : 0
+  const keep = (block: any): number => {
+    const p = block.position as Vec3
+    if (!inBounds(p)) return 0
+    const key = posKey(p.x, p.y, p.z)
+    if (!carved.has(key)) return 1e9
+    const name = own.get(key)
+    return name != null && bot.blockAt(p)?.name === name ? 1e9 : 0
+  }
   const room = (block: any): number => carved.has(posKey(block.position.x, block.position.y, block.position.z)) ? 1e9 : 0
   ;(keep as any).survivalBase = true
   ;(room as any).survivalBase = true
