@@ -14,7 +14,7 @@ import { isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
 import type { ReflexConfig } from './config'
 import { isBed } from '../core/items'
-import { breakFall, landingY, shouldBreakFall } from '../skills/fall'
+import { breakFall, predictLanding, shouldBreakFall } from '../skills/fall'
 import { blockIdsNamed, findBlock } from '../core/findBlocks'
 import { findDoorRefuge, retreatIndoors, type DoorRefuge } from '../skills/indoors'
 import { clearOfWarden, darkSpawners, escapeWarden, lightSpawner, nearestWarden, spawnerLit } from '../skills/danger'
@@ -569,7 +569,7 @@ export const eatReflex: Reflex = {
 /** the highest feet height since the bot last stood on the ground, per bot (where a fall began) */
 const fallStarts = new WeakMap<Bot, number>()
 
-/** A long fall broken with the water bucket held, just before the landing (breakFall). */
+/** A long fall (or one that would kill at the health left) broken with the water bucket held (breakFall). */
 export const fallReflex: Reflex = {
   name: 'fall',
   priority: 93,
@@ -580,11 +580,13 @@ export const fallReflex: Reflex = {
     if (bot.entity.onGround || (bot.entity as any).isInWater === true) { fallStarts.set(bot, y); return null }
     const start = Math.max(fallStarts.get(bot) ?? y, y)
     fallStarts.set(bot, start)
-    const landing = landingY(p => bot.blockAt(p) as any, bot.entity.position)
+    // (where the fall comes down, its drift across counted, as far as LANDING_DEPTH under: taken in hand at once)
+    const landing = predictLanding(p => bot.blockAt(p) as any, bot.entity.position, bot.entity.velocity)?.y ?? null
     const go = shouldBreakFall({
       y, vy: bot.entity.velocity.y, onGround: false, fallStart: start, landing,
       hasBucket: bot.inventory.items().some(i => i.name === 'water_bucket'),
-      nether: /nether/.test(String(bot.game?.dimension ?? ''))
+      nether: /nether/.test(String(bot.game?.dimension ?? '')),
+      health: bot.health
     })
     if (!go || landing == null) return null
     return { name: 'fall', priority: config.fall.priority, detail: `water at ${landing}`, run: async (signal) => await breakFall(bot, landing, signal) }
