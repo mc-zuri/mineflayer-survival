@@ -75,6 +75,10 @@ export const NOT_READY_TRIES = 10
 /** a not-ready back sooner than this got nothing: NOT_READY_WAIT_TICKS waited before the next try */
 export const NOT_READY_MIN_TICKS = 200
 export const NOT_READY_WAIT_TICKS = 1200
+/** the tries of a milestone short of only its food that bank more of it before they're counted as not ready */
+export const FOOD_BANK_TRIES = 12
+/** the wait by home between such tries (the farm's crops grow, the herd's cooldown runs) */
+export const FOOD_BANK_WAIT_TICKS = 2400
 
 /** the ticks the re-equipping after a death may take in all */
 export const REEQUIP_TICKS = 24000
@@ -115,6 +119,8 @@ export interface MilestoneEvent {
 export interface PlayOptions {
   /** stop once this milestone is reached */
   until?: MilestoneId
+  /** the food points the nether gate asks for (default: milestones' netherGate, 80 with a farm or herd, else 120) */
+  netherFood?: number
   /** stop before working on this milestone */
   stopAt?: MilestoneId
   /** milestones treated as done (not worked on) */
@@ -619,6 +625,8 @@ export class Runner {
     const skip = new Set(this.options.skip ?? [])
     const failures = new Map<MilestoneId, number>()
     const notReady = new Map<MilestoneId, number>()
+    // the food points a milestone short of only its food had at its last try, and its tries so (FOOD_BANK_TRIES)
+    const foodBank = new Map<MilestoneId, { points: number, tries: number }>()
     const spent = new Map<MilestoneId, number>()
     const maxFailures = this.options.maxFailures ?? 5
     const stopped = (): boolean => signal.aborted
@@ -713,6 +721,32 @@ export class Runner {
         // without counting it a failure, NOT_READY_TRIES times (a 26.3 bot back from its deaths failed the nether
         // twice on 'not going into the nether without' its armor, the game's stop three more away)
         if ((err as any)?.notReady === true) {
+          // short of the food only, and more of it than at the last try: banked, not a try counted (its own cap
+          // FOOD_BANK_TRIES); the farm and the herd tended, and the crops waited for by home in between
+          const points = Number((err as any).foodPoints)
+          if ((err as any).foodShort === true && Number.isFinite(points)) {
+            const last = foodBank.get(m.id)
+            const tries = (last?.tries ?? 0) + 1
+            foodBank.set(m.id, { points, tries })
+            if ((last == null || points > last.points) && tries <= FOOD_BANK_TRIES) {
+              this.log(`milestone ${m.id}: ${points} food points banked (${tries}): the farm and the herd till the next try`)
+              const from = this.bot.survival.tasks.tick
+              try {
+                await this.keepHerd(signal)
+                // the stock's top-ups meanwhile (the work by home), else a wait
+                await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
+                const left = FOOD_BANK_WAIT_TICKS - (this.bot.survival.tasks.tick - from)
+                if (left > 0) await this.waitTicksOrAbort(left, signal)
+              } catch (e) {
+                if (stopped()) return this.stop(m.id, 'aborted', e)
+                if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
+                  this.log(`died banking food for ${m.id}: ${(e as Error).message}`)
+                  await this.recover(signal)
+                }
+              }
+              continue
+            }
+          }
           const k = (notReady.get(m.id) ?? 0) + 1
           notReady.set(m.id, k)
           if (k < NOT_READY_TRIES) {

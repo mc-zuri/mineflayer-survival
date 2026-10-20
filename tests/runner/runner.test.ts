@@ -743,6 +743,39 @@ test('a milestone not ready to go on (notReady) is tried again without counting 
   assert.equal(logs.filter(l => /nothing came of it, waiting/.test(l)).length, 3)
 })
 
+test('a milestone short of only its food banks more of it each try without a try counted (FOOD_BANK_TRIES); a try that banked none is counted', async () => {
+  const { SkillError } = await import('../../src/skills/errors')
+  const bot = fakeBot()
+  let calls = 0
+  const logs: string[] = []
+  // 20, 40, 60 points banked over the tries, then 60 again (none more), then in
+  const points = [20, 40, 60, 60]
+  const runner = new Runner(bot, {
+    until: 'wood',
+    log: (l: string) => logs.push(l),
+    maxFailures: 2,
+    handlers: {
+      wood: async () => {
+        calls++
+        if (calls <= points.length) throw Object.assign(new SkillError('MISSING_ITEMS', 'not going in without the food'), { notReady: true, foodShort: true, foodPoints: points[calls - 1] })
+        bot.give('wooden_pickaxe', 1)
+        bot.give('crafting_table', 1)
+      }
+    }
+  })
+  const ticking = setInterval(() => { for (let i = 0; i < 200; i++) bot.emit('physicsTick') }, 1)
+  let r: any
+  try {
+    r = await runner.play()
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.equal(r.reason, 'until', logs.join(' | '))
+  assert.equal(calls, 5)
+  assert.equal(logs.filter(l => /food points banked/.test(l)).length, 3, logs.join(' | '))
+  assert.equal(logs.filter(l => /milestone wood not ready \(1\)/.test(l)).length, 1, logs.join(' | '))
+})
+
 test('the death spot: not gone back to bare where an archer shot the bot dead; a death to a mob at night gone back to by day if the items last (full-26.3-fresh-d)', async () => {
   const { deathSpotTiming } = await import('../../src/runner')
   const air = (): { name: string } => ({ name: 'air' })

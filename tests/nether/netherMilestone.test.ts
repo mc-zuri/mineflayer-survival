@@ -326,6 +326,44 @@ test('netherKit: short of the food, the farm grown by the base is harvested and 
   assert.deepStrictEqual(calls, ['farm wheat', 'obtain bread'])
 })
 
+test('netherGate: 80 food points with a farm or a herd known, else 120, the play option over both; 16 arrows with 2 fire resistance potions, 32 once no chicken was found, else 64', async () => {
+  const { netherGate, netherGearNeeds } = await import('../../src/milestones')
+  const { rememberFarm } = await import('../../src/skills/farm')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { ownedInventory } = await import('../../src/executor/executor')
+  const { Vec3 } = await import('vec3')
+  const memory = new WorldMemory()
+  const bot = fakeBot({ items: [] })
+  assert.deepStrictEqual(netherGate(bot, { memory }), { food: 120, arrows: 64 })
+  rememberFarm(memory, { crop: 'wheat', water: new Vec3(5, 63, 0), cells: [new Vec3(4, 63, 0)] } as any, 0)
+  assert.equal(netherGate(bot, { memory }).food, 80)
+  bot.survival = { playOptions: { netherFood: 60 } }
+  assert.equal(netherGate(bot, { memory }).food, 60)
+  assert.equal(netherGate(bot, { memory, sightings: { misses: (n: string) => n === 'chicken' ? 1 : 0 } }).arrows, 32)
+  const potion = (id: number): any => Object.assign(item('potion', 1), { componentMap: new Map([['potion_contents', { data: { potionId: id } }]]) })
+  const brewed = fakeBot({ items: [potion(11), potion(12)] })
+  assert.equal(netherGate(brewed, { memory }).arrows, 16)
+  assert.equal(netherGate(fakeBot({ items: [potion(11)] }), { memory }).arrows, 64)
+  // the needs go by the gate: 80 points of bread are enough with a farm, 16 arrows with the potions
+  const inv = ownedInventory(fakeBot({ items: [...NETHER_GEAR().filter((i: any) => i.name !== 'cooked_beef' && i.name !== 'arrow'), item('bread', 16), item('arrow', 16)] }))
+  assert.deepStrictEqual(netherGearNeeds(inv, { food: 80, arrows: 16 }), [])
+  assert.deepStrictEqual(netherGearNeeds(inv).map(r => r.unit === 'nutrition' ? 'food' : r.item), ['arrow', 'food'])
+})
+
+test('netherKit: short of only the food after its tries, the milestone is not ready with the food points banked (foodShort)', async () => {
+  const { netherKit } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [...NETHER_GEAR().filter((i: any) => i.name !== 'cooked_beef'), item('bread', 4)] })
+  bot.game.dimension = 'overworld'
+  const asked: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async (reqs: any[]) => { asked.push(reqs.map(r => r.unit === 'nutrition' ? 'food' : r.item).join(',')) }, task: async () => {} }
+  const err: any = await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e)
+  assert.equal(err?.notReady, true)
+  assert.equal(err?.foodShort, true)
+  assert.equal(err?.foodPoints, 20)
+  assert.deepStrictEqual(asked, ['food'])
+})
+
 test('goldOnInTheNether: the golden piece put on once in the nether, not in the overworld', async () => {
   const { goldOnInTheNether } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')

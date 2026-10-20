@@ -12,6 +12,7 @@ import { dayPhase } from './planner/schedule'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
 import { obsidianFromLava, refillWater } from './nether/obsidian'
 import { setFoodReserve } from './skills/eat'
+import { POTION_IDS, potionOf } from './skills/potion'
 import { descendTo, ensureSurface, inWater, spiralWaypoints, toShore } from './executor/explore'
 import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
@@ -752,7 +753,8 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   // the renewable food first, the farm's grown wheat harvested and baked and the herd's surplus cooked, before any
   // other source of the gate's food is planned (seed 2's kit went exploring for melons and berry bushes, 30000 ticks
   // for none, its farm by the base)
-  if (netherGearNeeds(ownedInventory(bot)).some(r => r.unit === 'nutrition')) {
+  const gate = netherGate(bot, executor as any)
+  if (netherGearNeeds(ownedInventory(bot), gate).some(r => r.unit === 'nutrition')) {
     // (and one sown when there's none yet, for the kits after a death)
     await startFarm(bot, executor, signal, log).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
@@ -763,7 +765,7 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
       log(`nether kit: the farm: ${(err as Error).message}`)
     })
     // and the herd's surplus slaughtered and cooked for the points still short (its breeders kept)
-    const short = NETHER_FOOD_POINTS - heldFor(ownedInventory(bot), FOOD_GOAL, { unit: 'nutrition' })
+    const short = gate.food - heldFor(ownedInventory(bot), FOOD_GOAL, { unit: 'nutrition' })
     if (short > 0) {
       await tendHerd(bot, executor, signal, log, { want: short }).catch(err => {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
@@ -772,17 +774,39 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
     }
   }
   // the gate's food kept from the eat reflex while the rest is got, and till the bot is in (setFoodReserve)
-  setFoodReserve(bot, NETHER_FOOD_POINTS, NETHER_GEAR_TICKS * 2)
-  const missing = netherGearNeeds(ownedInventory(bot))
+  setFoodReserve(bot, gate.food, NETHER_GEAR_TICKS * 2)
+  const missing = netherGearNeeds(ownedInventory(bot), gate)
   if (missing.length === 0) return
   log(`nether kit: getting ${missing.map(describeRequest).join(', ')} before going in`)
-  await withTickBudget(bot, NETHER_GEAR_TICKS, signal, async (s) => await executor.obtain(missing, s)).catch(err => {
-    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-    log(`nether kit: ${(err as Error).message}`)
-  })
-  const still = netherGearNeeds(ownedInventory(bot))
-  if (still.length > 0) throw Object.assign(new SkillError('MISSING_ITEMS', `not going into the nether without ${still.map(describeRequest).join(', ')}`), { notReady: true })
+  // the gear within NETHER_GEAR_TICKS; the food short after it within NETHER_FOOD_TICKS, near home: the rest is
+  // banked over the tries (farm, herd), not one long search (seed 2's 120 points took 90000 ticks of exploring)
+  const gear = missing.filter(r => r.unit !== 'nutrition')
+  if (gear.length > 0) {
+    await withTickBudget(bot, NETHER_GEAR_TICKS, signal, async (s) => await executor.obtain(gear, s)).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`nether kit: ${(err as Error).message}`)
+    })
+  }
+  const food = netherGearNeeds(ownedInventory(bot), gate).filter(r => r.unit === 'nutrition')
+  if (food.length > 0) {
+    await withTickBudget(bot, NETHER_FOOD_TICKS, signal, async (s) => await executor.obtain(food, s)).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`nether kit: the food: ${(err as Error).message}`)
+    })
+  }
+  const still = netherGearNeeds(ownedInventory(bot), gate)
+  if (still.length > 0) {
+    throw Object.assign(new SkillError('MISSING_ITEMS', `not going into the nether without ${still.map(describeRequest).join(', ')}`), {
+      notReady: true,
+      // only the food short: banked over the tries, its points counted (the runner's)
+      foodShort: still.every(r => r.unit === 'nutrition'),
+      foodPoints: heldFor(ownedInventory(bot), FOOD_GOAL, { unit: 'nutrition' })
+    })
+  }
 }
+
+/** the ticks a try of the nether kit spends on the gate's food after the gear (the rest banked over the tries) */
+export const NETHER_FOOD_TICKS = 12000
 
 const GOLD_PIECES = ['golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots']
 const SWORDS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'golden_sword', 'wooden_sword']
@@ -808,7 +832,40 @@ export const NETHER_GEAR_TICKS = 48000
  * food. After a death the bot went back
  * in bare, no gold and no armor, and died to the piglins, the blazes or the lava again (26.3).
  */
-export function netherGearNeeds (inv: Inventory): ObtainRequest[] {
+/** what the nether gate asks for of the food and the arrows (netherGate's, from what the bot has about it) */
+export interface NetherGate {
+  /** food points (NETHER_FOOD_POINTS) */
+  food: number
+  /** arrows (NETHER_ARROWS) */
+  arrows: number
+}
+
+/** the food points the gate asks for when a farm or a herd tops the food up between the trips (configurable) */
+export const NETHER_FOOD_POINTS_RENEWABLE = 80
+/** the arrows the gate asks for with NETHER_FIRE_POTIONS fire resistance potions held: the blazes' fire is no harm then */
+export const NETHER_ARROWS_FIRE_RESISTANT = 16
+/** the arrows the gate asks for when no chicken is to be found for the feathers: what the bow and the night's skeletons give */
+export const NETHER_ARROWS_NO_FEATHERS = 32
+/** the fire resistance potions that let the gate ask for fewer arrows */
+export const NETHER_FIRE_POTIONS = 2
+
+/**
+ * The gate's food and arrows for the bot as it is: NETHER_FOOD_POINTS, NETHER_FOOD_POINTS_RENEWABLE with a farm or a
+ * herd known (the play option netherFood over both); NETHER_ARROWS, NETHER_ARROWS_FIRE_RESISTANT with the potions,
+ * NETHER_ARROWS_NO_FEATHERS once the chickens were looked for and not found (a 26.3 seed 2 kit's 'kill 6 chicken for
+ * 6 feather: NOT_FOUND', full-26.3-fresh-o)
+ */
+export function netherGate (bot: Bot, executor: Pick<Executor, 'memory'> & { sightings?: { misses: (name: string) => number } }): NetherGate {
+  const option = Number((bot as any).survival?.playOptions?.netherFood)
+  const renewable = knownFarms(executor.memory, 'overworld').length > 0 || executor.memory.getPois(HERD, { dimension: 'overworld' }).length > 0
+  const food = Number.isFinite(option) && option > 0 ? option : renewable ? NETHER_FOOD_POINTS_RENEWABLE : NETHER_FOOD_POINTS
+  const fireRes = bot.inventory.items().filter(i => (POTION_IDS.fire_resistance ?? []).includes(potionOf(i) ?? -1)).reduce((n, i) => n + i.count, 0)
+  const noChickens = (executor.sightings?.misses('chicken') ?? 0) > 0
+  const arrows = fireRes >= NETHER_FIRE_POTIONS ? NETHER_ARROWS_FIRE_RESISTANT : noChickens ? NETHER_ARROWS_NO_FEATHERS : NETHER_ARROWS
+  return { food, arrows }
+}
+
+export function netherGearNeeds (inv: Inventory, gate: NetherGate = { food: NETHER_FOOD_POINTS, arrows: NETHER_ARROWS }): ObtainRequest[] {
   const out: ObtainRequest[] = []
   if (inv.countAny(SWORDS.filter(s => s !== 'wooden_sword' && s !== 'golden_sword')) === 0) out.push({ item: 'stone_sword', count: 1 })
   if (inv.countAny(['iron_chestplate', 'diamond_chestplate', 'netherite_chestplate']) === 0) out.push({ item: 'iron_chestplate', count: 1 })
@@ -827,9 +884,9 @@ export function netherGearNeeds (inv: Inventory): ObtainRequest[] {
   // with a stone sword (the gate's least, nether-26.3-q3's bag) died there 6 runs of 6 for 0 to 1 rods, one in iron with
   // an iron sword got 0 to 1 rods in 16000 ticks; the fight gives such a spawner up now (tests/integration/blaze)
   if (inv.count('bow') === 0) out.push({ item: 'bow', count: 1 })
-  if (inv.count('arrow') < NETHER_ARROWS) out.push({ item: 'arrow', count: NETHER_ARROWS })
+  if (inv.count('arrow') < gate.arrows) out.push({ item: 'arrow', count: gate.arrows })
   const food = heldFor(inv, FOOD_GOAL, { unit: 'nutrition' })
-  if (food < NETHER_FOOD_POINTS) out.push({ item: FOOD_GOAL, count: NETHER_FOOD_POINTS, unit: 'nutrition' })
+  if (food < gate.food) out.push({ item: FOOD_GOAL, count: gate.food, unit: 'nutrition' })
   return out
 }
 
