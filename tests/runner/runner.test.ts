@@ -859,3 +859,18 @@ test('the night down the mine starts in the nearest slime chunk from the seed wh
     travelModule.travel = real
   }
 })
+
+test('home: the food land while the bot has no base (its farm, herd and base go up there), with a base only while the food work is under way', async () => {
+  const { FOOD_LAND_POI } = await import('../../src/executor/foodLand')
+  const bot = fakeBot()
+  bot.spawnPoint = new Vec3(0, 120, 0)
+  const runner: any = new Runner(bot, { log: () => {} })
+  assert.ok(runner.home().equals(new Vec3(0, 120, 0)))
+  runner.memory.addPoi(FOOD_LAND_POI, { x: 230, y: 70, z: -10 }, 'overworld', 'snowy_taiga')
+  assert.ok(runner.home().equals(new Vec3(230, 70, -10)))
+  runner.memory.base = { x: 5, y: 110, z: 5, dimension: 'overworld' }
+  assert.ok(runner.home().equals(new Vec3(5, 110, 5)))
+  const during = await runner.foodWorking(async () => runner.home())
+  assert.ok(during.equals(new Vec3(230, 70, -10)))
+  assert.ok(runner.home().equals(new Vec3(5, 110, 5)))
+})

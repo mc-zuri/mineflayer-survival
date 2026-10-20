@@ -30,6 +30,7 @@ import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool 
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, WATER_MOBS } from './sight'
+import { BiomeSurvey, LAND_FOODS } from './foodLand'
 import { fishableWaterNear } from '../skills/fish'
 import { herdSpares, herdSupply } from '../skills/herd'
 import { noteVillage } from '../skills/village'
@@ -223,11 +224,17 @@ export function requestsMet (inv: Inventory, requests: readonly ObtainRequest[])
   })
 }
 
+/** ticks between the biome surveys of the chunks loaded since (BiomeSurvey.survey), and the chunks a survey takes at most */
+export const BIOME_SURVEY_TICKS = 100
+export const BIOME_SURVEY_MAX = 64
+
 export class Executor {
   readonly memory: WorldMemory
   readonly tasks: TaskRunner
   /** what's in sight and what wasn't found, for the plans' find costs */
   readonly sightings: Sightings
+  /** the loaded chunks' surface biomes, the food biomes' noted (foodLand.ts) */
+  readonly biomes: BiomeSurvey
   /** explorations' progress kept across the plans (StepContext.progress) */
   private readonly exploreProgress = new Map<string, { leg: number }>()
   readonly options: Required<Omit<ExecutorOptions, 'memory' | 'tasks' | 'runners' | 'hooks' | 'log' | 'home'>>
@@ -276,6 +283,9 @@ export class Executor {
     // the animals in sight noted every second (an exploring for berries that saw none is a land without them too)
     let looks = 0
     bot.on('physicsTick', () => { if (++looks % 20 === 0) this.sightings.look() })
+    // and the chunks loaded since the last survey every BIOME_SURVEY_TICKS
+    this.biomes = new BiomeSurvey(bot, this.memory)
+    bot.on('physicsTick', () => { if (looks % BIOME_SURVEY_TICKS === 0) this.biomes.survey(BIOME_SURVEY_MAX) })
     this.bagKeeper = {
       minFree: this.options.minFreeSlots,
       room: async (s, toward) => await this.makeRoomDuringStep(s, toward),
@@ -297,6 +307,12 @@ export class Executor {
 
   log (line: string): void {
     this.logFn(line)
+  }
+
+  /** on other land (a food land): the land's foods' misses and the explorations' progress forgotten */
+  forgetLand (): void {
+    this.sightings.forget(LAND_FOODS)
+    this.exploreProgress.clear()
   }
 
   get base (): BaseRecord | null {

@@ -42,6 +42,7 @@ import { isDeathMessage } from './diagnostics/death'
 import { RANGED_HOSTILES } from './reflexes/rules'
 import { blockIdsNamed, findBlock } from './core/findBlocks'
 import type { Seed } from './worldgen'
+import { foodLandOf, seekFoodLand } from './executor/foodLand'
 
 export interface MilestoneContext {
   bot: Bot
@@ -319,6 +320,9 @@ export const WATER_RETRY_TICKS = 1200
 
 /** ticks a meal (mealGoals) may take before the work goes on without it */
 export const MEAL_TICKS = 6000
+/** ticks a trip to food land (seekFoodLand: the scouting, the walk there) may take before the food work goes on where the bot is */
+export const FOOD_TRIP_TICKS = 12000
+
 /** ticks a meal that came to nothing waits before it is tried again */
 export const MEAL_RETRY_TICKS = 6000
 
@@ -384,7 +388,9 @@ const defaultHandlers: Partial<Record<MilestoneId, MilestoneHandler>> = {
     const opts = (bot as any).survival?.playOptions?.base ?? {}
     // the first base is the minimal house of day 1, dug in a few blocks under the ground (HOUSE_BLUEPRINT); the full
     // creeper-proof base is play's base options' (BASE_BLUEPRINT) for later
-    await buildBase(bot, { blueprint: HOUSE_BLUEPRINT, depths: HOUSE_DEPTHS, chests: 2, ...opts, executor, signal, log })
+    // (by the food land when the bot went to one: the spawn's land has no food, foodLand.ts)
+    const land = foodLandOf(executor.memory)
+    await buildBase(bot, { blueprint: HOUSE_BLUEPRINT, depths: HOUSE_DEPTHS, chests: 2, ...(land != null ? { around: land } : {}), ...opts, executor, signal, log })
   },
   ...MILESTONE_HANDLERS,
   ...EPOCH_HANDLERS
@@ -412,6 +418,8 @@ export class Runner {
   private inNightWork = false
   private restockRetryAt = 0
   private mealRetryAt = 0
+  /** the food work under way (a meal, a restock, the food milestone): home is the food land meanwhile (foodLand.ts) */
+  private foodWork = 0
   private waterRetryAt = 0
   /** the tick the herd was last tended at between trips (keepHerd) */
   private herdTendedAt = -Infinity
@@ -491,6 +499,10 @@ export class Runner {
 
   private home (): Vec3 | null {
     const base = this.memory.base
+    // the food land the food work is done from (and the bot's home while it has no base: its farm, herd and base go
+    // up there)
+    const land = foodLandOf(this.memory)
+    if (land != null && (base == null || this.foodWork > 0)) return land
     if (base != null) return new Vec3(base.x, base.y, base.z)
     const spawn = (this.bot as any).spawnPoint as Vec3 | undefined
     return spawn ?? null
@@ -683,8 +695,11 @@ export class Runner {
       if (meal != null) {
         this.log(`hungry (food ${this.bot.food ?? 0}, ${ownedInventory(this.bot).foodPoints()} points carried): a meal first`)
         try {
-          await this.untilDusk(signal, async (s) => await this.withinTicks(MEAL_TICKS, s, async (t) => {
-            await this.executor.obtain(meal, t, { unseenFactor: HUNGRY_FIND_FACTOR })
+          await this.foodWorking(async () => await this.untilDusk(signal, async (s) => {
+            await this.toFoodLand(s)
+            await this.withinTicks(MEAL_TICKS, s, async (t) => {
+              await this.executor.obtain(meal, t, { unseenFactor: HUNGRY_FIND_FACTOR })
+            })
           }))
         } catch (err) {
           if (stopped()) return this.stop(null, 'aborted', err)
@@ -702,12 +717,14 @@ export class Runner {
       if (restock != null) {
         try {
           this.log(`food low (${state.inventory.foodPoints()} points): getting more before going on`)
-          await this.untilDusk(signal, { hunger: true }, async (s) => {
+          await this.foodWorking(async () => await this.untilDusk(signal, { hunger: true }, async (s) => {
             // the renewable food first: the farm's harvest, and the herd's surplus slaughtered and cooked
             await harvestGrownFarms(this.bot, this.executor, s, this.log)
             await this.tendHerdFor(FOOD_POINTS - ownedInventory(this.bot).foodPoints(), s)
+            // then the rest from food land when home's has none
+            if (restockGoals(progressState(this.bot, this.memory), reachedIds) != null) await this.toFoodLand(s)
             await this.executor.obtain(restockGoals(progressState(this.bot, this.memory), reachedIds) ?? [], s)
-          })
+          }))
         } catch (err) {
           if (stopped()) return this.stop('food', 'aborted', err)
           if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
@@ -743,13 +760,14 @@ export class Runner {
       const begun = this.bot.survival.tasks.tick
       const account = (): void => { spent.set(m.id, (spent.get(m.id) ?? 0) + this.bot.survival.tasks.tick - begun) }
       try {
-        const how = await this.untilDusk(signal, { hunger: true }, async (s) => {
+        const how = await this.foodWorking(async () => await this.untilDusk(signal, { hunger: true }, async (s) => {
+          if (m.id === 'food') await this.toFoodLand(s)
           await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log, seed: this.options.seed })
           // the milestone ends with the stock topped up for the ones after it, what can be got where the bot is
           // (topUpPlaces: the surface's by day, the mine's down there); the milestone's own marks apply once it's done
           const done = m.done(progressState(this.bot, this.memory))
           await this.topUp(this.topUpPlacesNow(), s, done ? [...reachedIds, m.id] : reachedIds)
-        })
+        }), m.id === 'food')
         account()
         if (stopped()) return this.stop(m.id, 'aborted')
         if (how === 'dusk') {
@@ -1172,6 +1190,41 @@ export class Runner {
   }
 
   /** runs `fn` stopped (TIMEOUT) after `ticks` ticks */
+  /** runs `fn` as food work (`on`): home is the food land meanwhile */
+  private async foodWorking<T> (fn: () => Promise<T>, on = true): Promise<T> {
+    if (on) this.foodWork++
+    try {
+      return await fn()
+    } finally {
+      if (on) this.foodWork--
+    }
+  }
+
+  /**
+   * To food land when home's land has none (seekFoodLand: no food biome about it, or its animals hunted for and none
+   * found), within FOOD_TRIP_TICKS; the food work goes on from wherever the bot got to
+   */
+  private async toFoodLand (signal: AbortSignal): Promise<void> {
+    try {
+      await this.withinTicks(FOOD_TRIP_TICKS, signal, async (t) => {
+        await this.executor.task('to food land', async (s) => {
+          await seekFoodLand(this.bot, {
+            survey: this.executor.biomes,
+            memory: this.memory,
+            home: this.home(),
+            misses: name => this.executor.sightings.misses(name),
+            forgetLand: () => this.executor.forgetLand(),
+            seed: this.options.seed,
+            log: this.log
+          }, s)
+        }, t)
+      })
+    } catch (err) {
+      if (signal.aborted || TaskError.is(err, 'DIED') || this.bot.health <= 0) throw err
+      this.log(`no food land: ${(err as Error).message}`)
+    }
+  }
+
   async withinTicks (ticks: number, signal: AbortSignal, fn: (s: AbortSignal) => Promise<void>): Promise<void> {
     const ctrl = new AbortController()
     const onOuter = (): void => ctrl.abort(signal.reason)

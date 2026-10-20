@@ -81,6 +81,14 @@ export class Sightings {
     }
   }
 
+  /** the misses and the not-nears of the names forgotten: the bot is on other land (a food land, foodLand.ts) */
+  forget (names: readonly string[]): void {
+    for (const n of names) {
+      this.missed.delete(n)
+      this.away.delete(n)
+    }
+  }
+
   /** notes the watched animals in sight now (the executor's, every second): an exploring for a plant sees them too */
   look (): void {
     const bot = this.bot
