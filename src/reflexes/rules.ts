@@ -23,7 +23,7 @@ import { XP_FARM_POI } from '../skills/spawnerFarm'
 import { SEAL_MAX_BLOCKS, openCells, sealBox, sealIn } from '../skills/sealIn'
 import { sealItem } from '../skills/shelter'
 import { countItems } from '../skills/util'
-import { caveOpenings, sealCaveOpenings } from '../skills/caves'
+import { caveCells, caveOpenings, caveRuleOn, sealCaveOpenings } from '../skills/caves'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
 /**
@@ -456,6 +456,40 @@ export function sealDue (bot: Bot, near: Entity[], config: ReflexConfig, tick: n
   return item != null && countItems(bot, item) >= needed
 }
 
+/** ticks after a wall-in at a cell the hostiles reflex fights there instead (walled in, dug out, and they were back) */
+export const WALL_IN_RETRY_TICKS = 600
+const wallIns = new WeakMap<Bot, { feet: string, tick: number }>()
+
+/**
+ * Whether the hostiles reflex walls the bot in where it stands (sealIn) rather than fight: a bot not fit for the caves
+ * (caveRuleOn) in its own tunnel under the rock (its feet's and head's cells no cave's, CAVE_ROOF of rock over them),
+ * on its feet out of the water and the lava, no creeper within 4 (the creeper reflex's), a box of SEAL_MAX_BLOCKS at
+ * most there (a tunnel's two ends) and the blocks for it, and not walled in at that cell within WALL_IN_RETRY_TICKS.
+ * Behind the blocks no zombie hits nor skeleton shoots (MeleeAttackGoal and RangedBowAttackGoal need a line of sight),
+ * and the work's next dig goes on the way it was going. The 26.3 bot fought zombies and cave spiders in the dark with
+ * a stone sword, and in plain iron with a diamond one, and was killed both times at y 20 (ls-26.3, t34384 and t100061).
+ */
+export function wallInDue (bot: Bot, near: Entity[], config: ReflexConfig, tick: number): boolean {
+  if (!config.hostiles.wallIn || near.length === 0 || bot.health <= 0) return false
+  if (!caveRuleOn(bot)) return false
+  if (near.some(e => e.name === 'creeper' && distance(bot, e) < 4)) return false
+  const e = bot.entity as any
+  if (e.onGround !== true || e.isInWater === true || e.isInLava === true) return false
+  const feet = bot.entity.position.floored()
+  const cells = caveCells(bot)
+  if (cells.isCave(feet) || cells.isCave(feet.offset(0, 1, 0)) || !cells.roofed(feet)) return false
+  const last = wallIns.get(bot)
+  if (last != null && last.feet === feet.toString() && tick - last.tick >= 0 && tick - last.tick < WALL_IN_RETRY_TICKS) return false
+  const failed = sealFails.get(bot)
+  if (failed != null && tick - failed >= 0 && tick - failed < SEAL_RETRY_TICKS) return false
+  const box = sealBox(bot, near)
+  if (box == null) return false
+  const needed = openCells(bot, box).length
+  if (needed > SEAL_MAX_BLOCKS) return false
+  const item = sealItem(bot)
+  return item != null && countItems(bot, item) >= needed
+}
+
 /**
  * ticks after a flee found no way (fleeFrom's 'cornered': a tunnel, a pit) the hostiles reflex fights instead, an armed
  * bot: a 26.3 bot cornered at 4.8 health underground by a skeleton 0.9 off stood there, fleeing and failing every 20
@@ -508,6 +542,22 @@ export const hostilesReflex: Reflex = {
         name: 'hostiles',
         priority: config.hostiles.priority,
         detail: 'seal in',
+        run: async (signal) => await sealIn(bot, {
+          signal,
+          threats: () => Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange)
+        }).catch(err => {
+          if (!signal.aborted) sealFails.set(bot, ctx.tick)
+          throw err
+        })
+      }
+    }
+    // a bot not fit for the caves in its tunnel: walled in, not a fight in the dark (wallInDue)
+    if (wallInDue(bot, near, config, ctx.tick)) {
+      wallIns.set(bot, { feet: bot.entity.position.floored().toString(), tick: ctx.tick })
+      return {
+        name: 'hostiles',
+        priority: config.hostiles.priority,
+        detail: 'wall in',
         run: async (signal) => await sealIn(bot, {
           signal,
           threats: () => Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange)

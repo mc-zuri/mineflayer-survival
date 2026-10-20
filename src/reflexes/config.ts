@@ -44,6 +44,11 @@ export interface ReflexConfig {
      */
     sealHealth: number
     /**
+     * a bot not fit for the caves (skills/caves caveReady) in its tunnel under the rock walls itself in against the
+     * hostiles that come at it there (sealIn), whatever its health, rather than fight them in the dark (default true)
+     */
+    wallIn: boolean
+    /**
      * but fight on at low health against a single hostile with this many armor points and a weapon (default 10): a
      * zombie is as quick as the bot, and running from it never ended (300 ticks 'still chased', no eating meanwhile)
      */
@@ -205,6 +210,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
     maxDy: 4,
     fleeHealth: 6,
     sealHealth: 10,
+    wallIn: true,
     fightOnArmor: 10,
     maxFight: 3,
     fleeDistance: 16,

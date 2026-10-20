@@ -83,3 +83,23 @@ test('caves reflex: its run puts a block in each hole; a hole it sealed that the
     engine.stop()
   }
 })
+
+test('hostiles reflex: a bot not fit for the caves walls itself in in its tunnel against a zombie, at full health; fit for them, or in the cave, it fights', async () => {
+  const { hostilesReflex } = await import('../../src/reflexes/rules')
+  const zombie = (x: number): any => entity({ name: 'zombie', position: new Vec3(x, 20, 0.5) })
+  const blocks = [item('stone_sword'), item('cobblestone', 16)]
+  // in the tunnel at x -3, the zombie come along it from the cave's side
+  assert.strictEqual(check(hostilesReflex, { position: new Vec3(-2.5, 20, 0.5), items: blocks, entities: [zombie(-0.5)] }).detail, 'wall in')
+  // walled in there a moment ago and dug out: fought
+  const { bot } = check(hostilesReflex, { position: new Vec3(-4.5, 20, 0.5), items: blocks, entities: [zombie(-2.5)] })
+  const engine = new ReflexEngine(bot, { enabled: false })
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'fight zombie')
+  engine.stop()
+  // with too few blocks for the box (a tunnel's two ends: 4)
+  assert.strictEqual(check(hostilesReflex, { position: new Vec3(-2.5, 20, 0.5), items: [item('stone_sword'), item('cobblestone', 3)], entities: [zombie(-0.5)] }).detail, 'fight zombie')
+  // cave-ready: fought as ever
+  const kit = READY_KIT()
+  assert.strictEqual(check(hostilesReflex, { position: new Vec3(-2.5, 20, 0.5), ...kit, entities: [zombie(-0.5)] }).detail, 'fight zombie')
+  // in the cave itself: no tunnel to wall in
+  assert.strictEqual(check(hostilesReflex, { position: new Vec3(4.5, 20, 0.5), items: blocks, entities: [zombie(6.5)] }).detail, 'fight zombie')
+})
