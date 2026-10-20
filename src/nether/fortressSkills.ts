@@ -497,7 +497,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       const fought = await fightFromNook(bot, nook, { count, spawner, maxTicks: maxTicks - ticks, eatAt: args.eatAt ?? 14, onKill: () => { kills++ } }, signal)
       trace('collectBlazeRods: from the nook,', fought.kills, 'kills,', fought.shots, 'shots,', fought.ticks, 'ticks')
     } catch (err) {
-      if (isAbort(err) || isSkillError(err, 'TIMEOUT') || bot.health <= 0) throw err
+      // (out of food to heal on: the milestone gets more, not the camp's fight with none)
+      if (isAbort(err) || isSkillError(err, 'TIMEOUT') || bot.health <= 0 || (isSkillError(err, 'MISSING_ITEMS') && (err as Error).message.includes('no food'))) throw err
       // a spawner that gives no blazes: given up as one there's no way to (the milestone's next spawner)
       if (isSkillError(err, 'NOT_FOUND') && /no blaze came/.test((err as Error).message)) {
         markSpawnerUnreachable(bot, spawner)

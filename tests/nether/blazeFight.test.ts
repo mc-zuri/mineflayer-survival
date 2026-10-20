@@ -625,3 +625,39 @@ test('fightFromNook swings at a blaze hovering in the front over the roof\'s edg
   await done
 })
 
+test('fightFromNook ends (MISSING_ITEMS) with no meal left to heal on and the bar under 18, at NOOK_LEAVE_HEALTH; not with a meal in the bag, nor at full health', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, nookAround, mealLeft, NOOK_LEAVE_HEALTH } = await import('../../src/nether/blazeFight')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const fight = async (health: number, items: any[]): Promise<unknown> => {
+    const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 65, 2.5), meta: { health: 20, flags: 0 } })
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), health, food: 17, saturation: 0, items: [item('diamond_sword'), item('cobblestone', 32), ...items], offhand: item('shield'), entities: [blaze], world: name })
+    bot.world = { raycast: () => null }
+    bot.equip = async (it: any) => { bot.heldItem = it }
+    bot.activateItem = () => { bot.usingHeldItem = true }
+    bot.deactivateItem = () => { bot.usingHeldItem = false }
+    bot.lookAt = async () => {}
+    bot.look = async () => {}
+    bot.game.dimension = 'the_nether'
+    const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+    assert.ok(nook != null)
+    const ac = new AbortController()
+    let settled: unknown = null
+    void fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 1000, eatAt: 0, eatFood: 0 }, ac.signal).catch(err => err).then(r => { settled = r })
+    for (let i = 0; i < 20 && settled == null; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+    const r = settled
+    ac.abort()
+    for (let i = 0; i < 3; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+    return r
+  }
+  // (seed 7741's nook: the last meal eaten, 4.9 health for 15000 ticks shut in, then out among 12 blazes)
+  const r = await fight(NOOK_LEAVE_HEALTH, [item('rotten_flesh', 3)])
+  assert.ok(r instanceof Error && /no food left/.test(r.message), String(r))
+  assert.equal(await fight(NOOK_LEAVE_HEALTH, [item('cooked_mutton', 1)]), null)
+  assert.equal(await fight(20, []), null)
+  const { fakeBot: fb } = await import('../reflexes/fakeBot')
+  assert.ok(mealLeft(fb({ items: [item('golden_apple')] })))
+  assert.ok(!mealLeft(fb({ items: [item('rotten_flesh', 5), item('spider_eye')] })))
+})

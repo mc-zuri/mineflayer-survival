@@ -267,3 +267,31 @@ test('a spawner the bot found no way to: one near it is the same, a fortress rou
   assert.equal(excludedFortress({ min: { x: 840, y: 48, z: 60 }, max: { x: 900, y: 90, z: 120 } }, out), true)
   assert.equal(excludedFortress({ min: { x: 300, y: 48, z: 60 }, max: { x: 400, y: 90, z: 120 } }, out), false)
 })
+
+test('collectBlazeRods ends with the nook\'s fight when it runs out of food to heal on, no camp\'s fight after it', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const { SkillError } = await import('../../src/skills/errors')
+  const fightModule = require('../../src/nether/blazeFight')
+  const gridModule = require('../../src/skills/gridWalk')
+  const { item } = await import('../reflexes/fakeBot')
+  const realBuild = fightModule.buildNook
+  const realFight = fightModule.fightFromNook
+  const realMove = gridModule.moveNear
+  const moves: string[] = []
+  fightModule.buildNook = async () => {}
+  gridModule.moveNear = async (_b: unknown, to: Vec3) => { moves.push(to.toString()) }
+  try {
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('cobblestone', 64)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+    bot.game.dimension = 'the_nether'
+    ;(bot as any).world = { raycast: () => null }
+    bot.findBlocks = () => []
+    fightModule.fightFromNook = async () => { throw new SkillError('MISSING_ITEMS', 'no food left to heal on in the nook, health 12.0') }
+    await assert.rejects(collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false }), /no food left/)
+    assert.deepEqual(moves, [])
+  } finally {
+    fightModule.buildNook = realBuild
+    fightModule.fightFromNook = realFight
+    gridModule.moveNear = realMove
+  }
+})
+

@@ -19,6 +19,7 @@ import { aim, arrowWorld } from '../skills/shoot'
 import { motionTrackerOf } from '../skills/motion'
 import { attackStrengthOf, bestMeleeWeapon } from '../skills/weapons'
 import { eat, bestFoodInInventory } from '../skills/eat'
+import { chooseFood } from '../skills/food'
 import { placeBlock } from '../skills/placeBlock'
 import { collectDropsNear } from '../skills/hunt'
 import { nearbyDrops } from '../skills/pickupDrops'
@@ -321,6 +322,20 @@ export interface NookFightResult {
 
 const ARROWS = ['arrow', 'spectral_arrow', 'tipped_arrow']
 
+/** with no food left to heal on, the nook's fight ends at this health (fightFromNook's MISSING_ITEMS) */
+export const NOOK_LEAVE_HEALTH = 16
+
+/**
+ * Whether the bag holds a meal to heal on (chooseFood's pick for a half-empty bar at low health: a golden apple counts,
+ * the harmful foods don't). FoodData.tick heals only with the bar at 18 or more.
+ */
+export function mealLeft (bot: Bot): boolean {
+  const items = bot.inventory.items()
+  const offhand = bot.inventory.slots[45]
+  if (offhand != null) items.push(offhand)
+  return chooseFood(items, bot.registry.foodsByName as any, { food: 10, saturation: 0, health: 1 }) != null
+}
+
 /** tries at shutting the nook's front, low, before the nook is given up (fightFromNook's CANNOT_PLACE) */
 export const SEAL_FAILS = 5
 
@@ -437,6 +452,10 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       throwIfAborted(signal)
       if (bot.health <= 0) throw new SkillError('VERIFY_FAILED', 'the bot died in the nook', { ...result, ticks: tick })
       if (tick > maxTicks) throw new SkillError('TIMEOUT', `${countItems(bot, 'blaze_rod')} of ${opts.count} blaze rods after ${tick} ticks in the nook`, { ...result, ticks: tick })
+      // nothing left to heal on (no meal, the bar under 18): the fight ends while the health's still up (a 26.3 bot
+      // ate its last meal in the nook by seed 7741's spawner, sat 15000 ticks shut in it at 4.9 health, then came out
+      // among 12 blazes and burned)
+      if (!mealLeft(bot) && bot.food < 18 && bot.health <= NOOK_LEAVE_HEALTH) throw new SkillError('MISSING_ITEMS', `no food left to heal on in the nook, health ${bot.health.toFixed(1)}`, { ...result, ticks: tick })
       const blazes = blazesNow()
       if (blazes.length > 0) lastBlaze = tick
       else if (tick - lastBlaze > idleTicks) throw new SkillError('NOT_FOUND', `no blaze came from the blaze spawner at ${opts.spawner.toString()} in ${idleTicks} ticks`, { ...result, ticks: tick })
