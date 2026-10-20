@@ -615,6 +615,33 @@ test('a long task whose pickaxe is about to break stops (TOOL_WORN), a new one i
   assert.ok(lines.some(l => /down to the deep lava: stopped, the iron_pickaxe has 24 uses left.*"dug":6/.test(l)), lines.join('\n'))
 })
 
+test('a long task whose pickaxe is replaced and worn down again and again goes on: no count of replaced stops fails it', async () => {
+  // each replacement a pickaxe 30 uses from breaking: worn to the mark again 6 blocks on (a 26.3 nether trip's fourth
+  // stop failed the milestone, each stone pickaxe replaced and worn down again on the way to the fortress)
+  const { bot, pick } = wornPickBot(30, {})
+  const ex = new Executor(bot, { log: () => {} })
+  let replaced = 0
+  ex.replaceWornTool = async () => { replaced++; pick.durabilityUsed = 250 - 30; return true }
+  const progress = { dug: 0, runs: 0, tools: [] as string[] }
+  assert.equal(await ex.task('to the fortress', longDig(bot, 40, progress)), 40)
+  assert.ok(replaced >= 4, `${replaced} replacements`)
+  assert.equal(progress.runs, replaced + 1)
+})
+
+test('a task stopped MAX_WEAR_STOPS_TOTAL times goes on with the worn tool (muted) rather than failing', async () => {
+  const { MAX_WEAR_STOPS_TOTAL } = await import('../../src/executor/executor')
+  const { bot, pick } = wornPickBot(30, {})
+  const lines: string[] = []
+  const ex = new Executor(bot, { log: line => lines.push(line) })
+  let replaced = 0
+  ex.replaceWornTool = async () => { replaced++; pick.durabilityUsed = 250 - 30; return true }
+  const progress = { dug: 0, runs: 0, tools: [] as string[] }
+  // 6 blocks before each of the 11 replaced stops' marks, then the muted one's 24 uses: 90 blocks done with it
+  assert.equal(await ex.task('a very long tunnel', longDig(bot, 90, progress)), 90)
+  assert.equal(replaced, MAX_WEAR_STOPS_TOTAL - 1)
+  assert.ok(lines.some(l => /a very long tunnel: goes on with the worn iron_pickaxe/.test(l)), lines.join('\n'))
+})
+
 test('a worn tool no replacement can be got for is let be: the task goes on with it, and no task stops for it a while', async () => {
   // nothing to make a pickaxe of, and the mine steps find nothing
   const { bot } = wornPickBot(30, {})

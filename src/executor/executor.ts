@@ -94,8 +94,14 @@ export interface ExecutorOptions {
   milestoneNeeds?: () => Readonly<Record<string, number>>
 }
 
-/** times a task is stopped for a worn tool (TOOL_WORN) and run again before the stop is let through */
+/**
+ * times a task is stopped for a worn tool (TOOL_WORN) whose replacement couldn't be got before the task goes on with the
+ * worn one (muted); a stop whose tool was replaced isn't counted, but no more than MAX_WEAR_STOPS_TOTAL stops a task
+ */
 export const MAX_WEAR_STOPS = 3
+
+/** stops of one task for worn tools, replaced or not, before the task goes on with what it holds (muted) */
+export const MAX_WEAR_STOPS_TOTAL = 12
 
 /** ticks a worn tool whose replacement failed is let be (no task stopped for it) before another try */
 export const WEAR_RETRY_TICKS = 12000
@@ -442,6 +448,10 @@ export class Executor {
    * back to where it stopped, and the task run again, up to MAX_WEAR_STOPS times.
    */
   async task<T> (name: string, fn: (signal: AbortSignal) => Promise<T>, signal?: AbortSignal, info?: TaskInfo): Promise<T> {
+    // a stop is never the task's failure: the tool is replaced and the task goes on, or (no replacement after
+    // MAX_WEAR_STOPS tries, or MAX_WEAR_STOPS_TOTAL stops) the tool is muted and the task goes on with it (a 26.3 nether
+    // milestone failed at its fourth stop, each pickaxe replaced and worn down again on the way to the fortress)
+    let unreplaced = 0
     for (let stops = 0; ; stops++) {
       const watch: { stop: WearStop | null } = { stop: null }
       try {
@@ -451,11 +461,10 @@ export class Executor {
         if (stop == null || !TaskError.is(err, 'TOOL_WORN') || signal?.aborted === true) throw err
         const partial = err.partial
         this.log(`${name}: stopped, the ${stop.tool.name} has ${stop.tool.uses} uses left and no spare of its tier${partial != null ? ` (got so far: ${JSON.stringify(partial)})` : ''}`)
-        if (stops >= MAX_WEAR_STOPS) {
+        if (unreplaced >= MAX_WEAR_STOPS || stops + 1 >= MAX_WEAR_STOPS_TOTAL) {
           this.muteWorn(stop.tool)
-          throw err
-        }
-        await this.replaceWornTool(stop.tool, signal)
+          this.log(`${name}: goes on with the worn ${stop.tool.name}`)
+        } else if (!await this.replaceWornTool(stop.tool, signal)) unreplaced++
         await this.backTo(stop, name, signal)
       }
     }
