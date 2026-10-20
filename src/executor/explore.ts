@@ -822,6 +822,8 @@ export const STUCK_LEG_TTL = 48000
 export const STUCK_SPOT_RADIUS = 6
 /** the times a leg got stuck at a spot before the legs that go by it are passed over */
 export const STUCK_LEG_TIMES = 2
+/** a leg that moved the bot less than this before it ended short got stuck */
+export const STUCK_LEG_MOVED = 3
 
 type StuckMemory = Pick<WorldMemory, 'now' | 'addPoi' | 'removePoi' | 'getPois'>
 
@@ -843,12 +845,17 @@ export function noteStuckLeg (memory: StuckMemory, pos: Vec3, dimension = 'overw
   return times
 }
 
-/** whether the way from `from` to a leg's end (straight, over the ground) goes within STUCK_SPOT_RADIUS of a spot */
+/**
+ * whether the way from `from` to a leg's end (straight, over the ground) goes within STUCK_SPOT_RADIUS of a spot; a
+ * spot the bot is at already isn't one its way goes by (every leg starts there: all 24 of a hunt's were passed over
+ * from one, seed 31337)
+ */
 export function legPassesSpot (from: Vec3, to: { x: number, z: number }, spots: readonly Vec3[]): boolean {
   const dx = to.x - from.x
   const dz = to.z - from.z
   const len2 = dx * dx + dz * dz
   return spots.some(s => {
+    if (Math.hypot(s.x - from.x, s.z - from.z) <= STUCK_SPOT_RADIUS) return false
     const t = len2 === 0 ? 0 : Math.max(0, Math.min(1, ((s.x - from.x) * dx + (s.z - from.z) * dz) / len2))
     return Math.hypot(from.x + t * dx - s.x, from.z + t * dz - s.z) <= STUCK_SPOT_RADIUS
   })
@@ -892,9 +899,12 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
       continue
     }
     trace('explore: surface leg to', wp.x, wp.z)
-    // a leg that ends short of its end (failed, or cut off by a reflex) is noted where it did
+    // a leg that ends short of its end (failed, or cut off by a reflex) where it started, getting nowhere, is noted
+    // where it did (one cut off by a fight on its way, 8 blocks on, isn't stuck)
+    const legStart = bot.entity.position.clone()
     const short = (): void => {
       if (args.memory == null || Math.hypot(bot.entity.position.x - wp.x, bot.entity.position.z - wp.z) <= 8) return
+      if (bot.entity.position.distanceTo(legStart) >= STUCK_LEG_MOVED) return
       const times = noteStuckLeg(args.memory, bot.entity.position, dimension)
       trace('explore: leg to', wp.x, wp.z, 'ended short at', bot.entity.position.floored().toString(), `(${times} times there)`)
     }

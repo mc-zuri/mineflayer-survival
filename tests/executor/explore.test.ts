@@ -634,6 +634,9 @@ test('stuck legs: a spot a leg ended short at twice lately is passed by the legs
   // the leg from (-131, 65, 65) to (-136, -96) goes through it; one off to the east doesn't
   assert.equal(legPassesSpot(new Vec3(-131, 65, 65), { x: -136, z: -96 }, spots), true)
   assert.equal(legPassesSpot(new Vec3(-131, 65, 65), { x: 40, z: 64 }, spots), false)
+  // from the spot itself, every leg starts there: none passed over for it
+  assert.equal(legPassesSpot(spot, { x: -136, z: -96 }, spots), false)
+  assert.equal(legPassesSpot(spot.offset(3, 0, 2), { x: 64, z: -48 }, spots), false)
   // two days on, forgotten
   memory.now += STUCK_LEG_TTL
   assert.deepEqual(stuckSpots(memory), [])
