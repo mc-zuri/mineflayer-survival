@@ -766,3 +766,25 @@ test('hostiles reflex in the nether: a wither skeleton with a calm zombified pig
   assert.strictEqual(check(hostilesReflex, { entities: [ws, entity({ name: 'zombified_piglin', position: at(12) })], items: kit }, {}, nether), null)
   assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'wither_skeleton', position: at(10) }), entity({ name: 'zombified_piglin', position: at(10, 64, 6.5) })], items: kit }, {}, nether), 'shoot wither_skeleton')
 })
+
+test('hostiles reflex in the nether: a calm zombified piglin at the bot doesn\'t cut the wither skeleton\'s shooting off', async () => {
+  const kit = [item('diamond_sword'), item('bow'), item('arrow', 28)]
+  const run = async (other: any): Promise<number> => {
+    const ws = entity({ name: 'wither_skeleton', position: at(10) })
+    const bot = fakeBot({ entities: [ws, other], items: kit })
+    bot.game.dimension = 'the_nether'
+    bot.equip = async (it: any) => { bot.heldItem = it }
+    let draws = 0
+    bot.activateItem = () => { draws++ }
+    bot.deactivateItem = () => {}
+    bot.world = { ...(bot.world ?? {}), raycast: () => null }
+    bot.waitForTicks = async (n: number) => { for (let i = 0; i < n; i++) bot.emit('physicsTick') }
+    const engine = new ReflexEngine(bot, { enabled: false })
+    const task = hostilesReflex.check(engine.context())
+    assert.strictEqual(task?.detail, 'shoot wither_skeleton')
+    await task!.run(new AbortController().signal).catch(() => {})
+    engine.stop()
+    return draws
+  }
+  assert.ok(await run(entity({ name: 'zombified_piglin', position: at(-1.2, 64, 0.5) })) >= 1)
+})

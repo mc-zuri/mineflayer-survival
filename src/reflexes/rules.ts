@@ -499,9 +499,13 @@ export const hostilesReflex: Reflex = {
     }
     // a wither skeleton coming from afar, nothing nearer: shot till it's within WITHER_MELEE_AT (witherToShoot)
     if (wither != null && !near.some(e => e.id !== wither.id && distance(bot, e) < WITHER_SHOOT_FROM)) {
-      // (or a melee mob at the bot: the reflex looks again; the blazes a skill fights itself aren't one)
+      // (or a melee mob at the bot: the reflex looks again; the blazes a skill fights itself aren't one, nor a calm
+      // zombified piglin, the hostiles' ignored kinds unless provoked: a piglin by the bot cut each draw off at once,
+      // the reflex firing again every few ticks)
+      const fought = new Set(hostilesInRange(ctx).map(e => e.id))
       const stop = (): boolean => !isAlive(bot, wither) || distance(bot, wither) < WITHER_MELEE_AT ||
-        Object.values(bot.entities).some(e => e.id !== wither.id && MELEE_MOBS.has(e.name ?? '') && isHostile(bot, e) && isAlive(bot, e) && inMobReach(e, bot.entity.position, MELEE_GUARD_MARGIN))
+        Object.values(bot.entities).some(e => e.id !== wither.id && MELEE_MOBS.has(e.name ?? '') && isHostile(bot, e) && isAlive(bot, e) &&
+          (!config.hostiles.ignore.includes(e.name ?? '') || fought.has(e.id)) && inMobReach(e, bot.entity.position, MELEE_GUARD_MARGIN))
       return {
         name: 'hostiles',
         priority: config.hostiles.priority,
