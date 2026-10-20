@@ -312,7 +312,11 @@ export const DIAMOND_TRIP_PICKAXES = 2
  */
 export function diamondTripPickaxes (inv: Inventory): ObtainRequest[] {
   if (inv.countAny(toolsAtLeast('pickaxe', 'diamond')) > 0) return []
-  return inv.count('iron_pickaxe') >= DIAMOND_TRIP_PICKAXES ? [] : [{ item: 'iron_pickaxe', count: DIAMOND_TRIP_PICKAXES }]
+  const goals: ObtainRequest[] = inv.count('iron_pickaxe') >= DIAMOND_TRIP_PICKAXES ? [] : [{ item: 'iron_pickaxe', count: DIAMOND_TRIP_PICKAXES }]
+  // and a stone one to dig the staircase and the tunnels with (skills/digTool.ts: the iron saved for the ores), from
+  // the cobblestone always carried; when it breaks down there the route makes another (explore.ts pickaxeKeeper)
+  if (inv.count('stone_pickaxe') === 0) goals.push({ item: 'stone_pickaxe', count: 1, optional: true })
+  return goals
 }
 
 /**

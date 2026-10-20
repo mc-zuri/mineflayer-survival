@@ -16,6 +16,7 @@ import { keepRoom } from '../skills/bag'
 import { headInWater, surface } from '../skills/escape'
 import { placeBlock } from '../skills/placeBlock'
 import { AIR_BLOCKS, CARDINALS, countItems, trace, waitUntil } from '../skills/util'
+import { DIGGING_PICKAXE, wantsDiggingPickaxe } from '../skills/digTool'
 
 export type Lookup = (pos: Vec3) => { name: string, boundingBox: string } | null
 
@@ -601,14 +602,17 @@ type Crafter = (bot: Bot, args: { item: string, pickUpTable?: boolean }, signal?
 
 /**
  * A pickaxe in the bag, made from what's held when there's none (the last one broke down a mine, where the rock
- * wants one): stone, else wood. Resolves the one there is, or null.
+ * wants one): stone, else wood. Resolves the one there is, or null. `digging`: a stone one beside the iron one carried
+ * (digTool.ts wantsDiggingPickaxe: the stone dug with it, the iron one saved for the ores), only a stone one made.
  */
-export async function ensurePickaxe (bot: Bot, signal?: AbortSignal, craftFn?: Crafter): Promise<string | null> {
-  const held = (): string | null => bot.inventory.items().find(i => i.name.endsWith('_pickaxe'))?.name ?? null
+export async function ensurePickaxe (bot: Bot, signal?: AbortSignal, craftFn?: Crafter, digging = false): Promise<string | null> {
+  const held = (): string | null => digging
+    ? (wantsDiggingPickaxe(bot.inventory.items()) ? null : DIGGING_PICKAXE)
+    : bot.inventory.items().find(i => i.name.endsWith('_pickaxe'))?.name ?? null
   if (held() != null) return held()
   const make = craftFn ?? (await import('../skills/craft')).craft
   let nook = false
-  for (const pickaxe of ['stone_pickaxe', 'wooden_pickaxe']) {
+  for (const pickaxe of digging ? [DIGGING_PICKAXE] : ['stone_pickaxe', 'wooden_pickaxe']) {
     for (let tries = 0; tries < 2; tries++) {
       try {
         await make(bot, { item: pickaxe, pickUpTable: true }, signal)
@@ -630,20 +634,34 @@ export async function ensurePickaxe (bot: Bot, signal?: AbortSignal, craftFn?: C
 /** a dug route's steps between tries at a pickaxe after one failed (pickaxeKeeper) */
 export const PICKAXE_RETRY_STEPS = 16
 
+/** and between tries at a stone one to dig with beside the iron one after one failed (no sticks: the iron one digs) */
+export const DIGGING_PICKAXE_RETRY_STEPS = 64
+
 /**
  * A dug route's pickaxe kept, a step at a time: when the bag has none (the last one broke on the way, the wear watch
  * having found nothing to make another from, or none was carried), one made from what's carried before the step is
  * dug (ensurePickaxe: the route's own cobblestone, a stick, the table carried), tried again PICKAXE_RETRY_STEPS steps
  * on when none can be. A 26.3 whole game's staircase to the deep lava dug from y 12 to -50 by hand after its diamond
  * pickaxe broke, some 50000 ticks (a block of deepslate takes 300 ticks by hand, 23 with a stone pickaxe), with 17
- * sticks, a crafting table and 600 cobblestone in the bag.
+ * sticks, a crafting table and 600 cobblestone in the bag. And with the iron pickaxe the best carried, a stone one to
+ * dig the route with (digTool.ts: the iron one saved for the ores that need it), made when the last one broke, tried
+ * again DIGGING_PICKAXE_RETRY_STEPS steps on when none can be.
  */
 export function pickaxeKeeper (bot: Bot, craftFn?: Crafter): (signal?: AbortSignal) => Promise<void> {
   let step = 0
   let next = 0
+  let nextDigger = 0
   return async (signal) => {
     step++
-    if (step < next || bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))) return
+    const items = bot.inventory.items()
+    if (items.some(i => i.name.endsWith('_pickaxe'))) {
+      if (step < nextDigger || !wantsDiggingPickaxe(items)) return
+      const made = await ensurePickaxe(bot, signal, craftFn, true)
+      if (made == null) nextDigger = step + DIGGING_PICKAXE_RETRY_STEPS
+      trace('explore: no stone pickaxe to dig the route with:', made != null ? 'one made' : `none made, again in ${DIGGING_PICKAXE_RETRY_STEPS} steps`)
+      return
+    }
+    if (step < next) return
     const made = await ensurePickaxe(bot, signal, craftFn)
     if (made == null) next = step + PICKAXE_RETRY_STEPS
     trace('explore: no pickaxe for the route:', made != null ? `a ${made} made` : `none made, again in ${PICKAXE_RETRY_STEPS} steps`)

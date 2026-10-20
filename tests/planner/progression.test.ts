@@ -174,7 +174,7 @@ test('iron: the armor is iron, not diamond, even with a diamond ore seen nearby 
 })
 
 test('diamonds: the pickaxe and sword, and only the armor the diamonds held beyond them pay for', () => {
-  const kit = { iron_pickaxe: 2, iron_sword: 1, crafting_table: 1, furnace: 1 }
+  const kit = { iron_pickaxe: 2, stone_pickaxe: 1, iron_sword: 1, crafting_table: 1, furnace: 1 }
   const items = (s: ProgressState): string[] => milestone('diamonds').goals(s).map(g => typeof g.item === 'string' ? g.item : (g.item as string[])[0])
   assert.deepEqual(items(state(kit)), ['diamond_pickaxe', 'diamond_sword'])
   const plan = planMilestone(registry, milestone('diamonds'), state(kit))
@@ -188,7 +188,7 @@ test('diamonds: the pickaxe and sword, and only the armor the diamonds held beyo
 test(`diamonds: the trip sets out with ${DIAMOND_TRIP_PICKAXES} iron pickaxes, the spare made from the iron held before the diamonds are mined (rt-1, grim-2)`, () => {
   const items = (s: ProgressState): string[] => milestone('diamonds').goals(s).map(g => typeof g.item === 'string' ? g.item : (g.item as string[])[0])
   // one iron pickaxe and the iron stock's raw iron: a spare smelted and made first, no iron ore mined for it
-  const kit = { iron_pickaxe: 1, iron_sword: 1, crafting_table: 1, furnace: 1, raw_iron: 20, coal: 8, stick: 4, cobblestone: 64 }
+  const kit = { iron_pickaxe: 1, stone_pickaxe: 1, iron_sword: 1, crafting_table: 1, furnace: 1, raw_iron: 20, coal: 8, stick: 4, cobblestone: 64 }
   assert.deepEqual(items(state(kit)), ['iron_pickaxe', 'diamond_pickaxe', 'diamond_sword'])
   assert.deepEqual(diamondTripPickaxes(new Inventory(registry, kit)), [{ item: 'iron_pickaxe', count: DIAMOND_TRIP_PICKAXES }])
   const plan = planMilestone(registry, milestone('diamonds'), state(kit))
@@ -203,8 +203,13 @@ test(`diamonds: the trip sets out with ${DIAMOND_TRIP_PICKAXES} iron pickaxes, t
   assert.ok(bare.steps.some(st => st.kind === 'mine' && st.item === 'raw_iron'), bare.steps.map(st => `${st.kind} ${st.item}`).join(', '))
   // a diamond pickaxe had (the sword left to make): it lasts the trip, no iron one more
   assert.deepEqual(items(state({ ...kit, diamond_pickaxe: 1 })), ['diamond_pickaxe', 'diamond_sword'])
-  // two iron ones already: nothing more
-  assert.deepEqual(diamondTripPickaxes(new Inventory(registry, { iron_pickaxe: 2 })), [])
+  // two iron ones and a stone one already: nothing more
+  assert.deepEqual(diamondTripPickaxes(new Inventory(registry, { iron_pickaxe: 2, stone_pickaxe: 1 })), [])
+  // no stone one: one made from the cobblestone, to dig the staircase and the tunnels with (the iron saved for the ores)
+  assert.deepEqual(diamondTripPickaxes(new Inventory(registry, { iron_pickaxe: 2 })), [{ item: 'stone_pickaxe', count: 1, optional: true }])
+  const stoneless = planMilestone(registry, milestone('diamonds'), state({ ...kit, stone_pickaxe: 0 }))
+  const order = stoneless.steps.map(st => `${st.kind} ${st.item}`)
+  assert.ok(order.indexOf('craft stone_pickaxe') >= 0 && order.indexOf('craft stone_pickaxe') < order.indexOf('mine diamond'), order.join(', '))
 })
 
 test('a crop remembered (maybe not grown: the bot\'s own farm) is no cheaper to the food plan; one seen grown is', () => {

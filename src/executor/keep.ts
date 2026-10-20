@@ -6,6 +6,7 @@ import type { RegistryLike } from '../core/registry'
 import { heldFor, unitValue, type ObtainPlan, type ObtainRequest } from '../planner/obtain'
 import { FOOD_GOAL, toolsAtLeast, type Milestone, type MilestoneId, type ProgressState } from '../planner/progression'
 import type { StockPolicy } from '../planner/stock'
+import { DIGGING_PICKAXE, wantsDiggingPickaxe } from '../skills/digTool'
 
 /** how many of an item to carry; Infinity: all of them (the registry: the version's, for what is food) */
 export type KeepRule = (name: string, registry?: RegistryLike) => number | null
@@ -85,7 +86,10 @@ export function spareToolsKeep (items: readonly ItemCount[], base: KeepRule = de
   const rank = (name: string): number => { const t = parseTool(name); return t == null ? 0 : TOOL_MATERIALS[t.material].tier * 100 + TOOL_MATERIALS[t.material].speed }
   for (const [kind, names] of byKind) {
     names.sort((a, b) => rank(b) - rank(a))
-    for (const n of names.slice(0, counts[kind as ToolKind] ?? 1)) kept.set(n, (kept.get(n) ?? 0) + 1)
+    const keep = names.slice(0, counts[kind as ToolKind] ?? 1)
+    // and a stone pickaxe beside iron ones, to dig the stone with (digTool.ts: the iron saved for the ores)
+    if (kind === 'pickaxe' && names.includes(DIGGING_PICKAXE) && wantsDiggingPickaxe(keep.map(name => ({ name })))) keep.push(DIGGING_PICKAXE)
+    for (const n of keep) kept.set(n, (kept.get(n) ?? 0) + 1)
   }
   return (name, registry) => parseTool(name) != null ? (kept.get(name) ?? 0) : base(name, registry)
 }
