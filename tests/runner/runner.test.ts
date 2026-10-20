@@ -708,3 +708,28 @@ test('waitOutTheNight: by day nothing; a bed that fails as the night ends (the s
     clearInterval(ticker)
   }
 })
+
+test('a milestone not ready to go on (notReady) is tried again without counting a failure', async () => {
+  const { SkillError } = await import('../../src/skills/errors')
+  const bot = fakeBot()
+  let calls = 0
+  const logs: string[] = []
+  const runner = new Runner(bot, {
+    until: 'wood',
+    log: (l: string) => logs.push(l),
+    maxFailures: 2,
+    handlers: {
+      wood: async () => {
+        calls++
+        if (calls <= 3) throw Object.assign(new SkillError('MISSING_ITEMS', 'not going in without the gear'), { notReady: true })
+        bot.give('wooden_pickaxe', 1)
+        bot.give('crafting_table', 1)
+      }
+    }
+  })
+  const r = await runner.play()
+  assert.equal(r.reason, 'until', logs.join('\n'))
+  assert.equal(calls, 4)
+  assert.ok(logs.some(l => /milestone wood not ready \(3\)/.test(l)))
+  assert.ok(!logs.some(l => /milestone wood failed/.test(l)))
+})

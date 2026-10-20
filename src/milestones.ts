@@ -708,7 +708,7 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
     log(`nether kit: ${(err as Error).message}`)
   })
   const still = netherGearNeeds(ownedInventory(bot))
-  if (still.length > 0) throw new SkillError('MISSING_ITEMS', `not going into the nether without ${still.map(describeRequest).join(', ')}`)
+  if (still.length > 0) throw Object.assign(new SkillError('MISSING_ITEMS', `not going into the nether without ${still.map(describeRequest).join(', ')}`), { notReady: true })
 }
 
 const GOLD_PIECES = ['golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots']

@@ -69,6 +69,9 @@ export const OPTIONAL_MILESTONES: readonly MilestoneId[] = ['enchanting']
 export const OPTIONAL_MILESTONE_TICKS = 400000
 
 /** milestones that are a trip across the world, not worked from home: the night's mining waits till they're done */
+/** the times a milestone not ready to go on is tried again before it counts as a failure */
+export const NOT_READY_TRIES = 10
+
 /** the ticks the re-equipping after a death may take in all */
 export const REEQUIP_TICKS = 24000
 
@@ -588,6 +591,7 @@ export class Runner {
     this.playSignal = signal
     const skip = new Set(this.options.skip ?? [])
     const failures = new Map<MilestoneId, number>()
+    const notReady = new Map<MilestoneId, number>()
     const spent = new Map<MilestoneId, number>()
     const maxFailures = this.options.maxFailures ?? 5
     const stopped = (): boolean => signal.aborted
@@ -676,6 +680,18 @@ export class Runner {
           this.log(`died working on ${m.id}: ${(err as Error).message}`)
           await this.recover(signal)
           continue
+        }
+        // a milestone not ready to go on (the nether's gear still being got: netherKit's notReady) is tried again
+        // without counting it a failure, NOT_READY_TRIES times (a 26.3 bot back from its deaths failed the nether
+        // twice on 'not going into the nether without' its armor, the game's stop three more away)
+        if ((err as any)?.notReady === true) {
+          const k = (notReady.get(m.id) ?? 0) + 1
+          notReady.set(m.id, k)
+          if (k < NOT_READY_TRIES) {
+            this.log(`milestone ${m.id} not ready (${k}): ${(err as Error).message}`)
+            continue
+          }
+          notReady.delete(m.id)
         }
         const n = (failures.get(m.id) ?? 0) + 1
         failures.set(m.id, n)
