@@ -361,11 +361,32 @@ export async function seekFoodLand (bot: Bot, args: FoodLandArgs, signal?: Abort
       trace('foodLand: the trip to', target.toString(), (err as Error).message)
     })
   })
+  // (again while a trip gets the bot nearer: one from the bottom of the night's mine on seed 31337 ended 40 ticks in)
+  const goNear = async (to: Vec3): Promise<void> => {
+    for (let i = 0; i < FOOD_TRIP_TRIES; i++) {
+      const from = bot.entity.position.clone()
+      await go(to)
+      const left = Math.hypot(to.x - bot.entity.position.x, to.z - bot.entity.position.z)
+      trace('foodLand: the trip', i + 1, 'ended', Math.round(left), 'blocks from the food land')
+      if (left <= FED_RADIUS / 2 || bot.entity.position.distanceTo(from) < 8) break
+    }
+  }
   survey.survey()
   const center = args.home ?? bot.entity.position.floored()
   const barren = landBarren(survey, center)
   const hunted = LAND_ANIMALS.every(m => args.misses(m) > 0)
-  if (barren !== true && !hunted) return null
+  if (barren !== true && !hunted) {
+    // the food land far off (the bot respawned at the world's spawn, or back from a trip): there by travel's hops
+    // first, not by the explorations' first leg, a pathfinder's walk of 230 blocks over seed 31337's peaks that went
+    // the other way (hunt2-c)
+    const land = foodLandOf(memory)
+    if (land != null && land.equals(center) && Math.hypot(land.x - bot.entity.position.x, land.z - bot.entity.position.z) > FED_RADIUS) {
+      log(`to the food land at ${land.x} ${land.z} (${Math.round(Math.hypot(land.x - bot.entity.position.x, land.z - bot.entity.position.z))} blocks)`)
+      await goNear(land)
+      return land
+    }
+    return null
+  }
   // the land left: not gone back to for food a while (a food land's own animals not found)
   if (hunted) {
     const land = foodLandOf(memory)
@@ -418,13 +439,6 @@ export async function seekFoodLand (bot: Bot, args: FoodLandArgs, signal?: Abort
   for (const p of memory.getPois(FOOD_LAND_POI, { dimension: 'overworld' })) memory.removePoi(FOOD_LAND_POI, p, 'overworld')
   memory.addPoi(FOOD_LAND_POI, dest.pos, 'overworld', dest.biome)
   args.forgetLand()
-  // (again while a trip gets the bot nearer: one from the bottom of the night's mine on seed 31337 ended 40 ticks in)
-  for (let i = 0; i < FOOD_TRIP_TRIES; i++) {
-    const from = bot.entity.position.clone()
-    await go(dest.pos)
-    const left = Math.hypot(dest.pos.x - bot.entity.position.x, dest.pos.z - bot.entity.position.z)
-    trace('foodLand: the trip', i + 1, 'ended', Math.round(left), 'blocks from the food land')
-    if (left <= FED_RADIUS / 2 || bot.entity.position.distanceTo(from) < 8) break
-  }
+  await goNear(dest.pos)
   return dest.pos
 }

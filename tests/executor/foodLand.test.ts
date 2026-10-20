@@ -229,3 +229,20 @@ test('seekFoodLand scouts downhill while the seed\'s reads are under way, stops 
   assert.ok(hops < 10, `the scouting went on after the reads: ${hops} hops`)
   assert.ok(land != null && land.x === 0 && land.z === -224, String(land))
 })
+
+test('seekFoodLand: the food land fed but far off (a respawn at the world\'s spawn) is gone to by the trips first; near it, nothing', async () => {
+  const bot = fakeBot('26.3', (x) => x > 150 ? { biome: 'snowy_taiga', y: 70 } : { biome: 'grove', y: 120 })
+  const memory = new WorldMemory()
+  const survey = new BiomeSurvey(bot, memory)
+  bot.entity.position = new Vec3(224, 70, 0)
+  survey.survey()
+  memory.addPoi(FOOD_LAND_POI, { x: 224, y: 63, z: 0 }, 'overworld', 'snowy_taiga')
+  bot.entity.position = new Vec3(0, 120, 0)
+  const trips: string[] = []
+  const go = async (t: Vec3): Promise<void> => { trips.push(`${t.x} ${t.z}`); bot.entity.position = t.clone() }
+  const land = foodLandOf(memory) as Vec3
+  assert.ok((await seekFoodLand(bot, { survey, memory, home: land, misses: () => 0, forgetLand: () => {}, travel: go }))?.equals(land))
+  assert.deepEqual(trips, ['224 0'])
+  assert.equal(await seekFoodLand(bot, { survey, memory, home: land, misses: () => 0, forgetLand: () => {}, travel: go }), null)
+  assert.equal(trips.length, 1)
+})
