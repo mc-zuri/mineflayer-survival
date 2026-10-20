@@ -626,7 +626,9 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
         log(`a portal frame: ${(err as Error).message}: the lava carried to a cast away from it`)
       }
       // no shore either: the pool's lava carried in buckets to a cast away from it
-      const lava = findLavaSources(blockGetter(bot), bot.entity.position, 16).map(p => new Vec3(p.x, p.y, p.z))
+      // (the pool's, round its middle: the bot may be off it by now, the obsidian's tries having walked it away, and
+      // its own spot had none in 16, 'no cast at … from the 0 lava sources', 26.3)
+      const lava = findLavaSources(blockGetter(bot), at, 16).map(p => new Vec3(p.x, p.y, p.z))
       const away = castNearSpot(bot.entity.position, lava)
       if (away != null) {
         // a deep pool: the cast on a site dug in the rock CAST_AWAY blocks off it, the trips for its lava short (a 26.3

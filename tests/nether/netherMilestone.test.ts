@@ -849,3 +849,41 @@ test('the last way to a frame\'s obsidian (the planner\'s mine of any) is held t
   await assert.rejects(buildAPortal(bot, executor, new AbortController().signal, () => {}))
   assert.equal(budgeted, true)
 })
+
+test('a cast away takes the pool\'s lava round the pool, wherever the bot has got to', async () => {
+  const { SkillError } = await import('../../src/skills/errors')
+  const skillsModule = require('../../src/nether/portalSkills')
+  const gridModule = require('../../src/skills/gridWalk')
+  const { buildAPortal } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1), item('bucket', 1), item('cobblestone', 64), item('flint_and_steel', 1)] })
+  bot.game.dimension = 'overworld'
+  const lava = bot.registry.blocksByName.lava.id
+  bot.findBlocks = (opts: any) => opts.matching === lava ? Array.from({ length: 12 }, (_, i) => new Vec3(2 + (i % 4), -55, Math.floor(i / 4))) : []
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => (p.y === -55 && p.x >= 2 && p.x < 6 && p.z >= 0 && p.z < 3) ? { ...realAt(p), name: 'lava', getProperties: () => ({ level: 0 }) } : realAt(p)) as any
+  let given: number | null = null
+  const realCast = skillsModule.castPortalAway
+  const realMove = gridModule.moveNear
+  gridModule.moveNear = async () => {}
+  skillsModule.castPortalAway = async (_b: unknown, l: any[]) => { given = l.length; throw new Error('stop here') }
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async () => { throw new Error('MISSING_ITEMS: none') },
+    task: async (name: string, fn: any) => {
+      if (name === 'build a nether portal') throw new SkillError('CANNOT_PLACE', 'no site to cast a portal frame by the lava')
+      // the obsidian tries walked the bot 40 blocks off the pool
+      if (name === 'obsidian from the lava') { bot.entity.position = new Vec3(40.5, -50, 40.5); throw new SkillError('MISSING_ITEMS', 'no diamond pickaxe to mine obsidian with') }
+      if (name === 'cast a portal') return await fn(new AbortController().signal)
+    }
+  }
+  try {
+    await buildAPortal(bot, executor, new AbortController().signal, () => {}).catch(() => {})
+  } finally {
+    skillsModule.castPortalAway = realCast
+    gridModule.moveNear = realMove
+  }
+  assert.equal(given, 12)
+})
