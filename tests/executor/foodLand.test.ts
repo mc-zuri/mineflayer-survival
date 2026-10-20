@@ -265,3 +265,13 @@ test('seekFoodLand: a fed land whose food work got no food FOOD_LAND_DRY_TRIES t
   assert.equal(memory.getPois(FOOD_LAND_FAILED_POI).length, 1)
   assert.equal(forgot, 1)
 })
+
+test('BiomeSurvey.wide: a patch of 7 food biome chunks of the 29 about it is not wide (hunt2-d), one of 26 is', () => {
+  // the snowy taiga a strip 2 chunks wide west of x -96, the taiga all over north of z -160
+  const bot = fakeBot('26.3', (x, z) => z < -160 ? { biome: 'taiga', y: 90 } : (x < -96 && x > -130 && z > -60 && z < -20) ? { biome: 'snowy_taiga', y: 85 } : { biome: 'grove', y: 120 }, 20)
+  const survey = new BiomeSurvey(bot, new WorldMemory())
+  survey.survey(4000)
+  assert.ok(survey.patchSize({ x: -112, z: -40 }) < 14, String(survey.patchSize({ x: -112, z: -40 })))
+  assert.equal(survey.wide({ x: -112, z: -40 }), false)
+  assert.equal(survey.wide({ x: 0, z: -224 }), true)
+})
