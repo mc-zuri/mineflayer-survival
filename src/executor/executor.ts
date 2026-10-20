@@ -22,6 +22,8 @@ import { placeBlock } from '../skills/placeBlock'
 import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
 import { tossAway } from '../skills/pickupDrops'
+import { navigate } from '../skills/navigate'
+import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { holdBag, type BagKeeper } from '../skills/bag'
 import { countItems, emptySlots, trace } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
@@ -130,6 +132,15 @@ export const DEPOT_RANGE = 32
 
 /** slots made beyond the usual when what's thrown away goes into lava (explore.ts lavaThrow) */
 export const LAVA_ROOM = 6
+
+/**
+ * How far from where it stands the bot takes a stack the room's throws keep getting back (ThrowHistory) before it
+ * throws it again, with no lava to burn it nor a chest near to take it: the work it comes back to lies that far from it
+ */
+export const THROW_AWAY_RANGE = 8
+
+/** ticks the walk off for such a throw may take */
+export const THROW_AWAY_TICKS = 600
 
 /** the memory's point of interest for a chest the bot put down away from the base (a mine depot): its chests count as stock */
 export const DEPOT_POI = 'mine_depot'
@@ -710,8 +721,11 @@ export class Executor {
    * enchanting table and a diamond away (26.3). `inTask`: the signal of the task it runs in (a step's, room made on the
    * way: makeRoomDuringStep), whose skills it calls straight, with no walk to the base. `toward`: where the bot goes
    * next (the pit for what's thrown dug off its way). A stack thrown THROW_LOOP_REPEATS times within THROW_LOOP_TICKS
-   * (ThrowHistory: it came back each time) isn't thrown again: it goes to the base's chests or a chest near with the
-   * rest, and with no chest to take it, the room fails INVENTORY_FULL with a report rather than throw it once more.
+   * (ThrowHistory: it came back each time) goes into lava in reach, where it burns; else into a known chest near with
+   * the rest; else the bot takes it THROW_AWAY_RANGE blocks off first and throws it there (tossJunk's `away`), never
+   * refused while it's junk: a 26.3 bot's '23 diorite, 7 andesite, 3 dirt' was held back from a third throw with no
+   * chest to put it in, and the nether's gate failed 'inventory full (1 free slots)' with 5 stacks of cobblestone to
+   * spare (full-26.3-fresh-f). Only a stack the throw away still leaves fails INVENTORY_FULL, with a report.
    */
   async makeRoom (needed: Record<string, number> = {}, signal?: AbortSignal, force = false, inTask?: AbortSignal, toward?: Vec3): Promise<void> {
     if (this.makingRoom) return
@@ -726,7 +740,12 @@ export class Executor {
         if (emptySlots(this.bot) >= this.options.minFreeSlots) return
       }
       await this.stashNearby(needed, signal, run, new Set(thrown.looping.map(t => t.name)))
-      if (thrown.looping.length > 0 && emptySlots(this.bot) < this.options.minFreeSlots) this.roomLoops(thrown.looping)
+      if (thrown.looping.length > 0 && emptySlots(this.bot) < this.options.minFreeSlots) {
+        // no chest took them after all: thrown away from here
+        await this.tossJunk(needed, false, run, toward, true)
+        const left = thrown.looping.filter(t => countItems(this.bot, t.name) >= t.count)
+        if (left.length > 0 && emptySlots(this.bot) < this.options.minFreeSlots) this.roomLoops(left)
+      }
       if (!force || emptySlots(this.bot) >= this.options.minFreeSlots) return
       await this.tossJunk(needed, true, run, toward)
       if (emptySlots(this.bot) === 0) {
@@ -757,11 +776,12 @@ export class Executor {
   }
 
   /**
-   * A loop of throws for room no chest broke (the stacks `looping` came back each time they were thrown): fails
-   * INVENTORY_FULL, with a report, and no room is made on the way for THROW_LOOP_TICKS
+   * A loop of throws for room that neither a chest nor a throw away from here broke (the stacks `looping` came back
+   * each time they were thrown, and are held still): fails INVENTORY_FULL, with a report, and no room is made on the way
+   * for THROW_LOOP_TICKS
    */
   private roomLoops (looping: ReadonlyArray<{ name: string, count: number }>): never {
-    const err = new TaskError('INVENTORY_FULL', `making room loops: ${looping.map(t => `${t.count} ${t.name}`).join(', ')} thrown ${THROW_LOOP_REPEATS} times within ${THROW_LOOP_TICKS} ticks and picked up again, and no chest to put them in (${emptySlots(this.bot)} slots free)`)
+    const err = new TaskError('INVENTORY_FULL', `making room loops: ${looping.map(t => `${t.count} ${t.name}`).join(', ')} thrown ${THROW_LOOP_REPEATS} times within ${THROW_LOOP_TICKS} ticks and picked up again, and no chest to put them in nor a way off to throw them (${emptySlots(this.bot)} slots free)`)
     this.roomLoopUntil = this.tasks.tick + THROW_LOOP_TICKS
     try { this.diagnostics?.skillFailed('make room', err, { args: { looping, at: this.bot.entity.position.floored().toString() } }) } catch {}
     throw err
@@ -769,35 +789,58 @@ export class Executor {
 
   /**
    * Throws away the junk and the surplus (and with `anything`, what storing would take) for room: whole stacks, the
-   * least worth first (junkToToss), into lava or a pit off the way. Not a stack thrown THROW_LOOP_REPEATS times
-   * within THROW_LOOP_TICKS already (ThrowHistory: it was picked up again each time): those are `looping`, for a chest.
-   * Whether there's room now.
+   * least worth first (junkToToss), into lava or a pit off the way. A stack thrown THROW_LOOP_REPEATS times within
+   * THROW_LOOP_TICKS already (ThrowHistory: it was picked up again each time) burns in lava in reach like the rest; with
+   * none, it's left for a known chest near (`looping`, makeRoom's stash) and the rest thrown, the room it would have
+   * made got from the next junk and surplus; with no chest either, or `away` (no chest took them), the bot walks
+   * THROW_AWAY_RANGE blocks off from where it stands (walkOff) and throws them all there, into a pit dug off its way
+   * back. Whether there's room now.
    */
-  private async tossJunk (needed: Record<string, number>, anything: boolean, run: RoomRunner, toward?: Vec3): Promise<{ room: boolean, looping: Array<{ name: string, count: number }> }> {
+  private async tossJunk (needed: Record<string, number>, anything: boolean, run: RoomRunner, toward?: Vec3, away = false): Promise<{ room: boolean, looping: Array<{ name: string, count: number }> }> {
     const lava = (): { yaw: number, pitch: number } | null => lavaThrow(p => this.bot.blockAt(p) as any, this.bot.entity.position, (this.bot.entity as any).eyeHeight ?? 1.62)
     // with lava in reach, LAVA_ROOM more slots: what burns is gone for good, and the work about a lava lake (its
     // obsidian) turns the lava it would be thrown into later
     const want = this.options.minFreeSlots + 2 + (lava() != null ? LAVA_ROOM : 0) - emptySlots(this.bot)
     if (want <= 0) return { room: true, looping: [] }
     const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
-    let toss = junkToToss(stacks, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.options.scaffold, protect: this.protect() })
+    const pick = (from: typeof stacks): Array<{ name: string, count: number }> => junkToToss(from, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.options.scaffold, protect: this.protect() })
+    let toss = pick(stacks)
     const looping = this.throws.looping(toss, this.tasks.tick, name => this.bot.registry.itemsByName[name]?.stackSize ?? 64)
+    let forChest: Array<{ name: string, count: number }> = []
+    let walkOff = false
     if (looping.length > 0) {
-      this.log(`making room loops: ${looping.map(t => `${t.count} ${t.name}`).join(', ')} thrown ${THROW_LOOP_REPEATS - 1} times within ${THROW_LOOP_TICKS} ticks came back: into a chest instead`)
-      const names = new Set(looping.map(t => t.name))
-      toss = toss.filter(t => !names.has(t.name))
+      const what = `making room loops: ${looping.map(t => `${t.count} ${t.name}`).join(', ')} thrown ${THROW_LOOP_REPEATS - 1} times within ${THROW_LOOP_TICKS} ticks came back`
+      if (lava() != null) {
+        this.log(`${what}: into the lava, where it burns`)
+      } else if (!away && this.chestNear() != null) {
+        this.log(`${what}: into a chest instead`)
+        forChest = looping
+        // the room got from the next junk and surplus meanwhile
+        const names = new Set(looping.map(t => t.name))
+        toss = pick(stacks.filter(st => !names.has(st.name)))
+      } else {
+        this.log(`${what}: thrown ${THROW_AWAY_RANGE} blocks off`)
+        walkOff = true
+      }
     }
     if (toss.length > 0) {
       this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
       this.throws.record(toss, this.tasks.tick)
       await run('make room', async (s) => {
+        // what kept coming back where the bot works is thrown away from there, the pit off the way back to it
+        let back = toward
+        if (walkOff) {
+          const from = this.bot.entity.position.clone()
+          if (await this.walkOff(s, from)) back = from
+          else this.log(`no way ${THROW_AWAY_RANGE} blocks off: thrown here`)
+        }
         // into lava in reach, where it burns (lavaThrow); else into a pit dug beside the bot, out of its reach as it
         // walks by (or behind it), and never gone back for (tossAway): thrown at a wall, the stack fell at its feet and
         // was picked up again 40 ticks on (Player.drop's pickup delay)
         let pit: Vec3 | null | undefined
         for (const t of toss) {
           const burn = lava()
-          if (burn == null && pit === undefined) pit = await dumpPit(this.bot, s, toward)
+          if (burn == null && pit === undefined) pit = await dumpPit(this.bot, s, back)
           // into the pit along a look whose flight ends there (pitThrow), else aimed at it
           const look = burn == null && pit != null ? pitThrow(p => this.bot.blockAt(p) as any, this.bot.entity.position, pit, (this.bot.entity as any).eyeHeight ?? 1.62) : null
           const into = burn ?? (look != null && pit != null ? { ...look, pit } : pit)
@@ -805,7 +848,31 @@ export class Executor {
         }
       })
     }
-    return { room: emptySlots(this.bot) >= this.options.minFreeSlots, looping }
+    return { room: emptySlots(this.bot) >= this.options.minFreeSlots, looping: forChest }
+  }
+
+  /** a known chest within DEPOT_RANGE that stands there still (stashNearby's first choice), the nearest; null with none */
+  private chestNear (): Vec3 | null {
+    const here = this.bot.entity.position
+    return this.memory.knownChests(normalizeDimension(this.bot.game?.dimension))
+      .map(c => vec(c))
+      .filter(p => p.distanceTo(here) <= DEPOT_RANGE && ['chest', 'trapped_chest', 'barrel'].includes(this.bot.blockAt(p)?.name ?? ''))
+      .sort((a, b) => a.distanceTo(here) - b.distanceTo(here))[0] ?? null
+  }
+
+  /**
+   * Walks THROW_AWAY_RANGE blocks or more off `from` (within THROW_AWAY_TICKS), for a throw whose stacks came back
+   * there; whether it got that far
+   */
+  private async walkOff (signal: AbortSignal, from: Vec3): Promise<boolean> {
+    const at = from.floored()
+    try {
+      await navigate(this.bot, { goal: new goals.GoalInvert(new goals.GoalNear(at.x, at.y, at.z, THROW_AWAY_RANGE)) as any, maxTicks: THROW_AWAY_TICKS }, signal)
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('executor: no walk off for the throw:', (err as Error).message)
+    }
+    return this.bot.entity.position.distanceTo(from) >= THROW_AWAY_RANGE
   }
 
   /**
@@ -822,12 +889,7 @@ export class Executor {
     const worth = store.filter(it => also.has(it.name) || (!JUNK.has(it.name) && !this.isSurplus(it.name)))
     if (worth.length === 0) return moved
     const dimension = normalizeDimension(this.bot.game?.dimension)
-    const here = this.bot.entity.position
-    const near = this.memory.knownChests(dimension)
-      .map(c => vec(c))
-      .filter(p => p.distanceTo(here) <= DEPOT_RANGE && ['chest', 'trapped_chest', 'barrel'].includes(this.bot.blockAt(p)?.name ?? ''))
-      .sort((a, b) => a.distanceTo(here) - b.distanceTo(here))
-    let chest: Vec3 | null = near[0] ?? null
+    let chest: Vec3 | null = this.chestNear()
     if (chest == null) {
       try {
         chest = await run('put down a depot', async (s) => await this.putDownDepot(s))

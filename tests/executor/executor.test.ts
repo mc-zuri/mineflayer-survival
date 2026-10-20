@@ -337,35 +337,41 @@ test('makeRoom throws the route\'s cobblestone over a stack away once the stock 
   }
 })
 
-test('makeRoom: a part stack thrown THROW_LOOP_REPEATS times within THROW_LOOP_TICKS, picked up again each time, goes into a chest instead; with none, INVENTORY_FULL with a report, and no room is made on the way a while', async () => {
+test('makeRoom: a part stack thrown THROW_LOOP_REPEATS times within THROW_LOOP_TICKS, picked up again each time, goes into a chest near instead, the room got from the next junk meanwhile; with none, the bot walks THROW_AWAY_RANGE blocks off and throws it there; INVENTORY_FULL only for what that leaves held', async () => {
   // (26.3 run full-f: '19 dirt, 5 sand, 2 gravel' thrown into a pit the staircase's next step reached, every step for
-  // 30 steps)
+  // 30 steps; run full-26.3-fresh-f: '23 diorite, 7 andesite, 3 dirt' refused a third throw with no chest near, and the
+  // nether's gate failed 'inventory full (1 free slots)' with 5 stacks of cobblestone to spare)
   const { THROW_LOOP_REPEATS, THROW_LOOP_TICKS } = await import('../../src/executor/keep')
+  const { THROW_AWAY_RANGE } = await import('../../src/executor/executor')
   const valuables = ['diamond', 'emerald', 'lapis_lazuli', 'redstone', 'quartz', 'coal', 'obsidian', 'ender_pearl', 'blaze_rod', 'book',
     'raw_iron', 'raw_gold', 'raw_copper', 'iron_ingot', 'gold_ingot', 'copper_ingot', 'crafting_table', 'furnace', 'chest', 'anvil',
     'bow', 'shield', 'shears', 'compass', 'clock', 'flint_and_steel', 'diamond_pickaxe', 'diamond_sword', 'diamond_axe', 'iron_shovel',
     'golden_apple', 'ender_eye', 'iron_ore', 'gold_ore']
-  const make = (): { bot: any, ex: Executor, stashed: Array<Set<string>>, reports: string[] } => {
+  const chestAt = new Vec3(3, 64, 0)
+  const make = (opts: { chest?: boolean, bag?: Record<string, number>, surplus?: (name: string) => boolean } = {}): { bot: any, ex: Executor, stashed: Array<Set<string>>, reports: string[], walks: Vec3[] } => {
     // 34 valuables and 2 junk stacks: the bag full
-    const bot = fakeBot({ ...Object.fromEntries(valuables.map(n => [n, 1])), rotten_flesh: 7, string: 5 })
+    const bot = fakeBot(opts.bag ?? { ...Object.fromEntries(valuables.map(n => [n, 1])), rotten_flesh: 7, string: 5 })
     bot.tossed = []
     // what's thrown comes back (a pit in the next step's reach)
     bot.toss = async (type: number, _meta: unknown, n: number) => { bot.tossed.push(`${n} ${registry.items[type].name}`) }
-    bot.blockAt = () => null
+    bot.blockAt = (p: Vec3) => opts.chest === true && p.equals(chestAt) ? { name: 'chest', boundingBox: 'block', position: p } : null
     bot._client = new EventEmitter()
     bot.entity.yaw = 0
     bot.entities = {}
     bot.look = async () => {}
     const reports: string[] = []
     bot.survival.diagnostics = { skillFailed: (name: string, err: Error) => { reports.push(`${name}: ${err.message}`); return null } }
-    const ex = new Executor(bot, { runners: {} })
+    const ex = new Executor(bot, { runners: {}, surplus: opts.surplus })
+    if (opts.chest === true) ex.memory.rememberChest(chestAt, {})
     const stashed: Array<Set<string>> = []
     ;(ex as any).stashNearby = async (_needed: unknown, _signal: unknown, _run: unknown, also: Set<string>) => { stashed.push(new Set(also)); return {} }
-    return { bot, ex, stashed, reports }
+    const walks: Vec3[] = []
+    ;(ex as any).walkOff = async (_s: AbortSignal, from: Vec3) => { walks.push(from.clone()); return true }
+    return { bot, ex, stashed, reports, walks }
   }
   const ticking = (bot: any): ReturnType<typeof setInterval> => setInterval(() => bot.emit('physicsTick'), 1)
-  // a chest takes them: stored, not thrown a third time
-  const a = make()
+  // a chest near takes them: stored, not thrown a third time
+  const a = make({ chest: true })
   let t = ticking(a.bot)
   try {
     for (let i = 1; i < THROW_LOOP_REPEATS; i++) await a.ex.makeRoom()
@@ -380,24 +386,75 @@ test('makeRoom: a part stack thrown THROW_LOOP_REPEATS times within THROW_LOOP_T
     assert.equal(a.bot.tossed.length, 4, a.bot.tossed.join(', '))
     assert.deepEqual([...a.stashed[2]].sort(), ['rotten_flesh', 'string'])
     assert.equal(count(a.bot, 'rotten_flesh'), 0)
+    assert.deepEqual(a.walks, [])
     assert.deepEqual(a.reports, [])
   } finally {
     clearInterval(t)
   }
-  // none takes them: INVENTORY_FULL, a report, and no room made on the way (no throw, no stash) for THROW_LOOP_TICKS
+  // the chest near takes the looping stacks; the room meanwhile from the surplus cobblestone, not nothing
+  const spare = ['cobblestone', 'stone', 'deepslate', 'blackstone']
+  const bag: Record<string, number> = { ...Object.fromEntries(valuables.slice(0, 30).map(n => [n, 1])), rotten_flesh: 7, string: 5, ...Object.fromEntries(spare.map(n => [n, 64])) }
+  const c = make({ chest: true, bag, surplus: name => spare.includes(name) })
+  t = ticking(c.bot)
+  try {
+    // (the stone whole stacks thrown each time: no sign of a loop)
+    for (let i = 1; i < THROW_LOOP_REPEATS; i++) await c.ex.makeRoom()
+    c.bot.tossed.length = 0
+    ;(c.ex as any).stashNearby = async (_n: unknown, _s: unknown, _r: unknown, also: Set<string>) => {
+      c.stashed.push(new Set(also))
+      for (const name of also) c.bot.take(name, count(c.bot, name))
+      return {}
+    }
+    await c.ex.makeRoom()
+    assert.ok(!c.bot.tossed.includes('7 rotten_flesh') && c.bot.tossed.some((s: string) => /^64 /.test(s) && spare.includes(s.slice(3))), c.bot.tossed.join(', '))
+    assert.ok(c.stashed.some(st => st.has('rotten_flesh')))
+    assert.equal(count(c.bot, 'rotten_flesh'), 0)
+  } finally {
+    clearInterval(t)
+  }
+  // none near: the bot walks off THROW_AWAY_RANGE and throws them there, no INVENTORY_FULL, no report, and the room
+  // made on the way goes on
   const b = make()
   t = ticking(b.bot)
   try {
     for (let i = 1; i < THROW_LOOP_REPEATS; i++) await b.ex.makeRoom()
-    await assert.rejects(b.ex.makeRoom(), (err: any) => TaskError.is(err, 'INVENTORY_FULL') && /making room loops: 7 rotten_flesh, 5 string thrown 3 times/.test(err.message))
-    assert.equal(b.reports.length, 1, b.reports.join(' | '))
-    assert.match(b.reports[0], /^make room: making room loops/)
-    const tosses = b.bot.tossed.length
-    const stashes = b.stashed.length
+    assert.equal(b.walks.length, 0)
+    await b.ex.makeRoom()
+    assert.equal(b.walks.length, 1)
+    assert.deepEqual(b.bot.tossed.slice(4), ['7 rotten_flesh', '5 string'])
+    assert.deepEqual(b.reports, [])
     await b.ex.task('a staircase', async (s) => await b.ex.makeRoomDuringStep(s))
-    assert.equal(b.bot.tossed.length, tosses)
-    assert.equal(b.stashed.length, stashes)
-    assert.ok(THROW_LOOP_TICKS > 1000)
+    assert.equal(b.bot.tossed.length, 8)
+    assert.ok(THROW_LOOP_TICKS > 1000 && THROW_AWAY_RANGE >= 8)
+  } finally {
+    clearInterval(t)
+  }
+  // no way off: thrown where it stands all the same
+  const d = make()
+  ;(d.ex as any).walkOff = async () => false
+  t = ticking(d.bot)
+  try {
+    for (let i = 0; i < THROW_LOOP_REPEATS; i++) await d.ex.makeRoom()
+    assert.equal(d.bot.tossed.length, 6)
+    assert.deepEqual(d.reports, [])
+  } finally {
+    clearInterval(t)
+  }
+  // a chest near that takes none of them (full): thrown off after all; still held after that (the throws never leave
+  // the bag here), INVENTORY_FULL with a report, and no room made on the way a while
+  const e = make({ chest: true })
+  t = ticking(e.bot)
+  try {
+    for (let i = 1; i < THROW_LOOP_REPEATS; i++) await e.ex.makeRoom()
+    await assert.rejects(e.ex.makeRoom(), (err: any) => TaskError.is(err, 'INVENTORY_FULL') && /making room loops: 7 rotten_flesh, 5 string thrown 3 times/.test(err.message))
+    assert.equal(e.walks.length, 1)
+    assert.equal(e.reports.length, 1, e.reports.join(' | '))
+    assert.match(e.reports[0], /^make room: making room loops/)
+    const tosses = e.bot.tossed.length
+    const stashes = e.stashed.length
+    await e.ex.task('a staircase', async (s) => await e.ex.makeRoomDuringStep(s))
+    assert.equal(e.bot.tossed.length, tosses)
+    assert.equal(e.stashed.length, stashes)
   } finally {
     clearInterval(t)
   }
