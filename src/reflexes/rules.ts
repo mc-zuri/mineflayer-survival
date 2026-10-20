@@ -1,6 +1,6 @@
 import type { Bot } from 'mineflayer'
 import { armorUpgrades, equipArmor, equipTotem } from '../skills/armor'
-import { eat, bestFoodInInventory } from '../skills/eat'
+import { eat, bestFoodInInventory, reserveAllows } from '../skills/eat'
 import { escapeHazard, evadeCreeper, fleeFrom, headInWater, inHazard, surface } from '../skills/escape'
 import { creeperSwelling, fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
@@ -485,7 +485,10 @@ export const eatReflex: Reflex = {
     // starved to 1 health, at food 0, for 30000 ticks)
     const starving = bot.food <= config.eat.starving
     if (!hungry && !hurt && !regen && !starving) return null
-    if (bestFoodInInventory(bot) == null) return null
+    const food = bestFoodInInventory(bot)
+    if (food == null) return null
+    // the food kept for a trip is eaten into only in need: starving, or hurt (the reflex's health)
+    if (!starving && bot.health > config.eat.health && !reserveAllows(bot, food)) return null
     return { name: 'eat', priority: config.eat.priority, run: async (signal) => await eat(bot, { signal }) }
   }
 }

@@ -11,6 +11,7 @@ import { travel } from './skills/travel'
 import { dayPhase } from './planner/schedule'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
 import { obsidianFromLava, refillWater } from './nether/obsidian'
+import { setFoodReserve } from './skills/eat'
 import { descendTo, ensureSurface, inWater, spiralWaypoints, toShore } from './executor/explore'
 import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
@@ -770,6 +771,8 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
       })
     }
   }
+  // the gate's food kept from the eat reflex while the rest is got, and till the bot is in (setFoodReserve)
+  setFoodReserve(bot, NETHER_FOOD_POINTS, NETHER_GEAR_TICKS * 2)
   const missing = netherGearNeeds(ownedInventory(bot))
   if (missing.length === 0) return
   log(`nether kit: getting ${missing.map(describeRequest).join(', ')} before going in`)
@@ -900,6 +903,8 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     await netherKit(bot, executor, signal, log)
     try {
       await executor.task('into the nether', async (s) => await enterNether(bot, { build: false }, s), signal)
+      // in, the gate's food is the fight's
+      setFoodReserve(bot, 0, 0)
     } catch (err) {
       if (signal.aborted || TaskError.is(err, 'DIED') || inNether(bot)) throw err
       // the portal remembered gone or out of reach: forgotten, and another made the milestone's way (the pools, the

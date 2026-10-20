@@ -554,3 +554,33 @@ test('hostiles reflex: cornered (the flee found no way), an armed bot fights whe
   assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'flee')
   engine.stop()
 })
+
+test('eat reflex: the food kept for a trip (setFoodReserve) is eaten into only starving or hurt; food over it is eaten as before; none kept in the nether', async () => {
+  const { setFoodReserve, foodReserve } = await import('../../src/skills/eat')
+  const run = (input: FakeBotInput, kept: number, dimension?: string): string | null => {
+    const bot = fakeBot(input)
+    if (dimension != null) bot.game.dimension = dimension
+    setFoodReserve(bot, kept, 1000)
+    const engine = new ReflexEngine(bot, { config: {}, enabled: false })
+    const task = eatReflex.check(engine.context())
+    engine.stop()
+    return task == null ? null : (task.detail ?? task.name)
+  }
+  // 16 cooked beef, 128 points, 120 kept: one eaten leaves 120
+  const beef = (n: number): any[] => [item('cooked_beef', n)]
+  assert.strictEqual(run({ food: 14, items: beef(16) }, 120), 'eat')
+  // 15, 120 points: kept whole at food 14
+  assert.strictEqual(run({ food: 14, items: beef(15) }, 120), null)
+  // starving, or hurt: eaten
+  assert.strictEqual(run({ food: 6, items: beef(15) }, 120), 'eat')
+  assert.strictEqual(run({ food: 14, health: 9, items: beef(15) }, 120), 'eat')
+  // none kept: eaten
+  assert.strictEqual(run({ food: 14, items: beef(15) }, 0), 'eat')
+  // in the nether the food is the fight's
+  assert.strictEqual(run({ food: 14, items: beef(15) }, 120, 'the_nether'), 'eat')
+  const bot = fakeBot()
+  setFoodReserve(bot, 120, 1000)
+  assert.strictEqual(foodReserve(bot), 120)
+  bot.survival = { tasks: { tick: 1000 } }
+  assert.strictEqual(foodReserve(bot), 0)
+})
