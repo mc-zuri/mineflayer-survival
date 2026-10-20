@@ -174,15 +174,78 @@ async function findBlocks (bot: Bot, names: string[], ctx: StepContext, alternat
   ctx.log(`exploring for ${names.join(', ')}`)
   const all = [...names, ...alternatives]
   // the food that grows is looked for no further out than the animals: none there, the plan goes for another food
-  const maxRadius = all.some(n => SIGHTED_BLOCKS.includes(n)) ? HUNT_EXPLORE_RADIUS : undefined
-  ctx.state.explore ??= { leg: 0 }
+  const food = all.some(n => SIGHTED_BLOCKS.includes(n))
+  const maxRadius = food ? HUNT_EXPLORE_RADIUS : undefined
   // (the other food that grows noted on the way: none of it seen is the land's, Executor.noteMissing)
   const remember = maxRadius != null ? SIGHTED_BLOCKS : undefined
-  if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude, maxRadius, progress: ctx.state.explore, room: ctx.room, remember }, ctx.signal)) {
+  if (!food) {
+    ctx.state.explore ??= { leg: 0 }
+    if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude, maxRadius, progress: ctx.state.explore, room: ctx.room, remember }, ctx.signal)) {
+      if (near(names)) return names
+      if (near(alternatives)) return alternatives
+    }
+    throw new SkillError('NOT_FOUND', `no ${names.join(', ')} found exploring`)
+  }
+  // the food's exploring: FOOD_EXPLORE_TICKS of its own at most (a reflex's ticks not counted), its spiral kept across
+  // the plans (foodExploreProgress) so the next one for it goes on further out
+  const { key, progress } = foodExploreProgress(ctx, all)
+  const result = await withinOwnTicks(bot, ctx.state, 'exploreTicks', FOOD_EXPLORE_TICKS, ctx.signal, async (s) =>
+    await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude, maxRadius, progress, room: ctx.room, remember }, s))
+  // (found, or its spiral ran out: the next exploring for it starts over, as a step's own did)
+  if (result !== 'timeout') ctx.forgetProgress?.(key)
+  if (result === true) {
     if (near(names)) return names
     if (near(alternatives)) return alternatives
   }
-  throw new SkillError('NOT_FOUND', `no ${names.join(', ')} found exploring`)
+  throw new SkillError('NOT_FOUND', `no ${names.join(', ')} found exploring${result === 'timeout' ? ` in its ${FOOD_EXPLORE_TICKS} ticks` : ''}`)
+}
+
+/**
+ * the ticks a mine step's exploring for the food that grows (SIGHTED_BLOCKS) takes at most, across its preemptions:
+ * NOT_FOUND then, and the plans go for another food a while (Executor.noteMissing). The exploring for kelp of a 1.21.11
+ * bot's food restock on a snowy spruce land, cut off by 7 reflexes (falls, the night, fights, meals) and resumed each
+ * time where it was, walked 166 blocks over 29000 ticks before its spiral ran out, the enchanting held up (rt-1)
+ */
+export const FOOD_EXPLORE_TICKS = 6000
+
+/**
+ * A mine step's exploring progress for the food that grows: the executor's, kept across the plans (one cut off by its
+ * ticks goes on further out next time), else the step's own, kept across its preemptions
+ */
+export function foodExploreProgress (ctx: Pick<StepContext, 'progress' | 'state'>, names: readonly string[]): { key: string, progress: { leg: number } } {
+  const key = `explore:${[...names].sort().join(',')}`
+  return { key, progress: ctx.progress?.(key) ?? (ctx.state.explore ??= { leg: 0 }) }
+}
+
+/**
+ * Runs `fn` for `ticks` physics ticks at most, counted in `state[counter]` (the task's state: the ticks of each run of a
+ * step a reflex preempted add up). Resolves what `fn` resolved, or 'timeout' once the ticks are spent (`fn` aborted).
+ */
+export async function withinOwnTicks<T> (bot: Bot, state: Record<string, any>, counter: string, ticks: number, signal: AbortSignal, fn: (s: AbortSignal) => Promise<T>): Promise<T | 'timeout'> {
+  const spent = (): number => Number(state[counter] ?? 0)
+  if (spent() >= ticks) return 'timeout'
+  const ctrl = new AbortController()
+  const onOuter = (): void => ctrl.abort(signal.reason)
+  if (signal.aborted) onOuter()
+  signal.addEventListener('abort', onOuter, { once: true })
+  let out = false
+  const count = (): void => {
+    state[counter] = spent() + 1
+    if (spent() >= ticks && !ctrl.signal.aborted) {
+      out = true
+      ctrl.abort(new TaskError('TIMEOUT', `out of its ${ticks} ticks`))
+    }
+  }
+  bot.on('physicsTick', count)
+  try {
+    return await fn(ctrl.signal)
+  } catch (err) {
+    if (out && !signal.aborted) return 'timeout'
+    throw err
+  } finally {
+    bot.off('physicsTick', count)
+    signal.removeEventListener('abort', onOuter)
+  }
 }
 
 export const runMine: StepRunner<MineStep> = async (step, ctx) => {
