@@ -938,6 +938,7 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
   const portal = ruinedPortalCandidates(seed, bot.entity.position).find(c => c.distance <= RUINED_PORTAL_TRIP && !tried(c))
   if (portal == null) return
   const at = new Vec3(portal.x + 8, bot.entity.position.y, portal.z + 8)
+  const from = bot.entity.position.clone()
   log(`obsidian: to the ruined portal at ${portal.x} ${portal.z} (${portal.distance.toFixed(0)} blocks)`)
   executor.memory.addPoi(RUINED_PORTAL_TRIED, new Vec3(portal.x, 0, portal.z), 'overworld')
   await withTickBudget(bot, RUINED_PORTAL_TICKS, signal, async (budget) => {
@@ -947,8 +948,11 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
   // an ocean's portal left the bot in the sea (its bottom, where every way on from timed out and the drowning reflex
   // went on for 20000 ticks, 26.3): to the shore
   if (inWater(bot)) {
-    log('obsidian: the ruined portal was in the sea: to the shore')
+    // and back to where the trip began (the sea about it is no place for the pools after: a 26.3 bot's search for
+    // lava from there went over the ocean, the drowning reflex every 300 ticks, 48000 ticks 'exploring for obsidian')
+    log(`obsidian: the ruined portal was in the sea: back to ${from.floored().toString()}`)
     await executor.task('to the shore', async (s) => await toShore(bot, s), signal).catch(quiet)
+    await executor.task('back from the sea', async (s) => await overland(bot, { target: from, range: 8 }, s), signal).catch(quiet)
   }
 }
 
