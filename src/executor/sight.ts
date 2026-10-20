@@ -46,6 +46,18 @@ export const WATCHED_MOBS = ['cow', 'pig', 'sheep', 'chicken', 'rabbit']
  */
 export const WATER_MOBS = ['cod', 'salmon']
 
+/** the crops and hay of a village's farms (BLOCK_SOURCES' 5000 to find: a village somewhere) */
+export const VILLAGE_CROPS = ['carrots', 'potatoes', 'wheat', 'beetroots', 'hay_block']
+/** how far off a village noted counts as near for its crops */
+export const VILLAGE_RANGE = 512
+/**
+ * how many times dearer a village's crops are with no village noted within VILLAGE_RANGE: a 26.3 bot on seed 31337's
+ * peaks, the cows not near, planned 'mine 14 carrot' and explored 96 blocks for a village's carrots twice, 9000 ticks
+ * at food 0 to 6 (full-26.3-s31337-h, t115742 and t126906), and at the taiga after its trip there 8000 ticks more
+ * (hunt2-f, t206766)
+ */
+export const NO_VILLAGE_FACTOR = 4
+
 /** the blocks whose sighting the plans count on: the food that grows on the surface (the rest go by the memory) */
 export const SIGHTED_BLOCKS = ['sweet_berry_bush', 'melon', 'carrots', 'potatoes', 'wheat', 'beetroots', 'hay_block', 'kelp', 'kelp_plant']
 
@@ -69,7 +81,11 @@ export class Sightings {
    * @param outOfTheWay animals a hunt from where the bot is passes over (down a ravine, in a cave)
    * @param spared the ids of the animals no hunt takes (the herd's breeders and calves, herdSpares)
    */
-  constructor (private readonly bot: Bot, private readonly now: () => number, private readonly outOfTheWay: (pos: Vec3) => boolean = () => false, private readonly spared: () => ReadonlySet<number> = () => new Set()) {}
+  /**
+   * @param villageNear whether a village is noted within VILLAGE_RANGE (its crops and hay are the plans' to count on
+   * only then)
+   */
+  constructor (private readonly bot: Bot, private readonly now: () => number, private readonly outOfTheWay: (pos: Vec3) => boolean = () => false, private readonly spared: () => ReadonlySet<number> = () => new Set(), private readonly villageNear: () => boolean = () => true) {}
 
   /** the names a step looked for and didn't find */
   missing (names: readonly string[]): void {
@@ -152,6 +168,8 @@ export class Sightings {
     const water = t.kind === 'mob' && WATER_MOBS.includes(t.name) ? 'water' : null
     if (this.givenUp(t.name) || (water != null && this.givenUp(water))) return t.find * GIVE_UP_FACTOR
     if (this.isScarce(t.name) || this.isNotNear(t.name) || (water != null && this.isScarce(water))) return t.find * SCARCE_FACTOR
+    // (a village's crops with no village noted near: a guess at one somewhere)
+    if (t.kind === 'block' && VILLAGE_CROPS.includes(t.name) && !this.villageNear()) return t.find * NO_VILLAGE_FACTOR
     return undefined
   }
 

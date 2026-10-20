@@ -128,3 +128,24 @@ test('the fish in the water are as dear as the water once none was found (WATER_
   now += GIVE_UP_TICKS
   assert.equal(s.cost(mob('salmon')), undefined)
 })
+
+test('a village\'s crops are NO_VILLAGE_FACTOR times dearer with no village noted near; with one, the source\'s estimate (full-26.3-s31337-h: \'mine 14 carrot\' explored for twice)', async () => {
+  const { NO_VILLAGE_FACTOR } = await import('../../src/executor/sight')
+  let village = false
+  const s = new Sightings(fakeBot([]), () => 0, () => false, () => new Set(), () => village)
+  const carrots = { name: 'carrots', kind: 'block' as const, dimension: 'overworld' as const, find: 5000 }
+  assert.equal(s.cost(carrots), 5000 * NO_VILLAGE_FACTOR)
+  assert.equal(s.cost({ ...carrots, name: 'hay_block' }), 5000 * NO_VILLAGE_FACTOR)
+  // (not the land's own plants)
+  assert.equal(s.cost({ ...carrots, name: 'sweet_berry_bush', find: 16000 }), undefined)
+  village = true
+  assert.equal(s.cost(carrots), undefined)
+  // the food plan with the cows not near: the rabbits over a village's carrots somewhere
+  village = false
+  const bot = fakeBot([{ name: 'rabbit', at: new Vec3(20, 64, 0) }])
+  const s2 = new Sightings(bot, () => 0, () => false, () => new Set(), () => village)
+  s2.notNear(['cow', 'pig', 'sheep', 'chicken'])
+  const kit = { crafting_table: 1, stone_pickaxe: 1, iron_sword: 1, furnace: 1, coal: 16 }
+  const steps = obtainAll(registry, [{ item: FOOD_GOAL, count: FOOD_POINTS, unit: 'nutrition' as const }], { inventory: kit, findCost: t => s2.cost(t), exclude: ['farm'] }).steps.map(st => `${st.kind} ${st.item}`)
+  assert.ok(!steps.includes('mine carrot'), steps.join(', '))
+})

@@ -29,7 +29,7 @@ import { countItems, emptySlots, trace } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
-import { SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, WATER_MOBS } from './sight'
+import { SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, VILLAGE_RANGE, WATER_MOBS } from './sight'
 import { BiomeSurvey, LAND_FOODS } from './foodLand'
 import { fishableWaterNear } from '../skills/fish'
 import { herdSpares, herdSupply } from '../skills/herd'
@@ -279,7 +279,10 @@ export class Executor {
     this.hooks = opts.hooks ?? {}
     this.logFn = opts.log ?? (line => trace('executor:', line))
     this.home = opts.home ?? (() => null)
-    this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos), () => herdSpares(bot, this.memory))
+    this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos), () => herdSpares(bot, this.memory), () => {
+      const at = bot.entity?.position
+      return at != null && this.memory.getPois('village', { dimension: normalizeDimension(bot.game?.dimension) }).some(p => Math.hypot(p.x - at.x, p.z - at.z) <= VILLAGE_RANGE)
+    })
     // the animals in sight noted every second (an exploring for berries that saw none is a land without them too)
     let looks = 0
     bot.on('physicsTick', () => { if (++looks % 20 === 0) this.sightings.look() })
