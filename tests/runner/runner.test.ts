@@ -1167,3 +1167,33 @@ test('the trip to a death spot under the ground: the base\'s kit first when it i
   assert.deepEqual(order, ['kit', 'to the death spot', 'near 10 64 0', 'along 2', 'near 20 20 0'])
   assert.equal(memory.death, null)
 })
+
+test('rekit: with the base\'s door in sight no pickaxe is made for the way in; without, one is (tests/integration/respawn: 12000 ticks exploring a plain for logs, the kit behind a door)', async () => {
+  const refuge = require('../../src/skills/refuge')
+  const nav = require('../../src/skills/navigate')
+  const real = { findBaseDoor: refuge.findBaseDoor, pickaxeForTheWay: nav.pickaxeForTheWay, navigate: nav.navigate }
+  const run = async (door: boolean): Promise<string[]> => {
+    const bot = fakeBot()
+    bot.blockAt = () => ({ name: 'air', boundingBox: 'empty' })
+    const runner = new Runner(bot, { log: () => {} })
+    const memory = runner.memory
+    memory.setBase({ x: 20, y: 64, z: 1 })
+    memory.addPoi('base_entrance', { x: 16, y: 64, z: 0 })
+    memory.addPoi('base_bounds', { x: 17, y: 63, z: -2 }, 'overworld', '22,68,3')
+    memory.rememberChest({ x: 20, y: 64, z: 1 }, { stone_sword: 1 })
+    const asked: string[] = []
+    runner.executor.obtain = (async (reqs: any[]) => { asked.push(String(reqs[0].item)) }) as any
+    runner.executor.task = (async (name: string) => { asked.push(name) }) as any
+    refuge.findBaseDoor = () => door ? { door: new Vec3(17, 64, 0), inside: new Vec3(18, 64, 0), outside: new Vec3(16, 64, 0) } : null
+    nav.pickaxeForTheWay = async () => { asked.push('pickaxeForTheWay') }
+    await runner.rekit()
+    return asked
+  }
+  try {
+    assert.deepEqual(await run(true), ['to the base', 'to the kit', 'kit'])
+    assert.deepEqual(await run(false), ['pickaxeForTheWay', 'stone_pickaxe,wooden_pickaxe', 'to the base', 'to the kit', 'kit'])
+  } finally {
+    Object.assign(refuge, { findBaseDoor: real.findBaseDoor })
+    Object.assign(nav, { pickaxeForTheWay: real.pickaxeForTheWay, navigate: real.navigate })
+  }
+})

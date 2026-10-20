@@ -1771,10 +1771,13 @@ export class Runner {
     // (in its box already, shut in after a respawn: the walk out to the entrance and back left out)
     if (base.entrance != null && (base.bounds == null || !inBounds(bot.entity.position, base.bounds))) {
       const e = base.entrance
-      await pickaxeForTheWay(bot, signal)
+      // (the base's door in sight, a way in by hand: no pickaxe wanted; a 26.3 bot respawned by its hut on a plain
+      // with no trees spent its 12000 ticks exploring for logs to make one, the kit in the hut, tests/integration/respawn)
+      const doorIn = findBaseDoor(bot, base) != null
+      if (!doorIn) await pickaxeForTheWay(bot, signal)
       // nothing to make one from (back from a death with 2 dirt, the dug-in base 5 blocks down, the way in stone and
       // the searches timing out by hand, 26.3): the wood got and a pickaxe made as the start of the game is
-      if (!bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))) {
+      if (!doorIn && !bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))) {
         this.log('a pickaxe for the way into the base')
         await this.executor.obtain([{ item: ['stone_pickaxe', 'wooden_pickaxe'], count: 1 }], signal).catch(err => {
           if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
