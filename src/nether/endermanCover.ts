@@ -408,6 +408,8 @@ export const COVER_WAIT = 300
 export const COVER_NEAR = 10
 /** ticks the stand is kept after that */
 export const COVER_HOLD = 100
+/** ticks with no kill from the cover before another is dug */
+export const COVER_DRY = 3000
 /** ticks with none to stare at from the cover before another is dug */
 export const BLIND_TICKS = 1500
 /** walks into the pit for a drop at most */
@@ -480,7 +482,8 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
   let lastTrace = -1000
   const onTick = (): void => { ticks++ }
   const dead = new Set<number>()
-  const onDead = (e: Entity): void => { if (e.name === 'enderman' && !dead.has(e.id)) { dead.add(e.id); if (e.position.distanceTo(bot.entity.position) < 8) kills++ } }
+  let lastKill = 0
+  const onDead = (e: Entity): void => { if (e.name === 'enderman' && !dead.has(e.id)) { dead.add(e.id); if (e.position.distanceTo(bot.entity.position) < 8) { kills++; lastKill = ticks } } }
   const onHurt = (e: Entity, source?: Entity): void => {
     if (e === bot.entity) trace('fightFromCover: hurt by', source?.name ?? '?', source?.position?.toString() ?? '', 'at', bot.entity.position.toString(), 'line cell', lineIndex(bot, cover))
   }
@@ -507,6 +510,9 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
       const all = endermen()
       if (all.length > 0) lastSeen = ticks
       else if (ticks - lastSeen > idleTicks) return result('idle')
+      // stares and none come to the pit for COVER_DRY: a cover elsewhere (a 26.3 bot's covers low in seed 2's forest,
+      // y 43, stared endermen angry for 18000 ticks and killed one, run p8)
+      if (ticks - lastKill > COVER_DRY && !all.some(e => inReach(e))) return result('blind')
       for (const e of angry()) {
         if (!angrySince.has(e.id)) angrySince.set(e.id, ticks)
         // (one in a cave under the cover, come there by its teleport toward the bot, never gets out: let be sooner)
