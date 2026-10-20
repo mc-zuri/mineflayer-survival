@@ -21,6 +21,8 @@ export const SCARCE_FACTOR = 8
 
 /** misses in a row (each within GIVE_UP_TICKS of the last) after which a source is given up on for GIVE_UP_TICKS */
 export const GIVE_UP_MISSES = 2
+/** misses count as in a row when each is within this of the last (three days: a hunt's tries were a day apart and more) */
+export const MISS_STREAK_TICKS = 72000
 /** how long a source missed GIVE_UP_MISSES times is given up on (a day) */
 export const GIVE_UP_TICKS = 24000
 /** how many times the source's estimate one given up on costs: the last resort, when nothing else is to be had */
@@ -44,9 +46,15 @@ export class Sightings {
     const now = this.now()
     for (const n of names) {
       const last = this.missed.get(n)
-      const misses = last != null && now - last.at < GIVE_UP_TICKS ? last.misses + 1 : 1
+      const misses = last != null && now - last.at < MISS_STREAK_TICKS ? last.misses + 1 : 1
       this.missed.set(n, { at: now, misses })
     }
+  }
+
+  /** the misses in a row of a name, the last within MISS_STREAK_TICKS (0 when none lately) */
+  misses (name: string): number {
+    const last = this.missed.get(name)
+    return last != null && this.now() - last.at < MISS_STREAK_TICKS ? last.misses : 0
   }
 
   /** whether a name was looked for and not found within SCARCE_TICKS */

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { STUCK_LEG_TTL, climbHazard, facingDir, floorHeld, legPassesSpot, noteStuckLeg, stuckSpots, liquidAround, oreLevel, spiralWaypoints, staircaseStep, tunnelStep, unsafeStep } from '../../src/executor/explore'
+import { STUCK_LEG_TTL, climbHazard, facingDir, firstLegBeyond, floorHeld, legPassesSpot, noteStuckLeg, stuckSpots, liquidAround, oreLevel, spiralWaypoints, staircaseStep, tunnelStep, unsafeStep } from '../../src/executor/explore'
 
 const SOLID = new Set(['stone', 'deepslate', 'cobblestone', 'dirt'])
 const world = (blocks: Record<string, string>, fill = 'stone') => (pos: Vec3) => {
@@ -637,4 +637,17 @@ test('stuck legs: a spot a leg ended short at twice lately is passed by the legs
   // two days on, forgotten
   memory.now += STUCK_LEG_TTL
   assert.deepEqual(stuckSpots(memory), [])
+})
+
+test('the hunt explores twice as far after each exploration that found none, to 384, past the legs walked before (26.3 seed 31337: the same 96-block spiral five times on a snowy mountain)', async () => {
+  const { huntRadius, HUNT_EXPLORE_RADIUS, HUNT_EXPLORE_MAX } = await import('../../src/executor/steps')
+  assert.deepEqual([0, 1, 2, 3, 9].map(huntRadius), [HUNT_EXPLORE_RADIUS, 192, 384, HUNT_EXPLORE_MAX, HUNT_EXPLORE_MAX])
+  const center = { x: 0, z: 0 }
+  const wps = spiralWaypoints(center, 16, 192)
+  const i = firstLegBeyond(wps, center, 96)
+  assert.ok(i > 0 && i < wps.length)
+  for (const w of wps.slice(0, i)) assert.ok(Math.max(Math.abs(w.x), Math.abs(w.z)) <= 96)
+  assert.ok(Math.max(Math.abs(wps[i].x), Math.abs(wps[i].z)) > 96)
+  assert.equal(firstLegBeyond(wps, center), 0)
+  assert.equal(firstLegBeyond(spiralWaypoints(center, 16, 96), center, 96), spiralWaypoints(center, 16, 96).length)
 })

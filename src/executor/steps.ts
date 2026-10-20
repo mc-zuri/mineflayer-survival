@@ -56,6 +56,8 @@ export interface StepContext {
    * breaks and each step of a staircase or tunnel it digs, `toward` where the bot goes next
    */
   room?: (toward?: Vec3) => Promise<void>
+  /** the explorations for a name lately that found none, in a row (Executor.sightings) */
+  misses?: (name: string) => number
 }
 
 export interface StepOutcome {
@@ -372,6 +374,17 @@ export const runSmelt: StepRunner<SmeltStep> = async (step, ctx) => {
 
 /** how far from home the hunt explores for its animals before it gives up on them */
 export const HUNT_EXPLORE_RADIUS = 96
+/** the farthest the hunt's exploring goes out, once the nearer land had none (huntRadius) */
+export const HUNT_EXPLORE_MAX = 384
+
+/**
+ * How far the hunt explores after `misses` explorations in a row found none: twice as far each time, to
+ * HUNT_EXPLORE_MAX. A 26.3 bot whose base was on a snowy mountain walked the same 96-block spiral for cows five times
+ * from t107000 to past t220000, and never got its food milestone (seed 31337)
+ */
+export function huntRadius (misses: number): number {
+  return Math.min(HUNT_EXPLORE_MAX, HUNT_EXPLORE_RADIUS * 2 ** Math.max(0, misses))
+}
 
 /** how far below the bot an animal is left alone (down a ravine, a cliff) */
 export const PREY_BELOW = 12
@@ -408,7 +421,10 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
         // not far out: none in HUNT_EXPLORE_RADIUS of home is a land without them (a snowy taiga's rabbits only), and
         // the plan goes for another food then; the food that grows is noted on the way for it
         ctx.state.explore ??= { leg: 0 }
-        const found = await exploreSurface(bot, { found: () => nearest([step.mob, ...subs], 32) != null, center: ctx.home ?? undefined, maxRadius: HUNT_EXPLORE_RADIUS, memory: ctx.memory, remember: SIGHTED_BLOCKS, progress: ctx.state.explore }, signal)
+        // further out once the nearer land had none, its spiral not walked again (skipWithin)
+        const misses = Math.min(...[step.mob, ...subs].map(m => ctx.misses?.(m) ?? 0))
+        const radius = huntRadius(misses)
+        const found = await exploreSurface(bot, { found: () => nearest([step.mob, ...subs], 32) != null, center: ctx.home ?? undefined, maxRadius: radius, skipWithin: misses > 0 ? huntRadius(misses - 1) : undefined, memory: ctx.memory, remember: SIGHTED_BLOCKS, progress: ctx.state.explore }, signal)
         if (!found) throw new SkillError('NOT_FOUND', `no ${step.mob} found exploring`)
         continue
       }

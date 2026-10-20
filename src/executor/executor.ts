@@ -655,7 +655,8 @@ export class Executor {
         // 30 times and the milestone failed (seed 5)
         replacingTools: this.replacing,
         unwanted: name => this.unwantedDrop(name),
-        room: async (toward) => await this.makeRoomDuringStep(taskSignal, toward)
+        room: async (toward) => await this.makeRoomDuringStep(taskSignal, toward),
+        misses: name => this.sightings.misses(name)
       }
       return await runner(step, stepCtx)
     }, signal, { step, desc: describeStep(step) })

@@ -442,6 +442,8 @@ export interface ExploreArgs {
    * first leg
    */
   progress?: { leg: number }
+  /** the legs within this of the center passed over (walked by an exploration before, which found nothing) */
+  skipWithin?: number
 }
 
 /** notes the blocks of the given names within `radius` in the memory */
@@ -805,6 +807,13 @@ export async function onTheSurface<T> (bot: Bot, fn: () => Promise<T>): Promise<
   }
 }
 
+/** the index of the first waypoint farther than `skip` from the center (a square's), past the end when none is */
+export function firstLegBeyond (waypoints: ReadonlyArray<{ x: number, z: number }>, center: { x: number, z: number }, skip?: number): number {
+  if (skip == null) return 0
+  const i = waypoints.findIndex(w => Math.max(Math.abs(w.x - center.x), Math.abs(w.z - center.z)) > skip)
+  return i < 0 ? waypoints.length : i
+}
+
 /** the point of interest where a surface leg ended short of its end (its note: the times it did there) */
 export const STUCK_LEG_POI = 'explore_stuck'
 /** how long a spot a leg got stuck at is remembered (two days) */
@@ -856,7 +865,10 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
   const center = args.center ?? bot.entity.position.clone()
   const waypoints = spiralWaypoints(center, args.step ?? 16, args.maxRadius ?? 192)
   const lookup = lookupOf(bot)
-  for (let i = args.progress?.leg ?? 0; i < waypoints.length; i++) {
+  // (the legs within skipWithin walked before: on from the first beyond it)
+  const skip = args.skipWithin
+  const first = firstLegBeyond(waypoints, center, skip)
+  for (let i = Math.max(first, args.progress?.leg ?? 0); i < waypoints.length; i++) {
     const wp = waypoints[i]
     throwIfAborted(signal)
     if (args.progress != null) args.progress.leg = i

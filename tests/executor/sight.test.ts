@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { Sightings, GIVE_UP_FACTOR, GIVE_UP_TICKS, SCARCE_FACTOR, SCARCE_TICKS } from '../../src/executor/sight'
+import { Sightings, GIVE_UP_FACTOR, GIVE_UP_TICKS, MISS_STREAK_TICKS, SCARCE_FACTOR, SCARCE_TICKS } from '../../src/executor/sight'
 import { obtainAll } from '../../src/planner/obtain'
 import { FOOD_GOAL, FOOD_POINTS } from '../../src/planner/progression'
 
@@ -87,8 +87,15 @@ test('sightings: a source missed twice in a row is given up on for a day (the la
   assert.equal(s.cost(melon), 4000 * GIVE_UP_FACTOR)
   now += GIVE_UP_TICKS - SCARCE_TICKS
   assert.equal(s.cost(melon), undefined)
-  // a miss a day and more after the last: one miss again
-  now += 1
+  // a miss three days and more after the last: one miss again
+  now += MISS_STREAK_TICKS
   s.missing(['melon'])
   assert.equal(s.cost(melon), 4000 * SCARCE_FACTOR)
+  assert.equal(s.misses('melon'), 1)
+  // and a day and a half later another: two in a row, given up on
+  now += GIVE_UP_TICKS * 1.5
+  assert.equal(s.misses('melon'), 1)
+  s.missing(['melon'])
+  assert.equal(s.misses('melon'), 2)
+  assert.equal(s.cost(melon), 4000 * GIVE_UP_FACTOR)
 })
