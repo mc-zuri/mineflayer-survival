@@ -780,12 +780,22 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   log(`nether kit: getting ${missing.map(describeRequest).join(', ')} before going in`)
   // the gear within NETHER_GEAR_TICKS; the food short after it within NETHER_FOOD_TICKS, near home: the rest is
   // banked over the tries (farm, herd), not one long search (seed 2's 120 points took 90000 ticks of exploring)
-  const gear = missing.filter(r => r.unit !== 'nutrition')
+  const gear = missing.filter(r => r.unit !== 'nutrition' && r.item !== 'arrow')
   if (gear.length > 0) {
     await withTickBudget(bot, NETHER_GEAR_TICKS, signal, async (s) => await executor.obtain(gear, s)).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`nether kit: ${(err as Error).message}`)
     })
+  }
+  // the arrows within NETHER_ARROW_TICKS, the gate looked at again after (a hunt for the feathers' chickens that found
+  // none asks for fewer: the plan went on for 64 after its miss, 11 chickens more, full-26.3-fresh-p)
+  const arrows = netherGearNeeds(ownedInventory(bot), gate).filter(r => r.item === 'arrow')
+  if (arrows.length > 0) {
+    await withTickBudget(bot, NETHER_ARROW_TICKS, signal, async (s) => await executor.obtain(arrows, s)).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`nether kit: the arrows: ${(err as Error).message}`)
+    })
+    Object.assign(gate, { arrows: netherGate(bot, executor as any).arrows })
   }
   const food = netherGearNeeds(ownedInventory(bot), gate).filter(r => r.unit === 'nutrition')
   if (food.length > 0) {
@@ -807,6 +817,8 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
 
 /** the ticks a try of the nether kit spends on the gate's food after the gear (the rest banked over the tries) */
 export const NETHER_FOOD_TICKS = 12000
+/** the ticks a try of the nether kit spends on the gate's arrows after the rest of the gear */
+export const NETHER_ARROW_TICKS = 12000
 
 const GOLD_PIECES = ['golden_helmet', 'golden_chestplate', 'golden_leggings', 'golden_boots']
 const SWORDS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword', 'golden_sword', 'wooden_sword']

@@ -350,6 +350,29 @@ test('netherGate: 80 food points with a farm or a herd known, else 120, the play
   assert.deepStrictEqual(netherGearNeeds(inv).map(r => r.unit === 'nutrition' ? 'food' : r.item), ['arrow', 'food'])
 })
 
+test('netherKit: the arrows are got on their own after the gear, and once the hunt for the feathers chickens missed the gate asks for fewer', async () => {
+  const { netherKit } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [...NETHER_GEAR().filter((i: any) => i.name !== 'arrow' && i.name !== 'iron_helmet'), item('arrow', 34)] })
+  bot.game.dimension = 'overworld'
+  const asked: string[] = []
+  let misses = 0
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    sightings: { misses: (n: string) => n === 'chicken' ? misses : 0 },
+    obtain: async (reqs: any[]) => {
+      asked.push(reqs.map(r => r.item).join(','))
+      if (reqs.some(r => r.item === 'iron_helmet')) giveTo(bot, [item('iron_helmet', 1)])
+      // no chicken found for the feathers
+      if (reqs.some(r => r.item === 'arrow')) misses++
+    },
+    task: async () => {}
+  }
+  await netherKit(bot, executor, new AbortController().signal, () => {})
+  assert.deepStrictEqual(asked, ['iron_helmet', 'arrow'])
+})
+
 test('netherKit: short of only the food after its tries, the milestone is not ready with the food points banked (foodShort)', async () => {
   const { netherKit } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
