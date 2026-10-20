@@ -503,3 +503,35 @@ test('the camp\'s retreat with blocks in the bag: shut in where the bot stands t
     navModule.walkTo = real.walk
   }
 })
+
+test('the camp\'s fight goes no further after a blaze than the spawn volume\'s edge, and back to the camp from in it (nether-26.3-q3)', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/skills/fight')
+  const gridModule = require('../../src/skills/gridWalk')
+  const bot = fakeBot({ position: new Vec3(8.5, 64, 0.5), world: (p: any) => p.y < 64 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  ;(bot as any).lookAt = async () => {}
+  bot.entities[9] = { id: 9, name: 'blaze', type: 'hostile', position: new Vec3(5.5, 64, 0.5), metadata: [] } as any
+  const untils: boolean[][] = []
+  const moves: string[] = []
+  const realFight = fightModule.fight
+  const realMove = gridModule.moveNear
+  fightModule.fight = async (_b: unknown, _t: unknown, o: any) => {
+    const at8 = o.until()
+    bot.entity.position = new Vec3(2.5, 64, 0.5)
+    untils.push([at8, o.until()])
+  }
+  gridModule.moveNear = async (_b: unknown, to: Vec3) => { moves.push(to.toString()); bot.entity.position = to.offset(0.5, 0, 0.5) }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false, nook: false }), /TIMEOUT|rods/)
+  } finally {
+    clearInterval(ticking)
+    fightModule.fight = realFight
+    gridModule.moveNear = realMove
+  }
+  assert.deepEqual(untils[0], [false, true])
+  assert.ok(moves.length > 0, 'not back to the camp')
+})
