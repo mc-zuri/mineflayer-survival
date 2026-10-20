@@ -15,6 +15,7 @@ import { tunnelTo } from '../skills/tunnel'
 import { countItems, trace, waitTicks } from '../skills/util'
 import { eat } from '../skills/eat'
 import { craft } from '../skills/craft'
+import { chooseFuel, smelt } from '../skills/smelt'
 import { drinkPotion, findPotion, hasEffect } from '../skills/potion'
 import { fight, lowerShield, raiseShield } from '../skills/fight'
 import { shoot } from '../skills/shoot'
@@ -371,10 +372,29 @@ function keptNook (bot: Bot, spawner: Vec3, lookup: NookLookup): BlazeNook | nul
 /** shields the blaze fight carries when it can make them (the one in the off hand and a spare) */
 export const BLAZE_SHIELDS = 2
 
-/** a shield made (CraftingTable: six planks and an iron ingot) while the bag has fewer than BLAZE_SHIELDS and the makings */
+/**
+ * A shield made (CraftingTable: six planks and an iron ingot) while the bag has fewer than BLAZE_SHIELDS and the
+ * makings; with no iron ingot, the raw iron smelted for them first (a furnace carried or made, put down and taken back
+ * up): a 26.3 whole game went into seed 7741's nook with no shield and 3 raw iron, a furnace and 16 coal in the bag,
+ * and was shot to 5 health there for 2 kills
+ */
 export async function spareShield (bot: Bot, signal?: AbortSignal): Promise<number> {
   const have = (): number => countItems(bot, 'shield')
   let made = 0
+  const wood = (): boolean => countItems(bot, (i: any) => /_(planks|log|stem)$/.test(i.name)) > 0
+  const want = Math.min(BLAZE_SHIELDS - have(), countItems(bot, 'raw_iron'))
+  // (the fuel not the shield's wood: a log of it kept for the planks, 200 ticks a smelt)
+  const fuel = chooseFuel(bot.inventory.items().filter(i => !/_(planks|log|stem)$/.test(i.name)), 200 * want) ??
+    (countItems(bot, (i: any) => /_(log|stem)$/.test(i.name)) >= 3 ? chooseFuel(bot.inventory.items(), 200 * want) : null)
+  if (want > 0 && countItems(bot, 'iron_ingot') === 0 && wood() && fuel != null &&
+    (countItems(bot, 'furnace') > 0 || countItems(bot, ['cobblestone', 'cobbled_deepslate', 'blackstone']) >= 8)) {
+    try {
+      await smelt(bot, { input: 'raw_iron', count: want, fuel: fuel.name, pickUpFurnace: true }, signal)
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('collectBlazeRods: no iron smelted for a shield:', (err as Error).message)
+    }
+  }
   while (have() < BLAZE_SHIELDS && countItems(bot, 'iron_ingot') > 0 && countItems(bot, (i: any) => /_(planks|log|stem)$/.test(i.name)) > 0) {
     try {
       await craft(bot, { item: 'shield', pickUpTable: true }, signal)

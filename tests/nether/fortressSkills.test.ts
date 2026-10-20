@@ -295,3 +295,41 @@ test('collectBlazeRods ends with the nook\'s fight when it runs out of food to h
   }
 })
 
+test('spareShield smelts the raw iron for a shield when the bag has no ingot (a furnace carried, the fuel not the wood), then makes it; not with a shield or two in hand', async () => {
+  const { spareShield, BLAZE_SHIELDS } = await import('../../src/nether/fortressSkills')
+  const craftModule = require('../../src/skills/craft')
+  const smeltModule = require('../../src/skills/smelt')
+  const { item } = await import('../reflexes/fakeBot')
+  const realCraft = craftModule.craft
+  const realSmelt = smeltModule.smelt
+  const log: string[] = []
+  try {
+    // full-26.3-s7741-b's bag at the fortress
+    const bot = fakeBot({ items: [item('oak_log', 35), item('raw_iron', 3), item('coal', 16), item('furnace')] })
+    smeltModule.smelt = async (_b: unknown, a: any) => {
+      log.push(`smelt ${a.count as number} ${a.input as string} with ${a.fuel as string}`)
+      const raw = bot.inventory.items().find((i: any) => i.name === 'raw_iron')
+      raw.count -= a.count
+      bot.inventory.slots[33] = item('iron_ingot', a.count)
+    }
+    let slot = 30
+    craftModule.craft = async (_b: unknown, a: any) => {
+      log.push(`craft ${a.item as string}`)
+      const ingot = bot.inventory.slots[33]
+      if (--ingot.count === 0) bot.inventory.slots[33] = null
+      bot.inventory.slots[slot++] = item('shield')
+    }
+    assert.equal(await spareShield(bot), BLAZE_SHIELDS)
+    assert.deepStrictEqual(log, [`smelt ${BLAZE_SHIELDS} raw_iron with coal`, 'craft shield', 'craft shield'])
+    log.length = 0
+    assert.equal(await spareShield(bot), 0)
+    assert.deepStrictEqual(log, [])
+    // no fuel but the wood, little of it: none smelted
+    const poor = fakeBot({ items: [item('oak_log', 2), item('raw_iron', 3), item('furnace')] })
+    assert.equal(await spareShield(poor), 0)
+    assert.deepStrictEqual(log, [])
+  } finally {
+    craftModule.craft = realCraft
+    smeltModule.smelt = realSmelt
+  }
+})
