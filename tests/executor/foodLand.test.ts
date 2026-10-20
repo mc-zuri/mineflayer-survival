@@ -203,3 +203,29 @@ test('seekFoodLand goes to a wide food land (FOOD_PATCH_CHUNKS surveyed about it
     assert.ok(plains ? to.x > 280 : to.x < -90, `${String(plains)}: ${to.toString()}`)
   }
 })
+
+test('seekFoodLand scouts downhill while the seed\'s reads are under way, stops when they are in, and goes to their wide land', async () => {
+  const bot = fakeBot('26.3', () => ({ biome: 'grove', y: 120 }))
+  const memory = new WorldMemory()
+  const survey = new BiomeSurvey(bot, memory)
+  let release: () => void = () => {}
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const seedLand = { surface: async (x: number, z: number) => { await gate; return { x, z, y: 80, biome: z <= -200 && Math.abs(x) < 60 ? 'taiga' : 'grove' } }, dispose: async () => {} }
+  const trips: string[] = []
+  let hops = 0
+  const go = async (target: Vec3, onHop?: () => boolean): Promise<void> => {
+    trips.push(`${target.x} ${target.z}`)
+    if (onHop == null) { bot.entity.position = target.clone(); return }
+    for (let i = 0; i < 10; i++) {
+      hops++
+      // the reads come in after the third hop
+      if (hops === 3) release()
+      await new Promise(resolve => setImmediate(resolve))
+      if (onHop()) return
+    }
+  }
+  const land = await seekFoodLand(bot, { survey, memory, home: new Vec3(0, 120, 0), misses: () => 0, forgetLand: () => {}, travel: go, seed: '31337', openSeed: async () => seedLand })
+  assert.ok(trips.length === 2 && trips[0] !== '0 -224', trips.join(' | '))
+  assert.ok(hops < 10, `the scouting went on after the reads: ${hops} hops`)
+  assert.ok(land != null && land.x === 0 && land.z === -224, String(land))
+})
