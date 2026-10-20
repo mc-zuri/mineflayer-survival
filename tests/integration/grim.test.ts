@@ -159,6 +159,36 @@ describe(`a ${REALTIME ? 'real-time' : 'lockstep'} ${VERSION} server with GrimAC
     assert.strictEqual(countItems(bot, 'wooden_pickaxe'), 1)
   })
 
+  step('table', async () => {
+    // a table behind gravel on the side the bot stands and on top (the server opens it all the same: its use checks no
+    // line of sight), used sneaking with a shield in the off hand, as grimfix-3's bot did: the server passes a use with
+    // the shift key down and an item in a hand over for the item's (Player.isSecondaryUseActive) and no menu opened,
+    // 20 s a craft and the base milestone stalled; mineflayer lets go of the shift key for the use (7a2a9b88)
+    const table = at(8, 0, -12)
+    await fill(table, table, 'crafting_table')
+    for (const [dx, dy, dz] of [[0, 0, 1], [0, 1, 1], [-1, 0, 0], [1, 0, 0], [-1, 1, 0], [1, 1, 0], [0, 1, 0], [-1, 0, 1], [1, 0, 1]]) {
+      await fill(table.offset(dx, dy, dz), table.offset(dx, dy, dz), 'gravel')
+    }
+    await give('oak_planks', 3)
+    await give('stick', 2)
+    await navigateNear(bot, at(8, 0, -6), 0)
+    // the bot within reach of it, the gravel between
+    await run(`tp ${USERNAME} ${table.x + 0.5} ${table.y} ${table.z + 3.5}`)
+    assert.ok(await waitUntil(bot, () => bot.entity.position.distanceTo(table.offset(0.5, 0, 3.5)) < 0.1, 40))
+    // a shield in the off hand and the shift key down (as the edge guard holds it)
+    await give('shield', 1)
+    await bot.equip(bot.inventory.items().find(i => i.name === 'shield') as any, 'off-hand')
+    const had = countItems(bot, 'wooden_axe')
+    bot.setControlState('sneak', true)
+    await waitTicks(bot, 2)
+    try {
+      await craft(bot, { item: 'wooden_axe', count: 1, table })
+    } finally {
+      bot.setControlState('sneak', false)
+    }
+    assert.strictEqual(countItems(bot, 'wooden_axe'), had + 1)
+  })
+
   step('place', async () => {
     await give('cobblestone', 16)
     for (let dz = -1; dz <= 1; dz++) await placeBlock(bot, { pos: at(3, 0, 8 + dz), item: 'cobblestone' })
