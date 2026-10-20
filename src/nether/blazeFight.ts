@@ -375,11 +375,6 @@ export function inNook (bot: Bot, nook: BlazeNook): boolean {
   return Math.floor(p.x) === nook.stand.x && Math.floor(p.z) === nook.stand.z && Math.abs(p.y - nook.stand.y) < 0.6
 }
 
-/** whether a point is in front of the nook (past its stand, along its facing): where what sees the bot in it is */
-export function inFrontOf (nook: BlazeNook, p: Vec3): boolean {
-  return p.minus(nook.stand.offset(0.5, 0, 0.5)).dot(nook.facing) > 0.5
-}
-
 /** a blaze's eyes */
 export function blazeEye (blaze: Entity): Vec3 {
   return blaze.position.offset(0, BLAZE_EYE_HEIGHT, 0)
@@ -607,11 +602,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       const me = bot.entity.position
       const near = (a: Entity, b: Entity): number => a.position.distanceTo(me) - b.position.distanceTo(me)
       const fireball = Object.values(bot.entities).find(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 24))
-      // (a charged one in front of the nook is a danger whether the eyes' line says it sees the bot or not: its charge
-      // came with the bot in its sight, BlazeAttackGoal, and a line past the walls' edge was taken for none; a 26.3 bot
-      // in plain diamond in the hall's nook under seed 2's throne took a fireball with its shield down every 300 to 400
-      // ticks from blazes on the hall's floor beside its front, and burned, 200 health in a run, BLAZE_KIT=gateDiamond)
-      const danger = blazes.filter(b => (seeing.includes(b) || inFrontOf(nook, b.position)) && volleys.dangerous(b.id, tick)).sort(near)
+      const danger = seeing.filter(b => volleys.dangerous(b.id, tick)).sort(near)
 
       // fire in the nook (a fireball's on the floor by the feet): out at once
       for (const p of [nook.stand, nook.stand.plus(UP)]) {
