@@ -220,6 +220,8 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
   return countItems(bot, 'obsidian')
 }
 
+/** the lake's sources a pit's bucket tries to fill from before it gives up */
+export const PIT_FILL_TRIES = 6
 /** how far from the bot a pit for a deep lake's lava is looked for */
 export const PIT_RADIUS = 6
 /** the least distance, along x or z, from a pit to the lake's lava (the pour's water spreads on the floor about it) */
@@ -265,9 +267,24 @@ async function obsidianInPit (bot: Bot, get: ObsidianLookup, lava: readonly Vec3
   if (solidBlock(get(pit))) await collectBlock(bot, { positions: [pit], pickup: true }, signal)
   if (!AIR.has(get(pit)?.name ?? '')) return false
   if (countItems(bot, 'lava_bucket') === 0) {
-    const source = lava.find(p => isLavaSource(get(p)))
-    if (source == null) return false
-    await fillBucket(bot, { fluid: 'lava', pos: source }, signal)
+    // the lake's sources nearest the pit first, one with no spot to reach it from passed over (a deep lake's under a
+    // ledge: 'no spot found to see' it, 26.3)
+    // (those open to the air above first, by the pit: one under the lake's top layer or a ledge isn't reached)
+    const open = (p: Vec3): number => AIR.has(get(p.offset(0, 1, 0))?.name ?? '') ? 0 : 1
+    const sources = lava.filter(p => isLavaSource(get(p)) && get(p.offset(0, 1, 0))?.name !== 'lava')
+      .sort((a, b) => open(a) - open(b) || a.distanceTo(pit) - b.distanceTo(pit))
+    let filled = false
+    for (const source of sources.slice(0, PIT_FILL_TRIES)) {
+      try {
+        await fillBucket(bot, { fluid: 'lava', pos: source }, signal)
+        filled = true
+        break
+      } catch (err) {
+        if (isAbort(err)) throw err
+        trace('obsidianFromLava: the lava at', source.toString(), 'out of reach:', (err as Error).message)
+      }
+    }
+    if (!filled) return false
   }
   await emptyBucket(bot, { pos: pit, fluid: 'lava' }, signal)
   await refillWater(bot, signal)
@@ -281,7 +298,13 @@ async function obsidianInPit (bot: Bot, get: ObsidianLookup, lava: readonly Vec3
     await fillBucket(bot, { fluid: 'water', pos: spot }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the water by the pit:', (err as Error).message) })
   }
   if (bot.blockAt(pit)?.name !== 'obsidian') return false
-  await collectBlock(bot, { positions: [pit], pickup: true }, signal)
+  // mined from the floor beside it, again from there when the first dig didn't hold the crosshair (26.3)
+  await collectBlock(bot, { positions: [pit], pickup: true }, signal).catch(async err => {
+    if (isAbort(err)) throw err
+    trace('obsidianFromLava: the pit obsidian:', (err as Error).message, '- from beside it')
+    await navigateNear(bot, spot, 1, signal).catch(e => { if (isAbort(e)) throw e })
+    await collectBlock(bot, { positions: [pit], pickup: true }, signal)
+  })
   return countItems(bot, 'obsidian') > before
 }
 
