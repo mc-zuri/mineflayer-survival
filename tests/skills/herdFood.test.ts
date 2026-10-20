@@ -103,6 +103,10 @@ test('tendHerd: bred as the cooldown allows, only the surplus slaughtered for th
       return fn(signal()).catch(() => ({ killed: false }))
     }
   })
+  // the cooking after the bot is out of the pen (a furnace among the calves found no room, 26.3)
+  const cookedAfter: string[] = []
+  const obtain = executor.obtain
+  executor.obtain = async (reqs: any[]) => { cookedAfter.push(tasks[tasks.length - 1]); await obtain(reqs) }
   const huntModule = require('../../src/skills/hunt')
   const real = huntModule.hunt
   huntModule.hunt = async (b: any, prey: any) => { killed.push(prey.id); delete b.entities[prey.id]; b.inventory.slots[31 + killed.length] = item('beef', 2); return { killed: true } }
@@ -117,6 +121,8 @@ test('tendHerd: bred as the cooldown allows, only the surplus slaughtered for th
   assert.equal((Object.values(bot.entities) as any[]).filter(e => e.name === 'cow').length, 3)
   assert.ok(tasks.indexOf('breed the cows') < tasks.indexOf('slaughter a cow'), tasks.join(', '))
   assert.equal(tasks[tasks.length - 1], 'shut the herd in')
+  assert.deepEqual(cookedAfter, ['shut the herd in'])
+  assert.ok(tasks.indexOf('the herd drops') > tasks.lastIndexOf('slaughter a cow'), tasks.join(', '))
   // the beef cooked (the base's furnace, through the planner)
   assert.deepEqual(obtained, [{ item: 'cooked_beef', count: 4 }])
   assert.equal(points, 0)

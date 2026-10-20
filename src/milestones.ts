@@ -1868,8 +1868,8 @@ export function herdWheatKept (memory: WorldMemory): number {
  * herd, its start (startHerd); with one within HERD_TRIP, back to it, its pen mended if broken and the strays led back
  * in, the farm's grown wheat harvested for it, the pairs bred as the cooldown allows (herdChores), the surplus adults
  * slaughtered for the `want` food points or the pen's overflow (never the BREEDERS_KEPT breeders, never a calf:
- * slaughterPick), the meat cooked in the base's furnace, and the bot out with the gate shut behind it. The leather and
- * wool come along (the books' and the beds'). Resolves the cooked food points got.
+ * slaughterPick), their drops picked up, the bot out with the gate shut behind it and the meat cooked (the base's
+ * furnace when near). The leather and wool come along (the books' and the beds'). Resolves the cooked food points got.
  */
 export async function tendHerd (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, opts: { want?: number } = {}): Promise<number> {
   if (normalizeDimension(bot.game?.dimension) !== 'overworld' || bot.entity == null) return 0
@@ -1939,7 +1939,17 @@ export async function tendHerd (bot: Bot, executor: Executor, signal: AbortSigna
       if (r?.killed === true) killed++
     }
   }
-  // the meat cooked in the base's furnace (the planner's smelt: the base's furnace when near)
+  // the drops picked up in the pen (a kill over the ring leaves them inside it), then out of it, its gate shut
+  if (killed > 0) {
+    const where = pen?.center ?? at
+    await executor.task('the herd drops', async (s) => await pickupDrops(bot, { near: where, radius: pen != null ? pen.size : 8 }, s), signal).catch(fail('no drops'))
+  }
+  if (pen != null) {
+    const shut = pen
+    await executor.task('shut the herd in', async (s) => await leavePen(bot, shut, s), signal).catch(fail('the gate'))
+  }
+  // the meat cooked out of the pen, in the base's furnace when near (the planner's smelt): a furnace put down among
+  // the calves found no room, and the nook dug for it went through the ring (26.3)
   let points = 0
   const raw = MEAT_OF[mob]
   const cooked = RAW_TO_COOKED[raw]
@@ -1947,11 +1957,6 @@ export async function tendHerd (bot: Bot, executor: Executor, signal: AbortSigna
     const before = countItems(bot, cooked)
     await executor.obtain([{ item: cooked, count: before + countItems(bot, raw) }], signal).catch(fail('not cooked'))
     points = (countItems(bot, cooked) - before) * (foodInfo(bot.registry as any, cooked)?.nutrition ?? 0)
-  }
-  // out of the pen, its gate shut
-  if (pen != null) {
-    const shut = pen
-    await executor.task('shut the herd in', async (s) => await leavePen(bot, shut, s), signal).catch(fail('the gate'))
   }
   noteHerd(bot, memory, herd)
   if (killed > 0) log(`herd: ${killed} ${mob}s slaughtered, ${points} food points cooked`)
