@@ -48,6 +48,8 @@ test('createPlugin gives the pathfinder SCAFFOLD_ITEMS to build with: its budget
   const settings = bot.pathfinder.defaultMoveSettings
   assert.deepStrictEqual(settings.scaffoldingBlocks, SCAFFOLD_ITEMS)
   assert.strictEqual(settings.canDig, false, 'the other settings are kept')
+  // no drop into water from any height (a 42-block ForwardDropDown fell short of its water, full-26.3-fresh-s)
+  assert.strictEqual(settings.infiniteLiquidDropdownDistance, false)
   assert.strictEqual(scaffoldCount(bot, settings.scaffoldingBlocks), 28)
   // cheapest first: the netherrack before the cobblestone
   assert.strictEqual(scaffoldItem(bot, settings.scaffoldingBlocks)?.name, 'netherrack')

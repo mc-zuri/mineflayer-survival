@@ -76,12 +76,15 @@ export interface Survival {
 
 /**
  * the pathfinder builds with the blocks the survival skills count and keep (SCAFFOLD_ITEMS, cheapest first): its
- * search's budget and its places, the other settings as they are
+ * search's budget and its places; and no drop past maxDropDown into water however far down
+ * (infiniteLiquidDropdownDistance off, the skills that want a drop into water ask for it): a 26.3 bot mining gold took
+ * a ForwardDropDown of 12 blocks, then one of 42 toward a cave's water, and fell to its death on the way at y 29
+ * (full-26.3-fresh-s); the other settings as they are
  */
 function useScaffoldItems (bot: Bot): void {
   const pf = bot.pathfinder as any
   if (pf?.setMoveOptions == null || pf.defaultMoveSettings == null) return
-  pf.setMoveOptions({ ...pf.defaultMoveSettings, scaffoldingBlocks: [...SCAFFOLD_ITEMS] })
+  pf.setMoveOptions({ ...pf.defaultMoveSettings, scaffoldingBlocks: [...SCAFFOLD_ITEMS], infiniteLiquidDropdownDistance: false })
 }
 
 /** ticks before a death the last mob to hurt the bot is taken for its killer */
