@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { STUCK_LEG_TTL, climbHazard, facingDir, firstLegBeyond, floorHeld, legPassesSpot, noteStuckLeg, stuckSpots, liquidAround, oreLevel, spiralWaypoints, staircaseStep, tunnelStep, unsafeStep } from '../../src/executor/explore'
+import { BRIDGE_PLACE_COST, STUCK_LEG_TTL, bridgePlaceCost, climbHazard, facingDir, firstLegBeyond, floorHeld, legPassesSpot, noteStuckLeg, stuckSpots, liquidAround, oreLevel, spiralWaypoints, staircaseStep, tunnelStep, unsafeStep } from '../../src/executor/explore'
 
 const SOLID = new Set(['stone', 'deepslate', 'cobblestone', 'dirt'])
 const world = (blocks: Record<string, string>, fill = 'stone') => (pos: Vec3) => {
@@ -674,4 +674,17 @@ test("huntProgress: the spiral walked so far is the executor's across the plans 
   const state: Record<string, any> = {}
   huntProgress({ state }, ['cow'], 96).progress.leg = 3
   assert.equal(huntProgress({ state }, ['cow'], 96).progress.leg, 3)
+})
+
+test('bridgePlaceCost: a block put over 4 blocks and more of open air (a bridge across a valley) costs more; one with ground under it, or a short gap, not', () => {
+  // the valley's floor at y 70, the bridge's level at y 98
+  const valley = (pos: Vec3) => ({ name: pos.y <= 70 ? 'stone' : 'air', boundingBox: pos.y <= 70 ? 'block' : 'empty' })
+  const cost = bridgePlaceCost(valley)
+  assert.equal(cost({ position: new Vec3(0, 97, 0) }), BRIDGE_PLACE_COST)
+  // a block on the ground (a pillar's first), or 3 over it
+  assert.equal(cost({ position: new Vec3(0, 71, 0) }), 0)
+  assert.equal(cost({ position: new Vec3(0, 74, 0) }), 0)
+  assert.equal(cost({ position: new Vec3(0, 75, 0) }), BRIDGE_PLACE_COST)
+  // unloaded below: no opinion
+  assert.equal(bridgePlaceCost(() => null)({ position: new Vec3(0, 97, 0) }), 0)
 })

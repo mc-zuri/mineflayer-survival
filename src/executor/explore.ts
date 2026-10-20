@@ -784,6 +784,28 @@ export function surfaceStepCost (lookup: Lookup, refY: number, range = 64): (blo
   }
 }
 
+/** the open drop under a block put down that makes it a bridge's (bridgePlaceCost) */
+export const BRIDGE_DROP = 4
+/** what a block put down over such a drop costs a surface trip more (ticks): a way round is walked first */
+export const BRIDGE_PLACE_COST = 200
+
+/**
+ * A block put down with BRIDGE_DROP or more of open air under it, a bridge's over a valley, costs BRIDGE_PLACE_COST
+ * more: the surface legs bridged straight across valleys 25 to 35 blocks up, and a step off the bridge's edge was a
+ * death, four of them on 26.3 (full-26.3-fresh-o at y 101, fresh-r at y 108 and y 98, a bridge at y 144 on seed 31337).
+ * A block put with ground under it (a pillar's, a step's) costs nothing more.
+ */
+export function bridgePlaceCost (lookup: Lookup): (block: { position: Vec3 }) => number {
+  return (block) => {
+    const pos = block.position
+    for (let dy = 1; dy <= BRIDGE_DROP; dy++) {
+      const b = lookup(new Vec3(pos.x, pos.y - dy, pos.z))
+      if (b == null || b.boundingBox === 'block') return 0
+    }
+    return BRIDGE_PLACE_COST
+  }
+}
+
 /** how far below the level a surface trip sets out from a step counts as down a ravine (surfaceStepCost) */
 export const SURFACE_DIP = 10
 
@@ -799,6 +821,8 @@ export async function onTheSurface<T> (bot: Bot, fn: () => Promise<T>): Promise<
   pf.setMoveOptions({
     ...before,
     exclusionAreasStep: [...(before.exclusionAreasStep ?? []), surfaceStepCost(lookupOf(bot), Math.floor(bot.entity.position.y))],
+    // no bridge across a valley high over its floor when there's a way round
+    exclusionAreasPlace: [...(before.exclusionAreasPlace ?? []), bridgePlaceCost(lookupOf(bot))],
     // no jump into the water at a ravine's bottom, whatever the height: the way out of one is through its caves
     infiniteLiquidDropdownDistance: false
   })
