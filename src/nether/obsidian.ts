@@ -88,6 +88,7 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
   }
   const lavaId = bot.registry.blocksByName.lava.id
   const obsidianId = bot.registry.blocksByName.obsidian.id
+  let pitFailed = false
   for (let round = 0; countItems(bot, 'obsidian') < count && round < count * 3; round++) {
     throwIfAborted(signal)
     // obsidian made already about: mined first
@@ -116,6 +117,17 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
     const all = findBlocks(bot, { matching: lavaId, maxDistance: 16, count: 256 })
       .filter(p => isLavaSource(get(p)))
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
+    // a deep lake (lava under its top sources): its lava carried a bucket at a time to a pit dug in the stone by it and
+    // set there, over stone, so no drop falls into lava. The water poured on such a lake turns its top layer to a lid
+    // over more lava, and every block of the lid mined burned in the lava under it (a 26.3 whole game's table
+    // obsidian took 48000 ticks over 6 pools, 'broke 2 blocks but no item came into the inventory')
+    const deep = all.slice(0, 8).some(p => get(p.offset(0, -1, 0))?.name === 'lava')
+    if (deep && findInventoryItem(bot, 'bucket') != null && !pitFailed) {
+      const before = countItems(bot, 'obsidian')
+      const made = await obsidianInPit(bot, get, all, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the pit:', (err as Error).message); return false })
+      if (made && countItems(bot, 'obsidian') > before) continue
+      pitFailed = true
+    }
     let target = pourTarget(get, all, false)
     // a lake with no shore: a block put into the source nearest the bot (the lava replaced), the water poured on it
     // flows down into the sources about it and turns them, and is scooped back off the block (the water poured into
@@ -206,6 +218,71 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
     if (countItems(bot, 'water_bucket') === 0) trace('obsidianFromLava: the water was lost')
   }
   return countItems(bot, 'obsidian')
+}
+
+/** how far from the bot a pit for a deep lake's lava is looked for */
+export const PIT_RADIUS = 6
+/** the least distance, along x or z, from a pit to the lake's lava (the pour's water spreads on the floor about it) */
+export const PIT_CLEARANCE = 3
+
+const solidBlock = (b: { name: string, boundingBox: string } | null): boolean => b != null && b.boundingBox === 'block' && b.name !== 'lava' && b.name !== 'water'
+
+/**
+ * A cell of the floor by the bot to dig a 1-deep pit in for a deep lake's lava: solid under it and on its 4 sides,
+ * two cells of air over it (the water poured there, the bot reaching in), PIT_CLEARANCE off any lava; nearest first.
+ * A pit dug already (air over solid, walled) does too.
+ */
+export function pitSite (get: ObsidianLookup, feet: Vec3, lava: readonly Vec3[]): Vec3 | null {
+  const out: Vec3[] = []
+  for (let dx = -PIT_RADIUS; dx <= PIT_RADIUS; dx++) {
+    for (let dz = -PIT_RADIUS; dz <= PIT_RADIUS; dz++) {
+      for (const dy of [-1, -2, 0]) {
+        const p = feet.offset(dx, dy, dz)
+        if (dx === 0 && dz === 0) continue
+        const here = get(p)
+        if (here == null || (!solidBlock(here) && !AIR.has(here.name))) continue
+        if (!solidBlock(get(p.offset(0, -1, 0))) || !SIDES.every(s => solidBlock(get(p.plus(s))))) continue
+        if (!AIR.has(get(p.offset(0, 1, 0))?.name ?? '') || !AIR.has(get(p.offset(0, 2, 0))?.name ?? '')) continue
+        if (lava.some(l => Math.max(Math.abs(l.x - p.x), Math.abs(l.z - p.z)) < PIT_CLEARANCE + 1 && Math.abs(l.y - p.y) < 4)) continue
+        out.push(p)
+      }
+    }
+  }
+  out.sort((a, b) => a.distanceTo(feet) - b.distanceTo(feet))
+  return out[0] ?? null
+}
+
+/**
+ * One obsidian from a deep lake by a pit: the pit dug (PIT: pitSite), a bucket of the lake's lava poured in it, water
+ * over it till it sets, the water scooped back, the obsidian mined (its drop on the pit's stone floor). True when one
+ * came into the bag.
+ */
+async function obsidianInPit (bot: Bot, get: ObsidianLookup, lava: readonly Vec3[], signal?: AbortSignal): Promise<boolean> {
+  const before = countItems(bot, 'obsidian')
+  const pit = pitSite(get, bot.entity.position.floored(), lava)
+  if (pit == null) { trace('obsidianFromLava: no pit site by the lake'); return false }
+  trace('obsidianFromLava: a pit at', pit.toString(), 'for the lava of the deep lake')
+  if (solidBlock(get(pit))) await collectBlock(bot, { positions: [pit], pickup: true }, signal)
+  if (!AIR.has(get(pit)?.name ?? '')) return false
+  if (countItems(bot, 'lava_bucket') === 0) {
+    const source = lava.find(p => isLavaSource(get(p)))
+    if (source == null) return false
+    await fillBucket(bot, { fluid: 'lava', pos: source }, signal)
+  }
+  await emptyBucket(bot, { pos: pit, fluid: 'lava' }, signal)
+  await refillWater(bot, signal)
+  // the water on the floor beside the pit (over the lava there's no face to pour against), flowing over its lip and
+  // down onto the lava
+  const spot = SIDES.map(s => pit.plus(s).offset(0, 1, 0)).find(c => AIR.has(get(c)?.name ?? '') && solidBlock(get(c.offset(0, -1, 0)))) ?? pit.offset(0, 1, 0)
+  await emptyBucket(bot, { pos: spot, fluid: 'water' }, signal)
+  await waitUntil(bot, () => bot.blockAt(pit)?.name === 'obsidian', 40, signal)
+  await waitTicks(bot, 5, signal)
+  if (bot.blockAt(spot)?.name === 'water' && findInventoryItem(bot, 'bucket') != null) {
+    await fillBucket(bot, { fluid: 'water', pos: spot }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the water by the pit:', (err as Error).message) })
+  }
+  if (bot.blockAt(pit)?.name !== 'obsidian') return false
+  await collectBlock(bot, { positions: [pit], pickup: true }, signal)
+  return countItems(bot, 'obsidian') > before
 }
 
 /** how far a water source is looked for to fill an empty bucket from */

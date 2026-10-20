@@ -53,3 +53,21 @@ test('refillWater: nothing done with a water bucket held or no empty bucket; wit
   assert.equal(await refillWater(empty), false)
   assert.equal(looked, 1)
 })
+
+test('pitSite: a floor cell walled and floored in stone, open two above, PIT_CLEARANCE off the lake; none on the lake', async () => {
+  const { pitSite, PIT_CLEARANCE } = await import('../../src/nether/obsidian')
+  // stone below y 64, a 4 x 4 lake 2 deep at x 4 to 7 (y 62, 63), air from 64
+  const lakeAt = (p: Vec3): boolean => p.x >= 4 && p.x <= 7 && p.z >= 0 && p.z <= 3 && (p.y === 62 || p.y === 63)
+  const get = (p: Vec3): { name: string, boundingBox: string } => lakeAt(p) ? { name: 'lava', boundingBox: 'empty' } : p.y < 64 ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  const lava: Vec3[] = []
+  for (let x = 4; x <= 7; x++) for (let z = 0; z <= 3; z++) for (const y of [62, 63]) lava.push(new Vec3(x, y, z))
+  const pit = pitSite(get as any, new Vec3(0, 64, 1), lava)
+  assert.ok(pit != null)
+  assert.equal(pit.y, 63)
+  assert.ok(lava.every(l => Math.max(Math.abs(l.x - pit.x), Math.abs(l.z - pit.z)) > PIT_CLEARANCE), pit.toString())
+  // the bot on the lake's far side with no floor near but the lake's lid: lava all round within reach, none
+  const sea = (p: Vec3): { name: string, boundingBox: string } => p.y === 63 ? { name: 'lava', boundingBox: 'empty' } : p.y < 63 ? { name: 'stone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  const seaLava: Vec3[] = []
+  for (let x = -8; x <= 8; x++) for (let z = -8; z <= 8; z++) seaLava.push(new Vec3(x, 63, z))
+  assert.equal(pitSite(sea as any, new Vec3(0, 64, 0), seaLava), null)
+})

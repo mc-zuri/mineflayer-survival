@@ -48,7 +48,7 @@ describe(`obsidian from a lava lake on a ${DEFAULT_VERSION} server`, { timeout: 
     assert.strictEqual(countItems(bot, 'water_bucket'), 1)
   })
 
-  it('turns the lava of a deep lake to obsidian, the pedestal put against its wall (its floor more lava)', async () => {
+  it('gets 4 obsidian from a 2-deep lake with no drop burned: its lava set in a pit dug in the stone by it', async () => {
     // (beside the first test's ground, at its height)
     const o = (start ?? bot.entity.position.floored()).offset(24, 0, 0)
     const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
@@ -62,9 +62,20 @@ describe(`obsidian from a lava lake on a ${DEFAULT_VERSION} server`, { timeout: 
     for (const [item, n] of [['water_bucket', 1], ['bucket', 2], ['diamond_pickaxe', 1], ['cobblestone', 16]] as const) await run(`give ${USERNAME} ${item} ${n}`)
     await run(`tp ${USERNAME} ${o.x + 0.5} ${o.y} ${o.z + 0.5}`)
     assert.ok(await waitUntil(bot, () => countItems(bot, 'cobblestone') > 0 && bot.blockAt(o.offset(2, -3, 2))?.name === 'lava' && bot.entity.position.distanceTo(o.offset(0.5, 0, 0.5)) < 1, 200))
-    const got = await obsidianFromLava(bot, 4)
-    console.log(`obsidianFromLava (deep): ${got} obsidian, water bucket ${countItems(bot, 'water_bucket')}`)
+    // every obsidian block broken is one in the bag (a lid's broken over the lava under it burned in it)
+    let broken = 0
+    const onUpdate = (before: any, after: any): void => { if (before?.name === 'obsidian' && after?.name !== 'obsidian') broken++ }
+    bot.on('blockUpdate', onUpdate)
+    let got = 0
+    try {
+      got = await obsidianFromLava(bot, 4)
+    } finally {
+      bot.off('blockUpdate', onUpdate)
+    }
+    console.log(`obsidianFromLava (deep): ${got} obsidian, ${broken} broken, water bucket ${countItems(bot, 'water_bucket')}`)
     assert.ok(got >= 4, `${got} obsidian`)
+    assert.strictEqual(broken, got, 'an obsidian broken burned')
+    assert.strictEqual(countItems(bot, 'water_bucket'), 1)
   })
   it('mines the obsidian it was given, passing over one that lava has come against since the list was made', async () => {
     // (beside the other tests' ground) obsidian at x 2 and x 4 sunk in the stone, the bot by them; then lava let in
