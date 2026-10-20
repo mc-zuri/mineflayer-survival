@@ -1118,6 +1118,7 @@ async function routeRoom (bot: Bot, args: DigRouteArgs, signal?: AbortSignal, ne
  * another side where a step would open next to lava or water. Resolves once the bot's feet are at `y` (or `found`).
  */
 export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, signal?: AbortSignal): Promise<boolean> {
+  await outOfTheWater(bot, signal)
   let dir = facingDir(bot.entity.yaw)
   const lookup = lookupOf(bot)
   const maxSteps = args.maxSteps ?? 400
@@ -1176,6 +1177,16 @@ export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, s
     }
   }
   return feetOf(bot).y <= y
+}
+
+/**
+ * A dug route starts from dry ground: a bot in the water (a pond's, a lake's floor) goes to the shore first
+ * (toShore), and throws NO_PATH when it can't: a staircase or a tunnel from under the water lets it in on the bot (a
+ * 1.21.11 bot's stone step went under a pond's water at y 56 and surfaced 35 times, ls3-1.21.11)
+ */
+export async function outOfTheWater (bot: Bot, signal?: AbortSignal): Promise<void> {
+  if (!inWater(bot)) return
+  if (!(await toShore(bot, signal))) throw new SkillError('NO_PATH', `in the water at ${feetOf(bot).toString()}: no staircase or tunnel from under it`)
 }
 
 /** level steps a staircase down takes at most where no step down is safe (descendTo) */
@@ -1241,6 +1252,7 @@ export function dryStart (lookup: Lookup, feet: Vec3): Vec3 | null {
  * until `found` holds. Lava or water ahead turns it early. Resolves whether `found` held.
  */
 export async function tunnel (bot: Bot, args: DigRouteArgs & { length?: number, legs?: number }, signal?: AbortSignal): Promise<boolean> {
+  await outOfTheWater(bot, signal)
   let dir = facingDir(bot.entity.yaw)
   const lookup = lookupOf(bot)
   const length = args.length ?? 24

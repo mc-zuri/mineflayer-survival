@@ -70,3 +70,35 @@ test('the ore in the rock is taken under the rule, and a bot fit for the caves t
     assert.deepEqual(seen, [{ exposed: !ready, enclosed: false }], ready ? 'cave-ready' : 'under the rule')
   }
 })
+
+test('a mine step passes over the blocks near where the drowning reflex took the bot up from lately, the same target under the water not dived for again (ls3-1.21.11)', async () => {
+  const { runMine } = await import('../../src/executor/steps')
+  const { noteDrowning } = await import('../../src/skills/breath')
+  const stoneStep = { kind: 'mine', item: 'cobblestone', count: 1, block: 'stone', blocks: ['stone'], blockCount: 1, tool: 'wooden_pickaxe', dimension: 'overworld', cost: 100 } as any
+  const bot = botAt(true, [new Vec3(12, 55, 0), new Vec3(40, 55, 0)])
+  bot.survival = { tasks: { tick: 500 } }
+  noteDrowning(bot, new Vec3(11.5, 56.5, 0.5))
+  const seen: boolean[] = []
+  const collect = async (b: any, args: any): Promise<any> => {
+    seen.push(args.exclude(new Vec3(12, 55, 0)), args.exclude(new Vec3(40, 55, 0)))
+    const c = item('cobblestone', 30)
+    c.slot = 31
+    b.inventory.slots[31] = c
+    return { mined: 1, positions: [new Vec3(40, 55, 0)], items: { cobblestone: 1 }, count: 1 }
+  }
+  await stubbed('../../src/skills/collectBlock', 'collectBlock', collect, async () => await runMine(stoneStep, ctxOf(bot)))
+  assert.deepEqual(seen, [true, false])
+})
+
+test('a dug route never starts in the water: a bot with no shore near is NO_PATH, no staircase from a lake\'s floor (outOfTheWater)', async () => {
+  const { outOfTheWater } = await import('../../src/executor/explore')
+  // the feet in the water of a wide lake, the head over it (no surfacing needed)
+  const bot = fakeBot({ position: new Vec3(0.5, 62, 0.5), world: (p: Vec3) => p.y <= 62 && p.y >= 55 ? 'water' : p.y < 55 ? 'stone' : 'air' })
+  let err: any = null
+  await outOfTheWater(bot).catch(e => { err = e })
+  assert.equal(err?.code ?? err?.reason, 'NO_PATH')
+  assert.match(String(err?.message), /in the water/)
+  // on dry ground: nothing to do
+  const dry = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  await outOfTheWater(dry)
+})

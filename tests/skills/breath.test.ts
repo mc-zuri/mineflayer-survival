@@ -24,10 +24,34 @@ test('keepHeadAboveWater adds the cost to the pathfinder\'s step costs once', ()
   const bot: any = { pathfinder: pf, blockAt: () => null }
   keepHeadAboveWater(bot)
   keepHeadAboveWater(bot)
-  assert.equal(pf.defaultMoveSettings.exclusionAreasStep.length, 1)
+  assert.equal(pf.defaultMoveSettings.exclusionAreasStep.length, 2)
 })
 
 test('underwaterStepCost is dear but no wall: a bot already in a flooded cave still has a way out', async () => {
   const { UNDERWATER_STEP_COST } = await import('../../src/skills/breath')
   assert.ok(UNDERWATER_STEP_COST > 20 && UNDERWATER_STEP_COST < 1e6)
+})
+
+test('a spot the drowning reflex took the bot up from is kept off DROWNED_TICKS: the steps with the head in water near it cost DROWNED_STEP_COST, the dry ones nothing; a death forgets it', async () => {
+  const { DROWNED_STEP_COST, DROWNED_TICKS, drownedNear, drownedStepCost, noteDrowning } = await import('../../src/skills/breath')
+  const bot: any = new (require('node:events').EventEmitter)()
+  bot.survival = { tasks: { tick: 1000 } }
+  // a pond at y 55 to 58 by x 10 to 14
+  const lookup = (p: Vec3): { name: string } => ({ name: p.x >= 10 && p.x <= 14 && p.y >= 55 && p.y <= 58 ? 'water' : p.y > 58 ? 'air' : 'stone' })
+  const cost = drownedStepCost(bot, lookup)
+  assert.equal(cost({ position: new Vec3(11, 56, 0) }), 0)
+  noteDrowning(bot, new Vec3(11.5, 56.5, 0.5))
+  assert.equal(drownedNear(bot, new Vec3(18, 56, 0)), true)
+  assert.equal(drownedNear(bot, new Vec3(30, 56, 0)), false)
+  assert.equal(cost({ position: new Vec3(13, 56, 0) }), DROWNED_STEP_COST)
+  // dry ground by the pond, and swimming with the head over the water: no more
+  assert.equal(cost({ position: new Vec3(16, 59, 0) }), 0)
+  assert.equal(cost({ position: new Vec3(12, 58, 0) }), 0)
+  bot.survival.tasks.tick += DROWNED_TICKS + 1
+  assert.equal(cost({ position: new Vec3(13, 56, 0) }), 0)
+  // (a death forgets them)
+  const { clearDrownings } = await import('../../src/skills/breath')
+  noteDrowning(bot, new Vec3(11.5, 56.5, 0.5))
+  clearDrownings(bot)
+  assert.equal(drownedNear(bot, new Vec3(11, 56, 0)), false)
 })

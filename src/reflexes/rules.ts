@@ -24,6 +24,7 @@ import { SEAL_MAX_BLOCKS, openCells, sealBox, sealIn } from '../skills/sealIn'
 import { sealItem } from '../skills/shelter'
 import { countItems } from '../skills/util'
 import { caveCells, caveOpenings, caveRuleOn, sealCaveOpenings } from '../skills/caves'
+import { noteDrowning } from '../skills/breath'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
 /**
@@ -199,7 +200,11 @@ export const drowningReflex: Reflex = {
     return {
       name: 'drowning',
       priority: config.drowning.priority,
-      run: async (signal) => await surface(bot, { signal, recoverTo: config.drowning.recoverTo, searchRadius: config.drowning.searchRadius, maxTicks: config.drowning.maxTicks })
+      run: async (signal) => {
+        // the spot kept off a while (its targets, the ways under there: skills/breath drownedNear)
+        noteDrowning(bot, bot.entity.position)
+        return await surface(bot, { signal, recoverTo: config.drowning.recoverTo, searchRadius: config.drowning.searchRadius, maxTicks: config.drowning.maxTicks })
+      }
     }
   }
 }

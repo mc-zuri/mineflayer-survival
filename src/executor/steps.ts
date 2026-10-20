@@ -15,6 +15,7 @@ import { farmCells, grownPlots, harvestFarm, knownFarms, nearlyGrownPlots, plant
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { collectBlock, waterBeside } from '../skills/collectBlock'
 import { inCaveWall } from '../skills/caves'
+import { drownedNear } from '../skills/breath'
 import { craft } from '../skills/craft'
 import { PARALLEL_MIN_ITEMS, smelt, smeltParallel } from '../skills/smelt'
 import { retrieveItems } from '../skills/chest'
@@ -337,7 +338,10 @@ async function mineBlocks (step: MineStep, ctx: StepContext, muted: (tool: WornT
   // bot sent down a mineshaft for its cobwebs, and one after diamonds in plain iron, were killed by the cave spiders
   // and zombies there at y 20 (ls-26.3, t34384 and t100061)
   const caveWall = (pos: Vec3): boolean => inCaveWall(bot, pos)
-  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || ctx.unreachable?.has(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos) || caveWall(pos)
+  // and a block near where the drowning reflex took the bot up from lately: the same target under the water again was
+  // a dive again, 35 surfacings of a 1.21.11 bot's 'mine 16 cobblestone' by a pond at y 56 (ls3-1.21.11, t1071 on)
+  const drowned = (pos: Vec3): boolean => drownedNear(bot, pos)
+  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || ctx.unreachable?.has(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos) || caveWall(pos) || drowned(pos)
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     const subs = blockSubstitutes(step)
