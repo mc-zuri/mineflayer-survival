@@ -103,3 +103,21 @@ test('hostiles reflex: a bot not fit for the caves walls itself in in its tunnel
   // in the cave itself: no tunnel to wall in
   assert.strictEqual(check(hostilesReflex, { position: new Vec3(4.5, 20, 0.5), items: blocks, entities: [zombie(6.5)] }).detail, 'fight zombie')
 })
+
+test('spawner reflex: a cave spider spawner in a mineshaft\'s cave is let be by a bot not fit for the caves, lit by one that is', async () => {
+  const { spawnerReflex } = await import('../../src/reflexes/rules')
+  const spawner = new Vec3(5, 20, 0)
+  const run = (input: Partial<FakeBotInput>): string | null => {
+    const world = (p: Vec3): string => p.equals(spawner) ? 'spawner' : caveWorld(p)
+    const bot = fakeBot({ world, position: new Vec3(3.5, 20, 0.5), ...input })
+    bot.game.dimension = 'overworld'
+    bot.findBlocks = () => [spawner]
+    const engine = new ReflexEngine(bot, { enabled: false })
+    const task = spawnerReflex.check(engine.context())
+    engine.stop()
+    return task == null ? null : (task.detail ?? task.name)
+  }
+  assert.strictEqual(run({ items: [item('torch', 8)] }), null)
+  const kit = READY_KIT()
+  assert.strictEqual(run({ ...kit, items: [...(kit.items ?? []), item('torch', 8)] }), 'light spawner')
+})

@@ -23,7 +23,7 @@ import { XP_FARM_POI } from '../skills/spawnerFarm'
 import { SEAL_MAX_BLOCKS, openCells, sealBox, sealIn } from '../skills/sealIn'
 import { sealItem } from '../skills/shelter'
 import { countItems } from '../skills/util'
-import { caveCells, caveOpenings, caveRuleOn, sealCaveOpenings } from '../skills/caves'
+import { caveCells, caveOpenings, caveRuleOn, inCaveWall, sealCaveOpenings } from '../skills/caves'
 import { noteDrowning } from '../skills/breath'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
@@ -974,7 +974,9 @@ export const spawnerReflex: Reflex = {
     }
     const farms: Array<{ x: number, y: number, z: number }> = (bot as any).survival?.memory?.getPois?.(XP_FARM_POI) ?? []
     const l = look
-    const spawner = l.dark.find(p => (l.letBe.get(p.toString()) ?? -Infinity) <= ctx.tick && !farms.some(f => f.x === p.x && f.y === p.y && f.z === p.z) && !spawnerLit(bot, p))
+    // (not one in a cave, a dungeon's or a mineshaft's, for a bot not fit for the caves: the walk to it is into the cave,
+    // where its spiders are; the cave rule keeps it out, inCaveWall)
+    const spawner = l.dark.find(p => (l.letBe.get(p.toString()) ?? -Infinity) <= ctx.tick && !farms.some(f => f.x === p.x && f.y === p.y && f.z === p.z) && !spawnerLit(bot, p) && !inCaveWall(bot, p))
     if (spawner == null) return null
     return {
       name: 'spawner',
