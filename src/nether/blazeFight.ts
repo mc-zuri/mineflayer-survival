@@ -886,6 +886,23 @@ export interface FetchWatch {
  * on to the item, not back to the nook (the walks cut off by each charge went back in, and the rods stayed on the
  * floor); FETCH_TICKS at most, or till the health is down to `sealAt`
  */
+/**
+ * whether the bot's body is in a fire's cell (BaseFireBlock.entityInside: any cell its box is in), the cells of the
+ * feet and the head at the box's corners
+ */
+export function inFireCell (bot: Bot): boolean {
+  const p = bot.entity.position
+  for (const dy of [0, 1]) {
+    for (const dx of [-0.3, 0.3]) {
+      for (const dz of [-0.3, 0.3]) {
+        const name = bot.blockAt(new Vec3(p.x + dx, p.y + dy, p.z + dz))?.name
+        if (name === 'fire' || name === 'soul_fire') return true
+      }
+    }
+  }
+  return false
+}
+
 export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch: FetchWatch, signal?: AbortSignal): Promise<void> {
   const start = watch.now()
   let blocking = false
@@ -914,6 +931,10 @@ export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch
   try {
     while (bot.entities[item.id] === item && watch.now() - start < FETCH_TICKS && fightHealth(bot) > watch.sealAt) {
       throwIfAborted(signal)
+      // in a fire's cell, not fire resistant: back to the nook, never held there behind the shield (a 26.3 bot whose
+      // fetch stopped for a charged blaze in seed 2's throne at (-277, 77, -159) stood in the fireballs' fire with its
+      // shield up, 17.9 health to 2 in 80 ticks, and the blazes finished it with its 2 rods for the brew)
+      if (!fireProof(bot) && inFireCell(bot)) { trace('fightFromNook: drops: in fire, back to the nook'); break }
       const t = threat()
       if (t != null) {
         // the shield up where the bot stands, at it

@@ -1059,3 +1059,42 @@ test('fetchWanted: a rod fetch at full health whatever the volleys (FETCH_BOLD_H
   assert.equal(fetchWanted(16, 10, true, () => false), true)
   assert.equal(fetchWanted(14, 10, true, () => true), false)
 })
+
+test('fetchDrops: in a fire\'s cell, not fire resistant, the fetch is given up for the nook, never held there behind the shield (a 26.3 bot stood in the throne\'s fire with its shield up and burned)', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fetchDrops, inFireCell, nookAround, BlazeVolleys } = await import('../../src/nether/blazeFight')
+  const gridModule = require('../../src/skills/gridWalk')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  let fire = true
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : fire && p.floored().equals(new Vec3(0, 64, 7)) ? 'fire' : 'air'
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 64.2, 5.5), meta: { health: 20, flags: 0 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 7.5), items: [item('iron_sword')], offhand: item('shield'), entities: [blaze], world: name })
+  const rod = { id: 77, name: 'item', position: new Vec3(0.5, 64, 4.5), getDroppedItem: () => item('blaze_rod') }
+  bot.entities[77] = rod
+  bot.world = { raycast: () => null }
+  bot.entity.effects = {}
+  const log: string[] = []
+  bot.equip = async (it: any, dest: string) => { if (dest === 'hand') bot.heldItem = it }
+  bot.activateItem = () => { bot.usingHeldItem = true; log.push('shield') }
+  bot.deactivateItem = () => { bot.usingHeldItem = false }
+  bot.look = async () => {}
+  bot.lookAt = async () => {}
+  bot.attack = (e: any) => { log.push(`swing ${e.name as string}`) }
+  bot.waitForTicks = async (n: number) => await new Promise<void>(resolve => { let k = 0; const f = (): void => { if (++k >= n) { bot.off('physicsTick', f); resolve() } }; bot.on('physicsTick', f) })
+  bot.game.dimension = 'the_nether'
+  assert.equal(inFireCell(bot), true)
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const realMove = gridModule.moveNear
+  gridModule.moveNear = async (_b: unknown, to: Vec3) => { log.push(`to ${to.toString()}`); bot.entity.position = new Vec3(0.5, 64, 10.5) }
+  try {
+    await fetchDrops(bot, nook, rod as any, { volleys: new BlazeVolleys(), now: () => 0, sealAt: 6 })
+  } finally {
+    gridModule.moveNear = realMove
+  }
+  assert.deepEqual(log, [`to ${stand.toString()}`])
+  fire = false
+  bot.entity.position = new Vec3(0.5, 64, 7.5)
+  assert.equal(inFireCell(bot), false)
+})
