@@ -147,6 +147,43 @@ export class CrossbowGuard {
   }
 }
 
+/**
+ * The mobs whose hits are swings at the bot (MeleeAttackGoal and its kin: ZombieAttackGoal, the spider's, a hoglin's,
+ * a piglin brute's), a shield held up to them takes (Player's BlocksAttacks)
+ */
+export const MELEE_MOBS = new Set(['wither_skeleton', 'zombie', 'husk', 'zombie_villager', 'zombified_piglin', 'piglin_brute', 'hoglin', 'zoglin', 'vindicator', 'spider', 'cave_spider'])
+
+/** Mob.getAttackBoundingBox's widening of the mob's box, sideways only (DEFAULT_ATTACK_REACH: sqrt(2.04) - 0.6) */
+export const MOB_ATTACK_REACH = Math.sqrt(2.04) - 0.6
+
+/**
+ * Whether a mob's attack box (its box widened sideways by MOB_ATTACK_REACH, not up or down) meets the bot's box
+ * (Mob.isWithinMeleeAttackRange), with `margin` more sideways: it can hit the bot, or will in a step or two
+ */
+export function inMobReach (mob: { position: Vec3, width?: number, height?: number }, botPos: Vec3, margin = 0): boolean {
+  const across = (mob.width ?? 0.6) / 2 + MOB_ATTACK_REACH + 0.3 + margin
+  const dx = Math.abs(mob.position.x - botPos.x)
+  const dz = Math.abs(mob.position.z - botPos.z)
+  const over = mob.position.y < botPos.y + 1.8 && botPos.y < mob.position.y + (mob.height ?? 1.95)
+  return dx < across && dz < across && over
+}
+
+/**
+ * how much nearer than its reach a melee mob is let come before the shield goes up (a shield blocks only from 5 ticks
+ * after it's raised, BlocksAttacks' block_delay_seconds 0.25; a wither skeleton walks about a block in that)
+ */
+export const MELEE_GUARD_MARGIN = 1.2
+
+/**
+ * What the fight does with the shield against a melee mob this tick: 'swing' (the sword charged and the mob in
+ * reach), 'lower' (charged, the shield still up: vanilla's client takes no attack while an item is in use, so it's let
+ * down a tick first), 'block' (the mob in its reach, or about to be, and the sword not ready), or 'none' (closing in)
+ */
+export function meleeGuard (inTheirReach: boolean, inOurReach: boolean, charged: boolean, blocking: boolean): 'swing' | 'lower' | 'block' | 'none' {
+  if (inOurReach && charged) return blocking ? 'lower' : 'swing'
+  return inTheirReach ? 'block' : 'none'
+}
+
 /** Pillager.performRangedAttack's bolt (CrossbowItem.performShooting, an arrow) leaves this close to the mob */
 const BOLT_SPAWN_DISTANCE = 2.5
 
@@ -229,6 +266,8 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
   const onDead = (e: Entity): void => { if (e.id === target.id) died = true }
   bot.on('entityDead', onDead)
   const hasShield = (): boolean => useShield && (bot.inventory.slots[45]?.name === 'shield' || findItem(bot, 'shield') != null)
+  // a melee mob's swings taken on the shield (meleeGuard)
+  const guarded = MELEE_MOBS.has(name) && !isCrossbowMob(bot, target)
 
   try {
     while (isAlive(bot, target)) {
@@ -280,6 +319,18 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       } else if (name === 'blaze' && blazeCharged(bot, target) && distance > reach && hasShield()) {
         // its three small fireballs: the shield takes them (Player.isDamageSourceBlocked)
         wantBlock = true
+      } else if (guarded && hasShield()) {
+        // a melee mob: its swings on the shield, the sword's between them (meleeGuard). A 26.3 bot in iron with a
+        // shield traded blows with a wither skeleton in a fortress's corridor, its shield never up, and was hit to
+        // death and withered (full-26.3-fresh-d)
+        const guard = meleeGuard(inMobReach(target, bot.entity.position, MELEE_GUARD_MARGIN), distance <= reach, strength.scale(0.5) >= 1, blocking)
+        if (guard === 'block') wantBlock = true
+        if (guard === 'lower') {
+          lowerShield(bot)
+          blocking = false
+          await waitTicks(bot, 1, signal)
+          continue
+        }
       }
 
       if (wantBlock) {
@@ -319,8 +370,11 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       const e = bot.entity as any
       // no crit jump off a stalagmite: each landing back on its tip impales (PointedDripstoneBlock.fallOn; a 26.3 bot
       // jumped at zombies from one 17 times, till it died)
+      // (and none in a melee mob's reach with the shield to take its swings: the jump's fall leaves the shield down for
+      // 6 ticks and more; a crit is from beyond its reach, as it comes)
       const canCrit = crits && !isCreeper && e.isInWater !== true && e.isInLava !== true && e.onClimbable !== true &&
-        !onDripstone(p => bot.blockAt(p), bot.entity.position.floored())
+        !onDripstone(p => bot.blockAt(p), bot.entity.position.floored()) &&
+        !(guarded && hasShield() && inMobReach(target, bot.entity.position, 0.3))
       const airborne = ticks - jumpedAt <= 14 && !bot.entity.onGround
       const falling = !bot.entity.onGround && bot.entity.velocity.y < 0
       const jumpNow = canCrit && bot.entity.onGround && !airborne && strength.ticksToFull() <= 5

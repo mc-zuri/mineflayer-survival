@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import { ArrowGuard, CROSSBOW_LOADED_TICKS, CrossbowGuard, MOB_ARROW_SPEED, blazeCharged, isChargingCrossbow, isCrossbowMob } from '../../src/skills/fight'
-import { entity, fakeBot } from '../reflexes/fakeBot'
+import { entity, fakeBot, item } from '../reflexes/fakeBot'
 
 test('blazeCharged: Blaze.DATA_FLAGS_ID bit 1, set for the volley', () => {
   const bot = fakeBot()
@@ -97,4 +97,50 @@ test('fight: given up, not killed, once its until holds (the hostiles reflex\'s 
   const result = await fight(bot, spider, { until: () => true })
   assert.strictEqual(result.killed, false)
   assert.strictEqual(result.hits, 0)
+})
+
+test('inMobReach: a mob\'s attack box is its own widened sideways by sqrt(2.04) - 0.6, never up or down (Mob.getAttackBoundingBox)', async () => {
+  const { inMobReach, MOB_ATTACK_REACH } = await import('../../src/skills/fight')
+  assert.ok(Math.abs(MOB_ATTACK_REACH - 0.8283) < 1e-3)
+  const bot = new Vec3(0.5, 64, 0.5)
+  const ws = (x: number, y = 64, z = 0.5): any => ({ position: new Vec3(x, y, z), width: 0.7, height: 2.4 })
+  // a wither skeleton's box 0.35 out, its reach 0.83 more, the bot's 0.3: 1.48 between the middles
+  assert.equal(inMobReach(ws(1.9), bot), true)
+  assert.equal(inMobReach(ws(2.1), bot), false)
+  assert.equal(inMobReach(ws(2.1), bot, 1.2), true)
+  // three over the bot's feet (a pillar, a cover): out of its reach whatever the sideways distance
+  assert.equal(inMobReach(ws(0.6, 61.5), bot), false)
+  assert.equal(inMobReach({ position: new Vec3(1.2, 61, 0.5), width: 0.6, height: 2.9 }, bot), false)
+  assert.equal(inMobReach({ position: new Vec3(1.2, 61.2, 0.5), width: 0.6, height: 2.9 }, bot), true)
+})
+
+test('meleeGuard: the shield up while a melee mob is (about to be) in its reach and the sword is charging; let down a tick before the swing', async () => {
+  const { meleeGuard } = await import('../../src/skills/fight')
+  assert.equal(meleeGuard(true, true, false, false), 'block')
+  assert.equal(meleeGuard(true, true, false, true), 'block')
+  assert.equal(meleeGuard(true, true, true, true), 'lower')
+  assert.equal(meleeGuard(true, true, true, false), 'swing')
+  assert.equal(meleeGuard(false, true, true, false), 'swing')
+  assert.equal(meleeGuard(false, false, false, false), 'none')
+})
+
+test('fight: against a wither skeleton in its reach, with a shield, the swings come with the shield down and it is up between them (full-26.3-fresh-d)', async () => {
+  const { fight } = await import('../../src/skills/fight')
+  const skeleton = entity({ id: 8, name: 'wither_skeleton', position: new Vec3(1.9, 64, 0.5) })
+  const bot = fakeBot({ entities: [skeleton], items: [item('diamond_sword')], offhand: item('shield') })
+  bot.heldItem = bot.inventory.slots[9]
+  bot.equip = async () => {}
+  let using = false
+  bot.activateItem = () => { using = true; bot.usingHeldItem = true }
+  bot.deactivateItem = () => { using = false; bot.usingHeldItem = false }
+  const swings: boolean[] = []
+  const blockedTicks: boolean[] = []
+  bot.attack = () => { swings.push(using) }
+  bot.on('physicsTick', () => { blockedTicks.push(using) })
+  // (a tick each wait: the swing's charge counts them)
+  bot.waitForTicks = async (n: number) => { for (let i = 0; i < n; i++) bot.emit('physicsTick') }
+  await fight(bot, skeleton as any, { maxTicks: 60 }).catch(() => {})
+  assert.ok(swings.length >= 2, `${swings.length} swings`)
+  assert.ok(swings.every(u => !u), 'a swing with the shield up')
+  assert.ok(blockedTicks.filter(b => b).length > blockedTicks.length / 2, `the shield up ${blockedTicks.filter(b => b).length} of ${blockedTicks.length} ticks`)
 })
