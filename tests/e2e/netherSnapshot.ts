@@ -1,9 +1,10 @@
-// Reads a stretch of seed 2's nether from a 26.3 server's chunks into a snapshot for the unit tests' fake world
-// (tests/fixtures/nether-seed2-delta.json.gz, tests/nether/netherSnapshot.ts):
+// Reads a stretch of a seed's nether (SNAP_SEED, default 2) from a 26.3 server's chunks into a snapshot for the unit
+// tests' fake world (tests/fixtures/nether-seed2-delta.json.gz, tests/nether/netherSnapshot.ts):
 //   node -r ts-node/register/transpile-only tests/e2e/netherSnapshot.ts <out.json.gz> x0 z0 x1 z1 y0 y1
 // (the fixtures: nether-seed2-delta.json.gz 240 -64 495 127 24 119; nether-seed2-blaze.json.gz, the fortress spawner
 // at 59 64 -534 and its throne: 27 -566 91 -502 50 85; nether-seed2-east.json.gz, the basalt delta east of it down to
-// the lava sea, where the pearl legs go from the throne: 58 -585 160 -505 24 90)
+// the lava sea, where the pearl legs go from the throne: 58 -585 160 -505 24 90; nether-seed7741-blaze.json.gz, SNAP_SEED
+// 7741, the fortress spawner at 136 77 258 a fresh-seed whole game got no rod at: 104 226 168 290 56 98)
 import * as fs from 'node:fs'
 import * as zlib from 'node:zlib'
 import { Vec3 } from 'vec3'
@@ -12,7 +13,7 @@ import { startServer, connectLockstepBot, quitBot } from '../harness'
 async function main (): Promise<void> {
   const [out, ...nums] = process.argv.slice(2)
   const [x0, z0, x1, z1, y0, y1] = nums.map(Number)
-  const server = await startServer({ version: '26.3', seed: '2', difficulty: 'peaceful' })
+  const server = await startServer({ version: '26.3', seed: process.env.SNAP_SEED ?? '2', difficulty: 'peaceful' })
   try {
     const bot = await connectLockstepBot(server, { username: 'snap', timeoutMs: 120000 })
     await bot.waitForChunksToLoad()

@@ -7,7 +7,11 @@
 // BLAZE_RUNS runs (default 3), each from a fresh kit with the blazes, the items, the fires and the cobblestone the last
 // one left taken away; each run's rods, kills, deaths, hits and ticks are logged, and every run must end with the rods
 // and no death. BLAZE_START="x y z" puts the bot elsewhere, BLAZE_SPAWNER="x y z" fights at another spawner (the
-// 26.3 runs' nooks at (97, 64, -515) and (925, 64, 123) killed blazes for 20000 ticks and got no rod).
+// 26.3 runs' nooks at (97, 64, -515) and (925, 64, 123) killed blazes for 20000 ticks and got no rod). BLAZE_AT picks
+// another seed's spawner: s7741, seed 7741's fortress spawner at (136, 77, 258) on its throne over a bridge, where a
+// fresh-seed 26.3 whole game sat 20861 ticks in a nook on the bridge 10 off for no rod (full-26.3-s7741-b), the bot
+// put where that run came in. BLAZE_KIT=run7741 gives that run's bag instead of the nether stage's: iron armor and
+// golden boots, a plain diamond sword and bow, 12 arrows, no shield, 3 raw iron, 59 cobblestone, 6 meals.
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
 import { appendFileSync } from 'node:fs'
@@ -21,17 +25,37 @@ import { countItems, waitUntil } from '../../src/skills/util'
 import { STAGES } from './stageKits'
 
 const USERNAME = 'blazebot'
-const SEED = '2'
+/** the spawners fought at: the seed, the spawner, where the bot is put */
+const PLACES: Record<string, { seed: string, spawner: Vec3, start: Vec3 }> = {
+  s2: { seed: '2', spawner: new Vec3(59, 64, -534), start: new Vec3(43.5, 89, -515.5) },
+  s7741: { seed: '7741', spawner: new Vec3(136, 77, 258), start: new Vec3(120.5, 61, 247.5) }
+}
+const PLACE = PLACES[process.env.BLAZE_AT ?? 's2']
+assert.ok(PLACE != null, `BLAZE_AT is one of ${Object.keys(PLACES).join(', ')}`)
+const SEED = PLACE.seed
 const vec = (text: string): Vec3 => new Vec3(...(text.split(/[ ,]+/).map(Number) as [number, number, number]))
-const SPAWNER = process.env.BLAZE_SPAWNER != null ? vec(process.env.BLAZE_SPAWNER) : new Vec3(59, 64, -534)
-const START = process.env.BLAZE_START != null ? vec(process.env.BLAZE_START) : new Vec3(43.5, 89, -515.5)
+const SPAWNER = process.env.BLAZE_SPAWNER != null ? vec(process.env.BLAZE_SPAWNER) : PLACE.spawner
+const START = process.env.BLAZE_START != null ? vec(process.env.BLAZE_START) : PLACE.start
+/** the bags given */
+const KITS: Record<string, Array<[string, number]>> = {
+  nether: STAGES.nether.kit,
+  // full-26.3-s7741-b's at seed 7741's fortress
+  run7741: [
+    ['diamond_sword', 1], ['diamond_pickaxe', 1], ['bow', 1], ['arrow', 12], ['iron_helmet', 1], ['iron_chestplate', 1],
+    ['iron_leggings', 1], ['golden_boots', 1], ['cobblestone', 59], ['cooked_mutton', 5], ['mutton', 1], ['potato', 1],
+    ['raw_iron', 3], ['coal', 16], ['furnace', 1], ['crafting_table', 1], ['oak_log', 35], ['flint_and_steel', 1],
+    ['torch', 18], ['water_bucket', 1], ['raw_gold', 37]
+  ]
+}
+const KIT = KITS[process.env.BLAZE_KIT ?? 'nether']
+assert.ok(KIT != null, `BLAZE_KIT is one of ${Object.keys(KITS).join(', ')}`)
 const RUNS = Number(process.env.BLAZE_RUNS ?? 3)
 const RODS = Number(process.env.BLAZE_RODS ?? 6)
 const MAX_TICKS = Number(process.env.BLAZE_MAX_TICKS ?? 16000)
 
 interface RunResult { run: number, rods: number, kills: number, died: boolean, death: string, ticks: number, hurt: number, health: number, error: string }
 
-describe(`the blaze fight at seed 2's fortress spawner on a ${DEFAULT_VERSION} server`, { timeout: 120 * 60 * 1000 }, () => {
+describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString()} on a ${DEFAULT_VERSION} server`, { timeout: 120 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
 
@@ -80,14 +104,14 @@ describe(`the blaze fight at seed 2's fortress spawner on a ${DEFAULT_VERSION} s
     await bot.waitForChunksToLoad()
     await resetArea()
     await run(`clear ${USERNAME}`)
-    for (const [item, count] of STAGES.nether.kit) await run(`give ${USERNAME} ${item} ${count}`)
+    for (const [item, count] of KIT) await run(`give ${USERNAME} ${item} ${count}`)
     await run(`effect clear ${USERNAME}`)
     await run(`effect give ${USERNAME} minecraft:instant_health 1 10 true`)
     await run(`effect give ${USERNAME} minecraft:saturation 1 20 true`)
     await nether(`tp ${USERNAME} ${START.x} ${START.y} ${START.z}`)
     assert.ok(await waitUntil(bot, () => countItems(bot, 'cobblestone') > 0 && bot.entity.onGround, 400), 'no kit')
     // the armor reflex puts it on
-    assert.ok(await waitUntil(bot, () => bot.inventory.slots[6]?.name === 'diamond_chestplate', 400), 'the armor isn\'t on')
+    assert.ok(await waitUntil(bot, () => /_chestplate$/.test(bot.inventory.slots[6]?.name ?? ''), 400), 'the armor isn\'t on')
     await bot.waitForTicks(20)
 
     let died = false
