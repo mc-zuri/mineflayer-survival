@@ -799,6 +799,9 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
     await withTickBudget(bot, NETHER_ARROW_TICKS, signal, async (s) => await executor.obtain(arrows, s)).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`nether kit: the arrows: ${(err as Error).message}`)
+      // the budget gone with the arrows short: the chickens as good as not found (the hunt for them stopped, not
+      // failed, and the gate asked for 64 again each try, full-26.3-fresh-q)
+      if (countItems(bot, 'arrow') < gate.arrows) (executor as any).sightings?.missing?.(['chicken'])
     })
     Object.assign(gate, { arrows: netherGate(bot, executor as any).arrows })
   }

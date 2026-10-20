@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { WorldMemory } from '../../src/core/memory'
+import { TaskError } from '../../src/core/errors'
 import { fortressRoute, fortressRoutes } from '../../src/milestones'
 
 test('the fortress search walks findFortress\'s line first, then the other axis both ways, then back', () => {
@@ -374,6 +375,19 @@ test('netherKit: the arrows are got on their own after the gear, and once the hu
   await netherKit(bot, executor, new AbortController().signal, () => {})
   // (then the brewing's bottles: brewKit)
   assert.deepStrictEqual(asked, ['iron_helmet', 'arrow', 'glass_bottle,crafting_table,cobblestone'])
+  // the arrows' obtain stopped by its budget, no miss of its own: the chickens noted missing, fewer asked for
+  const timed = fakeBot({ items: [...NETHER_GEAR().filter((i: any) => i.name !== 'arrow'), item('arrow', 33)] })
+  timed.game.dimension = 'overworld'
+  const missed: string[] = []
+  const stopped: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    sightings: { misses: (n: string) => missed.filter(m => m === n).length, missing: (names: string[]) => missed.push(...names) },
+    obtain: async (reqs: any[]) => { if (reqs.some(r => r.item === 'arrow')) throw new TaskError('TIMEOUT', 'over the budget of 12000 ticks') },
+    task: async () => {}
+  }
+  await netherKit(timed, stopped, new AbortController().signal, () => {})
+  assert.deepStrictEqual(missed, ['chicken'])
 })
 
 test('netherKit: short of only the food after its tries, the milestone is not ready with the food points banked (foodShort)', async () => {
