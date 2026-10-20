@@ -23,15 +23,22 @@ import { countItems, trace, waitTicks } from '../skills/util'
 import { findBlocks } from '../core/findBlocks'
 import { withNetherSafety } from './safety'
 import { fillNook } from './blazeFight'
-import { collectBlazeRods, findBlazeSpawner, unreachableSpawners, type BlazeRodsArgs, type BlazeRodsResult } from './fortressSkills'
+import { collectBlazeRods, findBlazeSpawner, healSealed, unreachableSpawners, SEAL_HEAL_TO, type BlazeRodsArgs, type BlazeRodsResult } from './fortressSkills'
 
 /** the brew (two of BREW_TICKS in a box) is made no nearer the spawner than this: its blazes shoot from 16 off and more */
 export const BREW_CLEAR = 16
 
 /** blaze rods the brewing takes: the stand's, and the blaze powder's for its fuel (2 of a rod, 1 a brew of 20) */
 export const BREW_RODS = 2
-/** how far nether wart is looked for in the chunks the bot has (a 6-chunk view's) */
-export const WART_SIGHT = 96
+/**
+ * how far nether wart is looked for in the chunks the bot has: all it's sent (a server's view distance is 10 chunks
+ * by default, 160 blocks; a 6-chunk view's corners are some 110 off). Seed 2's wart room at (-170, 60, -242) is 126
+ * off where the 26.3 runs come in by its fortress, out of a 96 sight: the bots walked the legs for it, one 12000 ticks
+ * through the fortress's corridors to it from the leg that led away from (-290, 77, -209), and died after
+ */
+export const WART_SIGHT = 160
+/** wart seen further than this is walked to (travel) before it's dug */
+export const WART_DIG_REACH = 16
 /** the legs walked to look for wart rooms, each this long (seed 2's by its fortress's spawners: 110 to 150 off) */
 export const WART_LEG = 96
 /** the cubes met for their cream are this far from the spawner at the least (its blazes) */
@@ -79,8 +86,18 @@ export async function getNetherWart (bot: Bot, from: Vec3, spawner: Vec3, signal
       trace('getNetherWart: no wart dug:', (err as Error).message)
     })
   }
+  // wart in view, near or far: gone to and dug (the legs only when there's none in the chunks the bot has)
+  const goDig = async (at: Vec3[]): Promise<void> => {
+    if (at[0].distanceTo(bot.entity.position) > WART_DIG_REACH) {
+      trace('getNetherWart: wart in view at', at[0].toString())
+      memory?.addPoi('nether_wart', at[0], 'the_nether')
+      await travel(bot, { target: at[0], range: 4, exactY: true, trail: false }, signal).catch(err => { if (isAbort(err)) throw err; trace('getNetherWart: the way to it:', (err as Error).message) })
+      const near = wartInView(bot, WART_DIG_REACH)
+      await dig(near.length > 0 ? near : at)
+    } else await dig(at)
+  }
   const seen = wartInView(bot)
-  if (seen.length > 0) await dig(seen)
+  if (seen.length > 0) await goDig(seen)
   if (countItems(bot, 'nether_wart') > 0) return countItems(bot, 'nether_wart')
   const known = memory?.getPois('nether_wart', { dimension: 'the_nether', near: bot.entity.position })[0]
   const legs = [...(known != null ? [new Vec3(known.x, known.y, known.z)] : []), ...wartLegs(from, spawner)]
@@ -93,8 +110,7 @@ export async function getNetherWart (bot: Bot, from: Vec3, spawner: Vec3, signal
     })
     const here = wartInView(bot)
     if (here.length > 0) {
-      await travel(bot, { target: here[0], range: 4, exactY: true, trail: false }, signal).catch(err => { if (isAbort(err)) throw err })
-      await dig(wartInView(bot, 16).length > 0 ? wartInView(bot, 16) : here)
+      await goDig(here)
       if (countItems(bot, 'nether_wart') > 0) break
     }
   }
@@ -201,9 +217,26 @@ export async function getBrewMakings (bot: Bot, from: Vec3, spawner: Vec3, signa
     // the wart's legs (a fortress's corridors, its lava under them: a 26.3 bot fell in by seed 2's wart room and burned)
     // walked only for a brew that has its cream, or a slime ball for it (made with a blaze powder: creamToMake)
     if (countItems(bot, 'magma_cream') === 0 && countItems(bot, 'slime_ball') === 0) return false
-    if (countItems(bot, 'nether_wart') === 0 && !state.wartSought) { await getNetherWart(bot, from, spawner, signal); state.wartSought = true }
+    if (countItems(bot, 'nether_wart') === 0 && !state.wartSought) {
+      await getNetherWart(bot, from, spawner, signal)
+      state.wartSought = true
+      await backToHeal(bot, from, spawner, signal)
+    }
     return FIRE_RESISTANCE_BREW.every(name => countItems(bot, name) > 0)
   })
+}
+
+/**
+ * Back from the wart's trip to where the bot came in, and shut in there to heal up to SEAL_HEAL_TO (healSealed) when
+ * it's hurt, before the spawner's fight: a 26.3 bot back from seed 2's wart room along the trail at 3 health, the
+ * cubes and the corridors' mobs on the way, went into the nook by its throne at (-277, 77, -159) and a wither skeleton
+ * killed it there at 1.5
+ */
+export async function backToHeal (bot: Bot, from: Vec3, spawner: Vec3, signal?: AbortSignal): Promise<void> {
+  if (bot.entity.position.distanceTo(from) > 4) {
+    await travel(bot, { target: from, range: 2, exactY: true }, signal).catch(err => { if (isAbort(err)) throw err; trace('backToHeal: the way back:', (err as Error).message) })
+  }
+  if (bot.health < SEAL_HEAL_TO && !(await healSealed(bot, spawner, signal))) trace('backToHeal: no box to heal in at', bot.entity.position.floored().toString(), 'health', bot.health)
 }
 
 const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1)]

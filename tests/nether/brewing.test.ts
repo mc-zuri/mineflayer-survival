@@ -76,3 +76,34 @@ test('blazeRodsWithBrew: with the wart and cream held, the rods a rod at a time 
   // no bottles: nothing looked for
   assert.deepEqual(await run([item('nether_wart'), item('magma_cream')]), ['rods 8'])
 })
+
+test('getBrewMakings: wart seen far in the chunks the bot has (WART_SIGHT 160: seed 2\'s room 126 off) is walked to and dug, no legs; then back where the bot came in, shut in to heal there when hurt (backToHeal)', async () => {
+  const { getBrewMakings, resetBrewTries, WART_SIGHT } = await import('../../src/nether/brewing')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  assert.ok(WART_SIGHT >= 128)
+  const fortress = require('../../src/nether/fortressSkills')
+  const travelModule = require('../../src/skills/travel')
+  const collectModule = require('../../src/skills/collectBlock')
+  const real = { travel: travelModule.travel, collect: collectModule.collectBlock, heal: fortress.healSealed }
+  const calls: string[] = []
+  const from = new Vec3(0.5, 64, 30.5)
+  const wart = new Vec3(100, 60, -50)
+  const bot = fakeBot({ items: [item('magma_cream')], position: from.clone() })
+  bot.pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
+  ;(bot as any).health = 12
+  let asked = 0
+  bot.findBlocks = (o: any) => { asked = Math.max(asked, o.maxDistance); return o.maxDistance >= wart.distanceTo(bot.entity.position) ? [wart] : [] }
+  travelModule.travel = async (_b: unknown, a: any) => { calls.push(`travel ${String(a.target)}`); bot.entity.position = a.target.clone(); return {} }
+  collectModule.collectBlock = async (_b: unknown, a: any) => { calls.push(`dig ${String(a.positions[0])}`); bot.inventory.slots[20] = item('nether_wart', 3); return { mined: 1 } }
+  fortress.healSealed = async () => { calls.push(`heal at ${String(bot.entity.position)}`); return true }
+  resetBrewTries(bot)
+  try {
+    assert.equal(await getBrewMakings(bot, from, new Vec3(0, 64, 0)), true)
+  } finally {
+    travelModule.travel = real.travel
+    collectModule.collectBlock = real.collect
+    fortress.healSealed = real.heal
+  }
+  assert.ok(asked >= 128, `${asked}`)
+  assert.deepEqual(calls, [`travel ${wart.toString()}`, `dig ${wart.toString()}`, `travel ${from.toString()}`, `heal at ${from.toString()}`])
+})
