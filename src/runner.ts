@@ -229,7 +229,15 @@ export function waitOutNightFirst (timeOfDay: number, distance: number, armor: n
 export async function waitOutTheNight (bot: Bot, signal: AbortSignal): Promise<unknown> {
   if (!canSleepNow(bot.time?.timeOfDay ?? 0, false)) return
   const bed = typeof bot.findBlock === 'function' ? findBlock(bot, { matching: blockIdsNamed(bot, isBed), maxDistance: 16 }) : null
-  if (bed != null) return await sleepThroughNight(bot, { signal, bedDistance: 16 })
+  if (bed != null) {
+    try {
+      return await sleepThroughNight(bot, { signal, bedDistance: 16 })
+    } catch (err) {
+      if (isAbort(err) || TaskError.is(err, 'DIED')) throw err
+      // the night over as it went for the bed (the server's 'not night' at dawn): nothing more to wait out; else a hole
+      if (!canSleepNow(bot.time?.timeOfDay ?? 0, false)) return
+    }
+  }
   return await shelter(bot, { signal })
 }
 

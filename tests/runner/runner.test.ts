@@ -687,3 +687,24 @@ test('a resumed run\'s memory clock goes on from the save\'s ticks (WorldMemory.
   assert.ok(seen!.now >= 100000, String(seen!.now))
   assert.ok(seen!.age >= 10000, String(seen!.age))
 })
+
+test('waitOutTheNight: by day nothing; a bed that fails as the night ends (the server\'s not night at dawn) is the end of it, no hole dug', async () => {
+  const { waitOutTheNight } = await import('../../src/runner')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const day = fakeBot()
+  day.time = { timeOfDay: 1000 }
+  day.findBlock = () => { throw new Error('looked for a bed by day') }
+  assert.equal(await waitOutTheNight(day, new AbortController().signal), undefined)
+  const dawn = fakeBot()
+  dawn.time = { timeOfDay: 23400 }
+  // the bed found, and the night over by the time the bot lies down
+  dawn.findBlock = () => { dawn.time.timeOfDay = 100; return { name: 'white_bed', position: new Vec3(2, 64, 0) } }
+  dawn.sleep = async () => { throw new Error("it's not night") }
+  dawn.dig = async () => { throw new Error('a hole dug by day') }
+  const ticker = setInterval(() => dawn.emit('physicsTick'), 1)
+  try {
+    assert.equal(await waitOutTheNight(dawn, new AbortController().signal), undefined)
+  } finally {
+    clearInterval(ticker)
+  }
+})
