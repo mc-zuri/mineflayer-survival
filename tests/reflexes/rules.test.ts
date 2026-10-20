@@ -754,6 +754,15 @@ test('hostiles reflex in the nether: a wither skeleton coming from WITHER_SHOOT_
   bot.world = { ...(bot.world ?? {}), raycast: () => null }
   const shot: any = await task!.run(new AbortController().signal)
   engine.stop()
-  assert.ok(ticks < 22, `${ticks} ticks drawing`)
-  assert.strictEqual(shot.hit, false)
+  // (the draw begun goes on to its shot: a draw let go short looses a weak arrow anywhere)
+  assert.ok(shot.shots <= 1, `${shot.shots} shots`)
+  assert.ok(ticks < 60, `${ticks} ticks`)
+})
+
+test('hostiles reflex in the nether: a wither skeleton with a calm zombified piglin by the arrow\'s way isn\'t shot (sparedInLine); with the piglin off it, it is', () => {
+  const nether = (e: ReflexEngine): void => { (e as any).bot.game.dimension = 'the_nether' }
+  const kit = [item('diamond_sword'), item('bow'), item('arrow', 28)]
+  const ws = entity({ name: 'wither_skeleton', position: at(10) })
+  assert.strictEqual(check(hostilesReflex, { entities: [ws, entity({ name: 'zombified_piglin', position: at(12) })], items: kit }, {}, nether), null)
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'wither_skeleton', position: at(10) }), entity({ name: 'zombified_piglin', position: at(10, 64, 6.5) })], items: kit }, {}, nether), 'shoot wither_skeleton')
 })

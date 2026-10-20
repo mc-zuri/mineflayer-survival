@@ -3,6 +3,7 @@ import { Vec3 } from 'vec3'
 import { ARROW_EYE_OFFSET, type ArrowWorld, arrowHits, bowArrowSpeed, type Box, solveAim, type AimSolution } from './arrow'
 import { motionTrackerOf } from './motion'
 import { type Entity, entityBox, isAlive, TaskError, type SkillOptions, throwIfAborted, waitTicks } from './combatUtil'
+import { SWEEP_SPARED } from './weapons'
 
 export interface ShootOptions extends SkillOptions {
   /** ticks to draw the bow (default 22: full power from 20, BowItem.getPowerForTime, and two to spare) */
@@ -15,7 +16,7 @@ export interface ShootOptions extends SkillOptions {
   checkBlocks?: boolean
   /** where on an entity to aim, from its position (default: its middle, else high on its box when the middle's line is blocked) */
   aimOffset?: Vec3
-  /** looked at each tick: once true the shooting stops (the bow let go, a draw cut short) */
+  /** looked at before each draw and while an arrow flies: once true the shooting stops (a draw goes on to its shot) */
   until?: () => boolean
 }
 
@@ -98,6 +99,8 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
       throwIfAborted(signal)
       if (isEntity && !isAlive(bot, target)) return { shots, hit: shots > 0, solution }
       if (opts.until?.() === true) return { shots, hit: false, solution }
+      // no draw with a calm mob by the arrow's way (sparedInLine)
+      if (sparedInLine(bot, target) != null) return { shots, hit: false, solution }
       if (!hasArrows(bot) && bot.game.gameMode !== 'creative') throw new TaskError('MISSING_ITEMS', 'out of arrows')
       bot.clearControlStates()
       bot.deactivateItem()
@@ -108,9 +111,16 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
         if (solution != null) await bot.look(solution.yaw, solution.pitch, true)
         await waitTicks(bot, 1, signal)
         if (isEntity && !isAlive(bot, target)) break
-        if (opts.until?.() === true) { bot.deactivateItem(); return { shots, hit: false, solution } }
       }
-      if (isEntity && !isAlive(bot, target)) { bot.deactivateItem(); return { shots, hit: true, solution } }
+      // (the target dead: the draw put away, not loosed off at nothing)
+      if (isEntity && !isAlive(bot, target)) { cancelDraw(bot); return { shots, hit: true, solution } }
+      // a calm mob in the way (sparedInLine): the bow held drawn till it's out of it, else put away unloosed
+      for (let t = 0; t < SPARED_HOLD_TICKS && sparedInLine(bot, target) != null; t++) {
+        solution = aim(bot, target, { leadTicks: 1, highArc: opts.highArc, world, offset: opts.aimOffset })
+        if (solution != null) await bot.look(solution.yaw, solution.pitch, true)
+        await waitTicks(bot, 1, signal)
+      }
+      if (sparedInLine(bot, target) != null) { cancelDraw(bot); return { shots, hit: false, solution } }
       solution = aim(bot, target, { leadTicks: 1, highArc: opts.highArc, world, offset: opts.aimOffset })
       if (solution == null) {
         bot.deactivateItem()
@@ -134,6 +144,48 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
   } finally {
     if (isEntity) tracker.untrack(target)
   }
+}
+
+/** ticks a drawn bow is held for a calm mob to come out of the arrow's way */
+export const SPARED_HOLD_TICKS = 40
+/** how near the arrow's way a calm mob's middle may come, past its half width; and how far past the target the way runs (a miss flies on) */
+export const SPARED_LINE_MARGIN = 0.8
+export const SPARED_LINE_PAST = 6
+
+/**
+ * A mob calm till hurt (weapons' SWEEP_SPARED: a zombified piglin's hurt angers all of them about) by the straight way
+ * from the bot's eye to the target and SPARED_LINE_PAST on past it, or null: an arrow is never let go at it. One of the
+ * target's own kind is fought already. Zombified piglins by seed 2's throne were hit by the shots at a wither skeleton
+ * and the blazes and came at the bot, and killed it (tests/integration/blaze BLAZE_WITHER=fresh-x)
+ */
+export function sparedInLine (bot: Bot, target: Entity | Vec3): Entity | null {
+  const isEntity = !(target instanceof Vec3)
+  const from = arrowStart(bot)
+  const to = isEntity ? target.position.offset(0, (target.height ?? 1.8) / 2, 0) : target
+  const way = to.minus(from)
+  const len = way.norm()
+  if (len < 1e-6) return null
+  const dir = way.scaled(1 / len)
+  for (const m of Object.values(bot.entities) as Entity[]) {
+    if (m === bot.entity || !SWEEP_SPARED.has(m.name ?? '') || (isEntity && (m.id === target.id || m.name === target.name)) || !isAlive(bot, m)) continue
+    const mid = m.position.offset(0, (m.height ?? 1.8) / 2, 0)
+    const t = Math.max(0, Math.min(len + SPARED_LINE_PAST, mid.minus(from).dot(dir)))
+    const off = mid.minus(from.plus(dir.scaled(t))).norm()
+    if (off < (m.width ?? 0.6) / 2 + SPARED_LINE_MARGIN) return m
+  }
+  return null
+}
+
+/**
+ * A draw put away without its arrow: the held slot changed and back (ServerGamePacketListenerImpl.handleSetCarriedItem
+ * stops the use, LivingEntity.stopUsingItem, with no BowItem.releaseUsing); deactivateItem would loose it
+ */
+function cancelDraw (bot: Bot): void {
+  const slot = bot.quickBarSlot
+  if (typeof bot.setQuickBarSlot !== 'function' || typeof slot !== 'number') { bot.deactivateItem(); return }
+  bot.setQuickBarSlot((slot + 1) % 9)
+  bot.setQuickBarSlot(slot)
+  ;(bot as any).usingHeldItem = false
 }
 
 /**

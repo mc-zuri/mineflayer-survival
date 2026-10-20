@@ -2,8 +2,8 @@ import type { Bot } from 'mineflayer'
 import { armorUpgrades, equipArmor, equipTotem } from '../skills/armor'
 import { eat, dueMeal, reserveAllows } from '../skills/eat'
 import { escapeHazard, evadeCreeper, fleeFrom, headInWater, inHazard, surface } from '../skills/escape'
-import { creeperSwelling, fight } from '../skills/fight'
-import { shoot } from '../skills/shoot'
+import { MELEE_GUARD_MARGIN, MELEE_MOBS, creeperSwelling, fight, inMobReach } from '../skills/fight'
+import { shoot, sparedInLine } from '../skills/shoot'
 import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterRunning, shelterToLeave, sleepThroughNight, ticksSinceRest, undergroundAtWork, type NightPlan } from '../skills/shelter'
 import type { Vec3 } from 'vec3'
 import { bestMeleeWeapon } from '../skills/weapons'
@@ -294,7 +294,7 @@ export function witherToShoot (ctx: ReflexContext): Entity | null {
     if (e.name !== 'wither_skeleton') return false
     const d = distance(bot, e)
     return d >= WITHER_SHOOT_FROM && d <= WITHER_SHOOT_RANGE && Math.abs(e.position.y - bot.entity.position.y) <= config.hostiles.maxDy &&
-      hasLineOfSight(bot, e) && !letBeInNether(bot, e, ctx.tick)
+      hasLineOfSight(bot, e) && !letBeInNether(bot, e, ctx.tick) && sparedInLine(bot, e) == null
   }) ?? null
 }
 
@@ -499,8 +499,9 @@ export const hostilesReflex: Reflex = {
     }
     // a wither skeleton coming from afar, nothing nearer: shot till it's within WITHER_MELEE_AT (witherToShoot)
     if (wither != null && !near.some(e => e.id !== wither.id && distance(bot, e) < WITHER_SHOOT_FROM)) {
+      // (or a melee mob at the bot: the reflex looks again; the blazes a skill fights itself aren't one)
       const stop = (): boolean => !isAlive(bot, wither) || distance(bot, wither) < WITHER_MELEE_AT ||
-        hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e)) }).some(e => e.id !== wither.id && distance(bot, e) < WITHER_SHOOT_FROM)
+        Object.values(bot.entities).some(e => e.id !== wither.id && MELEE_MOBS.has(e.name ?? '') && isHostile(bot, e) && isAlive(bot, e) && inMobReach(e, bot.entity.position, MELEE_GUARD_MARGIN))
       return {
         name: 'hostiles',
         priority: config.hostiles.priority,
