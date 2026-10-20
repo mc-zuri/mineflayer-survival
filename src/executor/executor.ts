@@ -28,7 +28,7 @@ import { holdBag, type BagKeeper } from '../skills/bag'
 import { countItems, emptySlots, trace } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
-import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
+import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { herdSpares, herdSupply } from '../skills/herd'
 import { noteVillage } from '../skills/village'
@@ -272,6 +272,9 @@ export class Executor {
     this.logFn = opts.log ?? (line => trace('executor:', line))
     this.home = opts.home ?? (() => null)
     this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos), () => herdSpares(bot, this.memory))
+    // the animals in sight noted every second (an exploring for berries that saw none is a land without them too)
+    let looks = 0
+    bot.on('physicsTick', () => { if (++looks % 20 === 0) this.sightings.look() })
     this.bagKeeper = {
       minFree: this.options.minFreeSlots,
       room: async (s, toward) => await this.makeRoomDuringStep(s, toward),
@@ -403,6 +406,7 @@ export class Executor {
         const key = `${step.kind}:${step.item}`
         let outcome: StepOutcome
         diag?.stepStarted(step, describeStep(step), i)
+        const began = this.tasks.tick
         try {
           outcome = await this.runStep(step, signal)
           steps++
@@ -416,7 +420,7 @@ export class Executor {
           this.log(`step failed (${n}): ${describeStep(step)}: ${(err as Error).message}`)
           diag?.stepFailed(step, describeStep(step), err, n)
           if (step.kind === 'mine') this.forgetFailedBlocks(step)
-          this.noteMissing(step, err)
+          this.noteMissing(step, err, began)
           if (n >= this.options.maxStepFailures) throw err
           if (TaskError.is(err, 'INVENTORY_FULL')) await this.makeRoom(needed, signal, true)
           break
@@ -459,11 +463,26 @@ export class Executor {
    * of them) or its food blocks are dear to the next plans for a while, which go for another source then (berries in a
    * snowy taiga, where the hunt for cows found none)
    */
-  private noteMissing (step: PlanStep, err: unknown): void {
+  /**
+   * The food that grows (SIGHTED_BLOCKS) none of which the memory has near: a hunt's exploring that found no animal
+   * noted the plants it went by (exploreSurface's remember), so the land it walked has none of these either. A 26.3
+   * bot's hunt walked a snowy field's 96 blocks for none, then explored the same land for berry bushes, then melons
+   * (snowFood, 30000 ticks)
+   */
+  private unseenPlants (): string[] {
+    const dimension = normalizeDimension(this.bot.game?.dimension)
+    const near = this.home() ?? this.bot.entity.position
+    return SIGHTED_BLOCKS.filter(b => this.memory.findBlocks([b], { dimension, near, count: 1, maxDistance: HUNT_EXPLORE_MAX }).length === 0)
+  }
+
+  private noteMissing (step: PlanStep, err: unknown, began = this.tasks.tick): void {
     if (!TaskError.is(err, 'NOT_FOUND')) return
+    // an exploring for one food went over the land for the others too: the plants none of which it noted (the
+    // memory's), the animals it never saw since the step began (Sightings.look)
+    const plants = step.kind === 'mine' ? step.blocks.filter(b => SIGHTED_BLOCKS.includes(b)) : []
     const names = step.kind === 'kill'
-      ? [step.mob, ...mobSubstitutes(step)]
-      : step.kind === 'mine' ? step.blocks.filter(b => SIGHTED_BLOCKS.includes(b)) : step.kind === 'fish' ? ['water'] : []
+      ? [step.mob, ...mobSubstitutes(step), ...this.unseenPlants()]
+      : plants.length > 0 ? [...new Set([...plants, ...this.unseenPlants(), ...this.sightings.unseenSince(began)])] : step.kind === 'fish' ? ['water'] : []
     if (names.length === 0) return
     this.sightings.missing(names)
     this.log(`none of ${names.join(', ')} found: the plans go for another source for a while`)

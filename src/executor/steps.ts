@@ -176,7 +176,9 @@ async function findBlocks (bot: Bot, names: string[], ctx: StepContext, alternat
   // the food that grows is looked for no further out than the animals: none there, the plan goes for another food
   const maxRadius = all.some(n => SIGHTED_BLOCKS.includes(n)) ? HUNT_EXPLORE_RADIUS : undefined
   ctx.state.explore ??= { leg: 0 }
-  if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude, maxRadius, progress: ctx.state.explore, room: ctx.room }, ctx.signal)) {
+  // (the other food that grows noted on the way: none of it seen is the land's, Executor.noteMissing)
+  const remember = maxRadius != null ? SIGHTED_BLOCKS : undefined
+  if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude, maxRadius, progress: ctx.state.explore, room: ctx.room, remember }, ctx.signal)) {
     if (near(names)) return names
     if (near(alternatives)) return alternatives
   }

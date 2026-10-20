@@ -1235,6 +1235,8 @@ export interface ExploreForBlocksArgs {
   progress?: { leg: number }
   /** room made in the bag down the staircase and the tunnels (DigRouteArgs.room) */
   room?: (toward?: Vec3) => Promise<void>
+  /** more blocks to note in the memory on the surface spiral's way, beyond `names` */
+  remember?: string[]
 }
 
 /** the nearest block of the names in the loaded chunks, within `radius` */
@@ -1254,7 +1256,7 @@ export async function exploreForBlocks (bot: Bot, args: ExploreForBlocksArgs, si
   const found = (): boolean => findNear(bot, args.names, radius, args.exclude) != null
   if (found()) return true
   const level = oreLevel(args.names)
-  if (level == null) return await exploreSurface(bot, { found, center: args.center, memory: args.memory, remember: args.names, maxRadius: args.maxRadius, progress: args.progress }, signal)
+  if (level == null) return await exploreSurface(bot, { found, center: args.center, memory: args.memory, remember: [...new Set([...args.names, ...(args.remember ?? [])])], maxRadius: args.maxRadius, progress: args.progress }, signal)
   const feet = feetOf(bot)
   // the bot may stand in a hole above or below the level: get to within a few blocks of it
   if (feet.y > level + 2) await descendTo(bot, level, { found, room: args.room }, signal)

@@ -35,6 +35,9 @@ export const GIVE_UP_TICKS = 24000
 /** how many times the source's estimate one given up on costs: the last resort, when nothing else is to be had */
 export const GIVE_UP_FACTOR = 64
 
+/** the animals the sightings watch for (Sightings.look): the meat animals */
+export const WATCHED_MOBS = ['cow', 'pig', 'sheep', 'chicken', 'rabbit']
+
 /** the blocks whose sighting the plans count on: the food that grows on the surface (the rest go by the memory) */
 export const SIGHTED_BLOCKS = ['sweet_berry_bush', 'melon', 'carrots', 'potatoes', 'wheat', 'beetroots', 'hay_block', 'kelp', 'kelp_plant']
 
@@ -50,6 +53,8 @@ export class Sightings {
   private readonly missed = new Map<string, { at: number, misses: number }>()
   /** the tick a name was last not near a step that looked for it (no exploring: no miss) */
   private readonly away = new Map<string, number>()
+  /** the tick each watched animal was last in sight (look) */
+  private readonly lastSeen = new Map<string, number>()
 
   /**
    * @param now the tick count (the task runner's)
@@ -66,6 +71,21 @@ export class Sightings {
       const misses = last != null && now - last.at < MISS_STREAK_TICKS ? last.misses + 1 : 1
       this.missed.set(n, { at: now, misses })
     }
+  }
+
+  /** notes the watched animals in sight now (the executor's, every second): an exploring for a plant sees them too */
+  look (): void {
+    const bot = this.bot
+    if (bot.entity == null || bot.entities == null) return
+    const spared = this.spared()
+    for (const name of WATCHED_MOBS) {
+      if (nearestOfType(bot, [name], SIGHT_RADIUS, e => spared.has(e.id) || this.outOfTheWay(e.position)) != null) this.lastSeen.set(name, this.now())
+    }
+  }
+
+  /** the watched animals not in sight since `since` (look's) */
+  unseenSince (since: number): string[] {
+    return WATCHED_MOBS.filter(n => (this.lastSeen.get(n) ?? -Infinity) < since)
   }
 
   /** the names a step found none of near it, without exploring for them */

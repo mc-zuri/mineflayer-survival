@@ -178,7 +178,8 @@ test('a hunt that explored and found no animal makes the next plan go for anothe
   const log: string[] = []
   const runners: Record<string, StepRunner<any>> = {
     ...honestRunners(bot, log),
-    kill: async (step) => { log.push(describeStep(step)); throw new TaskError('NOT_FOUND', `no ${step.mob} found exploring`) },
+    // (the hunt's exploring went by a patch of berry bushes and noted it: the taiga's)
+    kill: async (step) => { log.push(describeStep(step)); bot.survival.memory.rememberBlock('sweet_berry_bush', { x: 40, y: 64, z: 0 }); throw new TaskError('NOT_FOUND', `no ${step.mob} found exploring`) },
     smelt: async (step) => {
       log.push(describeStep(step))
       for (const i of [...step.inputs, ...step.fuel]) bot.take(i.name, i.count)
@@ -191,6 +192,8 @@ test('a hunt that explored and found no animal makes the next plan go for anothe
   assert.ok(log[0].startsWith('kill'), log.join('; '))
   assert.equal(log.filter(l => l.startsWith('kill')).length, 1, log.join('; '))
   assert.ok(ex.sightings.isScarce('cow') && ex.sightings.isScarce('rabbit'))
+  // the plants the hunt went by none of are missed too: the berries it saw are not
+  assert.ok(ex.sightings.isScarce('melon') && !ex.sightings.isScarce('sweet_berry_bush'))
   assert.ok(heldFor(ownedInventory(bot), FOOD_GOAL, { unit: 'nutrition' }) >= FOOD_POINTS)
 })
 
@@ -859,4 +862,30 @@ test('a loot from a chest that is gone plans again at once (the chest forgotten)
   const out = await runLoot({ kind: 'loot', item: 'diamond_pickaxe', count: 1, from: { x: 4, y: 64, z: 0, dimension: 'overworld' } } as any, { bot, signal: new AbortController().signal, log: (l: string) => lines.push(l), state: {}, memory: bot.survival.memory } as any)
   assert.deepEqual(out, { gained: 0, replan: true })
   assert.equal(bot.survival.memory.chestAt(chest), undefined)
+})
+
+test('an exploring for berry bushes that found none, and saw no animal, makes the other plants and the animals dear too (snowFood: berries, then melons, each a 96-block walk)', async () => {
+  const bot = fakeBot({ crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, oak_planks: 16 })
+  bot.entities = { 0: bot.entity }
+  bot.blockAt = (p: Vec3) => ({ name: p.y < 64 ? 'stone' : 'air', boundingBox: p.y < 64 ? 'block' : 'empty', position: p })
+  let mined = 0
+  const runners: Record<string, StepRunner<any>> = {
+    ...honestRunners(bot, []),
+    mine: async (step) => {
+      mined++
+      // a pig went by on the second exploring
+      if (mined === 2) { bot.entities[5] = { id: 5, name: 'pig', position: new Vec3(20, 64, 0), metadata: [] }; for (let i = 0; i < 20; i++) bot.emit('physicsTick'); delete bot.entities[5] }
+      throw new TaskError('NOT_FOUND', `no ${String(step.block)} found exploring`)
+    }
+  }
+  const lines: string[] = []
+  const ex = new Executor(bot, { runners, maxStepFailures: 1, log: l => lines.push(l) })
+  await ex.obtain([{ item: 'sweet_berries', count: 4 }]).catch(() => {})
+  assert.ok(ex.sightings.isScarce('sweet_berry_bush'), lines.join(' | '))
+  assert.ok(ex.sightings.isScarce('melon') && ex.sightings.isScarce('kelp'), 'the plants it went by none of')
+  assert.ok(ex.sightings.isScarce('cow') && ex.sightings.isScarce('pig'), 'the animals it saw none of')
+  const ex2 = new Executor(bot, { runners, maxStepFailures: 1, log: l => lines.push(l) })
+  await ex2.obtain([{ item: 'sweet_berries', count: 4 }]).catch(() => {})
+  assert.ok(ex2.sightings.isScarce('cow'), lines.join(' | '))
+  assert.ok(!ex2.sightings.isScarce('pig'), 'the pig seen on the way')
 })
