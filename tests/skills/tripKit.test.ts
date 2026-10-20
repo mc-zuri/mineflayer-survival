@@ -326,3 +326,30 @@ test('netherSpares: arrows and food over the gate asked for, within its budget, 
   await netherSpares(full, executor, { food: 80, arrows: 32, bow: true }, new AbortController().signal, () => {})
   assert.deepStrictEqual(asked, [])
 })
+
+test('leaveTripKit with a full bag and the base near stores what the trip doesn\'t take there first (the spare tools too)', async () => {
+  const { leaveTripKit } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(20.5, 64, 0.5), items: new Array(36).fill(0).map(() => item('cobblestone', 64)) })
+  bot.inventory.emptySlotCount = () => 0
+  bot.game.dimension = 'overworld'
+  const calls: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    base: { origin: { x: 0, y: 64, z: 0 }, chests: [{ x: 1, y: 64, z: 0 }] },
+    tasks: { tick: 0 },
+    storeAtBase: async (_n: any, _s: any, opts: any) => { calls.push(`store ${opts?.spareTools === true ? 'spare tools' : ''}`); return { cobblestone: 64 } },
+    plan: () => ({ ok: false }),
+    obtain: async () => {},
+    task: async (name: string) => { calls.push(name); throw new Error('no chest') }
+  }
+  await leaveTripKit(bot, executor, new AbortController().signal, () => {})
+  assert.equal(calls[0], 'store spare tools')
+  // a bag with room: no visit
+  calls.length = 0
+  bot.inventory.emptySlotCount = () => 9
+  await leaveTripKit(bot, executor, new AbortController().signal, () => {})
+  assert.ok(!calls.some(c => c.startsWith('store')), calls.join(' | '))
+})

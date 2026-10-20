@@ -27,7 +27,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { holdBag, type BagKeeper } from '../skills/bag'
 import { countItems, emptySlots, trace } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
-import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
+import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
 import { herdSpares, herdSupply } from '../skills/herd'
@@ -1043,10 +1043,12 @@ export class Executor {
   }
 
   /** takes everything the keep rule doesn't keep (nor the needed) to the base's chests, the remembered contents updated */
-  async storeAtBase (needed: Record<string, number> = {}, signal?: AbortSignal): Promise<Record<string, number>> {
+  async storeAtBase (needed: Record<string, number> = {}, signal?: AbortSignal, opts: { spareTools?: boolean } = {}): Promise<Record<string, number>> {
     const base = this.base
     if (base == null || base.chests.length === 0) return {}
-    const { store: toStore } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed, protect: this.protect() })
+    // (spareTools: the tools beyond a trip's, spareToolsKeep's, stored too)
+    const keep = opts.spareTools === true ? spareToolsKeep(this.bot.inventory.items(), this.options.keep) : this.options.keep
+    const { store: toStore } = splitInventory(this.bot.inventory.items(), { keep, registry: this.bot.registry, needed, protect: this.protect() })
     const moved: Record<string, number> = {}
     if (toStore.length === 0) return moved
     const dimension = this.memory.base?.dimension ?? 'overworld'

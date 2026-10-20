@@ -1667,6 +1667,9 @@ export function portalRoomNear (bot: Bot): boolean {
 
 /** ticks a chest and a bed for the trip kit may cost (the plan's estimate) */
 export const TRIP_KIT_TICKS = 3000
+/** the free slots the trip kit's making wants (its chest's planks, the chest), and how far off a base is gone to for them */
+export const TRIP_KIT_FREE_SLOTS = 3
+export const TRIP_KIT_BASE_RANGE = 160
 
 /** ticks the trip kit's spare armor and shield may cost (the plan's estimate: made from what's held, not mined for) */
 export const KIT_SPARE_TICKS = 1000
@@ -1710,6 +1713,20 @@ export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortS
       log(`no trip kit: ${(err as Error).message}`)
     }
     return
+  }
+  // a bag with no room for the kit's chest's planks (the tools, potions and blocks a trip carries): to the base first,
+  // when it's near, with what the trip doesn't take stored, the spare tools too (storeAtBase spareTools): 'no chest: no
+  // room: nothing to throw away but what is kept or valuable', and no kit was left (full-26.3-fresh-x)
+  if ((bot.inventory.emptySlotCount?.() ?? 9) < TRIP_KIT_FREE_SLOTS && executor.base != null) {
+    const b = executor.base.origin
+    if (Math.hypot(b.x - bot.entity.position.x, b.z - bot.entity.position.z) <= TRIP_KIT_BASE_RANGE) {
+      await executor.storeAtBase({}, signal, { spareTools: true }).then(moved => {
+        if (Object.keys(moved).length > 0) log(`trip kit: room made at the base first: ${Object.entries(moved).map(([n, c]) => `${c} ${n}`).join(', ')}`)
+      }).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`trip kit: no room made at the base: ${(err as Error).message}`)
+      })
+    }
   }
   try {
     const beds = bot.registry.itemsArray.map(i => i.name).filter(n => n.endsWith('_bed'))

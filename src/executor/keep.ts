@@ -63,6 +63,33 @@ export const defaultKeep: KeepRule = (name, registry) => {
   return KEEP_COUNTS[name] ?? null
 }
 
+/** the tools of a kind carried on a trip: the best of each, and a spare pickaxe and sword (the trip kit's) */
+export const TRIP_TOOLS: Partial<Record<ToolKind, number>> = { pickaxe: 2, sword: 2 }
+
+/**
+ * A keep rule that keeps of each tool kind only the best `counts[kind]` (1 by default; by tier, then speed), the rest
+ * to store: the rule `base`'s for anything else. A 26.3 bag on its way to the portal held two stone axes, a stone and a
+ * wooden hoe and three pickaxes besides its potions and blocks, no slot for the trip kit's chest's planks, and no kit
+ * was left (full-26.3-fresh-x)
+ */
+export function spareToolsKeep (items: readonly ItemCount[], base: KeepRule = defaultKeep, counts: Partial<Record<ToolKind, number>> = TRIP_TOOLS): KeepRule {
+  const kept = new Map<string, number>()
+  const byKind = new Map<string, string[]>()
+  for (const it of items) {
+    const tool = parseTool(it.name)
+    if (tool == null) continue
+    const list = byKind.get(tool.kind) ?? []
+    for (let i = 0; i < it.count; i++) list.push(it.name)
+    byKind.set(tool.kind, list)
+  }
+  const rank = (name: string): number => { const t = parseTool(name); return t == null ? 0 : TOOL_MATERIALS[t.material].tier * 100 + TOOL_MATERIALS[t.material].speed }
+  for (const [kind, names] of byKind) {
+    names.sort((a, b) => rank(b) - rank(a))
+    for (const n of names.slice(0, counts[kind as ToolKind] ?? 1)) kept.set(n, (kept.get(n) ?? 0) + 1)
+  }
+  return (name, registry) => parseTool(name) != null ? (kept.get(name) ?? 0) : base(name, registry)
+}
+
 /** blocks and drops worth nothing to the plan, thrown away first when there's no room and no base near */
 export const JUNK = new Set([
   'dirt', 'coarse_dirt', 'rooted_dirt', 'gravel', 'sand', 'red_sand', 'granite', 'diorite', 'andesite', 'tuff', 'calcite',

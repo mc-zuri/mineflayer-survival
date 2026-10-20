@@ -356,3 +356,15 @@ test('the base store after a trip, the stash and a throw for room leave the whol
   assert.deepEqual(kit.filter(k => brew.some(b => b.name === k.name) && k.name !== 'cobblestone'), [])
   assert.ok(32 - (kit.find(k => k.name === 'cobblestone')?.count ?? 0) >= 3)
 })
+
+test('spareToolsKeep: of each tool kind the best kept (a spare pickaxe and sword too), the rest to store; anything else by the rule under it', async () => {
+  const { spareToolsKeep, splitInventory } = await import('../../src/executor/keep')
+  const items = [
+    { name: 'stone_axe', count: 1 }, { name: 'stone_axe', count: 1 }, { name: 'stone_hoe', count: 1 }, { name: 'wooden_hoe', count: 1 },
+    { name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 1 }, { name: 'stone_pickaxe', count: 1 },
+    { name: 'diamond_sword', count: 1 }, { name: 'iron_sword', count: 1 }, { name: 'stone_sword', count: 1 }, { name: 'torch', count: 17 }
+  ]
+  const { store } = splitInventory(items, { keep: spareToolsKeep(items) })
+  const by = Object.fromEntries(store.map(s => [s.name, s.count]))
+  assert.deepStrictEqual(by, { stone_axe: 1, wooden_hoe: 1, stone_pickaxe: 1, stone_sword: 1 })
+})
