@@ -30,6 +30,7 @@ import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool 
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
+import { herdSpares } from '../skills/herd'
 import { noteVillage } from '../skills/village'
 import { digDepotNook, dumpPit, lavaThrow, pitThrow, rememberAround } from './explore'
 import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
@@ -269,7 +270,7 @@ export class Executor {
     this.hooks = opts.hooks ?? {}
     this.logFn = opts.log ?? (line => trace('executor:', line))
     this.home = opts.home ?? (() => null)
-    this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos))
+    this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos), () => herdSpares(bot, this.memory))
     this.bagKeeper = {
       minFree: this.options.minFreeSlots,
       room: async (s, toward) => await this.makeRoomDuringStep(s, toward),

@@ -112,3 +112,42 @@ test('herdSupply: the surplus now, the calves as later surplus with their growin
   rememberHerd(memory, { pos: new Vec3(10, 64, 10), mob: 'cow', adults: 4, calves: 0, bred: null })
   assert.equal(herdSupply(bot, memory, 'cow', 1000)?.surplus, 2)
 })
+
+test('a kill step passes over the pen\'s two breeders and its calf, nearer as they are, for a wild cow', async () => {
+  const { memory, bot, ids } = penned()
+  delete bot.entities[ids.adults[2]]
+  const wild = Object.values(bot.entities).find((e: any) => e.name === 'cow' && e.position.x > 20) as any
+  wild.position = new Vec3(16.5, 64, 10.5)
+  bot.entity.position = new Vec3(12.5, 64, 10.5)
+  const huntModule = require('../../src/skills/hunt')
+  const { item } = await import('../reflexes/fakeBot')
+  const real = huntModule.hunt
+  const killed: number[] = []
+  huntModule.hunt = async (b: any, prey: any) => {
+    killed.push(prey.id)
+    delete b.entities[prey.id]
+    b.inventory.slots[20] = item('beef', 2)
+    return { killed: true, drops: { beef: 2 } }
+  }
+  try {
+    const { runKill } = await import('../../src/executor/steps')
+    const out = await runKill({ kind: 'kill', item: 'beef', count: 2, mob: 'cow', kills: 1, weapon: null, dimension: 'overworld', cost: 100 } as any, { bot, memory, signal: new AbortController().signal, state: {}, log: () => {} })
+    assert.equal(out.gained, 2)
+  } finally {
+    huntModule.hunt = real
+  }
+  assert.deepEqual(killed, [wild.id])
+  assert.ok(ids.adults.slice(0, 2).every(id => bot.entities[id] != null) && bot.entities[ids.calves[0]] != null)
+})
+
+test('sightings: the pen\'s breeders are no cow in sight; its surplus is', async () => {
+  const { Sightings } = await import('../../src/executor/sight')
+  const { memory, bot, ids } = penned()
+  const wild = Object.values(bot.entities).find((e: any) => e.name === 'cow' && e.position.x > 20) as any
+  delete bot.entities[wild.id]
+  const s = new Sightings(bot, () => 0, () => false, () => herdSpares(bot, memory))
+  const cow = { name: 'cow', kind: 'mob' as const, dimension: 'overworld' as const, find: 400 }
+  assert.ok((s.cost(cow) ?? Infinity) < 100)
+  delete bot.entities[ids.adults[0]]
+  assert.equal(s.cost(cow), undefined)
+})

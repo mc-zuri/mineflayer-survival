@@ -38,8 +38,9 @@ export class Sightings {
   /**
    * @param now the tick count (the task runner's)
    * @param outOfTheWay animals a hunt from where the bot is passes over (down a ravine, in a cave)
+   * @param spared the ids of the animals no hunt takes (the herd's breeders and calves, herdSpares)
    */
-  constructor (private readonly bot: Bot, private readonly now: () => number, private readonly outOfTheWay: (pos: Vec3) => boolean = () => false) {}
+  constructor (private readonly bot: Bot, private readonly now: () => number, private readonly outOfTheWay: (pos: Vec3) => boolean = () => false, private readonly spared: () => ReadonlySet<number> = () => new Set()) {}
 
   /** the names a step looked for and didn't find */
   missing (names: readonly string[]): void {
@@ -92,7 +93,9 @@ export class Sightings {
     const bot = this.bot
     if (t.kind === 'mob') {
       if (bot.entities == null) return null
-      const e = nearestOfType(bot, [t.name], SIGHT_RADIUS, e => this.outOfTheWay(e.position))
+      // (not the herd's breeders: two penned cows in sight priced a kill a walk away, and the hunt passed them over)
+      const spared = this.spared()
+      const e = nearestOfType(bot, [t.name], SIGHT_RADIUS, e => spared.has(e.id) || this.outOfTheWay(e.position))
       return e == null ? null : e.position.distanceTo(bot.entity.position)
     }
     if (!SIGHTED_BLOCKS.includes(t.name) || typeof bot.findBlocks !== 'function') return null

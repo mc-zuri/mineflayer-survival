@@ -26,6 +26,7 @@ import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, onT
 import { toolKindFor, wornOutTools } from './durability'
 import { growsAny, isGrown } from '../core/crops'
 import { SIGHTED_BLOCKS } from './sight'
+import { herdSpares } from '../skills/herd'
 
 /** a mine step hands back to the executor when its tool has this many uses left (the executor's default too) */
 export const MIN_TOOL_USES = 24
@@ -425,7 +426,11 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
   let substituted = 0
   // animals the bot couldn't get to (across a ravine, up a cliff): passed over for the others
   const passed = new Set<number>()
-  const nearest = (mobs: string[], range: number): Entity | null => nearestOfType(bot, mobs, range, e => passed.has(e.id) || outOfTheWay(bot, e.position))
+  // (never the herd's breeders, the last two adults of its pen, nor its calves: herdSpares, as the herd is now)
+  const nearest = (mobs: string[], range: number): Entity | null => {
+    const spared = herdSpares(bot, ctx.memory)
+    return nearestOfType(bot, mobs, range, e => passed.has(e.id) || spared.has(e.id) || outOfTheWay(bot, e.position))
+  }
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     let mob = step.mob
