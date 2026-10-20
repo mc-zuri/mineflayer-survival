@@ -16,6 +16,7 @@ import { SCAFFOLD_ITEMS } from './executor/steps'
 import { dropsWorthATrip } from './executor/keep'
 import { installSculkAvoidance, watchDangers } from './skills/danger'
 import { installGazeGuard } from './skills/gaze'
+import { capDropsByHealth } from './skills/dropGuard'
 import { rememberNetherDeath } from './nether/deaths'
 import { keepNetherTrail, pruneTrail } from './nether/trail'
 
@@ -91,6 +92,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
   return function (bot: Bot): void {
     if (options.loadPathfinder && bot.pathfinder == null) bot.loadPlugin(createPathfinder())
     useScaffoldItems(bot)
+    // no drop on a path the health can't take (a fall at 1 health)
+    capDropsByHealth(bot)
     // no walk or swim with the head under water and no air over it (a flooded cave): the bot drowns on the way
     keepHeadAboveWater(bot)
     // no step back into a cell the hazard reflex just took the bot out of (a magma block it was walked back onto)
