@@ -335,6 +335,8 @@ export class Runner {
   private working: Milestone | null = null
   /** the needs last planned, kept MILESTONE_NEEDS_TICKS */
   private needs: { id: MilestoneId, tick: number, needs: Readonly<Record<string, number>> } | null = null
+  /** the save loaded (or there was none): the chests' changes are saved from then on */
+  private loaded = false
   private readonly started = Date.now()
   private readonly log: (line: string) => void
   private sleepCooldownUntil = 0
@@ -476,6 +478,8 @@ export class Runner {
       this.log(`milestone ${m.id} reached at tick ${event.tick} (${(event.wallMs / 1000).toFixed(1)} s)`)
       this.diagnostics?.milestoneReached(m.id)
       if (levels != null) this.log(`stock at ${m.id}: ${levels.map(describeLevel).join(', ')}`)
+      // the save as it is when the milestone is reached: the e2e's checkpoint copies it with the world
+      this.save()
       this.bot.emit('survivalMilestone' as any, event)
     }
   }
@@ -515,6 +519,18 @@ export class Runner {
     }
     this.bot.on('death', onDeath)
     this.bot.on('messagestr' as any, onMessage)
+    // the save written after every change to a chest's remembered contents (a store, a take, a depot put down), once
+    // for the changes of one moment, not only at the milestones: a checkpoint's save from before a rekit's take had
+    // the base's chest still holding the diamond pickaxe, and the resumed run walked there for it (26.3)
+    let saving = false
+    const offChests = this.memory.onChestChange(() => {
+      if (!this.loaded || saving) return
+      saving = true
+      queueMicrotask(() => {
+        saving = false
+        try { this.save() } catch (err) { this.log(`no save after a chest's change: ${(err as Error).message}`) }
+      })
+    })
     // the stall watchdog, on play's ticks
     const diag = this.diagnostics
     const clock = (): number => this.tick
@@ -537,6 +553,7 @@ export class Runner {
       this.bot.off('reflex' as any, onReflex)
       this.bot.off('death', onDeath)
       this.bot.off('messagestr' as any, onMessage)
+      offChests()
       outer?.removeEventListener('abort', onOuter)
       disarm?.()
       if (diag != null && diag.clock === clock) diag.clock = null
@@ -551,6 +568,7 @@ export class Runner {
     const maxFailures = this.options.maxFailures ?? 5
     const stopped = (): boolean => signal.aborted
     this.load()
+    this.loaded = true
     for (;;) {
       if (stopped()) return this.stop(null, 'aborted')
       if (this.bot.health <= 0 || (this.bot as any).isAlive === false) await this.recover(signal)

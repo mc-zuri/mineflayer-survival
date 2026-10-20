@@ -609,3 +609,39 @@ test('in the nether milestone the executor\'s stores keep what it and the eyes n
   assert.ok(needs.flint >= 1 && needs.iron_ingot >= 1, JSON.stringify(needs))
   for (const name of ['bucket', 'water_bucket', 'lava_bucket', 'raw_gold', 'gold_ingot', 'ender_pearl', 'blaze_rod', 'blaze_powder', 'ender_eye']) assert.ok(needs[name] > 0, name)
 })
+
+test('the save is written after every chest change, not only at the milestones, and holds the milestone when its event fires (the e2e checkpoint copies it then)', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-test-'))
+  const saveFile = path.join(dir, 'save.json')
+  const read = (): any => JSON.parse(fs.readFileSync(saveFile, 'utf8'))
+  const bot = fakeBot()
+  const atEvent: string[][] = []
+  bot.on('survivalMilestone', () => atEvent.push(read().reached.map((r: any) => r.id)))
+  let midway: any = null
+  const runner = new Runner(bot, {
+    until: 'stone',
+    saveFile,
+    log: () => {},
+    handlers: {
+      wood: async () => {
+        // a take from the base's chest mid-milestone (a rekit's): in the save before the milestone ends
+        bot.survival.memory.rememberChest({ x: 1, y: 40, z: 1 }, { bread: 2 })
+        await new Promise(resolve => setImmediate(resolve))
+        midway = read()
+        bot.give('wooden_pickaxe', 1)
+        bot.give('crafting_table', 1)
+      },
+      stone: async () => { bot.give('stone_pickaxe', 1); bot.give('stone_sword', 1); bot.give('stone_axe', 1); bot.give('furnace', 1) }
+    }
+  })
+  await runner.play()
+  assert.deepEqual(midway?.memory.chests.map((c: any) => c.items), [{ bread: 2 }])
+  assert.deepEqual(midway?.reached, [])
+  assert.deepEqual(atEvent, [['wood'], ['wood', 'stone']])
+  // no listener left once play is over
+  const before = fs.statSync(saveFile).mtimeMs
+  fs.writeFileSync(saveFile, '{}')
+  bot.survival.memory.rememberChest({ x: 1, y: 40, z: 1 }, {})
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(fs.readFileSync(saveFile, 'utf8'), '{}', String(before))
+})

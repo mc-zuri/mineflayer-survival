@@ -86,3 +86,17 @@ test('restore replaces what a memory holds with a saved one, in place', () => {
   assert.equal(mem.getPois('fortress', { dimension: 'the_nether' }).length, 1)
   assert.deepEqual(mem.toJSON(), JSON.parse(saved))
 })
+
+test('onChestChange: told of each chest remembered or forgotten, not of a restore nor of forgetting an unknown chest; unsubscribed', () => {
+  const memory = new WorldMemory()
+  const told: string[] = []
+  const off = memory.onChestChange(c => told.push(`${c.dimension} ${c.x} ${c.y} ${c.z}`))
+  memory.rememberChest({ x: 1.5, y: 64, z: -2.2 }, { bread: 1 })
+  memory.forgetChest({ x: 9, y: 9, z: 9 })
+  memory.forgetChest({ x: 1, y: 64, z: -3 })
+  memory.restore(new WorldMemory().toJSON())
+  memory.rememberChest({ x: 0, y: 0, z: 0 }, {}, 'the_nether')
+  off()
+  memory.rememberChest({ x: 0, y: 0, z: 0 }, {})
+  assert.deepEqual(told, ['overworld 1 64 -3', 'overworld 1 64 -3', 'the_nether 0 0 0'])
+})

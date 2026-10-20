@@ -102,6 +102,7 @@ export class WorldMemory {
   base: Located | null = null
   death: Death | null = null
   private readonly maxPerBlock: number
+  private readonly chestListeners = new Set<(chest: Located) => void>()
 
   constructor (opts: WorldMemoryOptions = {}) {
     this.maxPerBlock = opts.maxPerBlock ?? 256
@@ -160,10 +161,27 @@ export class WorldMemory {
     const kept: Record<string, number> = {}
     for (const [name, count] of Object.entries(items)) if (count > 0) kept[name] = count
     this.chests.set(key(loc), { ...loc, items: kept, seen: this.now })
+    this.chestChanged(loc)
   }
 
   forgetChest (pos: Pos, dimension: Dimension = 'overworld'): void {
-    this.chests.delete(key(at(pos, dimension)))
+    const loc = at(pos, dimension)
+    if (this.chests.delete(key(loc))) this.chestChanged(loc)
+  }
+
+  /**
+   * Calls `fn` each time a chest is remembered or forgotten (not on a restore): the runner's save, written after every
+   * chest change so a resume doesn't carry contents the world no longer has. The unsubscribe.
+   */
+  onChestChange (fn: (chest: Located) => void): () => void {
+    this.chestListeners.add(fn)
+    return () => { this.chestListeners.delete(fn) }
+  }
+
+  private chestChanged (loc: Located): void {
+    for (const fn of this.chestListeners) {
+      try { fn(loc) } catch {}
+    }
   }
 
   chestAt (pos: Pos, dimension: Dimension = 'overworld'): KnownChest | undefined {
