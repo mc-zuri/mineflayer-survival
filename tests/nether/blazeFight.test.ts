@@ -524,3 +524,104 @@ test('fillNook puts a block in the front\'s floor first when it\'s dug out (noth
   }
 })
 
+test('meleeWindow: a swing goes with the shield down only while no other blaze that sees the bot can shoot before it is up again, and no fireball is near', async () => {
+  const { fakeBot, entity } = await import('../reflexes/fakeBot')
+  const { meleeWindow, SHIELD_DELAY_TICKS, SMALL_FIREBALL } = await import('../../src/nether/blazeFight')
+  const close = entity({ name: 'blaze', position: new Vec3(0.5, 64.2, 8.6), meta: { health: 20, flags: 0 } })
+  const other = entity({ name: 'blaze', position: new Vec3(2.5, 65, 3.5), meta: { health: 20, flags: 0 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), entities: [close, other] })
+  const v = new BlazeVolleys()
+  v.update([{ id: close.id, charged: false }, { id: other.id, charged: false }], 0)
+  assert.ok(meleeWindow(bot, v, 1, [close, other], close))
+  // the other charging: its shot 60 ticks off, then near
+  v.update([{ id: close.id, charged: false }, { id: other.id, charged: true }], 10)
+  assert.ok(meleeWindow(bot, v, 10 + BLAZE_CHARGE_TICKS - SHIELD_LEAD_TICKS, [close, other], close), 'within the shield\'s lead, not yet within its delay')
+  assert.ok(!meleeWindow(bot, v, 10 + BLAZE_CHARGE_TICKS - SHIELD_DELAY_TICKS, [close, other], close), 'its shot due before the shield is up')
+  // the one in reach charged (within 2 it hits, not shoots): the swing goes
+  const v2 = new BlazeVolleys()
+  v2.update([{ id: close.id, charged: true }], 0)
+  assert.ok(meleeWindow(bot, v2, 0, [close], close))
+  // a small fireball coming
+  bot.entities[999] = { id: 999, name: SMALL_FIREBALL, position: new Vec3(0.5, 65, 5.5), velocity: new Vec3(0, 0, 0.5) }
+  assert.ok(!meleeWindow(bot, v2, 0, [close], close))
+})
+
+test('fightFromNook without a shield swings at the blaze in reach while another charges, and a front that won\'t shut is tried again only in a while', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, nookAround, SHUT_AGAIN_TICKS } = await import('../../src/nether/blazeFight')
+  const placeModule = require('../../src/skills/placeBlock')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const close = entity({ name: 'blaze', position: new Vec3(0.5, 64.2, 8.4), meta: { health: 20, flags: 0 } })
+  const far = entity({ name: 'blaze', position: new Vec3(0.5, 65, 2.5), meta: { health: 20, flags: 1 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), items: [item('diamond_sword'), item('cobblestone', 32)], entities: [close, far], world: name })
+  bot.world = { raycast: () => null }
+  bot.equip = async (it: any) => { bot.heldItem = it }
+  bot.activateItem = () => {}
+  bot.deactivateItem = () => {}
+  bot.lookAt = async () => {}
+  bot.look = async () => {}
+  const swings: number[] = []
+  bot.attack = (e: any) => { swings.push(e.id) }
+  bot.game.dimension = 'the_nether'
+  const tries: string[] = []
+  const realPlace = placeModule.placeBlock
+  placeModule.placeBlock = async (_b: unknown, a: any) => { tries.push(a.pos.toString()); throw new Error('nothing solid to place against') }
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const ac = new AbortController()
+  const done = fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 2000 }, ac.signal).catch(err => err)
+  const tick = async (n: number): Promise<void> => { for (let i = 0; i < n; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) } }
+  try {
+    await tick(60)
+    assert.ok(swings.filter(id => id === close.id).length >= 2, `swings ${swings.join(' ')}`)
+    // the blaze in reach gone: the far one's charge, the front tried, and not again for SHUT_AGAIN_TICKS
+    delete bot.entities[close.id]
+    tries.length = 0
+    await tick(SHUT_AGAIN_TICKS - 5)
+    assert.ok(tries.length > 0 && tries.length <= 4, `tries ${tries.join(' ')}`)
+  } finally {
+    ac.abort()
+    await tick(3)
+    await done
+    placeModule.placeBlock = realPlace
+  }
+})
+
+test('fightFromNook swings at a blaze hovering in the front over the roof\'s edge, whose eyes don\'t see the bot\'s', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook, nookAround, blazeSeesBot } = await import('../../src/nether/blazeFight')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'stone' : 'air'
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 65.3, 9.5), meta: { health: 20, flags: 0 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), items: [item('diamond_sword'), item('cobblestone', 32)], offhand: item('shield'), entities: [blaze], world: name })
+  bot.world = {
+    raycast: (from: Vec3, dir: Vec3, range: number) => {
+      for (let t = 0; t <= range; t += 0.02) {
+        const p = from.plus(dir.scaled(t))
+        if (name(p) !== 'air') return { position: p.floored(), intersect: p, boundingBox: 'block', name: name(p) }
+      }
+      return null
+    }
+  }
+  assert.ok(!blazeSeesBot(bot, blaze))
+  bot.equip = async (it: any) => { bot.heldItem = it }
+  bot.activateItem = () => { bot.usingHeldItem = true }
+  bot.deactivateItem = () => { bot.usingHeldItem = false }
+  bot.lookAt = async () => {}
+  const swings: number[] = []
+  bot.attack = (e: any) => { swings.push(e.id) }
+  bot.game.dimension = 'the_nether'
+  const nook = nookAround((p: Vec3) => bot.blockAt(p), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const ac = new AbortController()
+  const done = fightFromNook(bot, nook, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 1000 }, ac.signal).catch(err => err)
+  for (let i = 0; i < 40; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  assert.ok(swings.includes(blaze.id), `swings ${swings.join(' ')}`)
+  ac.abort()
+  for (let i = 0; i < 3; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  await done
+})
+

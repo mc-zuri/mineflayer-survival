@@ -324,6 +324,21 @@ const ARROWS = ['arrow', 'spectral_arrow', 'tipped_arrow']
 /** tries at shutting the nook's front, low, before the nook is given up (fightFromNook's CANNOT_PLACE) */
 export const SEAL_FAILS = 5
 
+/** ticks before a front that wouldn't shut against a volley (no shield) is tried again */
+export const SHUT_AGAIN_TICKS = 40
+
+/**
+ * Whether a swing at the one in reach can go with the shield down: the shield back up (SHIELD_DELAY_TICKS) before any
+ * other blaze that sees the bot can shoot (BlazeVolleys), and no small fireball near. The one in reach doesn't shoot
+ * within 2 blocks (BlazeAttackGoal hits instead).
+ */
+export function meleeWindow (bot: Bot, volleys: BlazeVolleys, tick: number, seeing: readonly Entity[], close: Entity): boolean {
+  const lead = SHIELD_DELAY_TICKS + 2
+  const near = close.position.distanceTo(bot.entity.position) < 2
+  if (seeing.some(b => (b !== close || !near) && volleys.dangerous(b.id, tick, lead))) return false
+  return !Object.values(bot.entities).some(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 8))
+}
+
 /** the melee mobs (besides the blazes) the nook's fight meets itself, with the sword once in reach */
 export const NOOK_MELEE = ['magma_cube']
 
@@ -373,6 +388,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   let sealAgain = 0
   let shutUntil = 0
   let sealFails = 0
+  let shutAgain = 0
   const tracked = new Set<number>()
   const dead = new Set<number>()
   const tried = new Map<number, number>()
@@ -457,19 +473,25 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
 
       // one come close (in the front, hitting: BlazeAttackGoal within 2 blocks): the sword, the shield up between the
       // swings (a blaze in the front cell keeps the front from being shut: a 26.3 bot at 9 health tried to shut it
-      // for 1200 ticks, the blaze punching it the while, and died)
+      // for 1200 ticks, the blaze punching it the while, and died). The swing goes while the others charge, as long as
+      // none can shoot before the shield is up again (meleeWindow); without a shield, whenever the sword's ready
       const eye = eyePosition(bot)
       const inReach = (e: Entity): boolean => distanceToBox(eye, entityBox(e)) <= 2.9
-      const close = seeing.find(inReach) ?? Object.values(bot.entities).find(e => NOOK_MELEE.includes(e.name ?? '') && isAlive(bot, e) && inReach(e) && hasLineOfSight(bot, e))
-      if (close != null && danger.length === 0) {
+      // (a blaze hovering in the front over the roof's edge, its eyes not seeing the bot's, is hit all the same: in the
+      // front cell it kept the front from being shut, 26.3, seed 7741's bridge)
+      const close = seeing.find(inReach) ?? blazes.find(b => inReach(b) && seenPoint(bot, b) != null) ??
+        Object.values(bot.entities).find(e => NOOK_MELEE.includes(e.name ?? '') && isAlive(bot, e) && inReach(e) && hasLineOfSight(bot, e))
+      if (close != null && (danger.length === 0 || !hasShield() || meleeWindow(bot, volleys, tick, seeing, close))) {
         stopDraw()
         await hold(sword())
         if (strength.ticksToFull() <= 0) {
           unblock()
           await look(meleeAimPoint(bot, close))
           strength.attack(close)
-        } else if (strength.ticksToFull() > 1) {
+        } else if (strength.ticksToFull() > 1 && hasShield()) {
           await block(blazeEye(close))
+        } else {
+          await look(meleeAimPoint(bot, close))
         }
         await waitTicks(bot, 1, signal)
         continue
@@ -492,13 +514,18 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
 
       // no shield (broken: 6 of its 336 a blocked fireball): the front shut against what's about to come, open again
       // once it's quiet
-      // (shut for a volley's length at least: behind the shut front no blaze is seen to be about to shoot)
-      if (!hasShield() && (danger.length > 0 || fireball != null)) {
+      // (shut for a volley's length at least: behind the shut front no blaze is seen to be about to shoot). A front
+      // that won't shut is tried again in a while, the bow and the sword going on meanwhile: a 26.3 bot with no shield
+      // tried it every tick for 3000 ticks, standing there, 'nothing solid to place against', and was shot to 5 health
+      if (!hasShield() && (danger.length > 0 || fireball != null) && tick >= shutAgain) {
         stopDraw()
-        if (nook.front.some(p => bot.blockAt(p)?.boundingBox !== 'block')) await fillNook(bot, nook.front, signal)
-        shutUntil = tick + BLAZE_CHARGE_TICKS + 18 + FIREBALL_FLIGHT_TICKS
-        await waitTicks(bot, 1, signal)
-        continue
+        const missed = nook.front.some(p => bot.blockAt(p)?.boundingBox !== 'block') ? await fillNook(bot, nook.front, signal) : 0
+        if (missed === 0) {
+          shutUntil = tick + BLAZE_CHARGE_TICKS + 18 + FIREBALL_FLIGHT_TICKS
+          await waitTicks(bot, 1, signal)
+          continue
+        }
+        shutAgain = tick + SHUT_AGAIN_TICKS
       }
       if (nook.front.some(p => bot.blockAt(p)?.boundingBox === 'block') && bot.health > sealAt && tick >= shutUntil && danger.length === 0 && fireball == null) {
         unblock()
@@ -506,7 +533,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         continue
       }
 
-      if (danger.length > 0 || fireball != null) {
+      if ((danger.length > 0 || fireball != null) && hasShield()) {
         // a full draw goes off first (the shield is up 5 ticks later all the same; the shot may be the kill)
         if (drawn >= MIN_DRAW && drawTarget != null && isAlive(bot, drawTarget)) {
           const s = aim(bot, drawTarget, { leadTicks: 1, world })
@@ -601,6 +628,11 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
  * the crosshair met the roof and no swing went, 200 ticks, the blaze hitting the bot till it died)
  */
 export function meleeAimPoint (bot: Bot, e: Entity): Vec3 {
+  return seenPoint(bot, e) ?? e.position.offset(0, (e.height ?? 1) / 2, 0)
+}
+
+/** the first point up an entity's middle the eyes see with no block between (meleeAimPoint's), null when none is */
+export function seenPoint (bot: Bot, e: Entity): Vec3 | null {
   const eye = eyePosition(bot)
   const h = e.height ?? 1
   for (const f of [0.5, 0.25, 0.75, 0.1, 0.9]) {
@@ -611,7 +643,7 @@ export function meleeAimPoint (bot: Bot, e: Entity): Vec3 {
     const hit: any = (bot.world as any).raycast?.(eye, d.scaled(1 / len), len)
     if (hit == null || (hit.intersect != null && hit.intersect.distanceTo(eye) >= len - 1e-3)) return p
   }
-  return e.position.offset(0, h / 2, 0)
+  return null
 }
 
 /** drops further than this from the nook are left (a walk under the blazes' fire; the spawner's own floor is 10 off) */
