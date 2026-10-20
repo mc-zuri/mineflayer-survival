@@ -2,7 +2,8 @@
 // server, normal difficulty, no natural spawning, the reflexes on), each run on fresh ground 64 blocks along from the last:
 // - a pillager patrol of 3 (one a captain, with its banner) by a hut with a door, the bot bare or in iron with a shield;
 // - a night with a skeleton, a spider and a creeper summoned about a bot walking up and down, bare or in iron;
-// - the runner's wait for the day after a respawn (waitOutTheNight) as the night ends, the night reflex on.
+// - the runner's wait for the day after a respawn (waitOutTheNight) as the night ends, the night reflex on;
+// - hay bales to mine, some by pillagers (an outpost's): the far ones mined.
 // PATROL_RUNS=n repeats each (default 3); NIGHT_VERBOSE=1 logs each hit, kill and reflex.
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert'
@@ -13,6 +14,7 @@ import { createPlugin } from '../../src'
 import { navigate } from '../../src/skills/navigate'
 import { isEnclosed, shelterToLeave } from '../../src/skills/shelter'
 import { waitOutTheNight } from '../../src/runner'
+import { collectBlock } from '../../src/skills/collectBlock'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { NightLog, summary, type RunLog } from './nightLog'
 
@@ -252,5 +254,28 @@ describe(`pillager patrols and night mobs on ${DEFAULT_VERSION} (normal difficul
       logs.push(log)
     }
     report(t, 'the respawn\'s night wait', logs, i => outcome[i])
+  })
+
+  test(`hay bales to mine, one by pillagers (an outpost's), one further: the one away from them mined (${RUNS} runs)`, async (t) => {
+    let failed = 0
+    for (let i = 0; i < RUNS; i++) {
+      const home = await freshGround(6000)
+      // a pillager shut in glass by the near bale (in view, out of reach), the other bale 24 blocks the other way
+      const near = home.offset(12, 0, 0)
+      const far = home.offset(-24, 0, 0)
+      await run(`fill ${near.x + 4} ${GROUND} -1 ${near.x + 6} ${GROUND + 3} 1 minecraft:glass hollow`)
+      await run(`summon minecraft:pillager ${near.x + 5.5} ${GROUND} 0.5`)
+      await run(`setblock ${near.x} ${GROUND} 0 minecraft:hay_block`)
+      await run(`setblock ${far.x} ${GROUND} 0 minecraft:hay_block`)
+      await bot.waitForTicks(20)
+      const res = await collectBlock(bot, { names: ['hay_block'], count: 1, maxDistance: 48 })
+      const mined = res.positions[0]
+      const ok = mined != null && mined.x === far.x
+      if (!ok) failed++
+      t.diagnostic(`run ${i + 1}: ${ok ? 'the far bale' : `MINED ${mined == null ? 'none' : mined.toString()}`}`)
+      await run(`fill ${near.x + 4} ${GROUND} -1 ${near.x + 6} ${GROUND + 3} 1 minecraft:air`)
+    }
+    t.diagnostic(`hay by pillagers: ${RUNS - failed}/${RUNS} the far bale`)
+    assert.strictEqual(failed, 0)
   })
 })
