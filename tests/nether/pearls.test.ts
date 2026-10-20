@@ -61,7 +61,8 @@ test('provokeEnderman: a stare at its eyes from where the bot stands until it\'s
 test('huntEndermen passes over an enderman it finds no way to (unless it comes to the bot), and says so', async () => {
   const { huntEndermen, huntable } = await import('../../src/nether/pearls')
   const bot = fakeBot({ position: new Vec3(0.5, 98, 0.5) })
-  const below = entity({ name: 'enderman', position: new Vec3(2.5, 67, 3.5) })
+  // (5 under the bot, across a gap: within HUNT_BELOW, so hunted, and no way to it)
+  const below = entity({ name: 'enderman', position: new Vec3(2.5, 93, 3.5) })
   bot.entities[below.id] = below
   // (the fake bot has no pathfinder: every walk to it fails)
   const passOver = new Set<number>()
@@ -73,6 +74,24 @@ test('huntEndermen passes over an enderman it finds no way to (unless it comes t
   assert.equal(huntable(bot, below, passOver), false)
   below.position = new Vec3(2.5, 98, 0.5)
   assert.equal(huntable(bot, below, passOver), true)
+})
+
+test('huntEndermen leaves alone an enderman more than HUNT_BELOW under the bot (the walk down after one ended in the lava sea), unless it comes', async () => {
+  const { huntEndermen, farBelow, HUNT_BELOW } = await import('../../src/nether/pearls')
+  const bot = fakeBot({ position: new Vec3(0.5, 55, 0.5) })
+  const deep = entity({ name: 'enderman', position: new Vec3(6.5, 55 - HUNT_BELOW - 2, 0.5) })
+  bot.entities[deep.id] = deep
+  assert.equal(farBelow(bot, deep), true)
+  assert.equal(farBelow(bot, entity({ name: 'enderman', position: new Vec3(6.5, 50, 0.5) })), false)
+  // come up to the bot: hunted
+  assert.equal(farBelow(bot, entity({ name: 'enderman', position: new Vec3(0.5, 52.5, 0.5) })), false)
+  // the hunt finds none to go after (the ticks run, and it gives up)
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(huntEndermen(bot, { pearls: 1, provoke: false }), /no enderman within 48 blocks/)
+  } finally {
+    clearInterval(ticker)
+  }
 })
 
 test('huntEndermen passes over an enderman its fight never got to (TIMEOUT: a stem between), not fought 600 ticks at a time over and over', async () => {

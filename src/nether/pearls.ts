@@ -171,6 +171,17 @@ export interface HuntEndermenArgs {
 /** how near a passed-over enderman that's angry must come to be hunted again: at the bot, where the sword gets it */
 export const PASSED_OVER_NEAR = 3
 
+/** how far under the bot an enderman is left alone unless it comes (the walk down after one ends by the lava sea) */
+export const HUNT_BELOW = 8
+
+/**
+ * an enderman more than HUNT_BELOW under the bot and not come to it: a 26.3 bot walked down after one from y 55 and
+ * into the lava sea at 31 (run p9)
+ */
+export function farBelow (bot: Bot, e: Entity): boolean {
+  return e.position.y < bot.entity.position.y - HUNT_BELOW && e.position.distanceTo(bot.entity.position) > PASSED_OVER_NEAR
+}
+
 /** an enderman to hunt: alive, and not one passed over (no way to it, a fight that never got it) unless it's angry and come to the bot */
 export function huntable (bot: Bot, e: Entity, passOver?: ReadonlySet<number>): boolean {
   if (e.name !== 'enderman' || !isAlive(bot, e)) return false
@@ -199,7 +210,7 @@ export async function huntEndermen (bot: Bot, args: HuntEndermenArgs = {}, signa
       throwIfAborted(signal)
       if (ticks > maxTicks) throw new SkillError('TIMEOUT', `${countItems(bot, 'ender_pearl') - start} of ${wanted} pearls after ${ticks} ticks`)
       const enderman = Object.values(bot.entities)
-        .filter(e => huntable(bot, e, passOver) && e.position.distanceTo(bot.entity.position) <= range)
+        .filter(e => huntable(bot, e, passOver) && e.position.distanceTo(bot.entity.position) <= range && !farBelow(bot, e))
         .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
       if (enderman == null) {
         if (passOver.size > 0 && kills === 0) throw new SkillError('NOT_FOUND', `no enderman within ${range} blocks the bot can get to`)
