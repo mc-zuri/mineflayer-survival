@@ -246,3 +246,22 @@ test('seekFoodLand: the food land fed but far off (a respawn at the world\'s spa
   assert.equal(await seekFoodLand(bot, { survey, memory, home: land, misses: () => 0, forgetLand: () => {}, travel: go }), null)
   assert.equal(trips.length, 1)
 })
+
+test('seekFoodLand: a fed land whose food work got no food FOOD_LAND_DRY_TRIES times in a row is left for another (hunt2-d: a snowy taiga patch with no cow)', async () => {
+  const { FOOD_LAND_DRY_TRIES } = await import('../../src/executor/foodLand')
+  const bot = fakeBot('26.3', (x) => x < -60 ? { biome: 'snowy_taiga', y: 85 } : { biome: 'grove', y: 120 })
+  const memory = new WorldMemory()
+  const survey = new BiomeSurvey(bot, memory)
+  bot.entity.position = new Vec3(-120, 85, -40)
+  survey.survey()
+  memory.addPoi(FOOD_LAND_POI, { x: -120, y: 85, z: -40 }, 'overworld', 'snowy_taiga')
+  memory.addPoi(FOOD_BIOME_POI, { x: 0, y: 100, z: -240 }, 'overworld', 'taiga')
+  const home = foodLandOf(memory) as Vec3
+  const go = async (t: Vec3): Promise<void> => { bot.entity.position = t.clone() }
+  let forgot = 0
+  assert.equal(await seekFoodLand(bot, { survey, memory, home, misses: () => 0, forgetLand: () => { forgot++ }, travel: go, dryTries: FOOD_LAND_DRY_TRIES - 1 }), null)
+  const to = await seekFoodLand(bot, { survey, memory, home, misses: () => 0, forgetLand: () => { forgot++ }, travel: go, dryTries: FOOD_LAND_DRY_TRIES })
+  assert.ok(to != null && to.z === -240, String(to))
+  assert.equal(memory.getPois(FOOD_LAND_FAILED_POI).length, 1)
+  assert.equal(forgot, 1)
+})

@@ -894,3 +894,22 @@ test('withinTicks: only the ticks `counts` takes count against the budget (a tri
   const err = await done
   assert.ok(TaskError.is(err, 'TIMEOUT'), String(err))
 })
+
+test('foodWorking: a try of FOOD_DRY_TICKS or more that got no food counts dry, one that got some ends the run of them', async () => {
+  const { FOOD_DRY_TICKS } = await import('../../src/runner')
+  const bot = fakeBot()
+  bot.food = 10
+  const runner: any = new Runner(bot, { log: () => {} })
+  const ticks = async (n: number): Promise<void> => { for (let i = 0; i < n; i++) bot.emit('physicsTick') }
+  await runner.foodWorking(async () => await ticks(FOOD_DRY_TICKS))
+  await runner.foodWorking(async () => await ticks(FOOD_DRY_TICKS))
+  assert.equal(runner.foodDry, 2)
+  // a short one: not counted
+  await runner.foodWorking(async () => await ticks(10))
+  assert.equal(runner.foodDry, 2)
+  await runner.foodWorking(async () => { await ticks(FOOD_DRY_TICKS); bot.give('cooked_beef', 2) })
+  assert.equal(runner.foodDry, 0)
+  // not the food work's: not counted
+  await runner.foodWorking(async () => await ticks(FOOD_DRY_TICKS), false)
+  assert.equal(runner.foodDry, 0)
+})

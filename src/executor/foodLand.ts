@@ -75,6 +75,12 @@ export const SEED_PATCH_OFFSET = 40
 export const SCOUT_DISTANCE = 320
 /** the walks a trip to food land takes at most, each while the last got the bot nearer */
 export const FOOD_TRIP_TRIES = 4
+/**
+ * the food work's tries in a row that got no food after which the land's left (as one whose animals weren't found): a
+ * hunt's exploring of its 96 blocks, cut into the meals' 6000 ticks, came to its NOT_FOUND only after some 20000, and
+ * a 26.3 bot on a snowy taiga patch by seed 31337's peaks with no cow in it went from food 7 to 5 meanwhile (hunt2-d)
+ */
+export const FOOD_LAND_DRY_TRIES = 2
 /** how many directions are scouted (the best first) */
 export const SCOUT_DIRECTIONS = 8
 
@@ -339,6 +345,11 @@ export interface FoodLandArgs {
   /** the world's seed (the seed's biomes read when the survey knows of no food land) */
   seed?: Seed
   log?: (line: string) => void
+  /**
+   * the food work's tries in a row about home that got no food (the runner's): FOOD_LAND_DRY_TRIES of them leave the
+   * land as one whose animals weren't found
+   */
+  dryTries?: number
   /** the trips (default the travel skill's) */
   travel?: (target: Vec3, onHop?: () => boolean) => Promise<void>
   /** the seed's biomes (default openSeedBiomes: the minecraft-java-worldgen package's) */
@@ -374,7 +385,7 @@ export async function seekFoodLand (bot: Bot, args: FoodLandArgs, signal?: Abort
   survey.survey()
   const center = args.home ?? bot.entity.position.floored()
   const barren = landBarren(survey, center)
-  const hunted = LAND_ANIMALS.every(m => args.misses(m) > 0)
+  const hunted = LAND_ANIMALS.every(m => args.misses(m) > 0) || (args.dryTries ?? 0) >= FOOD_LAND_DRY_TRIES
   if (barren !== true && !hunted) {
     // the food land far off (the bot respawned at the world's spawn, or back from a trip): there by travel's hops
     // first, not by the explorations' first leg, a pathfinder's walk of 230 blocks over seed 31337's peaks that went
@@ -393,7 +404,7 @@ export async function seekFoodLand (bot: Bot, args: FoodLandArgs, signal?: Abort
     if (land != null && Math.hypot(land.x - center.x, land.z - center.z) <= FED_RADIUS) memory.removePoi(FOOD_LAND_POI, land, 'overworld')
     if (memory.getPois(FOOD_LAND_FAILED_POI, { dimension: 'overworld' }).every(f => Math.hypot(f.x - center.x, f.z - center.z) > FED_RADIUS)) memory.addPoi(FOOD_LAND_FAILED_POI, center, 'overworld')
   }
-  const why = barren === true ? 'no food biome about home' : `no ${LAND_ANIMALS.join(', ')} found about ${center.toString()}`
+  const why = barren === true ? 'no food biome about home' : LAND_ANIMALS.every(m => args.misses(m) > 0) ? `no ${LAND_ANIMALS.join(', ')} found about ${center.toString()}` : `no food got about ${center.toString()} in ${args.dryTries ?? 0} tries`
   // a wide food land first (FOOD_PATCH_CHUNKS), the seed's read for one, then a narrow one, then a scouting
   const wide = (p: { x: number, z: number }): boolean => survey.wide(p)
   let dest = nearestFoodBiome(memory, bot.entity.position, center, wide)

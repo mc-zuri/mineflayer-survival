@@ -323,6 +323,9 @@ export const MEAL_TICKS = 6000
 /** ticks a trip to food land (seekFoodLand: the scouting, the walk there) may take before the food work goes on where the bot is */
 export const FOOD_TRIP_TICKS = 12000
 
+/** ticks a try of the food work takes for one that got no food to count as dry (foodWorking) */
+export const FOOD_DRY_TICKS = 3000
+
 /** ticks a meal that came to nothing waits before it is tried again */
 export const MEAL_RETRY_TICKS = 6000
 
@@ -420,6 +423,8 @@ export class Runner {
   private mealRetryAt = 0
   /** the food work under way (a meal, a restock, the food milestone): home is the food land meanwhile (foodLand.ts) */
   private foodWork = 0
+  /** the food work's tries in a row that got no food (foodWorking's): the food land's left after FOOD_LAND_DRY_TRIES */
+  private foodDry = 0
   private waterRetryAt = 0
   /** the tick the herd was last tended at between trips (keepHerd) */
   private herdTendedAt = -Infinity
@@ -1192,11 +1197,18 @@ export class Runner {
   /** runs `fn` stopped (TIMEOUT) after `ticks` ticks */
   /** runs `fn` as food work (`on`): home is the food land meanwhile */
   private async foodWorking<T> (fn: () => Promise<T>, on = true): Promise<T> {
-    if (on) this.foodWork++
+    if (!on) return await fn()
+    this.foodWork++
+    // (the food got: the bar and the points carried; a try of FOOD_DRY_TICKS or more that got none is a dry one)
+    const food = (): number => (this.bot.food ?? 0) + (this.bot.inventory != null ? ownedInventory(this.bot).foodPoints() : 0)
+    const before = food()
+    const from = this.bot.survival.tasks.tick
     try {
       return await fn()
     } finally {
-      if (on) this.foodWork--
+      this.foodWork--
+      if (food() > before) this.foodDry = 0
+      else if (this.bot.survival.tasks.tick - from >= FOOD_DRY_TICKS && this.bot.health > 0) this.foodDry++
     }
   }
 
@@ -1215,7 +1227,8 @@ export class Runner {
             memory: this.memory,
             home: this.home(),
             misses: name => this.executor.sightings.misses(name),
-            forgetLand: () => this.executor.forgetLand(),
+            forgetLand: () => { this.executor.forgetLand(); this.foodDry = 0 },
+            dryTries: this.foodDry,
             seed: this.options.seed,
             log: this.log
           }, s)
