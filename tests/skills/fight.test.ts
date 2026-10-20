@@ -244,3 +244,35 @@ test('fight: a zombie in its reach swinging every 20 ticks: the bot\'s swings co
   // (each of its hits after the first cycle came on the raised shield)
   assert.ok(blockedHits.slice(1).every(b => b), `the shield on its hits: ${blockedHits.join(', ')}`)
 })
+
+test('fight: down a 1-wide tunnel a zombie coming is waited for with the shield, not walked at; in the open, or one that comes no nearer for HOLD_TICKS, closed in on', async () => {
+  const { fight, holdsGround, HOLD_TICKS } = await import('../../src/skills/fight')
+  const tunnel = (p: Vec3): string => p.z === 0 && p.y >= 64 && p.y <= 65 ? 'air' : 'stone'
+  const run = async (world?: (p: Vec3) => string): Promise<{ firstStep: number, held: boolean }> => {
+    const zombie = entity({ id: 12, name: 'zombie', position: new Vec3(6.5, 64, 0.5) })
+    const bot = fakeBot({ entities: [zombie], items: [item('diamond_sword')], offhand: item('shield'), world })
+    bot.heldItem = bot.inventory.slots[9]
+    bot.equip = async () => {}
+    bot.activateItem = () => { bot.usingHeldItem = true }
+    bot.deactivateItem = () => { bot.usingHeldItem = false }
+    bot.attack = () => {}
+    let tick = 0
+    let firstStep = -1
+    bot.waitForTicks = async (n: number) => {
+      for (let i = 0; i < n; i++) {
+        tick++
+        if (firstStep < 0 && bot.controls.forward === true) firstStep = tick
+        bot.emit('physicsTick')
+      }
+    }
+    await fight(bot, zombie as any, { maxTicks: HOLD_TICKS + 20 }).catch(() => {})
+    return { firstStep, held: holdsGround(bot) }
+  }
+  const inTunnel = await run(tunnel)
+  assert.strictEqual(inTunnel.held, true)
+  // (it never comes: closed in on after HOLD_TICKS)
+  assert.ok(inTunnel.firstStep >= HOLD_TICKS, `a step at ${inTunnel.firstStep}`)
+  const open = await run()
+  assert.strictEqual(open.held, false)
+  assert.ok(open.firstStep >= 0 && open.firstStep < 5, `the first step at ${open.firstStep}`)
+})

@@ -254,6 +254,27 @@ export function swingVictim (bot: Bot, target: Entity): Entity | null {
   return hostile && !NEUTRAL_HOSTILES.has(name) ? under : null
 }
 
+/** ticks a melee mob is waited for in a passage while it comes no nearer (then it's closed in on) */
+export const HOLD_TICKS = 40
+
+/**
+ * The bot stands in a passage (a tunnel, a staircase): two of the four sides round its body open at most, the feet's
+ * and the head's cells both. A melee mob comes at it from the front alone there, one at a time, its shield takes
+ * them; met in the room they come from, they were at the bot's sides and back: a 26.3 bot in iron that walked out of
+ * a 1-wide tunnel into a dungeon's room at the zombies its spawner sent was hit from both sides, 19 health in 450
+ * ticks, and died (tests/integration/mineZombies)
+ */
+export function holdsGround (bot: Bot): boolean {
+  const feet = bot.entity.position.floored()
+  const open = (p: Vec3): boolean => bot.blockAt(p)?.boundingBox !== 'block'
+  let sides = 0
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    const p = feet.offset(dx, 0, dz)
+    if (open(p) && open(p.offset(0, 1, 0))) sides++
+  }
+  return sides <= 2
+}
+
 function findItem (bot: Bot, name: string): Item | undefined {
   return bot.inventory.items().find(i => i.name === name) ?? (bot.inventory.slots[45]?.name === name ? bot.inventory.slots[45] ?? undefined : undefined)
 }
@@ -351,6 +372,9 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
     return open
   }
 
+  // (the nearest the target has come, and when: holdsGround's wait)
+  let closest = Infinity
+  let closerAt = 0
   try {
     while (isAlive(bot, target)) {
       throwIfAborted(signal)
@@ -437,6 +461,16 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       }
 
       if (distance > reach) {
+        // a melee mob coming down a passage, the shield up to it: waited for where the bot stands, not met in the room
+        // it comes from (holdsGround; one that comes no nearer for HOLD_TICKS is closed in on)
+        const d = bot.entity.position.distanceTo(target.position)
+        if (d < closest - 0.25) { closest = d; closerAt = ticks }
+        if (guarded && hasShield() && ticks - closerAt < HOLD_TICKS && holdsGround(bot)) {
+          bot.clearControlStates()
+          lookAt(bot, center)
+          await waitTicks(bot, 1, signal)
+          continue
+        }
         // close in, sprinting (a sprint hit knocks back further), but not over a deadly edge: a magma cube in a basalt
         // delta was chased into a lava pocket, a blaze off a ledge over the lava sea (26.3); it comes to the bot
         steerToward(bot, target.position, { sprint: true, guard: true, maxDrop: opts.maxDrop })
