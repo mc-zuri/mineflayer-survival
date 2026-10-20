@@ -1,9 +1,11 @@
 // danger: the places the bot keeps away from: the deep dark's sculk, seen as it goes (its sensors hear the bot's steps
-// and digs, its shriekers call the warden): the pathfinder's costs for it, and the mining targets left there.
+// and digs, its shriekers call the warden: the pathfinder's costs for it, the mining targets left there), and where
+// pillagers are in view (an outpost's, a patrol's: the mining targets left there).
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { findBlocks } from '../core/findBlocks'
 import { normalizeDimension } from '../core/memory'
+import { isAlive } from './combatUtil'
 
 /** the deep dark's blocks that hear or call: sensors (SculkSensorBlockEntity's listener, 8 blocks; the calibrated one 16), shriekers, catalysts */
 export const SCULK_LISTENERS = new Set(['sculk_sensor', 'calibrated_sculk_sensor', 'sculk_shrieker'])
@@ -30,6 +32,10 @@ export interface DangerPoint {
   until: number
 }
 
+/** the mobs of an outpost or a patrol (Raider's) */
+export const PILLAGER_KIN = new Set(['pillager', 'vindicator', 'evoker', 'illusioner', 'ravager'])
+/** how far from a pillager in view the bot's mining targets are left (an outpost's tower and its spawns about it) */
+export const PILLAGER_RADIUS = 32
 /** the cost the pathfinder adds to a step or a dig within a sensor's hearing (a long way round is cheaper) */
 export const SCULK_COST = 60
 /** the pathfinder's cost for what is never done (the exclusion areas' 'forbid') */
@@ -80,9 +86,19 @@ export function inDanger (bot: Bot, pos: { x: number, y: number, z: number }, ki
   return dangerMap(bot).at(pos, kind).length > 0
 }
 
-/** a block a mining target there is left for: in the sculk's hearing (inDanger) */
+/**
+ * A pillager (or one of its kin) in view within PILLAGER_RADIUS of `pos`: a pillager outpost's (they spawn about its
+ * tower for good, PillagerOutpost's spawn overrides) or a patrol's. A 26.3 bot with a stone sword and no armor went to
+ * an outpost to mine its hay bales for bread, and its pillagers shot it there (full-26.3-s9183-a)
+ */
+export function pillagersNear (bot: Bot, pos: { x: number, y: number, z: number }, radius = PILLAGER_RADIUS): boolean {
+  const p = new Vec3(pos.x + 0.5, pos.y + 0.5, pos.z + 0.5)
+  return Object.values(bot.entities).some(e => e !== bot.entity && PILLAGER_KIN.has(e.name ?? '') && isAlive(bot, e) && e.position.distanceTo(p) <= radius)
+}
+
+/** a block a mining target there is left for: in the sculk's hearing (inDanger) or by pillagers in view (pillagersNear) */
 export function dangerAt (bot: Bot, pos: { x: number, y: number, z: number }): boolean {
-  return inDanger(bot, pos, 'sculk')
+  return inDanger(bot, pos, 'sculk') || pillagersNear(bot, pos)
 }
 
 /** one look about: the sculk's sensors, shriekers and catalysts within 32 blocks (under SCULK_SCAN_Y) */

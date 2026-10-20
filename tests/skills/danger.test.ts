@@ -1,8 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { DangerMap, NEVER, SCULK_COST, dangerAt, dangerMap, inDanger, listenerRadius, scanDangers, sculkMoveAreas } from '../../src/skills/danger'
-import { fakeBot } from '../reflexes/fakeBot'
+import { DangerMap, NEVER, SCULK_COST, dangerAt, dangerMap, inDanger, listenerRadius, pillagersNear, scanDangers, sculkMoveAreas } from '../../src/skills/danger'
+import { entity, fakeBot } from '../reflexes/fakeBot'
 
 /** deepslate under y -10, a sensor at (5, -10, 0) and a shrieker at (8, -10, 0) on the floor */
 const deepDark = (p: Vec3): string => p.x === 5 && p.y === -10 && p.z === 0 ? 'sculk_sensor' : p.x === 8 && p.y === -10 && p.z === 0 ? 'sculk_shrieker' : p.y < -10 ? 'stone' : 'air'
@@ -66,4 +66,11 @@ test('dangerAt: a mining target in the hearing of the sculk is left', () => {
   scanDangers(bot)
   assert.strictEqual(dangerAt(bot, { x: 6, y: -11, z: 0 }), true)
   assert.strictEqual(dangerAt(bot, { x: 30, y: -11, z: 0 }), false)
+})
+
+test('dangerAt: a mining target by a pillager in view is left (an outpost: a bot with a stone sword went for its hay bales and was shot, 26.3)', () => {
+  const bot = deepBot({ entities: [entity({ name: 'pillager', position: new Vec3(40.5, -9, 0.5) })] })
+  assert.strictEqual(pillagersNear(bot, { x: 60, y: -9, z: 0 }), true)
+  assert.strictEqual(dangerAt(bot, { x: 60, y: -9, z: 0 }), true)
+  assert.strictEqual(dangerAt(bot, { x: 80, y: -9, z: 0 }), false)
 })

@@ -165,7 +165,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     }
     const avoidLava = args.avoidLava !== false
     // not in the deep dark's hearing (a sensor's 8 blocks: each block broken a vibration, the shriekers' call for the
-    // warden: dangerAt)
+    // warden) nor by pillagers in view (an outpost's hay bales: dangerAt)
     const found = [...targets.values()]
       .filter(pos => !tried.has(vecKey(pos)) && args.exclude?.(pos) !== true && !(avoidLava && lavaBeside(p => bot.blockAt(p), pos)) && !dangerAt(bot, pos))
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
