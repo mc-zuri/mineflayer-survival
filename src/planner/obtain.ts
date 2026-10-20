@@ -161,6 +161,9 @@ export const MINE_BLOCKS = /(_ore|^ancient_debris|^deepslate|^obsidian|^stone|^g
 
 const PREFERRED_WOOD = ['oak_', 'birch_', 'spruce_']
 
+/** the fuel the held raw food's cooking leaves for the rest of the plan when anything else burns */
+const WOODEN_FUEL = ['stick', ...['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak', 'bamboo', 'crimson', 'warped'].map(w => `${w}_planks`)]
+
 /**
  * The obtain resolver: plans how to end up with `count` of an item from what the bot holds.
  * Every way of getting an item (craft, smelt, mine, kill, barter, loot, fill a bucket) is a
@@ -311,7 +314,11 @@ export class Resolver {
    * alternative that makes up what is missing (the points from one source, as a hunt for cows or a patch of berry
    * bushes gets them; what is held of the others counts)
    */
-  private ensureValue (s: State, alts: readonly string[], req: Pick<ObtainRequest, 'unit'>, count: number, path: string[], limit: number): State | null {
+  private ensureValue (s0: State, alts: readonly string[], req: Pick<ObtainRequest, 'unit'>, count: number, path: string[], limit: number): State | null {
+    if (heldFor(s0.inv, alts, req) >= count) return s0
+    // the raw food held cooked first, as far as it goes (cookedFromHeld), the rest from the cheapest one alternative:
+    // a bot with 3 raw rabbits for 20 points planned 10 berries for all 20, explored for over a snowy field
+    const s = this.cookedFromHeld(s0, alts, req, count, path, limit)
     const have = heldFor(s.inv, alts, req)
     if (have >= count) return s
     let best: State | null = null
@@ -324,6 +331,30 @@ export class Resolver {
       if (r != null && r.cost <= lim && (best == null || r.cost < best.cost)) best = r
     }
     return best
+  }
+
+  /**
+   * `s` with the alternatives the held raw food smelts into made of it (no more than the points missing): a smelt of
+   * what's held, never a hunt; as it is when none is held or the smelt can't be had within `limit`
+   */
+  private cookedFromHeld (s: State, alts: readonly string[], req: Pick<ObtainRequest, 'unit'>, count: number, path: string[], limit: number): State {
+    let t = s
+    for (const item of alts) {
+      const value = unitValue(req, item, this.registry)
+      if (value <= 0) continue
+      const raw = (this.smelting.get(item) ?? []).flatMap(r => this.alternatives(r.input))
+      const held = raw.reduce((n, r) => n + t.inv.count(r), 0)
+      if (held <= 0) continue
+      const missing = count - heldFor(t.inv, alts, req)
+      if (missing <= 0) break
+      const n = Math.min(held, Math.ceil(missing / value - 1e-9))
+      // (burning the sticks and planks held only when nothing else burns: the rest of the plan may want them, a rod's
+      // sticks on a snowy field with no tree, burnt cooking the rabbits)
+      const recipe = (this.smelting.get(item) ?? [])[0]
+      const r = this.smelt(clone(t), recipe, item, n, path, limit, WOODEN_FUEL) ?? this.smelt(clone(t), recipe, item, n, path, limit)
+      if (r != null && r.cost <= limit) t = r
+    }
+    return t
   }
 
   /** held ones first, then the common woods, then the lower tool tiers: the cheap ones tend to come first, which prunes the rest */
@@ -416,13 +447,13 @@ export class Resolver {
     return t
   }
 
-  private smelt (s: State, recipe: SmeltingRecipe, item: string, n: number, path: string[], limit: number): State | null {
+  private smelt (s: State, recipe: SmeltingRecipe, item: string, n: number, path: string[], limit: number, keepMore: readonly string[] = []): State | null {
     const own = CRAFT_TICKS + n * SMELT_TICKS
     s.cost += own
     if (s.cost > limit) return null
     const inputs = this.alternatives(recipe.input)
     const burn = n * SMELT_TICKS
-    const keep = [...path, ...(this.opts.keepFuel ?? [])]
+    const keep = [...path, ...(this.opts.keepFuel ?? []), ...keepMore]
     let t: State = s
     for (let round = 0; round < 8; round++) {
       const met = this.meet(t, [...this.stationReq(t, 'furnace'), { alts: inputs, count: n }], path, limit)
