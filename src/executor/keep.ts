@@ -89,6 +89,15 @@ const VALUABLE = new Set([
 ])
 const VALUABLE_PATTERN = /(_ore|_ingot|_nugget|_shulker_box|_smithing_template|_horse_armor)$|^shulker_box$|^raw_(iron|gold|copper)(_block)?$|^(iron|gold|diamond|emerald|lapis|redstone|netherite|copper|coal|quartz|amethyst)_block$|^music_disc_/
 
+/**
+ * Whether a death's drops are worth the trip back: something valuable (isValuable: gear, ores, metal...), food or
+ * arrows. A 26.3 bot shot by a pillager patrol with 8 dirt and 2 leaf litter went back for them, bare, into the patrol,
+ * and was shot again (full-26.3-m)
+ */
+export function dropsWorthATrip (names: string[], registry: RegistryLike): boolean {
+  return names.some(n => isValuable(n) || foodInfo(registry, n) != null || /arrow$/.test(n))
+}
+
 /** never thrown away (VALUABLE): gear, stations, ores, metal and gems, the rare drops */
 export function isValuable (name: string): boolean {
   return VALUABLE.has(name) || VALUABLE_PATTERN.test(name) || parseTool(name) != null || ARMOR.test(name) || isBed(name)

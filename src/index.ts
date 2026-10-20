@@ -13,6 +13,7 @@ import { Diagnostics, type DiagnosticsOptions } from './diagnostics'
 import { StockPolicy, type StockOptions } from './planner/stock'
 import { advancementsDone, type AdvancementProgressPacket } from './core/advancements'
 import { SCAFFOLD_ITEMS } from './executor/steps'
+import { dropsWorthATrip } from './executor/keep'
 import { rememberNetherDeath } from './nether/deaths'
 import { keepNetherTrail, pruneTrail } from './nether/trail'
 
@@ -112,7 +113,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
         // (in the overworld: the nether's roof is over everything)
         const dimension = normalizeDimension(bot.game?.dimension)
         const lookup = (p: any): any => bot.blockAt(p)
-        memory.setDeath(bot.entity.position, dimension, dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined)
+        const dropped = [...bot.inventory.items(), ...[5, 6, 7, 8, 45].map(s => bot.inventory.slots[s])].filter(i => i != null).map(i => (i as any).name as string)
+        memory.setDeath(bot.entity.position, dimension, dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined, dropsWorthATrip(dropped, bot.registry as any))
         if (dimension === 'the_nether') {
           rememberNetherDeath(memory, bot.entity.position)
           pruneTrail(memory, bot.entity.position)

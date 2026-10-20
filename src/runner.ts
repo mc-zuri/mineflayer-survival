@@ -234,8 +234,10 @@ export async function waitOutTheNight (bot: Bot, signal: AbortSignal): Promise<u
 }
 
 /** whether a death spot is worth going back to: in this dimension, not underground, in lava or the void, the items not gone yet */
-export function deathSpotWorthIt (death: { x: number, y: number, z: number, dimension: string, seen: number, underground?: boolean } | null, now: { tick: number, dimension: string, position: Vec3, minY: number, blockAt: (pos: Vec3) => { name: string } | null }, maxTicks: number): boolean {
+export function deathSpotWorthIt (death: { x: number, y: number, z: number, dimension: string, seen: number, underground?: boolean, worth?: boolean } | null, now: { tick: number, dimension: string, position: Vec3, minY: number, blockAt: (pos: Vec3) => { name: string } | null }, maxTicks: number): boolean {
   if (death == null || death.dimension !== now.dimension) return false
+  // nothing dropped worth the trip (dropsWorthATrip): the mobs that killed the bot are likely still there
+  if (death.worth === false) return false
   // a death in a cave or down a mine is left: the mobs that killed the bot in the dark are still there (and a trip
   // down after the items on seed 4 ended in a fall and another death)
   if (death.underground === true) return false
@@ -1136,7 +1138,7 @@ export class Runner {
       minY: (bot.game as any)?.minY ?? -64,
       blockAt: pos => bot.blockAt(pos)
     }, this.options.deathItemTicks ?? 6000)
-    if (!deadly && !worth) diag?.recovery({ deathSpot: death == null ? 'skipped: no death spot' : 'skipped: not worth it (another dimension, underground, lava, the void, or the items gone first)' })
+    if (!deadly && !worth) diag?.recovery({ deathSpot: death == null ? 'skipped: no death spot' : 'skipped: not worth it (nothing worth the trip, another dimension, underground, lava, the void, or the items gone first)' })
     if (death != null && worth) {
       this.log(`back to the death spot at ${death.x} ${death.y} ${death.z}`)
       try {

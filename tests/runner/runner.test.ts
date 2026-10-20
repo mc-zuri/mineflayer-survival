@@ -9,6 +9,7 @@ import { TaskRunner } from '../../src/core/taskRunner'
 import { TaskError } from '../../src/core/errors'
 import { WorldMemory } from '../../src/core/memory'
 import { Runner, deathSpotWorthIt, progressState, tickLine, type MilestoneHandler } from '../../src/runner'
+import { dropsWorthATrip } from '../../src/executor/keep'
 
 /* eslint-disable @typescript-eslint/no-var-requires */
 const registry = require('minecraft-data')('1.21.11')
@@ -147,6 +148,19 @@ test('the death spot is worth going back to only while the items last and away f
   // a death under a roof (a cave, a mine) is left for the mobs there
   assert.equal(deathSpotWorthIt({ ...death, underground: true }, now, 6000), false)
   assert.equal(deathSpotWorthIt({ ...death, underground: false }, now, 6000), true)
+  // nothing dropped worth the trip (8 dirt and 2 leaf litter shot off a bare bot by a pillager patrol, 26.3)
+  assert.equal(deathSpotWorthIt({ ...death, worth: false }, now, 6000), false)
+  assert.equal(deathSpotWorthIt({ ...death, worth: true }, now, 6000), true)
+})
+
+test('dropsWorthATrip: gear, ores, food or arrows are; a few blocks of dirt and leaf litter are not', () => {
+  const registry = require('minecraft-data')('26.3')
+  assert.equal(dropsWorthATrip(['dirt', 'leaf_litter'], registry), false)
+  assert.equal(dropsWorthATrip([], registry), false)
+  assert.equal(dropsWorthATrip(['dirt', 'stone_pickaxe'], registry), true)
+  assert.equal(dropsWorthATrip(['dirt', 'bread'], registry), true)
+  assert.equal(dropsWorthATrip(['cobblestone', 'arrow'], registry), true)
+  assert.equal(dropsWorthATrip(['raw_iron'], registry), true)
 })
 
 test('maxTicks: play stops when its tick budget runs out, the work in hand aborted', async () => {

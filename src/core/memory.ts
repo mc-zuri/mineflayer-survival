@@ -42,6 +42,8 @@ export interface Death extends Located {
   seen: number
   /** died under a roof (a cave, a mine): no sky over the spot */
   underground?: boolean
+  /** false when what it dropped is worth no trip back (dropsWorthATrip: a few blocks of dirt) */
+  worth?: boolean
 }
 
 export interface WorldMemoryJSON {
@@ -234,8 +236,8 @@ export class WorldMemory {
     return opts.count != null ? out.slice(0, opts.count) : out
   }
 
-  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean): void {
-    this.death = { ...at(pos, dimension), seen: this.now, ...(underground != null ? { underground } : {}) }
+  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean, worth?: boolean): void {
+    this.death = { ...at(pos, dimension), seen: this.now, ...(underground != null ? { underground } : {}), ...(worth != null ? { worth } : {}) }
   }
 
   toJSON (): WorldMemoryJSON {
