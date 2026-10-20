@@ -126,9 +126,12 @@ export interface FoodInfo {
 
 /**
  * Foods minecraft-data lists that can't be eaten: the fish buckets carry a food component (Items: `.component(FOOD,
- * Foods.COD)`, 1.21.11 and 26.3) but no consumable one, so using one empties the fish out (MobBucketItem)
+ * Foods.COD)`, 1.21.11 and 26.3) but no consumable one, so using one empties the fish out (MobBucketItem). And never
+ * the ominous bottle, a drink (Consumables.OMINOUS_BOTTLE) whatever a foods table says: drunk, it gives Bad Omen, and
+ * the raid comes to the next village (a patrol's captain drops one, VanillaEntityLoot's pillager CAPTAIN_WITHOUT_RAID,
+ * 1.21.11 and 26.3; killing the captain gives no omen itself)
  */
-export const NOT_EATEN = new Set(['cod_bucket', 'salmon_bucket', 'pufferfish_bucket', 'tropical_fish_bucket'])
+export const NOT_EATEN = new Set(['cod_bucket', 'salmon_bucket', 'pufferfish_bucket', 'tropical_fish_bucket', 'ominous_bottle'])
 
 /**
  * Foods whose consume effects hurt (Foods / Consumables): rotten_flesh 80% hunger, spider_eye poison,

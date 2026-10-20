@@ -1,6 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { afterEating, canEat, chooseFood, foodScore } from '../../src/skills/food'
+import { bestFoodInInventory } from '../../src/skills/eat'
+import { fakeBot, item } from '../reflexes/fakeBot'
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const foods = require('minecraft-data')('1.21.11').foodsByName
@@ -57,4 +59,15 @@ test('canEat: with a full bar only the can_always_eat foods (the golden apples, 
   for (const name of ['golden_apple', 'enchanted_golden_apple', 'chorus_fruit', 'honey_bottle', 'suspicious_stew']) assert.ok(canEat(full, name), name)
   assert.ok(!canEat(full, 'bread'))
   assert.ok(canEat({ ...full, food: 19 }, 'bread'))
+})
+
+test('the ominous bottle (the drop of a patrol captain) is never eaten or drunk, whatever a foods table says (its Bad Omen brings a raid)', () => {
+  const state = { food: 2, saturation: 0, health: 4 }
+  const foods: any = { ominous_bottle: { name: 'ominous_bottle', foodPoints: 4, saturation: 2 }, bread: { name: 'bread', foodPoints: 5, saturation: 6 } }
+  assert.strictEqual(chooseFood([{ name: 'ominous_bottle' }], foods, state), null)
+  assert.strictEqual(chooseFood([{ name: 'ominous_bottle' }, { name: 'bread' }], foods, state)?.name, 'bread')
+  for (const version of ['1.21.11', '26.3']) {
+    const bot = fakeBot({ version, food: 2, health: 4, items: [item('ominous_bottle', 1, undefined, version)] })
+    assert.strictEqual(bestFoodInInventory(bot), null, version)
+  }
 })
