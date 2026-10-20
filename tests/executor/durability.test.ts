@@ -88,6 +88,25 @@ test('watchToolWear lets be a tool carried worn but not worn further, one with a
   assert.deepEqual(stops.map(s => `${s.kind}:${s.material}:${s.uses}`), ['sword:stone:10'])
 })
 
+test('watchToolWear stops for a pickaxe or a sword only: a hoe (a nether forest\'s wart blocks) or a shovel worn down is used till it breaks', () => {
+  const stops: any[] = []
+  for (const name of ['wooden_hoe', 'stone_shovel', 'stone_axe']) {
+    const bot = wearBot([{ name, maxDurability: 59, durabilityUsed: 40, slot: 36 }])
+    watchToolWear(bot, { minUses: 24, active: () => true, stop: w => stops.push(w) })
+    bot.emit('physicsTick')
+    bot.heldItem.durabilityUsed++
+    bot.emit('physicsTick')
+  }
+  assert.equal(stops.length, 0)
+  // a task that asks for the hoe's wear to be watched (kinds)
+  const hoe = wearBot([{ name: 'wooden_hoe', maxDurability: 59, durabilityUsed: 40, slot: 36 }])
+  watchToolWear(hoe, { minUses: 24, active: () => true, kinds: ['hoe'], stop: w => stops.push(w) })
+  hoe.emit('physicsTick')
+  hoe.heldItem.durabilityUsed++
+  hoe.emit('physicsTick')
+  assert.deepEqual(stops.map(s => `${s.kind}:${s.material}`), ['hoe:wooden'])
+})
+
 test('replacementTiers: the worn tool\'s tier, then the lower ones down to stone', () => {
   assert.deepEqual(replacementTiers('diamond'), ['diamond', 'iron', 'stone'])
   assert.deepEqual(replacementTiers('iron'), ['iron', 'stone'])

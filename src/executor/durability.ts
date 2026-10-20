@@ -60,6 +60,13 @@ export interface WornTool {
   uses: number
 }
 
+/**
+ * The tool kinds whose wear stops a task: a pickaxe (stone and ores take one) and a sword (a fight). A hoe, a shovel or
+ * an axe the task happens to swing (a nether forest's wart blocks take a hoe best) does without: the hand or another
+ * tool does their blocks, so their wear never stops the task (a 26.3 blaze rods trip was stopped for a wooden hoe)
+ */
+export const WATCHED_TOOL_KINDS: readonly ToolKind[] = ['pickaxe', 'sword']
+
 /** what the wear watch reads of the bot: the held item and the bag, each tick */
 export interface WearSource {
   heldItem: (WornItem & { slot?: number }) | null
@@ -75,6 +82,8 @@ export interface WearWatchOptions {
   active: () => boolean
   /** a worn tool let be (its replacement failed a while ago) */
   muted?: (tool: WornTool) => boolean
+  /** the tool kinds a task is stopped for (default WATCHED_TOOL_KINDS): the others are used till they break */
+  kinds?: readonly ToolKind[]
   /** called once, with the tool, when the task is to stop */
   stop: (tool: WornTool) => void
 }
@@ -92,7 +101,7 @@ export function watchToolWear (source: WearSource, opts: WearWatchOptions): () =
     if (done) return
     const held = source.heldItem
     const tool = held == null ? null : parseTool(held.name)
-    if (!opts.active() || held == null || tool == null) { last = null; return }
+    if (!opts.active() || held == null || tool == null || !(opts.kinds ?? WATCHED_TOOL_KINDS).includes(tool.kind)) { last = null; return }
     const uses = usesLeft(held)
     const wore = last != null && last.slot === held.slot && last.name === held.name && uses < last.uses
     last = { slot: held.slot, name: held.name, uses }
