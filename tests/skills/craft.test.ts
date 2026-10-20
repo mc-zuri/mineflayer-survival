@@ -126,3 +126,24 @@ test('craft: the reflexes are held while bot.craft\'s clicks are on their way, i
   // released after
   assert.deepStrictEqual([...held.values()], [0, 0, 0])
 })
+
+test('craft: a result the bag shows only ticks after the steps (the menu closed with the inventory as it was) is waited for', async () => {
+  const { craft } = require('../../src/skills/craft')
+  const bot = fakeCraftBot({ oak_planks: 2 })
+  let ticks = 0
+  let backAt = Infinity
+  bot.on('physicsTick', () => { if (++ticks >= backAt) bot.counts.set('stick', 4) })
+  // the step sees its sticks; then the bag shows none of them until the server's answer, 15 ticks on
+  bot.craft = async () => {
+    bot.counts.set('oak_planks', 0)
+    bot.counts.set('stick', 4)
+    setImmediate(() => { bot.counts.set('stick', 0); backAt = ticks + 15 })
+  }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 5)
+  try {
+    const res = await craft(bot, { item: 'stick', count: 4 })
+    assert.strictEqual(res.crafted, 4)
+  } finally {
+    clearInterval(ticking)
+  }
+})

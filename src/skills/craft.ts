@@ -9,7 +9,7 @@ import { navigateToReach } from './navigate'
 import { settlePickups } from './pickupDrops'
 import { placeBlock } from './placeBlock'
 import { findPlacementNear } from './placement'
-import { countItems, inventoryItems, itemId, resyncInventory, settleInventory, type Block } from './util'
+import { countItems, inventoryItems, itemId, resyncInventory, settleInventory, waitTicks, type Block } from './util'
 import { findBlock } from '../core/findBlocks'
 
 type CraftingFunc = Awaited<ReturnType<typeof buildStatic>>
@@ -117,6 +117,9 @@ export async function craftHeld (bot: Bot, recipe: any, times: number, table: Bl
   }
 }
 
+/** the recounts, 10 ticks apart, of a craft whose result the bag doesn't show yet */
+const FINAL_RECOUNTS = 3
+
 export async function craft (bot: Bot, args: CraftArgs, signal?: AbortSignal): Promise<CraftResult> {
   throwIfAborted(signal)
   const count = args.count ?? 1
@@ -183,6 +186,14 @@ export async function craft (bot: Bot, args: CraftArgs, signal?: AbortSignal): P
   // the count the server has, not the clicks' prediction of it
   await settleInventory(bot, signal)
   await resyncInventory(bot, signal)
+  // on a real-time server the menu closed can leave the inventory as it stood before the server's last answers, which
+  // come ticks later (the steps had their results, the bag shows none of them): it is waited for before the craft
+  // fails (a stone pickaxe the server made, 'crafted 0 of 1' and the step failed twice, pnpm e2e --grim)
+  for (let i = 0; i < FINAL_RECOUNTS && result().crafted < count; i++) {
+    await waitTicks(bot, 10, signal)
+    await settleInventory(bot, signal)
+    await resyncInventory(bot, signal)
+  }
   const res = result()
   if (res.crafted < count) throw new SkillError('VERIFY_FAILED', `crafted ${res.crafted} of ${count} ${args.item}`, res)
 
