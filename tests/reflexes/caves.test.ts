@@ -142,3 +142,34 @@ test('caves reflex: water a dig of the bot\'s tunnel opened onto is sealed again
   const kit = READY_KIT()
   assert.strictEqual(run(kit), null)
 })
+
+test('caves reflex: a bot under the rule lingering in a cave (CAVE_LINGER_TICKS within a few blocks) is taken back to its tunnel; one going through it, or cave-ready, is let be', async () => {
+  const { caveExit } = await import('../../src/skills/caves')
+  const run = (input: Partial<FakeBotInput>, moves: Vec3[]): Array<string | null> => {
+    const bot = fakeBot({ world: caveWorld, position: moves[0], ...input })
+    bot.game.dimension = 'overworld'
+    caveCells(bot)
+    for (let x = -6; x <= 0; x++) for (const y of [20, 21]) bot.emit('diggingCompleted', { position: new Vec3(x, y, 0) })
+    const engine = new ReflexEngine(bot, { enabled: false })
+    const out: Array<string | null> = []
+    for (const at of moves) {
+      bot.entity.position = at
+      ;(engine as any).tick += 50
+      const task = cavesReflex.check(engine.context())
+      out.push(task == null ? null : (task.detail ?? task.name))
+    }
+    engine.stop()
+    return out
+  }
+  const still = [new Vec3(3.5, 20, 0.5), new Vec3(3.5, 20, 0.5), new Vec3(3.6, 20, 0.5)]
+  assert.deepStrictEqual(run({ items: [item('cobblestone', 8)] }, still), [null, null, 'leave the cave'])
+  // walking through it: a few blocks each look
+  assert.deepStrictEqual(run({ items: [item('cobblestone', 8)] }, [new Vec3(1.5, 20, 0.5), new Vec3(5.5, 20, 0.5), new Vec3(5.5, 20, 3.5)]), [null, null, null])
+  assert.deepStrictEqual(run(READY_KIT(), still), [null, null, null])
+  // the way out: the tunnel's end, the bot's own cell, nearest
+  const bot = fakeBot({ world: caveWorld, position: still[0] })
+  const cells = caveCells(bot)
+  for (let x = -6; x <= 0; x++) for (const y of [20, 21]) bot.emit('diggingCompleted', { position: new Vec3(x, y, 0) })
+  const { dugByBot } = await import('../../src/skills/caves')
+  assert.deepStrictEqual(caveExit(cells, new Vec3(3, 20, 0), p => dugByBot(bot, p))?.toArray(), [0, 20, 0])
+})

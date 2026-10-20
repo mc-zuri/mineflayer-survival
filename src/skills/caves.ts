@@ -486,6 +486,8 @@ export async function sealPocket (bot: Bot, signal?: AbortSignal): Promise<numbe
 
 /** ticks between the cave-entry lines (watchCaveEntries) */
 export const CAVE_ENTRY_LOG_TICKS = 200
+/** ticks out of the caves before a way back in counts as another entry (a body at a cave's edge steps in and out) */
+export const CAVE_ENTRY_GAP = 40
 
 const entries = new WeakMap<Bot, { count: number }>()
 
@@ -506,6 +508,7 @@ export function watchCaveEntries (bot: Bot, log: (line: string) => void): void {
   let wasCave = false
   let ready: boolean | null = bot.entity != null && bot.inventory != null ? caveReadyNow(bot) : null
   let lastLog = -Infinity
+  let lastInCave = -Infinity
   let ticks = 0
   bot.on('physicsTick', () => {
     ticks++
@@ -517,11 +520,12 @@ export function watchCaveEntries (bot: Bot, log: (line: string) => void): void {
     }
     const p = bot.entity.position
     const feet = `${Math.floor(p.x)},${Math.floor(p.y + 1e-6)},${Math.floor(p.z)}`
+    if (wasCave) lastInCave = ticks
     if (feet === lastFeet) return
     lastFeet = feet
     if (!caveRuleOn(bot)) { wasCave = false; return }
     const cave = caveCells(bot).isCave(new Vec3(Math.floor(p.x), Math.floor(p.y + 1e-6), Math.floor(p.z)))
-    if (cave && !wasCave) {
+    if (cave && !wasCave && ticks - lastInCave >= CAVE_ENTRY_GAP) {
       e.count++
       if (ticks - lastLog >= CAVE_ENTRY_LOG_TICKS) {
         lastLog = ticks
@@ -530,4 +534,54 @@ export function watchCaveEntries (bot: Bot, log: (line: string) => void): void {
     }
     wasCave = cave
   })
+}
+
+/** how far round (across, and up or down) the way out of a cave looks for the rock's cells (caveExit) */
+export const CAVE_EXIT_RADIUS = 8
+
+/**
+ * The nearest cell out of the cave by the bot (within CAVE_EXIT_RADIUS) to stand in: its feet and head cells open,
+ * dry and no cave's, a full block under them; one the bot dug first (its tunnel), then the rest by distance. Null
+ * when there's none.
+ */
+export function caveExit (cells: CaveCells, feet: Vec3, dug: (p: Vec3) => boolean = () => false): Vec3 | null {
+  const r = CAVE_EXIT_RADIUS
+  let best: Vec3 | null = null
+  let bestScore = Infinity
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dz = -r; dz <= r; dz++) {
+        const c = feet.offset(dx, dy, dz)
+        const d = Math.abs(dx) + Math.abs(dy) + Math.abs(dz)
+        const score = d + (dug(c) ? 0 : 2 * r)
+        if (score >= bestScore) continue
+        if (!openBlock(cells.view.block(c)) || !openBlock(cells.view.block(c.offset(0, 1, 0)))) continue
+        if (cells.view.block(c.offset(0, -1, 0))?.boundingBox !== 'block') continue
+        if (cells.isCave(c) || cells.isCave(c.offset(0, 1, 0))) continue
+        best = c
+        bestScore = score
+      }
+    }
+  }
+  return best
+}
+
+/**
+ * Out of the cave the bot lingers in (a fight that took it there, a fall, a station put up by its edge) to the
+ * nearest of the rock's cells (caveExit), the pathfinder's way (the cave rule's costs on); resolves whether it got
+ * out. The caves reflex then seals the holes by it.
+ */
+export async function leaveCave (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  const cells = caveCells(bot)
+  const feet = bot.entity.position.floored()
+  const exit = caveExit(cells, feet, p => dugByBot(bot, p))
+  if (exit == null) return false
+  const { navigate } = await import('./navigate')
+  const { goals } = await import('@nxg-org/mineflayer-pathfinder')
+  try {
+    await navigate(bot, { goal: new goals.GoalBlock(exit.x, exit.y, exit.z) }, signal)
+  } catch (err) {
+    if (signal?.aborted === true) throw err
+  }
+  return !cells.isCave(bot.entity.position.floored())
 }

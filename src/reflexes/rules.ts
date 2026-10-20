@@ -23,7 +23,7 @@ import { XP_FARM_POI } from '../skills/spawnerFarm'
 import { SEAL_MAX_BLOCKS, openCells, sealBox, sealIn } from '../skills/sealIn'
 import { sealItem } from '../skills/shelter'
 import { countItems } from '../skills/util'
-import { caveCells, caveOpenings, caveRuleOn, inCaveWall, liquidOpenings, sealCaveOpenings } from '../skills/caves'
+import { caveCells, caveOpenings, caveRuleOn, inCaveWall, leaveCave, liquidOpenings, sealCaveOpenings } from '../skills/caves'
 import { noteDrowning } from '../skills/breath'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
@@ -1056,7 +1056,16 @@ export const CAVE_RESEAL_TICKS = 2400
 /** ticks between the caves reflex's looks for holes while the feet stay in their cell */
 export const CAVE_LOOK_TICKS = 10
 
-const caveLooks = new WeakMap<Bot, { at: number, feet: string, sealed: Map<string, { cell: Vec3, tick: number }>, letBeUntil: number }>()
+/**
+ * ticks a bot under the cave rule may stay in a cave within CAVE_LINGER_DISTANCE of where it came in before the caves
+ * reflex takes it out (a way through goes on: it moves)
+ */
+export const CAVE_LINGER_TICKS = 100
+export const CAVE_LINGER_DISTANCE = 4
+/** ticks the caves reflex waits after a way out of a cave failed */
+export const CAVE_LEAVE_RETRY_TICKS = 600
+
+const caveLooks = new WeakMap<Bot, { at: number, feet: string, sealed: Map<string, { cell: Vec3, tick: number }>, letBeUntil: number, inCave: { since: number, at: Vec3 } | null, leaveAfter: number }>()
 
 /**
  * The holes from the bot's tunnel into a cave (caveOpenings: a cave's cells against its feet's or head's cells, the bot
@@ -1074,7 +1083,7 @@ export const cavesReflex: Reflex = {
     const e = bot.entity as any
     if (e.onGround !== true || e.isInWater === true || e.isInLava === true) return null
     let look = caveLooks.get(bot)
-    if (look == null) caveLooks.set(bot, look = { at: -Infinity, feet: '', sealed: new Map(), letBeUntil: -Infinity })
+    if (look == null) caveLooks.set(bot, look = { at: -Infinity, feet: '', sealed: new Map(), letBeUntil: -Infinity, inCave: null, leaveAfter: -Infinity })
     const feet = bot.entity.position.floored().toString()
     if (feet === look.feet && ctx.tick - look.at < CAVE_LOOK_TICKS && ctx.tick >= look.at) return null
     look.at = ctx.tick
@@ -1089,6 +1098,28 @@ export const cavesReflex: Reflex = {
       }
     }
     if (ctx.tick < l.letBeUntil && l.letBeUntil - ctx.tick <= CAVE_RESEAL_TICKS) return null
+    // lingering in a cave (a fight took it there, a fall, a station by its edge), out of a fight: back to the rock's
+    // cells, its holes sealed after. A 1.21.11 bot smelted its salmon in a cave at y -20 after a skeleton's fight took it
+    // in, 1400 ticks in and out of it (grimls-2)
+    const pos = bot.entity.position
+    if (caveRuleOn(bot) && caveCells(bot).isCave(pos.floored())) {
+      if (l.inCave == null || pos.distanceTo(l.inCave.at) >= CAVE_LINGER_DISTANCE) l.inCave = { since: ctx.tick, at: pos.clone() }
+      if (!ctx.inCombat && ctx.tick - l.inCave.since >= CAVE_LINGER_TICKS && ctx.tick >= l.leaveAfter) {
+        return {
+          name: 'caves',
+          priority: config.caves.priority,
+          detail: 'leave the cave',
+          run: async (signal) => {
+            l.inCave = null
+            const out = await leaveCave(bot, signal)
+            if (!out) l.leaveAfter = ctx.tick + CAVE_LEAVE_RETRY_TICKS
+            return out
+          }
+        }
+      }
+      return null
+    }
+    l.inCave = null
     const holes = caveOpenings(bot)
     // (and the water or lava a dig of its tunnel opened onto)
     const wet = liquidOpenings(bot)

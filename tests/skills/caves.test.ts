@@ -303,6 +303,11 @@ test('watchCaveEntries: each way into a cave under the rule counted and logged, 
   watchCaveEntries(bot, l => lines.push(l))
   const walk = (x: number): void => { bot.entity.position = new Vec3(x + 0.5, 20, 0.5); bot.emit('physicsTick') }
   for (const x of [-1, 0, 1, 2, 3, 2, 1, 0, 1, 2]) walk(x)
+  // (out and in again at once: a body at the cave's edge, one entry)
+  assert.equal(caveEntries(bot), 1)
+  walk(0)
+  for (let i = 0; i < 40; i++) bot.emit('physicsTick')
+  walk(1)
   assert.equal(caveEntries(bot), 2)
   assert.match(lines[0], /^caves: into a cave at 1 20 0 \(1 so far, not cave-ready: /)
   // ready (its kit put on): the gate's line, no more counting
