@@ -334,6 +334,14 @@ export const HERD_TEND_TICKS = 6000
 /** ticks an upkeep of the herd between trips may take */
 export const HERD_UPKEEP_TICKS = 6000
 
+/**
+ * ticks a restock's plans (restockGoals) may take, the reflexes' not counted, before the work goes on without the rest
+ * (tried again after RESTOCK_RETRY_TICKS): a 1.21.11 bot with a full bar and 14 points carried explored for kelp for
+ * its restock from t157268 to t186669 (some 18000 ticks of its own, the night's 11000 besides), the enchanting
+ * stalled (rt-1)
+ */
+export const RESTOCK_TICKS = 12000
+
 /** ticks a restock that failed waits before it is tried again (the work goes on meanwhile) */
 export const RESTOCK_RETRY_TICKS = 6000
 
@@ -735,7 +743,11 @@ export class Runner {
             await this.tendHerdFor(FOOD_POINTS - ownedInventory(this.bot).foodPoints(), s)
             // then the rest from food land when home's has none
             if (restockGoals(progressState(this.bot, this.memory), reachedIds) != null) await this.toFoodLand(s)
-            await this.executor.obtain(restockGoals(progressState(this.bot, this.memory), reachedIds) ?? [], s)
+            // (RESTOCK_TICKS of its own at most, the reflexes' not counted: the milestone goes on after, the meals
+            // keep the bar up meanwhile)
+            await this.withinTicks(RESTOCK_TICKS, s, () => (this.executor.tasks.current?.priority ?? 0) <= 0, async (t) => {
+              await this.executor.obtain(restockGoals(progressState(this.bot, this.memory), reachedIds) ?? [], t)
+            })
           }))
         } catch (err) {
           if (stopped()) return this.stop('food', 'aborted', err)

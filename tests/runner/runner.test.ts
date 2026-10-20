@@ -959,3 +959,54 @@ test('foodWorking: a try of FOOD_DRY_TICKS or more that got no food counts dry, 
   await runner.foodWorking(async () => await ticks(FOOD_DRY_TICKS), false)
   assert.equal(runner.foodDry, 0)
 })
+
+test('a food restock that gets nothing gives up after RESTOCK_TICKS of its own (a reflex\'s not counted) and the milestone goes on, tried again after RESTOCK_RETRY_TICKS (rt-1: kelp explored for 29000 ticks, the enchanting held up)', async () => {
+  const { RESTOCK_TICKS } = await import('../../src/runner')
+  const bot = fakeBot()
+  bot.waitForTicks = async () => {}
+  const worked: string[] = []
+  const lines: string[] = []
+  const give = (items: Record<string, number>): MilestoneHandler => async ({ milestone }) => {
+    worked.push(milestone.id)
+    for (const [n, c] of Object.entries(items)) bot.give(n, c)
+  }
+  let ironTries = 0
+  const handlers = {
+    wood: give({ wooden_pickaxe: 1, crafting_table: 1 }),
+    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, coal: 16 }),
+    food: give({ cooked_beef: 8 }),
+    iron: async () => {
+      worked.push('iron')
+      // the first time, most of the food eaten on the way: 1 beef (8 points) left, under the restock's mark
+      if (ironTries++ === 0) { bot.give('cooked_beef', -7); return }
+      give({ iron_pickaxe: 1, iron_sword: 1, iron_helmet: 1, iron_chestplate: 1, iron_leggings: 1, iron_boots: 1, shield: 1, bucket: 1 })({ milestone: { id: 'iron' } } as any)
+      worked.pop()
+    }
+  }
+  // the restock's steps explore and find nothing: the ticks go by until the step is stopped; a reflex takes 500 of
+  // them in between, not counted against the restock
+  let explored = 0
+  let reflexDone = false
+  const explore = async (_step: any, ctx: any): Promise<any> => {
+    for (;;) {
+      if (ctx.signal.aborted) throw ctx.signal.reason
+      if (explored === 1000 && !reflexDone) {
+        // (preempts the step, which runs again after it)
+        reflexDone = true
+        bot.survival.tasks.enqueue({ name: 'reflex:fight', priority: 50 }, async () => { for (let i = 0; i < 500; i++) { bot.emit('physicsTick'); await Promise.resolve() } })
+      }
+      explored++
+      bot.emit('physicsTick')
+      await Promise.resolve()
+    }
+  }
+  const runners = { kill: explore, mine: explore, fish: explore, farm: explore }
+  const runner = new Runner(bot, { handlers, until: 'iron', skip: ['base'], log: l => lines.push(l), executor: { runners, log: () => {}, maxStepFailures: 30 } })
+  const result = await runner.play()
+  assert.equal(result.reason, 'until')
+  assert.deepEqual(worked, ['wood', 'stone', 'food', 'iron', 'iron'])
+  assert.ok(lines.some(l => /food low \(8 points\)/.test(l)), lines.join('\n'))
+  assert.ok(lines.some(l => new RegExp(`no more food for now: out of its ${RESTOCK_TICKS} ticks`).test(l)), lines.join('\n'))
+  // its own ticks only: the reflex's 500 on top
+  assert.ok(explored >= RESTOCK_TICKS - 5 && explored <= RESTOCK_TICKS + 5, String(explored))
+})
