@@ -74,6 +74,10 @@ test('powder snow is a hazard: the cells the bot is in are dug, the head first',
   const free = fakeBot({ position: new Vec3(3.5, 64, 0.5), world: snow })
   assert.strictEqual(inHazard(free), false)
   assert.strictEqual(powderSnowToDig(free), null)
+  // the box's side in the snow beside the bot, its middle out of it: that cell dug too
+  const side = fakeBot({ position: new Vec3(1.1, 64, 0.5), world: snow })
+  assert.strictEqual(inHazard(side), true)
+  assert.deepStrictEqual(powderSnowToDig(side)?.x, 0)
 })
 
 test('fireToPutOut: the fire at the feet or head, none elsewhere', async () => {

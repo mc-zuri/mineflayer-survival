@@ -105,6 +105,9 @@ export function fireToPutOut (bot: Bot): Vec3 | null {
 export function powderSnowToDig (bot: Bot): Vec3 | null {
   const feet = bot.entity.position.floored()
   for (const p of [feet.offset(0, 1, 0), feet]) if (FREEZING.has(nameAt(bot, p) ?? '')) return p
+  // any cell the box reaches into (Entity.isInPowderSnow is the box's: a 26.3 bot's side in the snow beside a slope,
+  // its middle out of it, froze to death, the reflex going 40 times without digging any, and twice at the spot)
+  for (const p of boxCells(bot)) if (FREEZING.has(nameAt(bot, p) ?? '')) return p
   return null
 }
 
