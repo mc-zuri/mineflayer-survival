@@ -7,7 +7,7 @@
 // 3 runs of 3, with none 0 of 3 (tests/integration/blaze BLAZE_KIT=runIron BLAZE_FIRE_RES=2).
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
-import { isAbort, throwIfAborted } from '../skills/errors'
+import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { brew, waterBottles, FIRE_RESISTANCE_BREW } from '../skills/brew'
 import { collectBlock } from '../skills/collectBlock'
 import { craft } from '../skills/craft'
@@ -24,6 +24,9 @@ import { findBlocks } from '../core/findBlocks'
 import { withNetherSafety } from './safety'
 import { fillNook } from './blazeFight'
 import { collectBlazeRods, findBlazeSpawner, unreachableSpawners, type BlazeRodsArgs, type BlazeRodsResult } from './fortressSkills'
+
+/** the brew (two of BREW_TICKS in a box) is made no nearer the spawner than this: its blazes shoot from 16 off and more */
+export const BREW_CLEAR = 16
 
 /** blaze rods the brewing takes: the stand's, and the blaze powder's for its fuel (2 of a rod, 1 a brew of 20) */
 export const BREW_RODS = 2
@@ -287,7 +290,10 @@ export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count
         await collectBlazeRods(bot, { ...args, count: countItems(bot, 'blaze_rod') + 1 }, signal)
       }
       if (makings() && countItems(bot, 'blaze_rod') >= rodsFor()) {
-        if (bot.entity.position.distanceTo(away) > 4) await travel(bot, { target: away, range: 2, trail: false }, signal)
+        // (to its height too: a 26.3 bot's trip ended over where it came in, 3 off the nook under seed 2's throne, and it
+        // brewed there in the blazes' fire and burned)
+        if (bot.entity.position.distanceTo(away) > 4) await travel(bot, { target: away, range: 2, exactY: true, trail: false }, signal)
+        if (bot.entity.position.distanceTo(spawner) < BREW_CLEAR) throw new SkillError('NO_PATH', `no way back to ${away.floored().toString()} to brew at, ${bot.entity.position.distanceTo(spawner).toFixed(0)} off the spawner`)
         // the stand and the powder made before the box (its blocks would take the stand's cobblestone: 'can't craft 1
         // brewing_stand', 26.3)
         if (countItems(bot, 'blaze_powder') < creamToMake(bot) + 1) await craft(bot, { item: 'blaze_powder' }, signal)
