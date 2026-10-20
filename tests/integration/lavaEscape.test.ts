@@ -42,4 +42,23 @@ describe(`out of a wide lava pool on a ${DEFAULT_VERSION} server`, { timeout: 10
     assert.equal(inHazard(bot), false)
     assert.ok(countItems(bot, 'cobblestone') < 16)
   })
+
+  it('pours its water bucket into the lava of a walled pit it has no block to climb out of, and takes the water back', async () => {
+    // (40 blocks over, at the flat ground's height) a 5 x 5 pit of lava a block deep, its walls 3 high
+    const at = bot.entity.position.floored()
+    const o = at.offset(40, 0, 0)
+    o.y = -60
+    const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
+    await run(`fill ${xyz(-3, -2, -3)} ${xyz(3, 2, 3)} stone`)
+    await run(`fill ${xyz(-2, -1, -2)} ${xyz(2, -1, 2)} lava`)
+    await run(`fill ${xyz(-2, 0, -2)} ${xyz(2, 4, 2)} air`)
+    await run(`clear ${USERNAME}`)
+    await run(`give ${USERNAME} water_bucket 1`)
+    await run(`effect give ${USERNAME} fire_resistance 120 0 true`)
+    await run(`tp ${USERNAME} ${o.x + 0.5} ${o.y - 1} ${o.z + 0.5}`)
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'water_bucket') > 0 && inHazard(bot) && bot.entity.position.distanceTo(o.offset(0.5, -1, 0.5)) < 1.5, 100))
+    await escapeHazard(bot, { maxTicks: 300 })
+    assert.equal(inHazard(bot), false)
+    assert.equal(countItems(bot, 'water_bucket'), 1, 'the water scooped back')
+  })
 })

@@ -236,6 +236,8 @@ export interface EscapeHazardOptions extends SkillOptions {
   maxTicks?: number
 }
 
+const inTheNether = (bot: Bot): boolean => /nether/.test(String(bot.game?.dimension ?? ''))
+
 /** Gets out of lava or fire onto safe ground (swimming up in lava), then to water if still burning and near. */
 export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): Promise<{ ticks: number }> {
   const radius = opts.searchRadius ?? 6
@@ -243,6 +245,7 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
   let target: Vec3 | null = null
   let hotTicks = 0
   let covered = false
+  let watered: Vec3 | null = null
   try {
     for (let t = 0; t < maxTicks; t++) {
       throwIfAborted(opts.signal)
@@ -253,6 +256,12 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
       if (!inHazard(bot) && bot.entity.onGround && isSafeStand(bot, here)) {
         // out; still burning with water close: put it out (Entity.updateInWaterStateAndDoFluidPushing clears the fire)
         const waterRadius = opts.waterRadius ?? 6
+        // the water poured scooped up again (the bucket's the portal's and the next fall's)
+        if (watered != null && nameAt(bot, watered) === 'water' && bot.inventory.items().some(i => i.name === 'bucket')) {
+          const { fillBucket } = await import('./bucket')
+          await fillBucket(bot, { fluid: 'water', pos: watered }, opts.signal).catch(err => { if (isAbort(err)) throw err })
+          watered = null
+        }
         if (!isOnFire(bot) || waterRadius <= 0) return { ticks: t }
         const water = nearestSpot(bot, waterRadius, p => nameAt(bot, p) === 'water')
         if (water == null) return { ticks: t }
@@ -306,6 +315,19 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
         // swam up in place for 200 ticks till it burned (26.3)
         target = nearestSpot(bot, radius, p => isSafeStand(bot, p) && !p.equals(here)) ??
           (t % 40 === 0 ? nearestSpot(bot, opts.farRadius ?? 16, p => isSafeStand(bot, p) && !p.equals(here)) : target)
+      }
+      // in the overworld's lava with a water bucket: the water poured where the bot is (the lava's cell taken by it,
+      // the sources about set to obsidian, the burning put out), once. A 26.3 bot at a deep pool's shore swam in the
+      // lava 110 ticks till it died, its water bucket in the bag
+      if (inLava(bot) && t >= 2 && watered == null && !inTheNether(bot) && bot.inventory.items().some(i => i.name === 'water_bucket')) {
+        watered = here
+        bot.clearControlStates()
+        const { emptyBucket } = await import('./bucket')
+        await emptyBucket(bot, { pos: here, fluid: 'water' }, opts.signal).catch(err => {
+          if (isAbort(err)) throw err
+          trace('escapeHazard: no water poured:', (err as Error).message)
+        })
+        continue
       }
       // in lava a while with no ground near: a block put into the lava beside the bot, against the floor under it,
       // to climb out onto (the basalt deltas' pools: lava all round, no stand within reach, 26.3's deaths in the nether)
