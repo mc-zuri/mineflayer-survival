@@ -96,3 +96,19 @@ test('scanSpot: with no enderman in sight from the cover\'s top, the nearest cel
   assert.equal(scanSpot(lookup, cover, [enderman], () => ({})), null, 'none seen from anywhere')
   assert.equal(scanSpot(lookup, cover, [], () => null), null)
 })
+
+test('coverView: the clear sight lines from a top, fewer with a wall by it; planEndermanCovers leaves out the tops excluded (one no enderman was seen from)', async () => {
+  const { coverView, planEndermanCovers } = await import('../../src/nether/endermanCover')
+  const top = new Vec3(0, 64, 0)
+  const open = coverView(top, () => null)
+  assert.equal(open, 32)
+  // a wall 2 off on the -x side: those lines end there
+  const walled = coverView(top, (from: Vec3, dir: Vec3) => dir.x < -0.3 ? { intersect: from.plus(dir.scaled(2)) } : null)
+  assert.ok(walled < open && walled > 15, String(walled))
+  const lookup = forest()
+  const all = planEndermanCovers(lookup, new Vec3(0.5, 64, 0.5), {}, undefined, 5)
+  assert.equal(all.length, 5)
+  assert.equal(new Set(all.map(c => c.top.toString())).size, 5, 'no top twice')
+  const away = planEndermanCovers(lookup, new Vec3(0.5, 64, 0.5), { exclude: t => t.distanceTo(new Vec3(0, 64, 0)) < 10 }, undefined, 5)
+  assert.ok(away.length > 0 && away.every(c => c.top.distanceTo(new Vec3(0, 64, 0)) >= 10))
+})

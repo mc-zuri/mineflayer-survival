@@ -63,6 +63,8 @@ export interface CoverOptions {
   dy?: number
   /** how deep the bot's cell goes under the surface at most (default 5; 3 at least) */
   maxDepth?: number
+  /** stair tops not to take (a cover from which no enderman was seen) */
+  exclude?: (top: Vec3) => boolean
 }
 
 /** the horizontal ways, a cell long */
@@ -151,11 +153,16 @@ export function firmAround (lookup: BlockLookup, feet: Vec3, except: Vec3[] = []
 
 /** the cover nearest `from` (the fewest blocks to dig, the shallowest, the nearest), or null */
 export function planEndermanCover (lookup: BlockLookup, from: Vec3, opts: CoverOptions = {}, reasons?: Map<string, number>): EndermanCover | null {
+  return planEndermanCovers(lookup, from, opts, reasons, 1)[0] ?? null
+}
+
+/** the `n` cheapest covers about `from` (planEndermanCover's), no two from the same top, cheapest first */
+export function planEndermanCovers (lookup: BlockLookup, from: Vec3, opts: CoverOptions = {}, reasons?: Map<string, number>, n = 12): EndermanCover[] {
   const radius = opts.radius ?? 12
   const dy = opts.dy ?? 5
   const maxDepth = Math.max(3, opts.maxDepth ?? 5)
   const base = from.floored()
-  let best: { cover: EndermanCover, cost: number } | null = null
+  const found: Array<{ cover: EndermanCover, cost: number }> = []
   for (let x = -radius; x <= radius; x++) {
     for (let z = -radius; z <= radius; z++) {
       const flat = Math.hypot(x, z)
@@ -164,6 +171,8 @@ export function planEndermanCover (lookup: BlockLookup, from: Vec3, opts: CoverO
       for (let y = -dy - 8; y <= dy; y++) {
         const top = base.offset(x, y, z)
         if (!open(lookup(top)) || !solid(lookup(top.offset(0, -1, 0)))) continue
+        if (opts.exclude?.(top) === true) continue
+        let best: { cover: EndermanCover, cost: number } | null = null
         for (const facing of WAYS) {
           for (let depth = 3; depth <= maxDepth; depth++) {
             const cover = coverAt(lookup, top, facing, depth, reasons)
@@ -173,10 +182,26 @@ export function planEndermanCover (lookup: BlockLookup, from: Vec3, opts: CoverO
             break
           }
         }
+        if (best != null) found.push(best)
       }
     }
   }
-  return best?.cover ?? null
+  return found.sort((a, b) => a.cost - b.cost).slice(0, n).map(f => f.cover)
+}
+
+/** the clear sight lines from a stand's eyes (feet at `feet`): 16 ways round, level and a little up, each up to 32 */
+export function coverView (feet: Vec3, raycast: Raycast): number {
+  const eye = feet.offset(0.5, 1.62, 0.5)
+  let sum = 0
+  for (let i = 0; i < 16; i++) {
+    const a = i * Math.PI / 8
+    for (const up of [0, 0.15]) {
+      const dir = new Vec3(Math.cos(a), up, Math.sin(a)).normalize()
+      const hit: any = raycast(eye, dir, 32)
+      sum += hit?.intersect != null ? Math.min(32, (hit.intersect as Vec3).distanceTo(eye)) : hit != null && hit.position != null ? Math.min(32, (hit.position as Vec3).offset(0.5, 0.5, 0.5).distanceTo(eye)) : 32
+    }
+  }
+  return sum / 32
 }
 
 /**
@@ -367,7 +392,7 @@ export interface CoverFightResult {
   kills: number
   ticks: number
   /** why it ended: the pearls got, out of ticks, no enderman about for idleTicks */
-  reason: 'pearls' | 'ticks' | 'idle'
+  reason: 'pearls' | 'ticks' | 'idle' | 'blind'
 }
 
 /** the bot's reach for a swing (Player.entityInteractionRange 3, less a margin) */
@@ -378,6 +403,8 @@ export const COVER_WAIT = 300
 export const COVER_NEAR = 10
 /** ticks the stand is kept after that */
 export const COVER_HOLD = 100
+/** ticks with none to stare at from the cover before another is dug */
+export const BLIND_TICKS = 1500
 /** walks into the pit for a drop at most */
 export const FETCH_TRIES = 3
 /** arrows at an angry enderman stuck where it can't come (a hollow under the cover), each sending it off */
@@ -431,6 +458,8 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
   // and goes, and the walks down to the stand and back with it, 26.3: one 23 off, 40 times in 9000 ticks)
   const angrySince = new Map<number, number>()
   let lastInSight = 0
+  // the last stare (or one to stare at seen)
+  let lastStare = 0
   // the stand kept till then (one angry came near the bot off it)
   let holdUntil = -1
   // the stuck ones to send off with an arrow, and how many each has had
@@ -541,6 +570,7 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
         const calm = seen.find(e => e.position.distanceTo(bot.entity.position) >= STARE_FAR) ?? seen[seen.length - 1]
         if (calm != null) {
           lastInSight = ticks
+          lastStare = ticks
           if (!await provokeEnderman(bot, calm, signal)) passOver.add(calm.id)
           continue
         }
@@ -555,12 +585,15 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
             trace('fightFromCover: to', spot.toString(), 'for an enderman in sight')
             await navigate(bot, { goal: new goals.GoalBlock(spot.x, spot.y, spot.z) }, signal).catch(err => { if (isAbort(err)) throw err })
             const seen = endermen().find(e => !isAngryEnderman(bot, e) && !passOver.has(e.id) && e.position.distanceTo(bot.entity.position) > STARE_TELEPORT && comes(e) && eyesInSight(bot, e))
-            if (seen != null) badSpots.delete(spot.toString())
+            if (seen != null) { badSpots.delete(spot.toString()); lastStare = ticks }
             if (seen != null && !await provokeEnderman(bot, seen, signal)) passOver.add(seen.id)
             if (seen == null || !isAngryEnderman(bot, seen)) await walkLine(bot, cover, lookout, signal)
             continue
           }
         }
+        // none to stare at from here for BLIND_TICKS: a cover elsewhere (a 26.3 bot's cover in a hollow of the forest
+        // had 20 endermen within 64 and none in sight for 42000 ticks)
+        if (ticks - lastStare > BLIND_TICKS && mad.length === 0) return result('blind')
         await waitTicks(bot, 10, signal)
         continue
       }
@@ -625,21 +658,51 @@ export async function endermenFromCover (bot: Bot, opts: CoverFightOptions & Cov
     if (kept.dug) cover = coverBreach(lookup, kept.cover) == null ? kept.cover : null
     else cover = coverAt(lookup, kept.cover.top, kept.cover.facing, kept.cover.steps.length + 1)
   }
-  if (cover == null || kept?.dug !== true) {
-    if (cover == null) {
-      const reasons = new Map<string, number>()
-      cover = planEndermanCover(lookup, bot.entity.position, opts, reasons)
-      if (cover == null) trace('endermenFromCover: no cover about', bot.entity.position.floored().toString(), JSON.stringify([...reasons]))
-      if (cover == null) throw new SkillError('NOT_FOUND', `no ground for an enderman cover within ${opts.radius ?? 12} blocks`)
+  const blind = blindTops.get(bot) ?? []
+  blindTops.set(bot, blind)
+  const total: CoverFightResult = { pearls: 0, kills: 0, ticks: 0, reason: 'ticks' }
+  const maxTicks = opts.maxTicks ?? 6000
+  for (let n = 0; ; n++) {
+    if (cover == null || covers.get(bot)?.dug !== true) {
+      if (cover == null) {
+        const reasons = new Map<string, number>()
+        // the cheap ones about, the one with the widest view of the forest of them (its endermen seen to be stared
+        // at), none near a top no enderman was seen from
+        const raycast: Raycast = (from, dir, len) => (bot.world as any).raycast?.(from, dir, len) ?? null
+        const options = planEndermanCovers(lookup, bot.entity.position, { ...opts, exclude: top => blind.some(b => b.distanceTo(top) < BLIND_APART) || opts.exclude?.(top) === true }, reasons, COVER_CHOICES)
+        cover = options.map((c, i) => ({ c, score: coverView(c.top, raycast) - i })).sort((a, b) => b.score - a.score)[0]?.c ?? null
+        if (cover == null) trace('endermenFromCover: no cover about', bot.entity.position.floored().toString(), JSON.stringify([...reasons]))
+        if (cover == null) throw new SkillError('NOT_FOUND', `no ground for an enderman cover within ${opts.radius ?? 12} blocks`)
+      }
+      covers.set(bot, { cover, dug: false })
+      trace('endermenFromCover: a cover from', cover.top.toString(), 'facing', cover.facing.toString(), 'the stand', cover.stand.toString(), cover.dig.length, 'blocks to dig')
+      await digCover(bot, cover, signal).catch(err => { if (!isAbort(err)) forgetCover(bot); throw err })
+      covers.set(bot, { cover, dug: true })
     }
-    covers.set(bot, { cover, dug: false })
-    trace('endermenFromCover: a cover from', cover.top.toString(), 'facing', cover.facing.toString(), 'the stand', cover.stand.toString(), cover.dig.length, 'blocks to dig')
-    await digCover(bot, cover, signal).catch(err => { if (!isAbort(err)) forgetCover(bot); throw err })
-    covers.set(bot, { cover, dug: true })
+    // no way to it (a stair's top the pathfinder found no way back to, 2475 ticks): another cover the next time
+    const res = await fightFromCover(bot, cover, { ...opts, pearls: (opts.pearls ?? 16) - total.pearls, maxTicks: maxTicks - total.ticks }, signal)
+      .catch(err => { if (!isAbort(err) && /NO_PATH|broken/.test(String((err as Error).message ?? err))) forgetCover(bot); throw err })
+    total.pearls += res.pearls
+    total.kills += res.kills
+    total.ticks += res.ticks
+    total.reason = res.reason
+    if (res.reason !== 'blind') return total
+    // none seen to stare at: another cover, away from this one
+    trace('endermenFromCover: none to stare at from', cover.top.toString(), 'for', BLIND_TICKS, 'ticks: another cover')
+    blind.push(cover.top)
+    forgetCover(bot)
+    cover = null
+    if (n + 1 >= COVER_MOVES || total.ticks >= maxTicks) return total
   }
-  // no way to it (a stair's top the pathfinder found no way back to, 2475 ticks): another cover the next time
-  return await fightFromCover(bot, cover, opts, signal).catch(err => { if (!isAbort(err) && /NO_PATH|broken/.test(String((err as Error).message ?? err))) forgetCover(bot); throw err })
 }
+
+/** the stair tops each bot saw no enderman from, and how far from them another cover goes */
+const blindTops = new WeakMap<Bot, Vec3[]>()
+export const BLIND_APART = 10
+/** covers dug in a row for one with endermen in sight, at most */
+export const COVER_MOVES = 3
+/** the cheapest covers about the one with the widest view is chosen from */
+export const COVER_CHOICES = 8
 
 export function forgetCover (bot: Bot): void {
   covers.delete(bot)

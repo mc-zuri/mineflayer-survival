@@ -1052,9 +1052,9 @@ export async function pearlsInTheNether (bot: Bot, executor: Executor, want: num
           coverFails = 0
           coverTicks += res.ticks
           coverPearls += res.pearls
-          log(`ender pearls: ${count('ender_pearl')} of ${want}: ${res.kills} endermen killed from cover in ${res.ticks} ticks${res.reason === 'idle' ? ', then none about' : ''} (${coverPearls} pearls in ${coverTicks} ticks of cover)`)
-          if (res.reason === 'idle') {
-            // none came for FOREST_IDLE: another spot of the forest
+          log(`ender pearls: ${count('ender_pearl')} of ${want}: ${res.kills} endermen killed from cover in ${res.ticks} ticks${res.reason === 'idle' ? ', then none about' : res.reason === 'blind' ? ', then none in sight' : ''} (${coverPearls} pearls in ${coverTicks} ticks of cover)`)
+          if (res.reason === 'idle' || res.reason === 'blind') {
+            // none came for FOREST_IDLE, or none in sight from the covers there: another spot of the forest
             lastEnderman = executor.tasks.tick - FOREST_IDLE
             if (forestSpot != null) triedSpots.push(forestSpot)
             forgetCover(bot)
