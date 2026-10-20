@@ -19,8 +19,10 @@ for (const version of VERSIONS) {
       assert.deepEqual([foods[food.name].nutrition, foods[food.name].saturation], [food.foodPoints, food.saturation], food.name)
       assert.equal(foods[food.name].harmful === true, HARMFUL_FOODS.includes(food.name), food.name)
     }
-    assert.equal(Object.keys(foods).length, registry.foodsArray.length - NOT_EATEN.size)
-    for (const bucket of NOT_EATEN) assert.ok(registry.foodsByName[bucket] != null, `${bucket} is one of minecraft-data's foods`)
+    assert.equal(Object.keys(foods).length, registry.foodsArray.length - registry.foodsArray.filter((f: any) => NOT_EATEN.has(f.name)).length)
+    for (const bucket of [...NOT_EATEN].filter(n => n.endsWith('_bucket'))) assert.ok(registry.foodsByName[bucket] != null, `${bucket} is one of minecraft-data's foods`)
+    // (the ominous bottle, never drunk, isn't one: NOT_EATEN keeps it out whatever a later table says)
+    assert.ok(NOT_EATEN.has('ominous_bottle'))
     assert.deepEqual(foodInfo(registry, 'cooked_beef'), { nutrition: 8, saturation: 12.8 })
     assert.ok(isSafeFood(registry, 'bread'))
     assert.ok(!isSafeFood(registry, 'spider_eye'))
