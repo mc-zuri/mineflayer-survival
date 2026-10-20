@@ -56,6 +56,9 @@ test('coverAt: no cover with lava beside a cell to dig, a cave under the bot\'s 
   assert.equal(coverAt(at({ '(6, 59, 0)': 'air' }), top, east, 4), null, 'no floor')
   assert.equal(coverAt(at({ '(7, 60, 1)': 'air', '(7, 61, 1)': 'air' }), top, east, 4), null, 'a cave beside it')
   assert.equal(coverAt(at({ '(6, 62, 0)': 'gravel' }), top, east, 4), null, 'a ceiling that falls')
+  // a hollow 3 deep behind the top: a knock off it is a fall; 2 deep, none
+  assert.equal(coverAt(at({ '(-1, 63, 1)': 'air', '(-1, 62, 1)': 'air', '(-1, 61, 1)': 'air' }), top, east, 4), null, 'a drop by the top')
+  assert.ok(coverAt(at({ '(-1, 63, 1)': 'air', '(-1, 62, 1)': 'air' }), top, east, 4) != null)
   // a stem on the stair: cut through; what the bot can't break there: no cover
   assert.ok(coverAt(at({ '(2, 64, 0)': 'warped_stem' }), top, east, 4)?.dig.some(p => p.equals(new Vec3(2, 64, 0))))
   assert.equal(coverAt(at({ '(2, 64, 0)': 'bedrock' }), top, east, 4), null, 'bedrock on the stair')

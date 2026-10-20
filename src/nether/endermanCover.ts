@@ -20,6 +20,7 @@ import { type Entity, distanceToBox, entityBox, eyePosition, isAlive } from '../
 import { attackStrengthOf, bestMeleeWeapon } from '../skills/weapons'
 import { nearbyDrops, pickupDrops } from '../skills/pickupDrops'
 import { fight } from '../skills/fight'
+import { shoot } from '../skills/shoot'
 import { dig } from '../core/actions'
 import type { BlockLookup, BlockView } from '../skills/placement'
 import { STARE_TELEPORT, eyesInSight, isAngryEnderman, provokeEnderman } from './pearls'
@@ -77,8 +78,10 @@ export function coverAt (lookup: BlockLookup, top: Vec3, facing: Vec3, depth: nu
   const no = (why: string): null => { reasons?.set(why, (reasons.get(why) ?? 0) + 1); return null }
   const g = top.y
   const at = (i: number, y: number): Vec3 => new Vec3(top.x + facing.x * i, y, top.z + facing.z * i)
-  // the top: a cell to stand in on the ground
+  // the top: a cell to stand in on the ground, no drop beside it (the lookout's fights knock the bot about: one off
+  // the top into a hollow 10 under it, 26.3)
   if (!open(lookup(at(0, g))) || !open(lookup(at(0, g + 1))) || !solid(lookup(at(0, g - 1)))) return no('top')
+  if (!firmAround(lookup, at(0, g), [at(1, g)])) return no('ledge')
   const steps: Vec3[] = []
   for (let i = 1; i < depth; i++) steps.push(at(i, g - i))
   const pit = at(depth, g - depth)
@@ -127,6 +130,23 @@ export function coverAt (lookup: BlockLookup, top: Vec3, facing: Vec3, depth: nu
     for (const w of [...WAYS, new Vec3(0, 1, 0), new Vec3(0, -1, 0)]) if (fluid(lookup(p.plus(w)))) return no('fluid')
   }
   return { top, steps, pit, front, stand, facing, dig }
+}
+
+/**
+ * No drop of more than 2 beside a cell the bot stands in (at `feet`): each of its 8 neighbours but `except` a wall
+ * (solid at the feet) or with ground within 2 under them
+ */
+export function firmAround (lookup: BlockLookup, feet: Vec3, except: Vec3[] = []): boolean {
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dz = -1; dz <= 1; dz++) {
+      if (dx === 0 && dz === 0) continue
+      const n = feet.offset(dx, 0, dz)
+      if (except.some(e => e.x === n.x && e.z === n.z)) continue
+      if (solid(lookup(n)) || [1, 2, 3].some(d => solid(lookup(n.offset(0, -d, 0))))) continue
+      return false
+    }
+  }
+  return true
 }
 
 /** the cover nearest `from` (the fewest blocks to dig, the shallowest, the nearest), or null */
@@ -208,7 +228,7 @@ export function scanSpot (lookup: BlockLookup, cover: EndermanCover, endermen: V
       for (let dy = -2; dy <= 2; dy++) {
         const at = cover.top.offset(dx, dy, dz)
         if (line.has(`${at.x},${at.z}`) || skip?.has(at.toString()) === true) continue
-        if (!open(lookup(at)) || !open(lookup(at.offset(0, 1, 0))) || !solid(lookup(at.offset(0, -1, 0)))) continue
+        if (!open(lookup(at)) || !open(lookup(at.offset(0, 1, 0))) || !solid(lookup(at.offset(0, -1, 0))) || !firmAround(lookup, at)) continue
         const eye = at.offset(0.5, 1.62, 0.5)
         const sees = endermen.some(e => {
           const to = e.offset(0, 2.55, 0).minus(eye)
@@ -354,6 +374,14 @@ export interface CoverFightResult {
 export const COVER_REACH = 2.9
 /** ticks an angry enderman is waited for at the stand before it's passed over (it stands off, out of reach) */
 export const COVER_WAIT = 300
+/** an angry enderman this near the bot off the stand, passed over or not, sends it to the stand */
+export const COVER_NEAR = 10
+/** ticks the stand is kept after that */
+export const COVER_HOLD = 100
+/** walks into the pit for a drop at most */
+export const FETCH_TRIES = 3
+/** arrows at an angry enderman stuck where it can't come (a hollow under the cover), each sending it off */
+export const SHOOS = 2
 /** an enderman is stared at from this far rather than nearer, when one is in sight */
 export const STARE_FAR = 12
 /** an angry enderman this near the bot off its stand is fought where it is (it would hit the bot's back on the way) */
@@ -403,6 +431,14 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
   // and goes, and the walks down to the stand and back with it, 26.3: one 23 off, 40 times in 9000 ticks)
   const angrySince = new Map<number, number>()
   let lastInSight = 0
+  // the stand kept till then (one angry came near the bot off it)
+  let holdUntil = -1
+  // the stuck ones to send off with an arrow, and how many each has had
+  const toShoo = new Set<number>()
+  const shoos = new Map<number, number>()
+  // the fetches of each drop by the pit
+  const fetches = new Map<number, number>()
+  const canShoot = (): boolean => countItems(bot, 'bow') > 0 && countItems(bot, ['arrow', 'spectral_arrow']) > 0
   // the spots looked from that showed none (a ray grazing a stem's edge), not gone to again for a while
   const badSpots = new Set<string>()
   let badSince = 0
@@ -442,11 +478,25 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
         // (one in a cave under the cover, come there by its teleport toward the bot, never gets out: let be sooner)
         const wait = e.position.y < cover.stand.y - 3 ? COVER_WAIT / 3 : COVER_WAIT
         if (ticks - (angrySince.get(e.id) as number) > wait && e.position.distanceTo(centre(cover.pit)) > 6) {
+          angrySince.set(e.id, ticks)
+          // stuck where it is: an arrow sends it off at random (EnderMan.hurtServer: a projectile, teleport), angry
+          // still, and from over 16 off it teleports toward the bot (EndermanLookForPlayerGoal), SHOOS times
+          if ((shoos.get(e.id) ?? 0) < SHOOS && canShoot()) { toShoo.add(e.id); continue }
           passOver.add(e.id)
+          toShoo.delete(e.id)
           trace('fightFromCover: passed over', e.id, 'at', e.position.toString(), e.position.distanceTo(bot.entity.position).toFixed(1), 'off (the bot at', bot.entity.position.floored().toString(), 'the pit', cover.pit.toString(), '), angry', COVER_WAIT, 'ticks and not come')
         }
       }
       const mad = angry()
+      // one to send off with an arrow, in sight from where the bot stands (off the stand: the top's in view of more)
+      const shoo = mad.find(e => toShoo.has(e.id) && e.position.distanceTo(bot.entity.position) > STARE_TELEPORT && eyesInSight(bot, e))
+      if (shoo != null && !inCell(bot, cover.stand)) {
+        toShoo.delete(shoo.id)
+        shoos.set(shoo.id, (shoos.get(shoo.id) ?? 0) + 1)
+        trace('fightFromCover: an arrow at', shoo.id, 'stuck at', shoo.position.floored().toString())
+        await shoot(bot, shoo, { signal, maxShots: 1 }).catch(err => { if (isAbort(err)) throw err; trace('fightFromCover:', (err as Error).message) })
+        continue
+      }
       if (ticks - badSince > 2000) { badSpots.clear(); badSince = ticks }
       if (ticks - lastTrace >= 200) {
         lastTrace = ticks
@@ -465,7 +515,17 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
           }
           continue
         }
-        if (mad.length > 0) {
+        // one angry near the bot, passed over or not, at the cover's height: it comes at the bot off the stand (the
+        // ones that never came to the pit hit a 26.3 bot 47 times at the top and the spots it looked from), so the
+        // stand, and a while there
+        const near = all.find(e => isAngryEnderman(bot, e) && e.position.distanceTo(bot.entity.position) <= COVER_NEAR && e.position.y >= cover.top.y - 3)
+        if (near != null && !mad.some(e => !toShoo.has(e.id))) {
+          trace('fightFromCover: to the stand,', near.id, 'angry at', near.position.distanceTo(bot.entity.position).toFixed(1))
+          holdUntil = ticks + COVER_HOLD
+          await walkLine(bot, cover, standAt, signal, onLine ? undefined : () => isAlive(bot, near) && near.position.distanceTo(bot.entity.position) <= COVER_THREAT)
+          continue
+        }
+        if (mad.some(e => !toShoo.has(e.id))) {
           // to the stand: it comes
           trace('fightFromCover: to the stand for', mad.map(e => `${e.id} at ${e.position.distanceTo(bot.entity.position).toFixed(1)}`).join(', '))
           await walkLine(bot, cover, standAt, signal, onLine ? undefined : () => mad.some(e => isAlive(bot, e) && e.position.distanceTo(bot.entity.position) <= COVER_THREAT))
@@ -484,7 +544,8 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
           if (!await provokeEnderman(bot, calm, signal)) passOver.add(calm.id)
           continue
         }
-        if (ticks - lastInSight > SCAN_AFTER) {
+        // (no spot off the line looked from with one angry about)
+        if (ticks - lastInSight > SCAN_AFTER && !all.some(e => isAngryEnderman(bot, e) && e.position.distanceTo(bot.entity.position) <= 24 && e.position.y >= cover.top.y - 3)) {
           // none in sight from the top (the forest's fungi between): a spot near it one is seen from, the stare from
           // there, and back
           lastInSight = ticks
@@ -514,16 +575,23 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
         await waitTicks(bot, 1, signal)
         continue
       }
-      // the drops in the pit, fetched from the front once no angry one is by it
-      const drops = nearbyDrops(bot, centre(cover.pit).offset(0, 0.5, 0), 2, ['ender_pearl'])
+      // the drops in and by the pit, fetched from the pit itself once no angry one is near it (from the front the
+      // pickup's reach missed one on the pit's far side: 26.3, the walk there and back for 3000 ticks), each a few
+      // times at most
+      const drops = nearbyDrops(bot, centre(cover.pit).offset(0, 0.5, 0), 2.5, ['ender_pearl']).filter(d => (fetches.get(d.id) ?? 0) < FETCH_TRIES)
       if (drops.length > 0 && !mad.some(e => e.position.distanceTo(centre(cover.pit)) <= 6)) {
-        trace('fightFromCover: the pearls in the pit fetched,', drops.length, 'of them')
+        trace('fightFromCover: the pearls by the pit fetched,', drops.length, 'of them')
+        for (const d of drops) fetches.set(d.id, (fetches.get(d.id) ?? 0) + 1)
+        const ids = new Set(drops.map(d => d.id))
         await walkTo(bot, centre(cover.front), { within: 0.25, maxTicks: 20 }, signal)
-        await waitUntil(bot, () => nearbyDrops(bot, centre(cover.pit).offset(0, 0.5, 0), 2, ['ender_pearl']).length === 0, 30, signal)
+        await walkTo(bot, centre(cover.pit), { within: 0.25, maxTicks: 20, until: () => !drops.some(d => bot.entities[d.id] != null) }, signal)
+        await waitUntil(bot, () => ![...ids].some(id => bot.entities[id] != null), 20, signal)
+        await walkTo(bot, centre(cover.front), { within: 0.25, maxTicks: 20 }, signal)
         await walkTo(bot, centre(cover.stand), { within: 0.2, maxTicks: 20 }, signal)
+        await settle(bot, signal)
         continue
       }
-      if (mad.length > 0) {
+      if (mad.some(e => !toShoo.has(e.id)) || ticks < holdUntil) {
         await waitTicks(bot, 2, signal)
         continue
       }
