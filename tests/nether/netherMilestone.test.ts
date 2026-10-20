@@ -689,3 +689,18 @@ test('a portal with no flint and steel gets one (its iron mined) before the fram
   await buildAPortal(bot, executor, new AbortController().signal, () => {})
   assert.deepStrictEqual(calls.slice(0, 3), ['obtain flint_and_steel', 'up to the surface', 'build a nether portal'])
 })
+
+test('inWarpedForest: the bot within FOREST_EDGE of the seed\'s warped forest counts as in it (out of it by a few blocks the search hunted instead, and walked into the lava sea), the wastes by the portal not', async () => {
+  const { inWarpedForest, FOREST_EDGE } = await import('../../src/milestones')
+  const { NetherBiomeSource } = await import('../../src/worldgen/netherBiomes')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const biomes = new NetherBiomeSource(2)
+  // out from seed 2's south-western warped forest along x to its edge
+  let x = -336
+  while (biomes.biomeAt(x, 304) === 'warped_forest') x++
+  const edge = fakeBot({ position: new Vec3(x + FOREST_EDGE / 2, 64, 304) })
+  assert.notEqual(biomes.biomeAt(x + FOREST_EDGE / 2, 304), 'warped_forest')
+  assert.equal(inWarpedForest(edge, biomes), true)
+  assert.equal(inWarpedForest(fakeBot({ position: new Vec3(2.5, 64, -1.5) }), biomes), false)
+})

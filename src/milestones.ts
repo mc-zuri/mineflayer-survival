@@ -961,10 +961,17 @@ export const COVER_FAILS = 3
 /** the bot in a warped forest: the seed's biome there, else its blocks about the bot (pearlGround's, within 16) */
 export function inWarpedForest (bot: Bot, biomes: NetherBiomeSource | null): boolean {
   const at = bot.entity.position
-  if (biomes != null) return biomes.biomeAt(at.x, at.z) === 'warped_forest'
+  // (at its edge too: within FOREST_EDGE of the biome, where a cover is planned in it; out of it by a few blocks the
+  // search hunted the endermen instead, walked down after one and into the lava sea, 26.3 run p9)
+  if (biomes != null) {
+    return [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => biomes.biomeAt(at.x + dx * FOREST_EDGE, at.z + dz * FOREST_EDGE) === 'warped_forest')
+  }
   const seen = pearlGround(bot, false)
   return seen?.kind === 'warped forest' && seen.at.distanceTo(at) <= 16
 }
+
+/** how far from a warped forest the bot counts as in it */
+export const FOREST_EDGE = 12
 
 /** game ticks the nether's pearl search may take in all (its legs, hunts and waits) before the overworld's nights */
 export const PEARL_NETHER_TICKS = 48000
