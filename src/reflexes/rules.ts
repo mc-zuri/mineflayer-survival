@@ -17,7 +17,8 @@ import { isBed } from '../core/items'
 import { breakFall, landingY, shouldBreakFall } from '../skills/fall'
 import { blockIdsNamed, findBlock } from '../core/findBlocks'
 import { findDoorRefuge, retreatIndoors, type DoorRefuge } from '../skills/indoors'
-import { clearOfWarden, escapeWarden, nearestWarden } from '../skills/danger'
+import { clearOfWarden, darkSpawners, escapeWarden, lightSpawner, nearestWarden, spawnerLit } from '../skills/danger'
+import { XP_FARM_POI } from '../skills/spawnerFarm'
 import { SEAL_MAX_BLOCKS, openCells, sealBox, sealIn } from '../skills/sealIn'
 import { sealItem } from '../skills/shelter'
 import { countItems } from '../skills/util'
@@ -781,4 +782,52 @@ export const nightReflex: Reflex = {
   }
 }
 
-export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, wardenReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, nightReflex, armorReflex]
+/** ticks between the spawner reflex's looks for dark spawners about (a block search) */
+export const SPAWNER_LOOK_TICKS = 40
+/** ticks a spawner whose torch didn't go in (no way to it, no room by it) is let be */
+export const SPAWNER_GIVE_UP_TICKS = 6000
+
+/** each bot's spawner looks: the tick of the last, the dark spawners it found, and the ones let be till a tick */
+const spawnerLooks = new WeakMap<Bot, { at: number, dark: Vec3[], letBe: Map<string, number> }>()
+
+/**
+ * A dark monster spawner the bot sees within range, out of a fight, with a torch carried: lit (lightSpawner). The xp
+ * farm's spawners are left dark (the memory's xp farms; the farm's epoch holds the reflex while it builds one). A 26.3
+ * bot in iron was set on by four zombies at once in the night's mine and died (full-26.3-fresh-l); by a dungeon's
+ * spawner they come four at a go every 10 to 40 seconds, as long as the bot's within 16 (tests/integration/mineZombies)
+ */
+export const spawnerReflex: Reflex = {
+  name: 'spawner',
+  priority: 45,
+  check (ctx) {
+    const { bot, config } = ctx
+    if (!config.spawner.enabled || ctx.inCombat || countItems(bot, 'torch') === 0) return null
+    let look = spawnerLooks.get(bot)
+    if (look == null) spawnerLooks.set(bot, look = { at: -Infinity, dark: [], letBe: new Map() })
+    if (ctx.tick - look.at >= SPAWNER_LOOK_TICKS || ctx.tick < look.at) {
+      look.at = ctx.tick
+      look.dark = darkSpawners(bot, config.spawner.range)
+    }
+    const farms: Array<{ x: number, y: number, z: number }> = (bot as any).survival?.memory?.getPois?.(XP_FARM_POI) ?? []
+    const l = look
+    const spawner = l.dark.find(p => (l.letBe.get(p.toString()) ?? -Infinity) <= ctx.tick && !farms.some(f => f.x === p.x && f.y === p.y && f.z === p.z) && !spawnerLit(bot, p))
+    if (spawner == null) return null
+    return {
+      name: 'spawner',
+      priority: config.spawner.priority,
+      detail: 'light spawner',
+      run: async (signal) => {
+        try {
+          await lightSpawner(bot, spawner, signal)
+        } catch (err) {
+          if (!signal.aborted) l.letBe.set(spawner.toString(), ctx.tick + SPAWNER_GIVE_UP_TICKS)
+          throw err
+        } finally {
+          l.at = -Infinity
+        }
+      }
+    }
+  }
+}
+
+export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, wardenReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, spawnerReflex, nightReflex, armorReflex]

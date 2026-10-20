@@ -9,8 +9,10 @@ import { normalizeDimension } from '../core/memory'
 import { isAbort } from './errors'
 import { navigate } from './navigate'
 import { steerAway } from './steer'
-import { isAlive, type Entity, TaskError, throwIfAborted, waitTicks } from './combatUtil'
-import { trace } from './util'
+import { eyePosition, isAlive, type Entity, TaskError, throwIfAborted, waitTicks } from './combatUtil'
+import { countItems, trace } from './util'
+import { placeBlock } from './placeBlock'
+import { spawnerMob } from './spawnerFarm'
 
 /** the deep dark's blocks that hear or call: sensors (SculkSensorBlockEntity's listener, 8 blocks; the calibrated one 16), shriekers, catalysts */
 export const SCULK_LISTENERS = new Set(['sculk_sensor', 'calibrated_sculk_sensor', 'sculk_shrieker'])
@@ -229,4 +231,64 @@ export function nearestWarden (bot: Bot, range = 40): Entity | null {
     if (d <= bestD) { best = e; bestD = d }
   }
   return best
+}
+
+/** a block that gives light enough that no monster spawns by it (a torch's 14, a lantern's 15; Monster.isDarkEnoughToSpawn: block light 0) */
+export const SPAWNER_LIGHTS = /(^|_)(torch|lantern|campfire|glowstone|sea_lantern|shroomlight|jack_o_lantern)$/
+const SPAWNER_SIDES = [new Vec3(0, 1, 0), new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1)]
+const AIR = new Set(['air', 'cave_air', 'void_air'])
+
+/** whether the bot's eyes see the block: the first block on the line to its middle is it (BlockGetter.clip) */
+export function seesBlock (bot: Bot, pos: Vec3): boolean {
+  const from = eyePosition(bot)
+  const to = pos.offset(0.5, 0.5, 0.5)
+  const delta = to.minus(from)
+  const dist = delta.norm()
+  if (dist < 1e-6) return true
+  const raycast = (bot.world as any)?.raycast
+  if (typeof raycast === 'function') {
+    const hit: any = raycast.call(bot.world, from, delta.scaled(1 / dist), dist + 1)
+    return hit?.position != null && hit.position.equals(pos)
+  }
+  for (let t = 0.25; t < dist - 0.9; t += 0.25) {
+    const p = from.plus(delta.scaled(t / dist)).floored()
+    if (!p.equals(pos) && bot.blockAt(p)?.boundingBox === 'block') return false
+  }
+  return true
+}
+
+/** a light by the spawner (on it or against a side): its spawn volume's lit (14 at the spawner, 9 or more 4 off) */
+export function spawnerLit (bot: Bot, spawner: Vec3): boolean {
+  return SPAWNER_SIDES.some(d => SPAWNER_LIGHTS.test(bot.blockAt(spawner.plus(d))?.name ?? ''))
+}
+
+/**
+ * The monster spawners within `range` the bot sees that are dark (no light by them, spawnerLit), nearest first: in
+ * the overworld only (the nether's blaze spawners are the rods' camp)
+ */
+export function darkSpawners (bot: Bot, range: number): Vec3[] {
+  if (normalizeDimension(bot.game?.dimension) !== 'overworld') return []
+  const id = (bot.registry.blocksByName as any).spawner?.id
+  if (id == null) return []
+  return findBlocks(bot, { matching: [id], maxDistance: range, count: 8 }).filter(p => {
+    const mob = spawnerMob(bot.blockAt(p) as any)
+    const hostile = mob == null || (bot.registry.entitiesByName as any)[mob]?.type === 'hostile'
+    return hostile && !spawnerLit(bot, p) && seesBlock(bot, p)
+  })
+}
+
+/**
+ * A torch put on a dungeon's spawner (on its top, else against a side with room): the spawner's mobs need the dark
+ * (BaseSpawner's spawns go by the type's SpawnPlacements, Monster.checkMonsterSpawnRules, the light only waived for a
+ * trial spawner), and a torch's light, 14 there, is over 0 all through its spawn volume (4 across, 1 up or down). A
+ * 26.3 bot in iron mining at y -23 was set on by four zombies at once and killed (full-26.3-fresh-l); a spawner left
+ * dark by the mine keeps sending them, four at a go every 10 to 40 seconds while the bot's within 16
+ */
+export async function lightSpawner (bot: Bot, spawner: Vec3, signal?: AbortSignal): Promise<Vec3> {
+  if (countItems(bot, 'torch') === 0) throw new TaskError('MISSING_ITEMS', 'no torch to light the spawner with')
+  const cell = SPAWNER_SIDES.map(d => spawner.plus(d)).find(p => AIR.has(bot.blockAt(p)?.name ?? ''))
+  if (cell == null) throw new TaskError('FAILED', `no room by the spawner at ${spawner.toString()} for a torch`)
+  trace('lightSpawner: a torch at', cell.toString(), 'on the spawner at', spawner.toString())
+  await placeBlock(bot, { pos: cell, item: 'torch', against: spawner }, signal)
+  return cell
 }

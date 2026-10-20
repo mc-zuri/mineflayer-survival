@@ -161,6 +161,17 @@ export interface ReflexConfig {
     health: number
     priority: number
   }
+  /**
+   * a monster spawner seen in the overworld (a dungeon's, a mineshaft's, a stronghold's) lit with a torch carried: its
+   * mobs spawn only in the dark (the spawner reflex)
+   */
+  spawner: {
+    enabled: boolean
+    /** a spawner this near, in sight (default 16: BaseSpawner's requiredPlayerRange, within which it spawns) */
+    range: number
+    /** under the hostiles (60) and eat (50) reflexes, over the night's (40): a fight or a meal first (default 45) */
+    priority: number
+  }
   /** a long fall broken with a water bucket held (the fall reflex; default priority 93, above all but the totem) */
   fall: {
     enabled: boolean
@@ -205,6 +216,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
   night: { enabled: true, sleep: true, shelter: true, minArmor: 10, minDamage: 6, bedDistance: 16, shelterRadius: 8, restTicks: 48000, priority: 40 },
   totem: { enabled: true, always: true, health: 10, priority: 95 },
   fall: { enabled: true, priority: 93 },
+  spawner: { enabled: true, range: 16, priority: 45 },
   retryCooldownTicks: 20
 }
 

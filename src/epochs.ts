@@ -190,15 +190,19 @@ export const xpFarmEpochHandler: MilestoneHandler = async ({ bot, executor, sign
   if (spawner == null) throw new TaskError('NOT_FOUND', `no ${BOOTH_MOBS.join(' or ')} spawner known`)
   await executor.obtain([{ item: 'cobblestone', count: 32 }, { item: 'cobblestone_slab', count: 1 }], signal)
   log(`xp farm: the ${spawner.mob} spawner at ${spawner.pos.toString()}`)
-  await executor.task('to the spawner', async (s) => await travel(bot, { target: spawner.pos, range: 3, exactY: true }, s), signal)
+  // (the spawner reflex lights a dark spawner the bot sees: the farm's is left dark, its lights broken by the build)
+  const release = bot.survival?.reflexes?.inhibit(['spawner'])
   let farm
   try {
+    await executor.task('to the spawner', async (s) => await travel(bot, { target: spawner.pos, range: 3, exactY: true }, s), signal)
     farm = await executor.task('build the xp farm', async (s) => await buildSpawnerFarm(bot, spawner.pos, s), signal)
   } catch (err) {
     if (fatal(signal, err)) throw err
     // a spawner the booth can't be built round (no spawner there after all, no wall for it) is forgotten
     if (TaskError.is(err, 'NOT_FOUND')) executor.memory.removePoi(SPAWNER_POI, spawner.pos, dimension)
     throw err
+  } finally {
+    release?.()
   }
   rememberXpFarm(executor.memory, farm)
   log(`xp farm built: the booth at ${farm.stand.toString()}`)

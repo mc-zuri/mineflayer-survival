@@ -634,3 +634,29 @@ test('hostiles reflex: hurt to sealHealth among two zombies down a tunnel, with 
   bot.health = 10
   assert.strictEqual(sealDue(bot, zombies, DEFAULT_REFLEX_CONFIG, 0), true)
 })
+
+test('spawner reflex: a dark spawner the bot sees within 16, out of a fight, with a torch carried, is lit; not lit, not seen, no torch, in a fight, the nether or an xp farm\'s, let be (full-26.3-fresh-l)', async () => {
+  const { spawnerReflex } = await import('../../src/reflexes/rules')
+  const spawner = new Vec3(5, 64, 0)
+  const run = (opts: { torch?: boolean, lit?: boolean, wall?: boolean, zombie?: boolean, nether?: boolean, farm?: boolean } = {}): string | null => {
+    const world = (p: Vec3): string => p.equals(spawner) ? 'spawner' : opts.lit === true && p.equals(spawner.offset(0, 1, 0)) ? 'torch'
+      : opts.wall === true && p.x === 3 && p.y >= 64 && p.y <= 66 ? 'stone' : p.y < 64 ? 'stone' : 'air'
+    return check(spawnerReflex, {
+      world,
+      items: opts.torch === false ? [] : [item('torch', 8)],
+      entities: opts.zombie === true ? [entity({ name: 'zombie', position: at(4) })] : []
+    }, {}, (engine) => {
+      const bot = (engine as any).bot
+      bot.findBlocks = () => [spawner]
+      if (opts.nether === true) bot.game.dimension = 'the_nether'
+      if (opts.farm === true) bot.survival = { memory: { getPois: () => [{ x: 5, y: 64, z: 0 }] } }
+    })
+  }
+  assert.strictEqual(run(), 'light spawner')
+  assert.strictEqual(run({ lit: true }), null)
+  assert.strictEqual(run({ wall: true }), null)
+  assert.strictEqual(run({ torch: false }), null)
+  assert.strictEqual(run({ zombie: true }), null)
+  assert.strictEqual(run({ nether: true }), null)
+  assert.strictEqual(run({ farm: true }), null)
+})
