@@ -15,7 +15,7 @@ import { heldFor, obtainAll, type ObtainOptions, type ObtainPlan, type ObtainReq
 import { toolsAtLeast } from '../planner/progression'
 import type { ToolMaterial } from '../core/items'
 import { checkPlan, type PlanStep, type Station } from '../planner/steps'
-import { baseRecord, type BaseRecord } from '../base/pois'
+import { BASE_POI, baseRecord, type BaseRecord } from '../base/pois'
 import { storeItems } from '../skills/chest'
 import { craft } from '../skills/craft'
 import { placeBlock } from '../skills/placeBlock'
@@ -420,6 +420,7 @@ export class Executor {
           this.log(`step failed (${n}): ${describeStep(step)}: ${(err as Error).message}`)
           diag?.stepFailed(step, describeStep(step), err, n)
           if (step.kind === 'mine') this.forgetFailedBlocks(step)
+          this.forgetMissingStation(err)
           this.noteMissing(step, err, began)
           if (n >= this.options.maxStepFailures) throw err
           if (TaskError.is(err, 'INVENTORY_FULL')) await this.makeRoom(needed, signal, true)
@@ -473,6 +474,25 @@ export class Executor {
     const dimension = normalizeDimension(this.bot.game?.dimension)
     const near = this.home() ?? this.bot.entity.position
     return SIGHTED_BLOCKS.filter(b => this.memory.findBlocks([b], { dimension, near, count: 1, maxDistance: HUNT_EXPLORE_MAX }).length === 0)
+  }
+
+  /**
+   * The base's crafting table or furnace a step found gone (NOT_FOUND 'no crafting table at …', 'no furnace at …', its
+   * chunk loaded) is forgotten: the plans after counted on it at the base, and a 26.3 bot's nether kit failed 'no
+   * crafting table at (-54, 60, -16)' 158 times, its leggings, boots and shield never made (full-26.3-fresh-w)
+   */
+  forgetMissingStation (err: unknown): void {
+    if (!TaskError.is(err, 'NOT_FOUND')) return
+    const m = /no (crafting table|furnace) at \((-?\d+), (-?\d+), (-?\d+)\)/.exec((err as Error).message)
+    if (m == null) return
+    const pos = new Vec3(Number(m[2]), Number(m[3]), Number(m[4]))
+    const block = typeof this.bot.blockAt === 'function' ? this.bot.blockAt(pos) : null
+    if (block == null) return
+    const kind = m[1] === 'crafting table' ? BASE_POI.table : BASE_POI.furnace
+    const dimension = normalizeDimension(this.bot.game?.dimension)
+    if (!this.memory.getPois(kind, { dimension }).some(p => p.x === pos.x && p.y === pos.y && p.z === pos.z)) return
+    this.memory.removePoi(kind, pos, dimension)
+    this.log(`the base's ${m[1]} at ${pos.toString()} is gone (${block.name} there): forgotten`)
   }
 
   private noteMissing (step: PlanStep, err: unknown, began = this.tasks.tick): void {

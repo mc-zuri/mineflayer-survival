@@ -956,3 +956,24 @@ test('an exploring for berry bushes that found none, and saw no animal, makes th
   assert.ok(ex2.sightings.isScarce('cow'), lines.join(' | '))
   assert.ok(!ex2.sightings.isScarce('pig'), 'the pig seen on the way')
 })
+
+test('the base\'s crafting table or furnace a step found gone (its chunk loaded) is forgotten; one in an unloaded chunk, or not the base\'s, kept', () => {
+  const bot = fakeBot({})
+  const memory = new WorldMemory()
+  memory.addPoi('base_crafting_table', { x: -54, y: 60, z: -16 }, 'overworld')
+  memory.addPoi('base_furnace', { x: -53, y: 60, z: -16 }, 'overworld')
+  bot.game = { dimension: 'overworld' }
+  let loaded = false
+  bot.blockAt = (p: Vec3) => loaded ? { name: 'air', type: 0, position: p } : null
+  const ex = new Executor(bot, { runners: {}, log: () => {}, memory } as any)
+  const gone = new TaskError('NOT_FOUND', 'no crafting table at (-54, 60, -16)')
+  ex.forgetMissingStation(gone)
+  assert.equal(memory.getPois('base_crafting_table').length, 1, 'unloaded: kept')
+  loaded = true
+  ex.forgetMissingStation(new TaskError('NOT_FOUND', 'no crafting table at (10, 60, 10)'))
+  assert.equal(memory.getPois('base_crafting_table').length, 1, 'not the base\'s: kept')
+  ex.forgetMissingStation(gone)
+  assert.equal(memory.getPois('base_crafting_table').length, 0)
+  ex.forgetMissingStation(new TaskError('NOT_FOUND', 'no furnace at (-53, 60, -16)'))
+  assert.equal(memory.getPois('base_furnace').length, 0)
+})
