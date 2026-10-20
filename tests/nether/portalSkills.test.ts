@@ -156,3 +156,33 @@ test('preparePortalSite makes a pickaxe from what is carried first when the bag 
   }
   assert.deepEqual(calls.slice(0, 2), ['ensurePickaxe', 'collectBlock'])
 })
+
+test('preparePortalSite fills the ground holes its own digging walks made, not only those there before', async () => {
+  const collectModule = require('../../src/skills/collectBlock')
+  const placeModule = require('../../src/skills/placeBlock')
+  const exploreModule = require('../../src/executor/explore')
+  const { preparePortalSite } = await import('../../src/nether/portalSkills')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const air = new Set<string>()
+  const world = (p: Vec3): string => air.has(p.toString()) ? 'air' : (p.x === 0 && p.z === 0 && (p.y === 64 || p.y === 65)) ? 'air' : p.y <= 69 ? 'stone' : 'air'
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('stone_pickaxe', 1), item('cobblestone', 64)], world })
+  const placed: string[] = []
+  const real = [collectModule.collectBlock, placeModule.placeBlock, exploreModule.ensurePickaxe]
+  let first: Vec3 | null = null
+  collectModule.collectBlock = async (_b: unknown, a: any) => {
+    for (const p of a.positions) air.add(p.toString())
+    // the first dig's walk took a block of the ground under the cell dug
+    if (first == null) { first = a.positions[0].offset(0, -1, 0); air.add(first.toString()) }
+    while (first != null && first.y > 63 && air.has(first.toString())) { first = first.offset(0, -1, 0); air.add(first.toString()) }
+    return { mined: a.positions.length }
+  }
+  placeModule.placeBlock = async (_b: unknown, a: any) => { placed.push(a.pos.toString()); air.delete(a.pos.toString()); return { pos: a.pos, placed: true } }
+  exploreModule.ensurePickaxe = async () => 'stone_pickaxe'
+  try {
+    await preparePortalSite(bot, undefined, true).catch(() => {})
+  } finally {
+    [collectModule.collectBlock, placeModule.placeBlock, exploreModule.ensurePickaxe] = real
+  }
+  assert.ok(first != null)
+  assert.ok(placed.length > 0, 'the hole the dig made filled')
+})

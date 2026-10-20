@@ -226,7 +226,10 @@ export async function preparePortalSite (bot: Bot, signal?: AbortSignal, cast = 
   // the ground filled: a hole's bottom first, up (a cell with nothing solid by it can't take a block: 'nothing solid
   // to place against', 26.3); the frame's own row must hold, a side row's hole is walked round
   const inPlane = (p: Pos): boolean => (axis === 'x' ? p.z : p.x) === (axis === 'x' ? origin.z : origin.x)
-  for (const top of work.fill.map(v3)) {
+  // (the ground's holes as they are now: the walks of the dig take blocks out of it too, two under a 26.3 cast site's
+  // front row, and its cast found no site there, 'no cast at')
+  const fill = [...work.fill, ...portalSiteWork(getBlock, origin, axis, cast).fill]
+  for (const top of fill.map(v3)) {
     throwIfAborted(signal)
     const column: Vec3[] = [top]
     while (column.length < 5 && !isSolid(getBlock(column[column.length - 1].offset(0, -1, 0)))) column.push(column[column.length - 1].offset(0, -1, 0))
