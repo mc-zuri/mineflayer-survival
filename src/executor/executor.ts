@@ -106,6 +106,9 @@ export const MAX_WEAR_STOPS_TOTAL = 12
 /** ticks a worn tool whose replacement failed is let be (no task stopped for it) before another try */
 export const WEAR_RETRY_TICKS = 12000
 
+/** blocks off a chest is far: a replacement looted from one is a dear plan (the walk there and back underground) */
+export const FAR_LOOT = 96
+
 /** ticks a replacement may cost to be got at once (a tier lower, or a spare of it held, before a dearer one) */
 export const WEAR_REPLACE_TICKS = 6000
 
@@ -156,6 +159,11 @@ export interface TaskInfo {
   room?: boolean
   /** false: no wear watch (the task isn't stopped for a worn tool) */
   wear?: boolean
+  /**
+   * the uses of its tool the task still needs, when it knows: no stop for a worn tool with more left (3 obsidian with 24
+   * uses: a 26.3 run's stop sent the bot 200 blocks to the base's spare and back, 29000 ticks, for 3 blocks)
+   */
+  uses?: () => number | null
 }
 
 /** a step as a log line: "mine 3 cobblestone" */
@@ -464,7 +472,7 @@ export class Executor {
         if (unreplaced >= MAX_WEAR_STOPS || stops + 1 >= MAX_WEAR_STOPS_TOTAL) {
           this.muteWorn(stop.tool)
           this.log(`${name}: goes on with the worn ${stop.tool.name}`)
-        } else if (!await this.replaceWornTool(stop.tool, signal)) unreplaced++
+        } else if (!await this.replaceWornTool(stop.tool, signal, { dear: false })) unreplaced++
         await this.backTo(stop, name, signal)
       }
     }
@@ -485,7 +493,7 @@ export class Executor {
    * depot), a spare of a lower tier held in good shape doing before a dear plan; else the first plan there is. None got,
    * the tool is let be for a while (muteWorn) and used till it breaks. Whether there's one now.
    */
-  async replaceWornTool (tool: WornTool, signal?: AbortSignal): Promise<boolean> {
+  async replaceWornTool (tool: WornTool, signal?: AbortSignal, opts: { dear?: boolean } = {}): Promise<boolean> {
     if (this.replacing) return false
     this.replacing = true
     try {
@@ -510,6 +518,10 @@ export class Executor {
           return false
         }
       }
+      // a loot from a chest far off is dear whatever the plan's walk says (the trip back up from the deep caves and down
+      // again isn't in it: a 26.3 run's loot of the base's spare 200 blocks off was a plan of a few thousand ticks and
+      // took 29000)
+      const cost = (plan: ObtainPlan): number => plan.steps.some(st => st.kind === 'loot' && this.bot.entity.position.distanceTo(new Vec3(st.from.x, st.from.y, st.from.z)) > FAR_LOOT) ? Math.max(plan.cost, WEAR_REPLACE_TICKS + 1) : plan.cost
       const plans = tiers.map(material => ({ material, plan: this.plan(request(material)) }))
       for (const [i, { material, plan }] of plans.entries()) {
         const spare = i > 0 ? spareHeld(material) : null
@@ -518,10 +530,13 @@ export class Executor {
           this.muteWorn(tool)
           return true
         }
-        if (plan.ok && plan.cost <= WEAR_REPLACE_TICKS && await get(material, `a plan of ${Math.round(plan.cost)} ticks`)) return true
+        if (plan.ok && cost(plan) <= WEAR_REPLACE_TICKS && await get(material, `a plan of ${Math.round(plan.cost)} ticks`)) return true
       }
-      for (const { material, plan } of plans) {
-        if (plan.ok && plan.cost > WEAR_REPLACE_TICKS && await get(material, `a dear plan, ${Math.round(plan.cost)} ticks`)) return true
+      // a dear plan only where asked: a task stopped mid-way goes on with the worn tool instead (it has its uses left,
+      // and a pickaxe made from what's carried does the rest when it breaks: pickaxeKeeper), the dear replacement left
+      // to the steps between tasks (replaceWornTools)
+      for (const { material, plan } of opts.dear === false ? [] : plans) {
+        if (plan.ok && cost(plan) > WEAR_REPLACE_TICKS && await get(material, `a dear plan, ${Math.round(cost(plan))} ticks`)) return true
       }
       this.log(`no new ${tool.kind} for the ${tool.name}: it's used till it breaks`)
       this.muteWorn(tool)
@@ -578,6 +593,7 @@ export class Executor {
         minUses: this.options.minToolUses,
         active: () => active,
         muted: tool => this.wornMuted(tool),
+        needs: info?.uses,
         stop: tool => {
           watch.stop = { tool, at: this.bot.entity.position.clone(), dimension: normalizeDimension(this.bot.game?.dimension) }
           handle.stop(new TaskError('TOOL_WORN', `the ${tool.name} has ${tool.uses} uses left, no spare of its tier: ${name} stopped for another`))

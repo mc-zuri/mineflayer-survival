@@ -642,6 +642,29 @@ test('a task stopped MAX_WEAR_STOPS_TOTAL times goes on with the worn tool (mute
   assert.ok(lines.some(l => /a very long tunnel: goes on with the worn iron_pickaxe/.test(l)), lines.join('\n'))
 })
 
+test('a task stopped for a worn tool whose only replacement is a far chest\'s goes on with the worn one (no trip mid-task)', async () => {
+  const { bot } = wornPickBot(30, {})
+  // the base's spare 300 blocks off: a plan of a short walk, a trip of tens of thousands of ticks from the deep caves
+  bot.survival.memory.rememberChest(new Vec3(300, 64, 0), { iron_pickaxe: 1 })
+  const log: string[] = []
+  const lines: string[] = []
+  const ex = new Executor(bot, { runners: { loot: async (step: any) => { log.push(describeStep(step)); return { gained: 0 } } }, maxStepFailures: 1, log: line => lines.push(line) })
+  const progress = { dug: 0, runs: 0, tools: [] as string[] }
+  assert.equal(await ex.task('mine the obsidian', longDig(bot, 20, progress)), 20)
+  assert.deepEqual(log, [])
+  assert.ok(lines.some(l => /no new pickaxe for the iron_pickaxe/.test(l)), lines.join('\n'))
+})
+
+test('a task that tells the uses it still needs is not stopped while the worn tool has them (TaskInfo.uses)', async () => {
+  const { bot } = wornPickBot(30, { iron_ingot: 3, stick: 2, crafting_table: 1 })
+  const log: string[] = []
+  const ex = new Executor(bot, { runners: honestRunners(bot, log), log: () => {} })
+  const progress = { dug: 0, runs: 0, tools: [] as string[] }
+  assert.equal(await ex.task('mine the obsidian', longDig(bot, 10, progress), undefined, { uses: () => 10 - progress.dug }), 10)
+  assert.equal(progress.runs, 1)
+  assert.deepEqual(log, [])
+})
+
 test('a worn tool no replacement can be got for is let be: the task goes on with it, and no task stops for it a while', async () => {
   // nothing to make a pickaxe of, and the mine steps find nothing
   const { bot } = wornPickBot(30, {})

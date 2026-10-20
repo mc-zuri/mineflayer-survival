@@ -107,6 +107,22 @@ test('watchToolWear stops for a pickaxe or a sword only: a hoe (a nether forest\
   assert.deepEqual(stops.map(s => `${s.kind}:${s.material}`), ['hoe:wooden'])
 })
 
+test('watchToolWear lets a worn tool be while it has the uses the task still needs (needs)', () => {
+  const stops: any[] = []
+  let left = 3
+  const bot = wearBot([{ name: 'diamond_pickaxe', maxDurability: 1561, durabilityUsed: 1530, slot: 36 }])
+  watchToolWear(bot, { minUses: 24, active: () => true, needs: () => left, stop: w => stops.push(w) })
+  bot.emit('physicsTick')
+  bot.heldItem.durabilityUsed = 1540
+  bot.emit('physicsTick')
+  assert.equal(stops.length, 0)
+  // the task's work grown past the uses left: the stop
+  left = 40
+  bot.heldItem.durabilityUsed++
+  bot.emit('physicsTick')
+  assert.equal(stops.length, 1)
+})
+
 test('replacementTiers: the worn tool\'s tier, then the lower ones down to stone', () => {
   assert.deepEqual(replacementTiers('diamond'), ['diamond', 'iron', 'stone'])
   assert.deepEqual(replacementTiers('iron'), ['iron', 'stone'])

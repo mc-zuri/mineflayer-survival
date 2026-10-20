@@ -84,6 +84,8 @@ export interface WearWatchOptions {
   muted?: (tool: WornTool) => boolean
   /** the tool kinds a task is stopped for (default WATCHED_TOOL_KINDS): the others are used till they break */
   kinds?: readonly ToolKind[]
+  /** the uses of the tool the task still needs, when it knows (a few obsidian to mine): no stop while they're left */
+  needs?: () => number | null
   /** called once, with the tool, when the task is to stop */
   stop: (tool: WornTool) => void
 }
@@ -106,6 +108,8 @@ export function watchToolWear (source: WearSource, opts: WearWatchOptions): () =
     const wore = last != null && last.slot === held.slot && last.name === held.name && uses < last.uses
     last = { slot: held.slot, name: held.name, uses }
     if (!wore || uses > opts.minUses) return
+    const needs = opts.needs?.()
+    if (needs != null && uses > needs) return
     const worn = wornOutTools(source.inventory.items(), { minUses: opts.minUses }).find(w => w.kind === tool.kind)
     if (worn == null) return
     const out: WornTool = { kind: worn.kind, material: worn.material, name: worn.item.name, uses: worn.uses }
