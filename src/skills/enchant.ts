@@ -473,10 +473,20 @@ export async function setupEnchanting (bot: Bot, args: SetupEnchantingArgs = {},
       (base != null ? chooseEnchantingSite(lookup, bot.entity.position, { radius: args.radius ?? 12 }) : null)
     if (site == null) throw new SkillError('CANNOT_PLACE', `no room for an enchanting table and its shelves near ${around.toString()}`, res)
     trace('setupEnchanting: site', site.table.toString(), 'dig', site.dig.length, 'fill', site.fill.length)
-    if (site.dig.length > 0) {
-      const dug = await collectBlock(bot, { positions: site.dig, pickup: true }, signal)
-      res.dug = dug.mined
+    // the room dug; what collectBlock stops short of ('broke 42 of 44 blocks: no more blocks found': a block that fell
+    // or was dug on the way, one out of reach from where it stood) tried again from where the bot is, and only a cell
+    // still solid after fails the setup (the enchanting milestone failed on it in 26.3 whole games, twice a run)
+    let dig = site.dig
+    for (let pass = 0; pass < 3 && dig.length > 0; pass++) {
+      const dug = await collectBlock(bot, { positions: dig, pickup: true }, signal).catch(err => {
+        if (!isSkillError(err, 'NOT_FOUND') && !isSkillError(err, 'NO_PATH')) throw err
+        trace('setupEnchanting: the room:', (err as Error).message)
+        return { mined: (err as any).partial?.mined ?? 0 }
+      })
+      res.dug = (res.dug ?? 0) + (dug.mined ?? 0)
+      dig = dig.filter(p => isSolid(lookup(p)))
     }
+    if (dig.length > 0) throw new SkillError('NOT_FOUND', `${dig.length} blocks of the enchanting room left at ${dig.slice(0, 3).map(p => p.toString()).join(' ')}`, res)
     for (const pos of site.fill) {
       if (isSolid(lookup(pos))) continue
       const filler = FILLERS.find(name => countItems(bot, name) > 0)

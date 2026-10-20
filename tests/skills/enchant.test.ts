@@ -363,3 +363,33 @@ test('the enchanting milestone makes its table\'s obsidian from lava when it has
   assert.ok(calls.includes('obsidian from the lava'), calls.join(', '))
   assert.ok(calls.indexOf('obsidian from the lava') < calls.findIndex(c => c.startsWith('obtain enchanting_table')), calls.join(', '))
 })
+
+test('setupEnchanting: the room cells a dig stops short of are dug again from where the bot is, not the setup failed', async () => {
+  const collectModule = require('../../src/skills/collectBlock')
+  const placeModule = require('../../src/skills/placeBlock')
+  const { SkillError } = await import('../../src/skills/errors')
+  const { setupEnchanting } = await import('../../src/skills/enchant')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  // stone to y 65 round the table's spot (a room to dig out of it), air above
+  const dug = new Set<string>()
+  const world = (p: Vec3): string => dug.has(p.toString()) ? 'air' : p.y < 64 ? 'stone' : (p.y <= 65 && Math.abs(p.x) <= 4 && Math.abs(p.z) <= 4 ? 'stone' : 'air')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 6.5), items: [item('enchanting_table', 1), item('bookshelf', 15)], world })
+  const calls: number[] = []
+  const real = [collectModule.collectBlock, placeModule.placeBlock]
+  collectModule.collectBlock = async (_b: unknown, a: any) => {
+    calls.push(a.positions.length)
+    // the first stops 2 short
+    const take = calls.length === 1 ? a.positions.slice(0, -2) : a.positions
+    for (const p of take) dug.add(p.toString())
+    if (calls.length === 1) throw new SkillError('NOT_FOUND', `broke ${take.length} of ${a.positions.length} blocks: no more blocks found`)
+    return { mined: take.length }
+  }
+  placeModule.placeBlock = async () => { throw new Error('stop at the table') }
+  try {
+    await assert.rejects(setupEnchanting(bot, { table: new Vec3(0, 64, 0), radius: 0, craft: false }), /stop at the table/)
+  } finally {
+    [collectModule.collectBlock, placeModule.placeBlock] = real
+  }
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1], 2)
+})
