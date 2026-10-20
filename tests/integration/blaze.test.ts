@@ -28,7 +28,10 @@ const USERNAME = 'blazebot'
 /** the spawners fought at: the seed, the spawner, where the bot is put */
 const PLACES: Record<string, { seed: string, spawner: Vec3, start: Vec3 }> = {
   s2: { seed: '2', spawner: new Vec3(59, 64, -534), start: new Vec3(43.5, 89, -515.5) },
-  s7741: { seed: '7741', spawner: new Vec3(136, 77, 258), start: new Vec3(120.5, 61, 247.5) }
+  s7741: { seed: '7741', spawner: new Vec3(136, 77, 258), start: new Vec3(120.5, 61, 247.5) },
+  // seed 2's fortress by the portal of the fresh-seed runs: full-26.3-fresh-d and nether-26.3-q3 died at its melee nook,
+  // (-277, 77, -161), three times; the bot put where q3 came in
+  s2fortress: { seed: '2', spawner: new Vec3(-277, 77, -159), start: new Vec3(-270.5, 61, -164.5) }
 }
 const PLACE = PLACES[process.env.BLAZE_AT ?? 's2']
 assert.ok(PLACE != null, `BLAZE_AT is one of ${Object.keys(PLACES).join(', ')}`)
@@ -45,6 +48,11 @@ const KITS: Record<string, Array<[string, number]>> = {
     ['iron_leggings', 1], ['golden_boots', 1], ['cobblestone', 59], ['cooked_mutton', 5], ['mutton', 1], ['potato', 1],
     ['raw_iron', 3], ['coal', 16], ['furnace', 1], ['crafting_table', 1], ['oak_log', 35], ['flint_and_steel', 1],
     ['torch', 18], ['water_bucket', 1], ['raw_gold', 37]
+  ],
+  // nether-26.3-q3's at seed 2's fortress (-277, 77, -159): an iron chestplate, golden boots, a shield, a stone sword, no bow
+  q3: [
+    ['iron_chestplate', 1], ['golden_boots', 1], ['shield', 1], ['stone_sword', 1], ['iron_pickaxe', 1], ['cobblestone', 128],
+    ['cooked_porkchop', 4], ['netherrack', 51], ['torch', 16], ['crafting_table', 1], ['coal', 31]
   ]
 }
 const KIT = KITS[process.env.BLAZE_KIT ?? 'nether']

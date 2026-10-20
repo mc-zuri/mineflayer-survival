@@ -14,7 +14,7 @@ import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { type Entity, entityBox, distanceToBox, eyePosition, hasLineOfSight, isAlive } from '../skills/combatUtil'
-import { blazeCharged, lowerShield, raiseShield } from '../skills/fight'
+import { blazeCharged, fight, lowerShield, raiseShield } from '../skills/fight'
 import { aim, arrowWorld } from '../skills/shoot'
 import { motionTrackerOf } from '../skills/motion'
 import { attackStrengthOf, bestMeleeWeapon } from '../skills/weapons'
@@ -24,6 +24,7 @@ import { placeBlock } from '../skills/placeBlock'
 import { collectDropsNear } from '../skills/hunt'
 import { nearbyDrops } from '../skills/pickupDrops'
 import { moveNear } from '../skills/gridWalk'
+import { walkTo } from '../skills/navigate'
 import { countItems, trace, waitTicks } from '../skills/util'
 import { fireballIncoming } from './safety'
 import { dig } from '../core/actions'
@@ -887,6 +888,8 @@ export async function withBlocksKept<T> (bot: Bot, cells: readonly Vec3[], fn: (
  */
 export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: AbortSignal): Promise<number> {
   let missed = 0
+  // (the blazes come out of the spawner within its 4 of a melee nook: one on the bot is fought off first)
+  await clearBlazesNear(bot, signal)
   const solidAt = (p: Vec3): boolean => bot.blockAt(p)?.boundingBox === 'block'
   const backed = (p: Vec3): boolean => [p.offset(0, -1, 0), p.offset(0, 1, 0), ...SIDES.map(s => p.plus(s))].some(solidAt)
   for (const cell of cells) {
@@ -904,6 +907,7 @@ export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: Abort
         trace('blaze nook: no block under', cell.toString(), (err as Error).message)
       }
     }
+    await clearBlazesNear(bot, signal)
     try {
       await placeBlock(bot, { pos: cell, item }, signal)
     } catch (err) {
@@ -915,10 +919,35 @@ export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: Abort
   return missed
 }
 
+/** a blaze this near the bot (in its melee reach soon: BlazeAttackGoal hits within 2) is fought before a nook's next block */
+export const NOOK_BLAZE_CLEAR = 3
+
+/**
+ * The blazes on the bot (within NOOK_BLAZE_CLEAR, in sight) fought off with the sword, each for 200 ticks at most,
+ * before a nook's next block goes in: a 26.3 bot building its melee nook 2 off seed 2's spawner stood stepping in and out
+ * of a wall's cell with two blazes come out on it punching, 5 a hit, and died there twice (nether-26.3-q3,
+ * full-26.3-fresh-d's spot). Resolves the ones fought.
+ */
+export async function clearBlazesNear (bot: Bot, signal?: AbortSignal): Promise<number> {
+  let fought = 0
+  for (let i = 0; i < 4; i++) {
+    const blaze = Object.values(bot.entities)
+      .filter(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(bot.entity.position) <= NOOK_BLAZE_CLEAR && hasLineOfSight(bot, e))
+      .sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
+    if (blaze == null) break
+    trace('blaze nook: a blaze on the bot at', blaze.position.distanceTo(bot.entity.position).toFixed(1), ': fought first')
+    fought++
+    await fight(bot, blaze, { signal, maxTicks: 200, maxDistance: 8, maxDrop: 0, crits: false }).catch(err => { if (isAbort(err)) throw err; trace('blaze nook:', (err as Error).message) })
+  }
+  return fought
+}
+
 /** to the nook's cell and its walls and roof put up; throws when they can't all be */
 export async function buildNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal): Promise<void> {
   await enterNook(bot, nook, signal)
   if (!inNook(bot, nook)) throw new SkillError('VERIFY_FAILED', `the bot is at ${bot.entity.position.toString()}, not in the nook at ${nook.stand.toString()}`)
+  // (in the middle of its cell: half in a wall's, the wall's block walked the bot out and back three times, 26.3)
+  await walkTo(bot, nook.stand.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal)
   const missed = await fillNook(bot, nook.build, signal)
   if (missed > 0) throw new SkillError('CANNOT_PLACE', `${missed} of the nook's ${nook.build.length} blocks not put`)
 }

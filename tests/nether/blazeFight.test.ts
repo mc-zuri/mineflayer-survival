@@ -753,3 +753,25 @@ test('nookAround takes no fence for a wall (a fireball goes between its posts): 
   const nook = nookAround(at('nether_bricks'), new Vec3(0, 64, 10), new Vec3(0, 0, -1))
   assert.ok(nook != null && !nook.build.some(p => p.equals(new Vec3(1, 65, 10))))
 })
+
+test('fillNook fights off a blaze on the bot (within 3) before the next block, and builds on (nether-26.3-q3: two deaths building the melee nook among the spawner\'s blazes)', async () => {
+  const { fillNook } = await import('../../src/nether/blazeFight')
+  const fightModule = require('../../src/skills/fight')
+  const placeModule = require('../../src/skills/placeBlock')
+  const { fakeBot: fb, item: it, entity: en } = await import('../reflexes/fakeBot')
+  const blaze = en({ name: 'blaze', position: new Vec3(1.5, 64, 0.5) })
+  const bot = fb({ items: [it('cobblestone', 16)], entities: [blaze] })
+  ;(bot as any).world = { raycast: () => null }
+  const order: string[] = []
+  const realFight = fightModule.fight
+  const realPlace = placeModule.placeBlock
+  fightModule.fight = async (_b: unknown, t: any) => { order.push(`fight ${t.name}`); delete bot.entities[t.id] ; return { killed: true, hits: 3, ticks: 30, lastPosition: t.position } }
+  placeModule.placeBlock = async (_b: unknown, a: any) => { order.push(`place ${a.pos.toString()}`); return { pos: a.pos, block: a.item, placed: true } }
+  try {
+    assert.equal(await fillNook(bot, [new Vec3(-1, 64, 0), new Vec3(0, 64, -1)]), 0)
+  } finally {
+    fightModule.fight = realFight
+    placeModule.placeBlock = realPlace
+  }
+  assert.deepEqual(order, ['fight blaze', 'place (-1, 64, 0)', 'place (0, 64, -1)'])
+})
