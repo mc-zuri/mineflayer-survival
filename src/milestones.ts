@@ -11,7 +11,7 @@ import { travel } from './skills/travel'
 import { dayPhase } from './planner/schedule'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
 import { obsidianFromLava, refillWater } from './nether/obsidian'
-import { descendTo, ensureSurface, spiralWaypoints } from './executor/explore'
+import { descendTo, ensureSurface, inWater, spiralWaypoints, toShore } from './executor/explore'
 import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
 import { SkillError, isAbort, isSkillError } from './skills/errors'
@@ -944,6 +944,12 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
     await executor.task('to a ruined portal', async (s) => await overland(bot, { target: at, range: 16 }, s), budget).catch(quiet)
     await mineInSight(48, budget)
   }).catch(err => { quiet(err); log(`obsidian: the ruined portal: ${(err as Error).message}`) })
+  // an ocean's portal left the bot in the sea (its bottom, where every way on from timed out and the drowning reflex
+  // went on for 20000 ticks, 26.3): to the shore
+  if (inWater(bot)) {
+    log('obsidian: the ruined portal was in the sea: to the shore')
+    await executor.task('to the shore', async (s) => await toShore(bot, s), signal).catch(quiet)
+  }
 }
 
 export async function obsidianFromPools (bot: Bot, executor: Executor, count: number, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {

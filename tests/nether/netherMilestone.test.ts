@@ -770,3 +770,17 @@ test('naturalObsidian passes over obsidian in water (an ocean ruined portal) or 
   await naturalObsidian(bot, executor, 10, new AbortController().signal, (l: string) => logs.push(l))
   assert.ok(logs.some(l => /^obsidian: 1 in sight/.test(l)), logs.join('\n'))
 })
+
+test('naturalObsidian: a ruined portal that was in the sea is left for the shore', async () => {
+  const { naturalObsidian } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 56, 0.5), items: [item('diamond_pickaxe', 1)], world: (p: any) => p.y < 50 ? 'stone' : p.y < 63 ? 'water' : 'air' })
+  bot.game.dimension = 'overworld'
+  bot.survival = { ...(bot.survival ?? {}), playOptions: { seed: '2' } }
+  bot.findBlocks = () => []
+  const calls: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (name: string) => { calls.push(name) } }
+  await naturalObsidian(bot, executor, 10, new AbortController().signal, () => {})
+  assert.deepEqual(calls, ['to a ruined portal', 'to the shore'])
+})
