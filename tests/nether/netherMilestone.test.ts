@@ -56,7 +56,7 @@ test('the nether milestone with no lava near and no obsidian gets the frame\'s 1
   assert.equal(calls[0], 'down to the deep lava')
   assert.equal(calls.slice(0, from).filter(c => c === 'a leg for lava').length, PORTAL_LEGS)
   // (the nether's kit got before the way in)
-  assert.deepStrictEqual(calls.slice(from).filter(c => !/iron_sword|stone_sword|shield|glass_bottle|water bottles/.test(c)).slice(0, 4), ['obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
+  assert.deepStrictEqual(calls.slice(from).filter(c => !/iron_sword|stone_sword|shield|glass_bottle|water bottles|80 arrow/.test(c)).slice(0, 4), ['obtain 10 obsidian', 'up to the surface', 'build a nether portal', 'into the nether'])
 })
 
 test('pearls in the nether: the endermen in sight hunted, else a leg on to find piglins or endermen, a few legs at most', async () => {

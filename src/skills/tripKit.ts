@@ -136,7 +136,19 @@ export function nearPortal (lookup: (p: Vec3) => any, pos: Vec3): boolean {
  * a bow when there are two, half the arrows (from 32 up) and of each food (from 8 up), half the blocks up to 64, and
  * the armor and shields carried, not worn or held
  */
-export function tripKitItems (items: readonly ItemCount[]): ItemCount[] {
+/**
+ * What a trip's gate keeps in the bag (TripKitKeep): the arrows and the food points the trip goes with; the kit then
+ * takes what's over them, not half (the nether's kit, left after its gate is met: a respawn by it takes the spares up
+ * and the gate is met again at once, not got again over 100000 ticks, seed 2)
+ */
+export interface TripKitKeep {
+  arrows?: number
+  /** food points, by `nutrition` */
+  food?: number
+  nutrition?: (name: string) => number
+}
+
+export function tripKitItems (items: readonly ItemCount[], keep: TripKitKeep = {}): ItemCount[] {
   const count = (name: string): number => items.filter(i => i.name === name).reduce((n, i) => n + i.count, 0)
   const out: ItemCount[] = []
   const add = (name: string, n: number): void => { if (n > 0) out.push({ name, count: n }) }
@@ -149,8 +161,22 @@ export function tripKitItems (items: readonly ItemCount[]): ItemCount[] {
   const picks = PICKAXES.flatMap(p => new Array<string>(count(p)).fill(p))
   for (const p of PICKAXES) add(p, picks.slice(picks.length >= 3 ? 2 : 1).filter(q => q === p).length)
   if (count('bow') >= 2) add('bow', count('bow') - 1)
-  if (count('arrow') >= 32) add('arrow', Math.floor(count('arrow') / 2))
-  for (const f of FOODS) if (count(f) >= 8) add(f, Math.floor(count(f) / 2))
+  if (keep.arrows != null) add('arrow', count('arrow') - keep.arrows)
+  else if (count('arrow') >= 32) add('arrow', Math.floor(count('arrow') / 2))
+  if (keep.food != null && keep.nutrition != null) {
+    // the food over the points kept, the least nourishing first (the trip goes with the best)
+    const value = keep.nutrition
+    let spare = FOODS.reduce((n, f) => n + count(f) * value(f), 0) - keep.food
+    for (const f of [...FOODS].sort((a, b) => value(a) - value(b))) {
+      const each = value(f)
+      if (each <= 0 || spare < each) continue
+      const n = Math.min(count(f), Math.floor(spare / each))
+      add(f, n)
+      spare -= n * each
+    }
+  } else {
+    for (const f of FOODS) if (count(f) >= 8) add(f, Math.floor(count(f) / 2))
+  }
   let blocks = 0
   for (const b of BLOCKS) {
     const n = Math.min(Math.floor(count(b) / 2), 64 - blocks)
@@ -215,7 +241,7 @@ export interface TripKitResult {
  * Leaves the trip kit (tripKitItems) in a chest put down by the bot, and a bed beside it used to set the respawn
  * point when one is held; remembered as a TRIP_KIT point with the chest's items. Throws MISSING_ITEMS without a chest.
  */
-export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: AbortSignal, opts: { chest?: Vec3 } = {}): Promise<TripKitResult> {
+export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: AbortSignal, opts: { chest?: Vec3, keep?: TripKitKeep } = {}): Promise<TripKitResult> {
   throwIfAborted(signal)
   const lookup = (p: Vec3): any => bot.blockAt(p)
   // a kit's chest there already (the one a respawn emptied): filled again, no chest nor bed made
@@ -237,7 +263,7 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
     await placeBlock(bot, { pos, item: 'chest' }, signal)
   }
   const stored: Record<string, number> = {}
-  for (const it of tripKitItems(bot.inventory.items().map(i => ({ name: i.name, count: i.count })))) {
+  for (const it of tripKitItems(bot.inventory.items().map(i => ({ name: i.name, count: i.count })), opts.keep)) {
     throwIfAborted(signal)
     try {
       const res = await storeItems(bot, { chest: pos, filter: it.name, count: it.count, memory }, signal)

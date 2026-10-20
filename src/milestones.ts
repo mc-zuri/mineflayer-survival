@@ -34,7 +34,7 @@ import { BREEDERS_KEPT, HERD, HERD_MOBS, MEAT_OF, POINTS_PER_KILL, breedingFoodH
 import { hunt } from './skills/hunt'
 import { isAlive } from './skills/combatUtil'
 import { foodInfo } from './core/items'
-import { TRIP_KIT, kitSpares, stashTripKit } from './skills/tripKit'
+import { TRIP_KIT, kitSpares, stashTripKit, type TripKitKeep } from './skills/tripKit'
 import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
 import { normalizeDimension, type WorldMemory } from './core/memory'
@@ -858,6 +858,31 @@ export function bowlessBrewGate (bot: Bot): void {
   if (!creamMakings(bot)) throw Object.assign(new SkillError('MISSING_ITEMS', 'not going into the nether without a bow or a slime ball for the magma cream of fire resistance'), { notReady: true })
 }
 
+/** the spares over the nether gate a trip kit by the portal is left with: arrows, food points */
+export const NETHER_SPARE_ARROWS = 16
+export const NETHER_SPARE_FOOD = 40
+/** the ticks the spares may take to get (they're not the gate's: what comes in that time) */
+export const NETHER_SPARES_TICKS = 8000
+
+/**
+ * The spares over the gate for the trip kit (leaveTripKit's keep leaves the gate's in the bag): NETHER_SPARE_ARROWS
+ * more arrows (with a bow), NETHER_SPARE_FOOD more food points, within NETHER_SPARES_TICKS; what doesn't come in that
+ * time isn't waited for
+ */
+export async function netherSpares (bot: Bot, executor: Executor, gate: NetherGate, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  if (inNether(bot)) return
+  const want: ObtainRequest[] = []
+  if (gate.bow !== false && countItems(bot, 'bow') > 0) want.push({ item: 'arrow', count: gate.arrows + NETHER_SPARE_ARROWS, optional: true })
+  want.push({ item: FOOD_GOAL, count: gate.food + NETHER_SPARE_FOOD, unit: 'nutrition', optional: true })
+  const short = want.filter(r => r.unit === 'nutrition' ? heldFor(ownedInventory(bot), FOOD_GOAL, { unit: 'nutrition' }) < r.count : countItems(bot, r.item as string) < r.count)
+  if (short.length === 0) return
+  log(`nether kit: spares for the trip kit: ${short.map(describeRequest).join(', ')}`)
+  await withTickBudget(bot, NETHER_SPARES_TICKS, signal, async (s) => await executor.obtain(short, s)).catch(err => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`nether kit: the spares: ${(err as Error).message}`)
+  })
+}
+
 /** the ticks a try of the nether kit spends on the gate's food after the gear (the rest banked over the tries) */
 export const NETHER_FOOD_TICKS = 12000
 /** the ticks a try of the nether kit spends on the gate's arrows after the rest of the gear */
@@ -1065,8 +1090,14 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
       // bot that started the nether at the spawn had none near
       await buildAPortal(bot, executor, signal, log)
     }
-    // a spare kit by the portal and the respawn point by it (a blaze's death in the nether was the stage lost)
-    await leaveTripKit(bot, executor, signal, log)
+    // the gate met, then spares over it got (NETHER_SPARES) and left in a kit by the portal with the respawn point by
+    // it: a death in the nether is a respawn by the kit, its spares taken up, and the gate met again at once (a blaze's
+    // death was a re-kit of 175000 ticks on 1.21.11 seed 2, its arrows, food and bow all got again, fresh-e)
+    await netherKit(bot, executor, signal, log)
+    const gate = netherGate(bot, executor as any)
+    await netherSpares(bot, executor, gate, signal, log)
+    await leaveTripKit(bot, executor, signal, log, undefined, { arrows: gate.bow === false ? 0 : gate.arrows, food: gate.food, nutrition: n => foodInfo(bot.registry as any, n)?.nutrition ?? 0 })
+    // (the kit took only what's over the gate: still met, the bottles' brew kit made after it again if it took them)
     await netherKit(bot, executor, signal, log)
     try {
       await executor.task('into the nether', async (s) => await enterNether(bot, { build: false }, s), signal)
@@ -1656,7 +1687,7 @@ async function makeKitSpares (bot: Bot, executor: Executor, signal: AbortSignal,
  * cheap), the spares put in, the respawn point set by it. `beforeStash` runs once the chest and bed are got, before
  * they are put down (back to where the kit belongs: the bed's sheep may be hunted far off)
  */
-export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, beforeStash?: () => Promise<void>): Promise<void> {
+export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, beforeStash?: () => Promise<void>, keep?: TripKitKeep): Promise<void> {
   const known = executor.memory.getPois(TRIP_KIT, { dimension: 'overworld', near: bot.entity.position })[0]
   if (known != null && Object.values(executor.memory.chestAt(known, 'overworld')?.items ?? {}).some(n => n > 0)) return
   // the kit's chest a respawn emptied, by: filled again (a 26.3 bot respawned by the stronghold went 68000 ticks up
@@ -1665,7 +1696,7 @@ export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortS
   if (chest != null && chest.distanceTo(bot.entity.position) <= 32 && bot.blockAt(chest)?.name === 'chest') {
     try {
       await makeKitSpares(bot, executor, signal, log)
-      const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s, { chest }), signal)
+      const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s, { chest, keep }), signal)
       log(`trip kit again at ${kit.chest.toString()}: ${Object.entries(kit.stored).map(([n, c]) => `${c} ${n}`).join(', ')}`)
     } catch (err) {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
@@ -1688,7 +1719,7 @@ export async function leaveTripKit (bot: Bot, executor: Executor, signal: AbortS
     }
     await makeKitSpares(bot, executor, signal, log)
     await beforeStash?.()
-    const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s), signal)
+    const kit = await executor.task('leave a trip kit', async (s) => await stashTripKit(bot, executor.memory, s, { keep }), signal)
     log(`trip kit at ${kit.chest.toString()}: ${Object.entries(kit.stored).map(([n, c]) => `${c} ${n}`).join(', ')}${kit.bed != null ? ', the respawn point by it' : `; no respawn point by it: ${kit.noBed ?? '?'}`}`)
   } catch (err) {
     if (signal.aborted || TaskError.is(err, 'DIED')) throw err

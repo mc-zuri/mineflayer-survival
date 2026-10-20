@@ -295,3 +295,34 @@ test('keepUnbroken: the kit\'s chest and the spawn bed are never broken by a pat
   for (const p of [[2358, -24, 1015], [2359, -24, 1014], [2359, -24, 1013]]) assert.ok(cost(p[0], p[1], p[2]) >= 1e9, p.join(','))
   assert.strictEqual(cost(2360, -24, 1014), 0)
 })
+
+test('tripKitItems with the gate kept (the nether\'s kit): the arrows and the food over it go in, the least nourishing food first; the gate\'s stay', async () => {
+  const { tripKitItems } = await import('../../src/skills/tripKit')
+  const nutrition = (n: string): number => ({ cooked_beef: 8, bread: 5, cooked_chicken: 6 } as Record<string, number>)[n] ?? 0
+  const items = [{ name: 'diamond_sword', count: 1 }, { name: 'arrow', count: 48 }, { name: 'cooked_beef', count: 12 }, { name: 'bread', count: 8 }]
+  // 136 points, 80 kept: 56 over, the bread first (40), then two beef (16)
+  const by = Object.fromEntries(tripKitItems(items, { arrows: 32, food: 80, nutrition }).map(k => [k.name, k.count]))
+  assert.deepStrictEqual(by, { arrow: 16, bread: 8, cooked_beef: 2 })
+  // none over the gate: none of them in
+  const none = Object.fromEntries(tripKitItems([{ name: 'arrow', count: 32 }, { name: 'cooked_beef', count: 10 }], { arrows: 32, food: 80, nutrition }).map(k => [k.name, k.count]))
+  assert.deepStrictEqual(none, {})
+  // with no gate (the End's kit): half, as before
+  assert.deepStrictEqual(Object.fromEntries(tripKitItems(items).map(k => [k.name, k.count])), { arrow: 24, cooked_beef: 6, bread: 4 })
+})
+
+test('netherSpares: arrows and food over the gate asked for, within its budget, optional; none when they\'re there', async () => {
+  const { netherSpares, NETHER_SPARE_ARROWS, NETHER_SPARE_FOOD } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const asked: any[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async (reqs: any[]) => { asked.push(...reqs) }, task: async () => {} }
+  const bot = fakeBot({ items: [item('bow', 1), item('arrow', 32), item('cooked_beef', 10)] })
+  bot.game.dimension = 'overworld'
+  await netherSpares(bot, executor, { food: 80, arrows: 32, bow: true }, new AbortController().signal, () => {})
+  assert.deepStrictEqual(asked.map(r => [r.unit === 'nutrition' ? 'food' : r.item, r.count, r.optional]), [['arrow', 32 + NETHER_SPARE_ARROWS, true], ['food', 80 + NETHER_SPARE_FOOD, true]])
+  asked.length = 0
+  const full = fakeBot({ items: [item('bow', 1), item('arrow', 48), item('cooked_beef', 15)] })
+  full.game.dimension = 'overworld'
+  await netherSpares(full, executor, { food: 80, arrows: 32, bow: true }, new AbortController().signal, () => {})
+  assert.deepStrictEqual(asked, [])
+})
