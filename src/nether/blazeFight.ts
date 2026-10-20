@@ -839,12 +839,13 @@ export function seenPoint (bot: Bot, e: Entity): Vec3 | null {
 export const DROP_REACH = 14
 
 /**
- * The blaze rods lying near the nook (the kills' drops), on a floor no lower than 3 under it, nearest first: the rest
- * (a wither skeleton's bones and coal) is left, not worth the walk under the blazes
+ * The blaze rods lying near the nook (the kills' drops), and a magma cube's cream (fire resistance's making: the cubes
+ * the nook's sword meets), on a floor no lower than 3 under it, nearest first: the rest (a wither skeleton's bones and
+ * coal) is left, not worth the walk under the blazes
  */
 export function dropsNear (bot: Bot, nook: BlazeNook): Entity[] {
   const at = nook.stand.offset(0.5, 0, 0.5)
-  return nearbyDrops(bot, at, DROP_REACH, ['blaze_rod']).filter(e => e.position.y >= nook.stand.y - 3)
+  return nearbyDrops(bot, at, DROP_REACH, ['blaze_rod', 'magma_cream']).filter(e => e.position.y >= nook.stand.y - 3)
 }
 
 /** ticks with no blaze that sees the bot able to shoot that a fetch of the rods on the floor starts in */

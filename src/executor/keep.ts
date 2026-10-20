@@ -84,7 +84,7 @@ const VALUABLE = new Set([
   'coal', 'charcoal', 'obsidian', 'crying_obsidian',
   'ender_pearl', 'ender_eye', 'blaze_rod', 'blaze_powder', 'breeze_rod', 'ghast_tear', 'nether_star', 'dragon_egg',
   'dragon_breath', 'totem_of_undying', 'golden_apple', 'enchanted_golden_apple', 'golden_carrot', 'experience_bottle',
-  'potion', 'splash_potion', 'lingering_potion', 'book', 'enchanted_book', 'writable_book', 'written_book',
+  'potion', 'splash_potion', 'lingering_potion', 'glass_bottle', 'nether_wart', 'magma_cream', 'slime_ball', 'book', 'enchanted_book', 'writable_book', 'written_book',
   'heart_of_the_sea', 'nautilus_shell', 'echo_shard', 'shulker_shell', 'trial_key', 'ominous_trial_key', 'heavy_core'
 ])
 const VALUABLE_PATTERN = /(_ore|_ingot|_nugget|_shulker_box|_smithing_template|_horse_armor)$|^shulker_box$|^raw_(iron|gold|copper)(_block)?$|^(iron|gold|diamond|emerald|lapis|redstone|netherite|copper|coal|quartz|amethyst)_block$|^music_disc_/

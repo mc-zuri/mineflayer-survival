@@ -29,6 +29,7 @@ import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
 import { collectBlazeRods } from '../../src/nether/fortressSkills'
+import { blazeRodsWithBrew, resetBrewTries } from '../../src/nether/brewing'
 import { Executor } from '../../src/executor/executor'
 import { countItems, waitUntil } from '../../src/skills/util'
 import { STAGES } from './stageKits'
@@ -119,6 +120,13 @@ const KITS: Record<string, Array<[string, number]>> = {
 }
 // BLAZE_FIRE_RES=n: n potions of fire resistance in the bag as well (the piglins' barter, or brewed)
 const FIRE_RES: Array<[string, number]> = process.env.BLAZE_FIRE_RES != null ? [['potion[potion_contents={potion:"minecraft:fire_resistance"}]', Number(process.env.BLAZE_FIRE_RES)]] : []
+// BLAZE_BREW=1: fire resistance brewed by the fight (blazeRodsWithBrew: the first 2 rods, nether wart from the fortress,
+// magma cream from the cubes about, brewed where the bot came in), the kit with 3 water bottles, a crafting table and
+// 32 cobblestone for it (the gate's brewKit)
+const BREW = process.env.BLAZE_BREW != null
+if (BREW) FIRE_RES.push(['potion[potion_contents={potion:"minecraft:water"}]', 3], ['crafting_table', 1], ['cobblestone', 32])
+// BLAZE_CREAM=n: n magma cream in the kit too (the brew's making the deltas' cubes give: their cream got before)
+if (process.env.BLAZE_CREAM != null) FIRE_RES.push(['magma_cream', Number(process.env.BLAZE_CREAM)])
 assert.ok(KITS[process.env.BLAZE_KIT ?? 'nether'] != null, `BLAZE_KIT is one of ${Object.keys(KITS).join(', ')}`)
 const KIT = [...FIRE_RES, ...KITS[process.env.BLAZE_KIT ?? 'nether']]
 const RUNS = Number(process.env.BLAZE_RUNS ?? 3)
@@ -245,11 +253,14 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
     bot.on('death', onDeath)
     bot.on('messagestr' as any, onMessage)
     const executor = new Executor(bot, { log: () => {} })
+    resetBrewTries(bot)
     const t0 = bot.lockstep.ticks
     let result = { rods: 0, kills: 0 }
     let error = ''
     try {
-      result = await executor.task('blaze rods', async (s) => await collectBlazeRods(bot, { count: RODS, spawner: SPAWNER, maxTicks: MAX_TICKS }, s))
+      result = await executor.task('blaze rods', async (s) => BREW
+        ? await blazeRodsWithBrew(bot, { count: RODS, spawner: SPAWNER, maxTicks: MAX_TICKS, away: START }, s)
+        : await collectBlazeRods(bot, { count: RODS, spawner: SPAWNER, maxTicks: MAX_TICKS }, s))
     } catch (err) {
       error = (err as Error).message
     } finally {

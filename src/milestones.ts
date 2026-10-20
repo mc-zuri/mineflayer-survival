@@ -49,6 +49,7 @@ import { findBlocks } from './core/findBlocks'
 import { nearestBiomeSpot, pearlLeg } from './nether/ground'
 import { endermenFromCover, forgetCover } from './nether/endermanCover'
 import { NetherBiomeSource } from './worldgen/netherBiomes'
+import { blazeRodsWithBrew, resetBrewTries } from './nether/brewing'
 import { ruinedPortalCandidates } from './worldgen/placement'
 import type { Seed } from './worldgen/random'
 import { excludedSpawner, levelSeed, unreachableSpawners } from './nether/fortressSkills'
@@ -1002,6 +1003,8 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     // the rods wanted fixed before the task (a restart after a reflex read the rods held again and wanted 8 more: a
     // 26.3 bot fought at the spawner with 43 rods until a blaze killed it)
     const rods = count('blaze_rod') + needs.rods
+    // (the brew of fire resistance tried anew each time the milestone's worked on)
+    resetBrewTries(bot)
     // a spawner the bot finds no way to is left for the fortress's other (they often have two), else another
     // fortress (a 26.3 bot found no path to one for 6000 ticks, then fell into the lava under it, run blz-d)
     let otherFortress = false
@@ -1017,8 +1020,10 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
         log(`a fortress at ${found.fortress.center.x} ${found.fortress.center.y} ${found.fortress.center.z} (${found.via}, ${found.ticks} ticks)`)
         otherFortress = false
       }
+      // (fire resistance brewed first when the bottles were brought: blazeRodsWithBrew, its makings got from here)
+      const away = bot.entity.position.clone()
       try {
-        await executor.task('blaze rods', async (s) => await collectBlazeRods(bot, { count: rods, spawner, exclude }, s), signal)
+        await executor.task('blaze rods', async (s) => await blazeRodsWithBrew(bot, { count: rods, spawner, exclude, away }, s), signal)
         break
       } catch (err) {
         if (signal.aborted || TaskError.is(err, 'DIED') || attempt >= BLAZE_SPAWNER_TRIES) throw err

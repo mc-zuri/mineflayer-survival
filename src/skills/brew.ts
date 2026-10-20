@@ -70,6 +70,8 @@ export interface BrewArgs {
   /** the stand to use (default: one within `standDistance`, else one made and put down) */
   stand?: Vec3
   standDistance?: number
+  /** where to put down a stand made (default a free cell beside the bot) */
+  standAt?: Vec3
   /** the stand the bot put down taken back after (default true) */
   pickUpStand?: boolean
 }
@@ -94,7 +96,7 @@ async function getStand (bot: Bot, args: BrewArgs, signal?: AbortSignal): Promis
   if (found != null) return { stand: found, placed: false }
   // (a blaze rod and 3 cobblestone, blackstone or cobbled deepslate at a crafting table)
   if (countItems(bot, 'brewing_stand') === 0) await craft(bot, { item: 'brewing_stand' }, signal)
-  const pos = findPlacementNear(p => bot.blockAt(p), bot.entity.position)
+  const pos = args.standAt ?? findPlacementNear(p => bot.blockAt(p), bot.entity.position)
   if (pos == null) throw new SkillError('CANNOT_PLACE', 'no room next to the bot for a brewing stand')
   await placeBlock(bot, { pos, item: 'brewing_stand' }, signal)
   const stand = bot.blockAt(pos)
