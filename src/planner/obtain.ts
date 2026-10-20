@@ -71,6 +71,12 @@ export interface ObtainOptions {
    */
   farmCost?: (crop: string) => number | undefined
   /**
+   * The bot's herd of a kind (skills/herd.ts herdSupply): its surplus adults (beyond the breeders) a walk away, and its
+   * calves once grown; a kill of the kind takes those first, at the walk and the growing left, then wild ones at the
+   * source's costs. Undefined for a kind the bot keeps none of.
+   */
+  herd?: (mob: string) => { surplus: number, growing: number, growTicks: number, distance: number } | undefined
+  /**
    * count on each mine and kill step for its count alone, not the drops expected beyond it (a cow's second beef): the
    * executor's plan after its plans failed their check twice the same way
    */
@@ -108,13 +114,18 @@ interface State {
   visited: Set<string>
   /** remembered chest contents already planned out: `chestKey|item` → count */
   looted: Map<string, number>
+  /** the herd's animals already planned to be killed, by kind */
+  herded?: Map<string, number>
 }
 
 function clone (s: State): State {
-  return { inv: s.inv.clone(), cost: s.cost, steps: s.steps.slice(), dims: new Set(s.dims), visited: new Set(s.visited), looted: new Map(s.looted) }
+  return { inv: s.inv.clone(), cost: s.cost, steps: s.steps.slice(), dims: new Set(s.dims), visited: new Set(s.visited), looted: new Map(s.looted), herded: new Map(s.herded) }
 }
 
 type Strategy = (s: State, path: string[], limit: number) => State | null
+
+/** ticks from one of the herd's animals to the next in its pen */
+export const HERD_EACH_TICKS = 20
 
 /** blocks a mine step goes down for (ORE_LEVELS' ores, the deep stone): the rest is got at the surface */
 export const UNDERGROUND_BLOCKS = /(_ore|^ancient_debris|^deepslate|^obsidian)$/
@@ -584,7 +595,19 @@ export class Resolver {
     const perKill = src.drops.find(d => d.item === item)?.count ?? 0
     if (perKill <= 0) return null
     const kills = Math.ceil(n / perKill - 1e-9)
-    const own = this.dimensionCost(s, src.dimension) + this.findCost(s, src.mob, 'mob', src.dimension, src.find, src.each) + (kills - 1) * src.each + kills * (FIGHT_TICKS + PICKUP_TICKS)
+    // the herd's surplus first, a walk to its pen, then its calves once grown, then wild ones (the herd's breeders
+    // and calves are no wild ones: the hunt passes them over, herdSpares)
+    const herd = src.dimension === 'overworld' ? this.opts.herd?.(src.mob) : undefined
+    const taken = s.herded?.get(src.mob) ?? 0
+    const now = herd == null ? 0 : Math.max(0, Math.min(kills, herd.surplus - taken))
+    const later = herd == null ? 0 : Math.max(0, Math.min(kills - now, herd.surplus + herd.growing - taken - now))
+    const wild = kills - now - later
+    const herdCost = herd == null || now + later === 0
+      ? 0
+      : (taken > 0 ? 0 : Math.ceil(herd.distance * WALK_TICKS_PER_BLOCK)) + (now + later - 1) * HERD_EACH_TICKS + (later > 0 ? herd.growTicks : 0)
+    const wildCost = wild > 0 ? this.findCost(s, src.mob, 'mob', src.dimension, src.find, src.each) + (wild - 1) * src.each : 0
+    const own = this.dimensionCost(s, src.dimension) + herdCost + wildCost + kills * (FIGHT_TICKS + PICKUP_TICKS)
+    if (now + later > 0) (s.herded ??= new Map()).set(src.mob, taken + now + later)
     s.cost += own
     if (s.cost > limit) return null
     const extra = [...(this.opts.exactYields === true ? [] : surplus(item, n, kills * perKill)), ...extras(src.drops, item, kills)]

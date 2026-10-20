@@ -151,3 +151,43 @@ test('sightings: the pen\'s breeders are no cow in sight; its surplus is', async
   delete bot.entities[ids.adults[0]]
   assert.equal(s.cost(cow), undefined)
 })
+
+test('a kill step with no cow near goes to the herd it keeps out of sight for its surplus, not exploring', async () => {
+  const { memory, bot } = penned()
+  const herdCows = Object.values(bot.entities).filter((e: any) => e.name === 'cow' && e.position.x < 20) as any[]
+  for (const e of Object.values(bot.entities) as any[]) if (e.name === 'cow') delete bot.entities[e.id]
+  rememberHerd(memory, { pos: new Vec3(10, 64, 10), mob: 'cow', adults: 3, calves: 1, bred: null })
+  bot.entity.position = new Vec3(300.5, 64, 0.5)
+  const travelModule = require('../../src/skills/travel')
+  const huntModule = require('../../src/skills/hunt')
+  const { item } = await import('../reflexes/fakeBot')
+  const real = { travel: travelModule.travel, hunt: huntModule.hunt }
+  const trips: string[] = []
+  const killed: number[] = []
+  travelModule.travel = async (b: any, args: any) => {
+    trips.push(args.target.toString())
+    b.entity.position = new Vec3(12.5, 64, 10.5)
+    for (const e of herdCows) b.entities[e.id] = e
+    return {}
+  }
+  huntModule.hunt = async (b: any, prey: any) => {
+    killed.push(prey.id)
+    delete b.entities[prey.id]
+    b.inventory.slots[20] = item('beef', 2)
+    return { killed: true, drops: { beef: 2 } }
+  }
+  const lines: string[] = []
+  try {
+    const { runKill } = await import('../../src/executor/steps')
+    await runKill({ kind: 'kill', item: 'beef', count: 2, mob: 'cow', kills: 1, weapon: null, dimension: 'overworld', cost: 100 } as any, { bot, memory, signal: new AbortController().signal, state: {}, log: l => lines.push(l) })
+  } finally {
+    Object.assign(travelModule, { travel: real.travel })
+    huntModule.hunt = real.hunt
+  }
+  assert.deepEqual(trips, ['(10, 64, 10)'])
+  assert.equal(killed.length, 1)
+  assert.ok(herdCows.some(e => e.id === killed[0]), 'a penned cow')
+  assert.ok(!lines.some(l => /exploring/.test(l)), lines.join(' | '))
+  // its counts as seen there remembered
+  assert.equal(herdFromMemory(memory)?.adults, 3)
+})

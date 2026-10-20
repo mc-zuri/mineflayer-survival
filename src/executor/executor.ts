@@ -30,7 +30,7 @@ import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool 
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { SIGHTED_BLOCKS, Sightings } from './sight'
-import { herdSpares } from '../skills/herd'
+import { herdSpares, herdSupply } from '../skills/herd'
 import { noteVillage } from '../skills/village'
 import { digDepotNook, dumpPit, lavaThrow, pitThrow, rememberAround } from './explore'
 import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
@@ -325,7 +325,9 @@ export class Executor {
       dimension: this.bot.game?.dimension,
       exclude: [...this.options.exclude, ...(extra.exclude ?? [])],
       findCost: t => this.sightings.cost(t),
-      farmCost: crop => this.farmCost(crop)
+      farmCost: crop => this.farmCost(crop),
+      // the herd's surplus a walk away, its calves once grown
+      herd: mob => herdSupply(this.bot, this.memory, mob, Number((this.bot.time as any)?.age ?? 0))
     })
   }
 

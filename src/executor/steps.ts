@@ -26,7 +26,8 @@ import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, onT
 import { toolKindFor, wornOutTools } from './durability'
 import { growsAny, isGrown } from '../core/crops'
 import { SIGHTED_BLOCKS } from './sight'
-import { herdSpares } from '../skills/herd'
+import { herdCensus, herdFromMemory, herdPenOf, herdSpares, herdSupply, herdSurplus, noteHerd } from '../skills/herd'
+import { protectPen } from '../skills/pen'
 
 /** a mine step hands back to the executor when its tool has this many uses left (the executor's default too) */
 export const MIN_TOOL_USES = 24
@@ -417,6 +418,38 @@ export function huntProgress (ctx: Pick<StepContext, 'progress' | 'state'>, mobs
   return { key, progress: ctx.progress?.(key) ?? (ctx.state.explore ??= { leg: 0 }) }
 }
 
+/** ticks a kill step waits at the herd for a calf to grow into a surplus adult, at most */
+export const HERD_GROW_WAIT = 12000
+
+/**
+ * A kill step with none of its animals near and a herd of one of them kept (the plan counts on the herd's surplus or
+ * its calves nearly grown, herdSupply): to the herd first (the bot off at the mine, out of its sight), its counts
+ * noted as seen there, and a calf nearly grown waited for (HERD_GROW_WAIT at most). Resolves whether it went; once a
+ * step (ctx.state.herdVisited), then the step explores as for any.
+ */
+async function toTheHerd (bot: Bot, ctx: StepContext, mobs: readonly string[]): Promise<boolean> {
+  const herd = herdFromMemory(ctx.memory, bot.entity.position)
+  if (herd == null || !mobs.includes(herd.mob) || dimensionOf(bot) !== 'overworld') return false
+  const age = (): number => Number((bot.time as any)?.age ?? 0)
+  const supply = herdSupply(bot, ctx.memory, herd.mob, age())
+  if (supply == null || (supply.surplus === 0 && supply.growTicks > HERD_GROW_WAIT)) return false
+  ctx.state.herdVisited = true
+  const pen = herdPenOf(ctx.memory, herd)
+  // (in by its gate: the pathfinder never breaks its ring)
+  if (pen != null) protectPen(bot, pen)
+  if (Math.hypot(bot.entity.position.x - herd.pos.x, bot.entity.position.z - herd.pos.z) > 16) {
+    ctx.log(`to the herd at ${herd.pos.toString()} for its ${herd.mob}s`)
+    await travel(bot, { target: herd.pos, range: 8 }, ctx.signal).catch(err => { if (isAbort(err)) throw err })
+  }
+  const census = noteHerd(bot, ctx.memory, herd)
+  if (census == null || herdSurplus(census.adults.length) > 0 || census.calves.length === 0) return true
+  const left = herdSupply(bot, ctx.memory, herd.mob, age())
+  if (left == null || left.growTicks > HERD_GROW_WAIT) return true
+  ctx.log(`waiting at the herd for a calf to grow (${left.growTicks} ticks or so)`)
+  await waitUntil(bot, () => herdSurplus(herdCensus(bot, herd, pen)?.adults.length ?? 0) > 0, left.growTicks + 1200, ctx.signal)
+  return true
+}
+
 export const runKill: StepRunner<KillStep> = async (step, ctx) => {
   const { bot, signal } = ctx
   const start = startCount(ctx, 'start', () => countItems(bot, step.item))
@@ -437,7 +470,9 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
     if (nearest([step.mob], SEARCH_RADIUS) == null) {
       const sub = subs.find(m => nearest([m], SEARCH_RADIUS) != null)
       if (sub != null) mob = sub
-      else {
+      else if (ctx.state.herdVisited !== true && await toTheHerd(bot, ctx, [step.mob, ...subs])) {
+        continue
+      } else {
         ctx.log(`exploring for a ${[step.mob, ...subs].join(' or ')}`)
         passed.clear()
         // not far out: none in HUNT_EXPLORE_RADIUS of home is a land without them (a snowy taiga's rabbits only), and

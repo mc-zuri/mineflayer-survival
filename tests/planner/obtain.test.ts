@@ -321,3 +321,33 @@ test('a plan counts what its kills and blocks drop beyond the count wanted as it
   assert.equal(oreCheck.ok, true, oreCheck.error?.reason)
   assert.equal(oreCheck.inventory.count('redstone'), redstone.inventory.count('redstone'))
 })
+
+test('a kill of the herd\'s kind takes its surplus first, a walk to the pen, then its calves once grown, then wild ones; the breeders never', async () => {
+  const { HERD_EACH_TICKS } = await import('../../src/planner/obtain')
+  const cow = MOB_SOURCES.find(m => m.mob === 'cow') as typeof MOB_SOURCES[number]
+  const fight = 105
+  const supply = (surplus: number, growing = 0, growTicks = 0) => (mob: string) => mob === 'cow' ? { surplus, growing, growTicks, distance: 10 } : undefined
+  // 2 kills for 4 beef, the herd's two surplus cows 10 blocks off
+  const herd = obtain(registry, 'beef', 4, { herd: supply(2) })
+  assert.equal(kills(herd.steps, 'cow')[0].cost, 10 * WALK_TICKS_PER_BLOCK + HERD_EACH_TICKS + 2 * fight)
+  const wild = obtain(registry, 'beef', 4)
+  assert.equal(kills(wild.steps, 'cow')[0].cost, cow.find + cow.each + 2 * fight)
+  // 4 kills, 2 from the herd and 2 wild
+  assert.equal(kills(obtain(registry, 'beef', 8, { herd: supply(2) }).steps, 'cow')[0].cost, 10 * WALK_TICKS_PER_BLOCK + HERD_EACH_TICKS + cow.find + cow.each + 4 * fight)
+  // no surplus, a calf 3000 ticks from grown: its growing waited, cheaper than a wild one only when it's near grown
+  assert.equal(kills(obtain(registry, 'beef', 2, { herd: supply(0, 1, 300) }).steps, 'cow')[0].cost, 10 * WALK_TICKS_PER_BLOCK + 300 + fight)
+  // the two of a plan's kill steps for the herd don't take its one surplus cow twice
+  const both = obtainAll(registry, [{ item: 'beef', count: 2 }, { item: 'leather', count: 3 }], { herd: supply(1) })
+  const cost = kills(both.steps, 'cow').reduce((n, s) => n + s.cost, 0)
+  // (the one from the herd, the two more wild: the cows found by then, each the source's next)
+  assert.equal(cost, 10 * WALK_TICKS_PER_BLOCK + fight + 2 * cow.each + 2 * fight)
+})
+
+test('the food points come from the herd\'s surplus cows, cooked, over a hunt for wild animals', () => {
+  const inventory = { furnace: 1, coal: 8, stone_sword: 1 }
+  const food = obtainAll(registry, [{ item: ['cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'bread'], count: 32, unit: 'nutrition' }], { inventory, herd: mob => mob === 'cow' ? { surplus: 3, growing: 0, growTicks: 0, distance: 12 } : undefined })
+  assert.equal(food.ok, true)
+  assert.ok(kills(food.steps, 'cow').length > 0, food.steps.map(s => `${s.kind} ${s.item}`).join(', '))
+  const plain = obtainAll(registry, [{ item: ['cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'bread'], count: 32, unit: 'nutrition' }], { inventory })
+  assert.ok(food.cost < plain.cost - 300, `${food.cost} vs ${plain.cost}`)
+})

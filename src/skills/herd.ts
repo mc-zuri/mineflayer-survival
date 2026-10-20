@@ -202,3 +202,10 @@ export function holdsBreedingFood (bot: Bot, mob: string): boolean {
 export function breedingFoodHeld (bot: Bot, mob: string): number {
   return (BREEDING_FOOD[mob] ?? []).reduce((n, f) => n + countItems(bot, f), 0)
 }
+
+/** the herd's counts as seen now remembered (for the plans made out of its sight); the census, null out of sight */
+export function noteHerd (bot: Bot, memory: WorldMemory, herd: Herd): { adults: Entity[], calves: Entity[] } | null {
+  const census = herdCensus(bot, herd, herdPenOf(memory, herd))
+  if (census != null) rememberHerd(memory, { ...herd, adults: census.adults.length, calves: census.calves.length })
+  return census
+}
