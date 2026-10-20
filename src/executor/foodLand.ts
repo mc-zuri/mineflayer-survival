@@ -33,6 +33,13 @@ export const MEAT_BIOMES: ReadonlySet<string> = new Set([
   'swamp', 'taiga', 'windswept_forest', 'windswept_gravelly_hills', 'windswept_hills', 'windswept_savanna', 'wooded_badlands'
 ])
 
+/**
+ * The biomes whose features grow kelp: kelp_cold in the ocean, deep ocean, cold and deep cold ocean, kelp_warm in the
+ * lukewarm and deep lukewarm ocean (1.21.11's and 26.3's worldgen/biome files; no kelp in the warm and frozen oceans,
+ * nor in a river)
+ */
+export const KELP_BIOMES: ReadonlySet<string> = new Set(['ocean', 'deep_ocean', 'cold_ocean', 'deep_cold_ocean', 'lukewarm_ocean', 'deep_lukewarm_ocean'])
+
 /** the meat animals whose misses (Sightings) say the land's hunted out */
 export const LAND_ANIMALS = ['cow', 'pig', 'sheep', 'chicken']
 /** the land's foods whose misses are forgotten on new land */
@@ -174,6 +181,14 @@ export class BiomeSurvey {
       if (MEAT_BIOMES.has(s.biome)) meat++
     }
     return { chunks, meat }
+  }
+
+  /** whether a chunk of one of `biomes` was surveyed (or read from the seed: noted the same) within `radius` of `center` */
+  near (biomes: ReadonlySet<string>, center: { x: number, z: number }, radius: number): boolean {
+    for (const s of this.chunks.values()) {
+      if (biomes.has(s.biome) && Math.hypot(s.x - center.x, s.z - center.z) <= radius) return true
+    }
+    return false
   }
 
   /** the seed's reads under way: about a home, their promise */

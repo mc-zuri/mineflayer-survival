@@ -27,8 +27,8 @@ export const SCARCE_FACTOR = 16
 export const GIVE_UP_MISSES = 2
 /** misses count as in a row when each is within this of the last (three days: a hunt's tries were a day apart and more) */
 export const MISS_STREAK_TICKS = 72000
-/** the sources of one biome only (RARE_FIND): given up on at their first miss */
-export const RARE_SOURCES = ['melon', 'sweet_berry_bush']
+/** the sources of one biome only (RARE_FIND; the sea's kelp, KELP_BLOCKS): given up on at their first miss */
+export const RARE_SOURCES = ['melon', 'sweet_berry_bush', 'kelp', 'kelp_plant']
 
 /** how long a source missed GIVE_UP_MISSES times is given up on (a day) */
 export const GIVE_UP_TICKS = 24000
@@ -58,6 +58,23 @@ export const VILLAGE_RANGE = 512
  */
 export const NO_VILLAGE_FACTOR = 4
 
+/**
+ * the sea's kelp (BLOCK_SOURCES' 1000 to find: the sea near), had only where an ocean that grows it is (foodLand's
+ * KELP_BIOMES), and in the water: as dear as the water once none was found
+ */
+export const KELP_BLOCKS = ['kelp', 'kelp_plant']
+/**
+ * how far off an ocean that grows kelp (or kelp remembered) counts as near: the exploring's 96 blocks about home
+ * (HUNT_EXPLORE_RADIUS) and the 48 it sees from there
+ */
+export const OCEAN_RANGE = 144
+/**
+ * how many times dearer kelp is with no such ocean known within OCEAN_RANGE (a sea somewhere: as dear as RARE_FIND's
+ * melons): a 1.21.11 bot on a snowy spruce land with no sea about, its animals not near, planned 'mine 10 kelp' for
+ * its food restock and explored 166 blocks for it from t157268 to t186669, the enchanting held up (rt-1)
+ */
+export const NO_OCEAN_FACTOR = 16
+
 /** the blocks whose sighting the plans count on: the food that grows on the surface (the rest go by the memory) */
 export const SIGHTED_BLOCKS = ['sweet_berry_bush', 'melon', 'carrots', 'potatoes', 'wheat', 'beetroots', 'hay_block', 'kelp', 'kelp_plant']
 
@@ -84,8 +101,10 @@ export class Sightings {
   /**
    * @param villageNear whether a village is noted within VILLAGE_RANGE (its crops and hay are the plans' to count on
    * only then)
+   * @param oceanNear whether an ocean that grows kelp (or kelp remembered) is known within OCEAN_RANGE (kelp is the
+   * plans' to count on only then)
    */
-  constructor (private readonly bot: Bot, private readonly now: () => number, private readonly outOfTheWay: (pos: Vec3) => boolean = () => false, private readonly spared: () => ReadonlySet<number> = () => new Set(), private readonly villageNear: () => boolean = () => true) {}
+  constructor (private readonly bot: Bot, private readonly now: () => number, private readonly outOfTheWay: (pos: Vec3) => boolean = () => false, private readonly spared: () => ReadonlySet<number> = () => new Set(), private readonly villageNear: () => boolean = () => true, private readonly oceanNear: () => boolean = () => true) {}
 
   /** the names a step looked for and didn't find */
   missing (names: readonly string[]): void {
@@ -164,12 +183,14 @@ export class Sightings {
       this.away.delete(t.name)
       return Math.ceil(seen * WALK_TICKS_PER_BLOCK)
     }
-    // (the fish in the water: as dear as the water once none was found)
-    const water = t.kind === 'mob' && WATER_MOBS.includes(t.name) ? 'water' : null
+    // (the fish in the water, and the kelp: as dear as the water once none was found)
+    const water = (t.kind === 'mob' && WATER_MOBS.includes(t.name)) || (t.kind === 'block' && KELP_BLOCKS.includes(t.name)) ? 'water' : null
     if (this.givenUp(t.name) || (water != null && this.givenUp(water))) return t.find * GIVE_UP_FACTOR
     if (this.isScarce(t.name) || this.isNotNear(t.name) || (water != null && this.isScarce(water))) return t.find * SCARCE_FACTOR
     // (a village's crops with no village noted near: a guess at one somewhere)
     if (t.kind === 'block' && VILLAGE_CROPS.includes(t.name) && !this.villageNear()) return t.find * NO_VILLAGE_FACTOR
+    // (kelp with no sea that grows it known near: a guess at one somewhere)
+    if (t.kind === 'block' && KELP_BLOCKS.includes(t.name) && !this.oceanNear()) return t.find * NO_OCEAN_FACTOR
     return undefined
   }
 

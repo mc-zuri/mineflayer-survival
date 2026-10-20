@@ -149,3 +149,46 @@ test('a village\'s crops are NO_VILLAGE_FACTOR times dearer with no village note
   const steps = obtainAll(registry, [{ item: FOOD_GOAL, count: FOOD_POINTS, unit: 'nutrition' as const }], { inventory: kit, findCost: t => s2.cost(t), exclude: ['farm'] }).steps.map(st => `${st.kind} ${st.item}`)
   assert.ok(!steps.includes('mine carrot'), steps.join(', '))
 })
+
+test('kelp is NO_OCEAN_FACTOR times dearer with no ocean that grows it known near, as dear as the water once none was found, and given up at its first miss (rt-1: \'mine 10 kelp\' explored 166 blocks of a snowy spruce land)', async () => {
+  const { NO_OCEAN_FACTOR, KELP_BLOCKS } = await import('../../src/executor/sight')
+  let now = 0
+  let ocean = false
+  const kelpBlocks: any[] = []
+  const s = new Sightings(fakeBot([], kelpBlocks), () => now, () => false, () => new Set(), () => true, () => ocean)
+  for (const name of KELP_BLOCKS) {
+    const kelp = { name, kind: 'block' as const, dimension: 'overworld' as const, find: 1000 }
+    assert.equal(s.cost(kelp), 1000 * NO_OCEAN_FACTOR, name)
+    ocean = true
+    assert.equal(s.cost(kelp), undefined, name)
+    ocean = false
+  }
+  // (not the land's own plants, nor a village's crops)
+  assert.equal(s.cost({ name: 'sweet_berry_bush', kind: 'block', dimension: 'overworld', find: 16000 }), undefined)
+  assert.equal(s.cost({ name: 'carrots', kind: 'block', dimension: 'overworld', find: 5000 }), undefined)
+  // kelp in sight is a walk away, the sea or not
+  kelpBlocks.push({ name: 'kelp_plant', at: new Vec3(20, 60, 0) })
+  assert.equal(s.cost({ name: 'kelp_plant', kind: 'block', dimension: 'overworld', find: 1000 }), 105)
+  kelpBlocks.length = 0
+  // no water found to fish in: the kelp in the water as dear
+  ocean = true
+  s.missing(['water'])
+  assert.equal(s.cost({ name: 'kelp', kind: 'block', dimension: 'overworld', find: 1000 }), 1000 * SCARCE_FACTOR)
+  now += GIVE_UP_TICKS
+  // explored for and none found: given up on for a day at once (the sea's only)
+  s.missing(['kelp_plant'])
+  assert.equal(s.cost({ name: 'kelp_plant', kind: 'block', dimension: 'overworld', find: 1000 }), 1000 * GIVE_UP_FACTOR)
+})
+
+test('the rt-1 food restock with no sea known: no kelp planned, the animals not near notwithstanding; with an ocean near, the kelp as before', () => {
+  // (the bag at t157268: the porkchops and a mutton, a furnace, coal and spruce logs; the sheep, pigs, cows, chickens and rabbits not near)
+  const inv = { cooked_porkchop: 2, mutton: 1, furnace: 1, crafting_table: 1, coal: 32, spruce_log: 53, stick: 15, diamond_sword: 1, iron_pickaxe: 1, diamond_pickaxe: 1, stone_sword: 1, cobblestone: 64 }
+  const goal = [{ item: FOOD_GOAL, count: FOOD_POINTS, unit: 'nutrition' as const }]
+  const plan = (ocean: boolean): string[] => {
+    const s = new Sightings(fakeBot([]), () => 0, () => false, () => new Set(), () => false, () => ocean)
+    s.notNear(['cow', 'pig', 'sheep', 'chicken', 'rabbit'])
+    return obtainAll(registry, goal, { inventory: inv, findCost: t => s.cost(t), exclude: ['farm'] }).steps.map(st => `${st.kind} ${st.item}`)
+  }
+  assert.ok(plan(true).includes('mine kelp'), plan(true).join(', '))
+  assert.ok(!plan(false).includes('mine kelp'), plan(false).join(', '))
+})

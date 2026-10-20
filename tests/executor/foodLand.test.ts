@@ -296,3 +296,18 @@ test('seekFoodLand takes the scouting under way up again after a preemption, not
   assert.ok(land != null && land.x > 200)
   assert.equal(memory.getPois('food_scouted').length, 1)
 })
+
+test('BiomeSurvey.near: a chunk of the biomes surveyed (or read from the seed) within the radius; KELP_BIOMES are the oceans that grow kelp', async () => {
+  const { KELP_BIOMES } = await import('../../src/executor/foodLand')
+  const survey = new BiomeSurvey({} as any, new WorldMemory())
+  assert.equal(survey.near(KELP_BIOMES, { x: 0, z: 0 }, 144), false)
+  survey.note({ x: 100, z: 0, y: 62, biome: 'warm_ocean' })
+  survey.note({ x: 0, z: 100, y: 62, biome: 'deep_frozen_ocean' })
+  survey.note({ x: 50, z: 0, y: 62, biome: 'river' })
+  assert.equal(survey.near(KELP_BIOMES, { x: 0, z: 0 }, 144), false)
+  survey.note({ x: 0, z: -140, y: 62, biome: 'deep_lukewarm_ocean' })
+  assert.equal(survey.near(KELP_BIOMES, { x: 0, z: 0 }, 144), true)
+  assert.equal(survey.near(KELP_BIOMES, { x: 0, z: 0 }, 100), false)
+  for (const b of ['ocean', 'deep_ocean', 'cold_ocean', 'deep_cold_ocean', 'lukewarm_ocean', 'deep_lukewarm_ocean']) assert.ok(KELP_BIOMES.has(b), b)
+  assert.ok(!KELP_BIOMES.has('frozen_ocean') && !KELP_BIOMES.has('warm_ocean'))
+})

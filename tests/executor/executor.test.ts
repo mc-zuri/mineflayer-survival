@@ -1008,3 +1008,26 @@ test('a hunt for salmon that found none with no water in sight makes the water a
     assert.equal(ex.sightings.isScarce('water'), !water)
   }
 })
+
+test('the executor knows an ocean that grows kelp near by its biome survey (or the kelp remembered), within OCEAN_RANGE: kelp is priced as the sea\'s then', async () => {
+  const { OCEAN_RANGE, NO_OCEAN_FACTOR } = await import('../../src/executor/sight')
+  const bot = fakeBot({})
+  bot.entities = { 0: bot.entity }
+  const ex = new Executor(bot, {})
+  const kelp = { name: 'kelp_plant', kind: 'block' as const, dimension: 'overworld' as const, find: 1000 }
+  assert.equal(ex.oceanNear(), false)
+  assert.equal(ex.sightings.cost(kelp), 1000 * NO_OCEAN_FACTOR)
+  // a river, a frozen ocean (no kelp in them), and a cold ocean too far
+  ex.biomes.note({ x: 40, z: 0, y: 62, biome: 'river' })
+  ex.biomes.note({ x: 0, z: 60, y: 62, biome: 'frozen_ocean' })
+  ex.biomes.note({ x: OCEAN_RANGE + 24, z: 0, y: 62, biome: 'cold_ocean' })
+  assert.equal(ex.oceanNear(), false)
+  ex.biomes.note({ x: -100, z: 0, y: 62, biome: 'cold_ocean' })
+  assert.equal(ex.oceanNear(), true)
+  assert.equal(ex.sightings.cost(kelp), undefined)
+  // kelp remembered near, no ocean surveyed
+  const ex2 = new Executor(fakeBot({}), {})
+  assert.equal(ex2.oceanNear(), false)
+  ex2.memory.rememberBlock('kelp_plant', new Vec3(30, 50, 30), 'overworld')
+  assert.equal(ex2.oceanNear(), true)
+})
