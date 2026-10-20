@@ -5,6 +5,7 @@ import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { edgeAhead, steerAway, steerToward } from './steer'
 import { onDripstone } from './hazardCells'
 import { entityUnderCrosshair } from '../core/actions'
+import { motionTrackerOf } from './motion'
 import { type Entity, hasLineOfSight, metadataIndex, metadataValue, distanceToBox, entityBox, entityName, eyePosition, isAlive, TaskError, type SkillOptions, throwIfAborted, waitTicks, yawPitchOf } from './combatUtil'
 
 export interface FightOptions extends SkillOptions {
@@ -33,6 +34,39 @@ export interface FightOptions extends SkillOptions {
   maxDrop?: number
   /** given up (returned, not killed) once this holds: the fight's odds turned (the hostiles reflex's flee) */
   until?: () => boolean
+  /**
+   * close in on where the target will be (its velocity from the motion tracker, over the ticks to get there), not where
+   * it is: a fleeing animal (chaseLead)
+   */
+  lead?: boolean
+  /** sprint jumps while closing in from afar on open ground (a player's fastest run, 7 blocks a second to 5.6) */
+  sprintJump?: boolean
+  /**
+   * ticks closing in without getting nearer (by 0.5) before `onStuck` (a path to it) is tried, then NO_PATH: a rabbit
+   * up a slope's step the steering can't climb was chased 1200 ticks, 'still alive' (full-26.3-s31337-g)
+   */
+  stuckTicks?: number
+  /** the way to the target when the steering gets no nearer: resolves whether it got anywhere */
+  onStuck?: () => Promise<boolean>
+}
+
+/** the most ticks ahead a chase leads its target by, and the most blocks */
+export const LEAD_TICKS = 12
+export const LEAD_BLOCKS = 4
+/** a sprinting player's ground speed, blocks a tick (Player's 0.1 movement speed, sprinting x1.3, on ground) */
+export const CHASE_SPEED = 0.28
+
+/**
+ * Where a chase steers for: the target's position led by its velocity over the ticks the bot takes to get there
+ * (distance / CHASE_SPEED, LEAD_TICKS at most), LEAD_BLOCKS at most from it, on its own level
+ */
+export function chaseLead (from: Vec3, target: Vec3, velocity: Vec3): Vec3 {
+  const ticks = Math.min(LEAD_TICKS, from.distanceTo(target) / CHASE_SPEED)
+  let dx = velocity.x * ticks
+  let dz = velocity.z * ticks
+  const d = Math.hypot(dx, dz)
+  if (d > LEAD_BLOCKS) { dx *= LEAD_BLOCKS / d; dz *= LEAD_BLOCKS / d }
+  return target.offset(dx, 0, dz)
 }
 
 export interface FightResult {
@@ -376,6 +410,12 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
     }
     return open
   }
+  // the chase's headway: the nearest it got and when, and whether the way round was tried
+  let nearest = Infinity
+  let nearestAt = 0
+  let rerouted = false
+  const tracker = opts.lead === true ? motionTrackerOf(bot) : null
+  tracker?.track(target)
 
   // (the nearest the target has come, and when: holdsGround's wait)
   let closest = Infinity
@@ -476,9 +516,25 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
           await waitTicks(bot, 1, signal)
           continue
         }
+        if (opts.stuckTicks != null) {
+          if (distance < nearest - 0.5) { nearest = distance; nearestAt = ticks }
+          if (ticks - nearestAt > opts.stuckTicks) {
+            // no nearer for a while: the way round once (a path), then given up
+            if (rerouted || opts.onStuck == null) throw new TaskError('NO_PATH', `can't get at the ${name}`)
+            rerouted = true
+            bot.clearControlStates()
+            if (!await opts.onStuck()) throw new TaskError('NO_PATH', `can't get at the ${name}`)
+            nearest = Infinity
+            nearestAt = ticks
+            continue
+          }
+        }
         // close in, sprinting (a sprint hit knocks back further), but not over a deadly edge: a magma cube in a basalt
         // delta was chased into a lava pocket, a blaze off a ledge over the lava sea (26.3); it comes to the bot
-        steerToward(bot, target.position, { sprint: true, guard: true, maxDrop: opts.maxDrop })
+        const aim = tracker != null ? chaseLead(bot.entity.position, target.position, tracker.velocity(target)) : target.position
+        const walked = steerToward(bot, aim, { sprint: true, guard: true, maxDrop: opts.maxDrop })
+        // a sprint jump from afar on open ground: no edge within the jump's reach ahead (Player.jumpFromGround's sprint boost)
+        if (opts.sprintJump === true && walked && distance > reach + 2 && bot.entity.onGround && !edgeAhead(bot, Math.atan2(-(aim.x - bot.entity.position.x), -(aim.z - bot.entity.position.z)), 3, opts.maxDrop ?? 3)) bot.setControlState('jump', true)
         lookAt(bot, center)
         await waitTicks(bot, 1, signal)
         continue
@@ -519,6 +575,7 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       await waitTicks(bot, 1, signal)
     }
   } finally {
+    tracker?.untrack(target)
     bot.off('entityDead', onDead)
     bot.off('entitySpawn', onSpawn)
     bot.off('entitySwingArm', onSwing)
