@@ -351,3 +351,24 @@ test('the food points come from the herd\'s surplus cows, cooked, over a hunt fo
   const plain = obtainAll(registry, [{ item: ['cooked_beef', 'cooked_porkchop', 'cooked_mutton', 'bread'], count: 32, unit: 'nutrition' }], { inventory })
   assert.ok(food.cost < plain.cost - 300, `${food.cost} vs ${plain.cost}`)
 })
+
+test('a bow\'s string from the cobwebs remembered near (a mineshaft\'s), broken with the sword; unseen, the spiders first; underground too (the night\'s mine)', () => {
+  const memory = new WorldMemory()
+  const inventory = { iron_sword: 1, stick: 3, crafting_table: 1 }
+  const far = obtain(registry, 'bow', 1, { inventory })
+  assert.equal(far.ok, true)
+  assert.equal(kills(far.steps, 'spider').length, 1)
+  assert.equal(mines(far.steps, 'string').length, 0)
+  for (let i = 0; i < 4; i++) memory.rememberBlock('cobweb', { x: 6 + i, y: 30, z: 0 })
+  const near = obtain(registry, 'bow', 1, { inventory, memory, position: { x: 0, y: 30, z: 0 } })
+  assert.equal(near.ok, true)
+  const webs = mines(near.steps, 'string')
+  assert.equal(webs.length, 1)
+  assert.equal(webs[0].block, 'cobweb')
+  assert.equal(kills(near.steps, 'spider').length, 0)
+  assert.equal(crafts(near.steps, 'bow').length, 1)
+  // the night's mine (undergroundOnly): cobwebs are a mine's
+  const night = obtain(registry, 'string', 3, { inventory, memory, position: { x: 0, y: 30, z: 0 }, undergroundOnly: true })
+  assert.equal(night.ok, true)
+  assert.equal(mines(night.steps, 'string')[0]?.block, 'cobweb')
+})

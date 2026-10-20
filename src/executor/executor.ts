@@ -45,6 +45,9 @@ import { travel } from '../skills/travel'
 
 /** ticks between the looks for a village about the bot */
 export const VILLAGE_CHECK_TICKS = 400
+/** how often, and how far round, the cobwebs about are noted (the string of a bow: planner/sources' cobweb) */
+export const COBWEB_CHECK_TICKS = 200
+export const COBWEB_CHECK_RADIUS = 32
 
 /** how far from the bot a failed mine step's remembered blocks are forgotten: all of them in the dimension */
 export const FORGET_RADIUS = Infinity
@@ -294,6 +297,14 @@ export class Executor {
       room: async (s, toward) => await this.makeRoomDuringStep(s, toward),
       unwanted: name => this.unwantedDrop(name)
     }
+    // the cobwebs about noted (a mineshaft's, the night's mines open into them), for the string's plans (a bow's)
+    let nextWebCheck = 0
+    bot.on('physicsTick', () => {
+      if (this.tasks.tick < nextWebCheck || bot.entity == null || typeof bot.blockAt !== 'function' || typeof bot.findBlocks !== 'function') return
+      nextWebCheck = this.tasks.tick + COBWEB_CHECK_TICKS
+      if (normalizeDimension(bot.game?.dimension) !== 'overworld') return
+      rememberAround(bot, this.memory, ['cobweb'], COBWEB_CHECK_RADIUS, 16)
+    })
     // a village passed by is noted, with its farms' crops and hay, for the food plans
     let nextVillageCheck = 0
     bot.on('physicsTick', () => {

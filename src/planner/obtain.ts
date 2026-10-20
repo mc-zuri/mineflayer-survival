@@ -170,7 +170,7 @@ export const CHEST_TRUST_TICKS = 24000
 export const STALE_LOOT_FACTOR = 2
 
 /** blocks a mine has besides its ores: what an undergroundOnly plan may mine */
-export const MINE_BLOCKS = /(_ore|^ancient_debris|^deepslate|^obsidian|^stone|^gravel|^dirt|^clay|^tuff|^andesite|^diorite|^granite)$/
+export const MINE_BLOCKS = /(_ore|^ancient_debris|^deepslate|^obsidian|^stone|^gravel|^dirt|^clay|^tuff|^andesite|^diorite|^granite|^cobweb)$/
 
 const PREFERRED_WOOD = ['oak_', 'birch_', 'spruce_']
 

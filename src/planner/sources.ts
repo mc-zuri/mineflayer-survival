@@ -65,6 +65,8 @@ export interface FluidSource {
  * at 4000, and 14000 for berry bushes (full-26.3-fresh-m, fresh-l)
  */
 export const RARE_FIND = 16000
+/** a cobweb's find when none is in sight or remembered: a mineshaft is a cave's luck */
+export const COBWEB_FIND = 8000
 
 function block (name: string, drops: Drop[] | string, find: number, each: number, dimension: Dimension = 'overworld'): BlockSource {
   return { block: name, drops: typeof drops === 'string' ? [{ item: drops, count: 1 }] : drops, dimension, find, each }
@@ -148,6 +150,10 @@ export const BLOCK_SOURCES: BlockSource[] = [
   block('basalt', 'basalt', 2000, 5, 'the_nether'),
   block('magma_block', 'magma_block', 600, 10, 'the_nether'),
   block('ancient_debris', 'ancient_debris', 20000, 2000, 'the_nether'),
+  // a cobweb's string, broken with anything but shears (blocks/cobweb: shears or silk touch drop the web): the
+  // mineshafts' (the night's mines open into them), dear unless one is in sight or remembered (the executor's look
+  // round for them); the bow's 3 string where no spider is found (a 1.21.11 seed 2 kit found none from t149460 on)
+  block('cobweb', 'string', COBWEB_FIND, 20),
   block('end_stone', 'end_stone', 5, 3, 'the_end')
 ]
 

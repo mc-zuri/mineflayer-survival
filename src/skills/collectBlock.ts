@@ -116,6 +116,9 @@ async function digBlock (bot: Bot, block: Block, signal?: AbortSignal): Promise<
   await dig(bot, block, { signal })
 }
 
+/** the swords a cobweb is broken with, the quickest first (the sword's mining speed on a web is 15 whatever it's made of) */
+const SWORD_ORDER = ['wooden_sword', 'stone_sword', 'golden_sword', 'copper_sword', 'iron_sword', 'diamond_sword', 'netherite_sword']
+
 export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: AbortSignal): Promise<CollectBlockResult> {
   if ((args.names == null || args.names.length === 0) && (args.positions == null || args.positions.length === 0)) {
     throw new SkillError('NOT_FOUND', 'collectBlock needs block names or positions')
@@ -209,7 +212,18 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
 
     // the best tool (the pathfinder's choice, the one GoalMineBlock digs with)
     bot.pathingUtil.refresh()
-    const tool = bot.pathingUtil.bestHarvestingTool(block as any)
+    let tool = bot.pathingUtil.bestHarvestingTool(block as any)
+    // a cobweb for its string with a sword (Blocks.COBWEB requires its tool for drops, the swords and the shears, and
+    // shears drop the web itself: blocks/cobweb); the pathfinder's tools have no sword (its PathingUtil.toolsOf), and
+    // a web it dug by hand dropped nothing, 'broke 3 blocks but no item came into the inventory' (26.3); its dig
+    // (GoalMineBlock's) takes the sword from its memo
+    if (block.name === 'cobweb') {
+      const sword = inventoryItems(bot).filter(i => i.name.endsWith('_sword')).sort((a, b) => SWORD_ORDER.indexOf(a.name) - SWORD_ORDER.indexOf(b.name))[0]
+      if (sword != null) {
+        tool = sword
+        ;(bot.pathingUtil as any).memoedBestTool[block.type] = sword
+      }
+    }
     if (tool != null && bot.heldItem?.slot !== tool.slot) {
       await settleInventory(bot, signal)
       await bot.equip(tool, 'hand')
@@ -219,8 +233,9 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     trace('collectBlock: target', block.name, pos.toString(), 'from', bot.entity.position.toString(), 'tool', tool?.name ?? 'hand')
     if (!withinReach(bot, pos)) {
       try {
-        // GoalMineBlock digs the block once there (its onFinish)
-        const goal = goals.GoalMineBlock.fromBlock(bot.pathfinder.world, block as any, 4, eyeHeight(bot))
+        // GoalMineBlock digs the block once there (its onFinish); a cobweb is walked to and dug here, with the sword
+        // (the pathfinder's dig is by hand: no sword is a tool of its, and the web drops nothing so)
+        const goal = block.name === 'cobweb' ? new goals.GoalNear(pos.x, pos.y, pos.z, 2) : goals.GoalMineBlock.fromBlock(bot.pathfinder.world, block as any, 4, eyeHeight(bot))
         await navigate(bot, { goal, reached: () => gone() || withinReach(bot, pos) }, signal)
       } catch (err) {
         if (isAbort(err)) throw (err as TaskError).withPartial?.(result()) ?? err
@@ -243,6 +258,7 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     if (!gone()) {
       const current = bot.blockAt(pos)
       if (current == null) continue
+      if (tool != null && bot.heldItem?.slot !== tool.slot) await bot.equip(tool, 'hand')
       try {
         await digBlock(bot, current, signal)
       } catch (err) {
