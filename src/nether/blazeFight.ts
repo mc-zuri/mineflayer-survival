@@ -28,6 +28,7 @@ import { walkTo } from '../skills/navigate'
 import { countItems, trace, waitTicks } from '../skills/util'
 import { fireballIncoming } from './safety'
 import { dig } from '../core/actions'
+import { isOnFire } from '../skills/escape'
 
 /** BlazeAttackGoal: ticks charged before the first of the volley's three fireballs */
 export const BLAZE_CHARGE_TICKS = 60
@@ -375,6 +376,18 @@ export function inNook (bot: Bot, nook: BlazeNook): boolean {
   return Math.floor(p.x) === nook.stand.x && Math.floor(p.z) === nook.stand.z && Math.abs(p.y - nook.stand.y) < 0.6
 }
 
+/** the health the fire a small fireball lights takes (SmallFireball.onHitEntity: 5 s alight, 1 a second; on_fire passes armor by) */
+export const BURN_HEALTH = 5
+
+/**
+ * The health the blaze fight goes by: the bot's, less what the fire it's alight with will take (isOnFire), so it shuts
+ * itself in or backs off while that's still to come: a 26.3 bot at 10 health, alight among the blazes 4 off seed 2's
+ * throne spawner at (-290, 77, -209), fought on, burned to 2, took another fireball and died (full-26.3-fresh-k)
+ */
+export function fightHealth (bot: Bot): number {
+  return bot.health - (isOnFire(bot) ? BURN_HEALTH : 0)
+}
+
 /** a blaze's eyes */
 export function blazeEye (blaze: Entity): Vec3 {
   return blaze.position.offset(0, BLAZE_EYE_HEIGHT, 0)
@@ -638,7 +651,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
 
       // low: the front shut, fed and healed inside; healed (or back after a reflex cut the healing off), open again.
       // A front that won't shut (a blaze in it) is tried again in a while, the fight going on meanwhile
-      if (bot.health <= sealAt && tick >= sealAgain && close == null) {
+      if (fightHealth(bot) <= sealAt && tick >= sealAgain && close == null) {
         unblock()
         stopDraw()
         const shutAt = tick
@@ -670,7 +683,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         }
         shutAgain = tick + SHUT_AGAIN_TICKS
       }
-      if (nook.front.some(p => bot.blockAt(p)?.boundingBox === 'block') && bot.health > sealAt && tick >= shutUntil && danger.length === 0 && fireball == null) {
+      if (nook.front.some(p => bot.blockAt(p)?.boundingBox === 'block') && fightHealth(bot) > sealAt && tick >= shutUntil && danger.length === 0 && fireball == null) {
         unblock()
         await openNook(bot, nook, signal)
         continue
@@ -706,7 +719,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // FETCH_QUIET: the bow's turn came first and the fetch only with every blaze quiet for 75 ticks, which with two or
       // three about never was, and the nooks at seed 2's spawners at (97, 64, -515) and (925, 64, 123) killed blazes
       // for 20000 ticks with their rods left on the throne (26.3 runs mag-b and mag-d: 0 rods)
-      const drop = drawn === 0 && bot.health > sealAt + 4 && seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET))
+      const drop = drawn === 0 && fightHealth(bot) > sealAt + 4 && seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET))
         ? dropsNear(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES)
         : undefined
       if (drop != null) {
@@ -846,7 +859,7 @@ export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch
   }
   trace('fightFromNook: drops at', item.position.toString())
   try {
-    while (bot.entities[item.id] === item && watch.now() - start < FETCH_TICKS && bot.health > watch.sealAt) {
+    while (bot.entities[item.id] === item && watch.now() - start < FETCH_TICKS && fightHealth(bot) > watch.sealAt) {
       throwIfAborted(signal)
       const t = threat()
       if (t != null) {

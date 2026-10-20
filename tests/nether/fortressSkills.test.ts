@@ -614,3 +614,35 @@ test('the camp keeps a block clear of the spawn volume\'s edge (CAMP_MARGIN): a 
   }
   assert.equal(unreachableSpawners(bot).length, 1)
 })
+
+test('the blaze camp backs off at 12 health when alight (fightHealth: the fire still to come counted), not at 12 unburnt (full-26.3-fresh-k: burned to death from 10 among the blazes)', async () => {
+  const gridModule = require('../../src/skills/gridWalk')
+  const eatModule = require('../../src/skills/eat')
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const run = async (alight: boolean): Promise<string[]> => {
+    const bot = fakeBot({ position: new Vec3(40.5, 64, 0.5), world: (p: any) => p.y < 64 ? 'netherrack' : 'air' })
+    bot.game.dimension = 'the_nether'
+    ;(bot as any).health = 12
+    ;(bot as any).food = 20
+    bot.entity.metadata[0] = alight ? 1 : 0
+    ;(bot as any).world = { raycast: () => null }
+    bot.findBlocks = () => []
+    const moves: string[] = []
+    const realMove = gridModule.moveNear
+    const realEat = eatModule.eat
+    gridModule.moveNear = async (_b: unknown, to: Vec3) => { moves.push(to.toString()) }
+    eatModule.eat = async () => {}
+    const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+    try {
+      await assert.rejects(collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 150, safety: false, nook: false }), /TIMEOUT|blaze rods/)
+    } finally {
+      clearInterval(ticking)
+      gridModule.moveNear = realMove
+      eatModule.eat = realEat
+    }
+    return moves
+  }
+  const off = (moves: string[]): boolean => moves.some(m => { const [x, , z] = m.replace(/[()]/g, '').split(',').map(Number); return x >= 30 && Math.abs(z) <= 2 })
+  assert.ok(off(await run(true)), 'backed off alight')
+  assert.ok(!off(await run(false)), 'not unburnt')
+})

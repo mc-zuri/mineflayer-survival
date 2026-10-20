@@ -27,7 +27,7 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, openNook, planBlazeNooks, sealAndHeal, withBlocksKept } from './blazeFight'
+import { SPAWN_RANGE, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, openNook, planBlazeNooks, sealAndHeal, withBlocksKept } from './blazeFight'
 import { walkTo } from '../skills/navigate'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
@@ -745,7 +745,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         if (ticks > maxTicks) throw new SkillError('TIMEOUT', `${countItems(bot, 'blaze_rod')} of ${count} blaze rods after ${ticks} ticks`, { rods: countItems(bot, 'blaze_rod'), kills, ticks })
         // low: back out of the blazes' reach (the way the bot came) to eat up and heal, then on again (a 26.3 bot fought
         // on at the spawner, fireballed and burning, till it died)
-        if (bot.health <= retreatHealth(blazesInView(bot, 24).length, args.retreatAt) && retreats < BLAZE_RETREATS) {
+        // (alight, the fire's still to come counted: fightHealth)
+        if (fightHealth(bot) <= retreatHealth(blazesInView(bot, 24).length, args.retreatAt) && retreats < BLAZE_RETREATS) {
           retreats++
           // shut in where it stands to heal, when it can be
           if (await healSealed(bot, spawner, signal)) continue
@@ -815,7 +816,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         const cut = new AbortController()
         const onParent = (): void => { cut.abort(signal?.reason) }
         signal?.addEventListener('abort', onParent, { once: true })
-        const onHealth = (): void => { if (bot.health <= low) cut.abort(new Error('low health')) }
+        const onHealth = (): void => { if (fightHealth(bot) <= low) cut.abort(new Error('low health')) }
         bot.on('health', onHealth)
         try {
           if (d > Math.min(shootFrom, 3.5) && canShoot) {
