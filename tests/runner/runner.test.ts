@@ -1113,3 +1113,57 @@ test('a respawn shut in behind the base\'s door takes the kit from its chests th
   }
   assert.deepEqual(order, ['refuge', 'kit', 'night', 'to the death spot'])
 })
+
+test('a death spot under the ground is gone back to for dear drops by the way down walked, the trip half the items\' time left at most; the reason a spot is skipped said (ls-26.3, t100061: slain at y 20 with diamond gear and iron armor, skipped)', async () => {
+  const { deathSpotSkip, deathSpotTiming } = await import('../../src/runner')
+  const air = (): { name: string } => ({ name: 'air' })
+  // respawned at the base 50 blocks off the cave's mouth, the way down some 40 blocks long
+  const now = { tick: 100100, dimension: 'overworld', position: new Vec3(40, 71, -7), minY: -64, blockAt: air }
+  const way = [{ x: -9, y: 64, z: 30 }, ...Array.from({ length: 14 }, (_, k) => ({ x: -9, y: 61 - 3 * k, z: 30 - 2 * k }))]
+  const death = { x: -9, y: 20, z: -4, dimension: 'overworld', seen: 100061, underground: true, worth: true, killer: 'zombie', dear: true, way }
+  assert.equal(deathSpotSkip(death, now, 6000), null)
+  assert.equal(deathSpotWorthIt(death, now, 6000), true)
+  // nothing dear (cobblestone and torches), or no way down known: left, and said why
+  assert.equal(deathSpotSkip({ ...death, dear: false }, now, 6000), 'underground, nothing dear')
+  assert.equal(deathSpotSkip({ ...death, way: undefined }, now, 6000), 'underground, no way down known')
+  // the trip over half the items' time left: left
+  assert.match(String(deathSpotSkip({ ...death, seen: 100100 - 5000 }, now, 6000)), /the way down too long/)
+  // the surface's reasons said too
+  assert.equal(deathSpotSkip({ ...death, underground: false, killer: 'skeleton' }, { ...now, bare: true }, 6000), 'shot dead by a skeleton, back bare')
+  assert.equal(deathSpotSkip({ ...death, worth: false }, now, 6000), 'nothing worth the trip')
+  assert.equal(deathSpotSkip(null, now, 6000), 'no death spot')
+  // under the ground the night is no reason to wait
+  assert.equal(deathSpotTiming({ seen: 1900, killer: 'zombie', underground: true }, { tick: 2000, timeOfDay: 19920, dimension: 'overworld' }, 100, 6000), 'go')
+})
+
+test('the trip to a death spot under the ground: the base\'s kit first when it is by, to the way down\'s start, then along it, then the spot', async () => {
+  const wayMod = require('../../src/skills/wayDown')
+  const nav = require('../../src/skills/navigate')
+  const pick = require('../../src/skills/pickupDrops')
+  const real = { followWay: wayMod.followWay, navigateNear: nav.navigateNear, pickupDrops: pick.pickupDrops }
+  const bot = fakeBot()
+  bot.waitForTicks = async () => {}
+  bot.blockAt = () => ({ name: 'air', boundingBox: 'empty' })
+  bot.entities = {}
+  bot.entity.position = new Vec3(2, 64, 2)
+  const runner = new Runner(bot, { log: () => {} })
+  const memory = runner.memory
+  memory.setBase({ x: 0, y: 64, z: 4 })
+  memory.setDeath(new Vec3(20, 20, 0), 'overworld', true, true, 'zombie', { dear: true, way: [{ x: 10, y: 64, z: 0 }, { x: 12, y: 60, z: 0 }, { x: 20, y: 20, z: 0 }] })
+  const order: string[] = []
+  ;(runner as any).refugeFirst = async () => null
+  ;(runner as any).rekit = async () => { order.push('kit'); return { iron_sword: 1 } }
+  runner.executor.task = (async (name: string, fn: (s: AbortSignal) => Promise<unknown>) => { order.push(name); return await fn(new AbortController().signal) }) as any
+  try {
+    nav.navigateNear = async (_b: any, at: Vec3) => { order.push(`near ${at.x} ${at.y} ${at.z}`) }
+    wayMod.followWay = async (_b: any, rest: any[]) => { order.push(`along ${rest.length}`) }
+    pick.pickupDrops = async () => ({ items: { diamond_sword: 1 } })
+    await runner.recoverFromDeath()
+  } finally {
+    nav.navigateNear = real.navigateNear
+    pick.pickupDrops = real.pickupDrops
+    wayMod.followWay = real.followWay
+  }
+  assert.deepEqual(order, ['kit', 'to the death spot', 'near 10 64 0', 'along 2', 'near 20 20 0'])
+  assert.equal(memory.death, null)
+})

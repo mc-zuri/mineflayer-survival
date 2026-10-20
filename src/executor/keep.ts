@@ -141,6 +141,19 @@ export function dropsWorthATrip (names: string[], registry: RegistryLike): boole
   return names.some(n => isValuable(n) || foodInfo(registry, n) != null || /arrow$/.test(n))
 }
 
+/** the rare drops dear enough to go down a cave or a mine after (dropsDear) */
+const DEAR = new Set(['elytra', 'totem_of_undying', 'trident', 'ender_eye', 'ender_pearl', 'blaze_rod', 'enchanted_book', 'nether_star', 'heavy_core', 'shulker_box'])
+
+/**
+ * Whether a death's drops are dear: worth a trip down to where the bot died under the ground (deathSpotWorthIt), where
+ * the mobs that killed it may be still: diamond and netherite gear and gems, iron armor, the rare drops of the End's way
+ * (DEAR). A 26.3 bot slain at y 20 with a diamond sword and pickaxe and iron armor left them there, and its game
+ * stalled at the enchanting with iron tools (ls-26.3, t100061)
+ */
+export function dropsDear (names: string[]): boolean {
+  return names.some(n => /^(diamond|netherite)(_|$)/.test(n) || /^iron_(helmet|chestplate|leggings|boots)$/.test(n) || /_shulker_box$/.test(n) || DEAR.has(n))
+}
+
 /** never thrown away (VALUABLE): gear, stations, ores, metal and gems, the rare drops */
 export function isValuable (name: string): boolean {
   return VALUABLE.has(name) || VALUABLE_PATTERN.test(name) || parseTool(name) != null || ARMOR.test(name) || isBed(name)

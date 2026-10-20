@@ -46,6 +46,10 @@ export interface Death extends Located {
   worth?: boolean
   /** the mob that killed the bot (the last to hurt it, within a few seconds of the death) */
   killer?: string
+  /** what it dropped is dear (dropsDear: diamond gear, iron armor...): worth a trip down a cave or a mine for */
+  dear?: boolean
+  /** the way down it walked to the spot from the open sky (skills/wayDown), when it died underground */
+  way?: Pos[]
 }
 
 export interface WorldMemoryJSON {
@@ -238,8 +242,8 @@ export class WorldMemory {
     return opts.count != null ? out.slice(0, opts.count) : out
   }
 
-  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean, worth?: boolean, killer?: string): void {
-    this.death = { ...at(pos, dimension), seen: this.now, ...(underground != null ? { underground } : {}), ...(worth != null ? { worth } : {}), ...(killer != null ? { killer } : {}) }
+  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean, worth?: boolean, killer?: string, extra: { dear?: boolean, way?: Pos[] | null } = {}): void {
+    this.death = { ...at(pos, dimension), seen: this.now, ...(underground != null ? { underground } : {}), ...(worth != null ? { worth } : {}), ...(killer != null ? { killer } : {}), ...(extra.dear != null ? { dear: extra.dear } : {}), ...(extra.way != null ? { way: extra.way.map(p => ({ x: p.x, y: p.y, z: p.z })) } : {}) }
   }
 
   toJSON (): WorldMemoryJSON {

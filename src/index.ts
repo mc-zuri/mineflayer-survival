@@ -13,7 +13,8 @@ import { Diagnostics, type DiagnosticsOptions } from './diagnostics'
 import { StockPolicy, type StockOptions } from './planner/stock'
 import { advancementsDone, type AdvancementProgressPacket } from './core/advancements'
 import { SCAFFOLD_ITEMS } from './executor/steps'
-import { dropsWorthATrip } from './executor/keep'
+import { dropsDear, dropsWorthATrip } from './executor/keep'
+import { keepWayDown, wayDown } from './skills/wayDown'
 import { installSculkAvoidance, watchDangers } from './skills/danger'
 import { installGazeGuard } from './skills/gaze'
 import { capDropsByHealth } from './skills/dropGuard'
@@ -125,6 +126,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     bot.on('physicsTick', () => { memory.now = memory.tickBase + tasks.tick })
     // where the bot walks the nether, to go that way again (travel by trailRoute)
     keepNetherTrail(bot, memory)
+    // the way down a cave or a mine from the open sky (a death there gone back to by it)
+    keepWayDown(bot)
     // the advancements as the server tells them: the End milestone's check is the dragon's minecraft:end/kill_dragon
     ;(bot as any)._client?.on?.('advancements', (packet: AdvancementProgressPacket) => {
       for (const id of advancementsDone(packet)) bot.survival.advancements.add(id)
@@ -146,7 +149,11 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
           ? [...inventory.items(), ...[5, 6, 7, 8, 45].map(s => inventory.slots?.[s])].filter(i => i != null).map(i => (i as any).name as string)
           : null
         const killer = lastAttacker != null && tasks.tick - lastAttacker.tick <= KILLER_TICKS ? lastAttacker.name : undefined
-        memory.setDeath(bot.entity.position, dimension, dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined, dropped == null ? undefined : dropsWorthATrip(dropped, bot.registry as any), killer)
+        const underground = dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined
+        memory.setDeath(bot.entity.position, dimension, underground, dropped == null ? undefined : dropsWorthATrip(dropped, bot.registry as any), killer, {
+          dear: dropped == null ? undefined : dropsDear(dropped),
+          way: underground === true ? wayDown(bot) : null
+        })
         if (dimension === 'the_nether') {
           rememberNetherDeath(memory, bot.entity.position)
           pruneTrail(memory, bot.entity.position)

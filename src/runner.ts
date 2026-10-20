@@ -35,6 +35,7 @@ import { TRIP_KIT, keepUnbroken, takeTripKit } from './skills/tripKit'
 import { armorPoints, shelter, sleepThroughNight, undergroundAtWork } from './skills/shelter'
 import { REFUGE_TRIES, chooseRefuge, describeSituation, findBaseDoor, inBounds, refugeSituation, shutInBase, takeRefuge, waitInBase, type Refuge } from './skills/refuge'
 import { bestMeleeWeapon } from './skills/weapons'
+import { followWay, wayLength } from './skills/wayDown'
 import { overland } from './end/strongholdSkills'
 import { unstick } from './executor/explore'
 import { slimeBallsShort, toSlimeChunk } from './skills/slimeChunk'
@@ -287,30 +288,57 @@ export async function waitOutTheNight (bot: Bot, signal: AbortSignal): Promise<u
   return await shelter(bot, { signal })
 }
 
-/** whether a death spot is worth going back to: in this dimension, not underground, in lava or the void, the items not gone yet */
-export function deathSpotWorthIt (death: { x: number, y: number, z: number, dimension: string, seen: number, underground?: boolean, worth?: boolean, killer?: string } | null, now: { tick: number, dimension: string, position: Vec3, minY: number, blockAt: (pos: Vec3) => { name: string } | null, bare?: boolean }, maxTicks: number): boolean {
-  if (death == null || death.dimension !== now.dimension) return false
+interface DeathSpot { x: number, y: number, z: number, dimension: string, seen: number, underground?: boolean, worth?: boolean, killer?: string, dear?: boolean, way?: Array<{ x: number, y: number, z: number }> }
+interface DeathSpotNow { tick: number, dimension: string, position: Vec3, minY: number, blockAt: (pos: Vec3) => { name: string } | null, bare?: boolean }
+
+/** ticks a block of the way to a death spot takes at a walk (some 4.3 blocks a second, the bends and the climbs between) */
+export const DEATH_TRIP_TICKS_PER_BLOCK = 5
+/** a trip down to a death spot under the ground is taken when it's this share of the items' time left at most */
+export const DEATH_TRIP_UNDERGROUND_SHARE = 0.5
+/** the base this near the respawn: its kit is taken before a trip down to a death spot under the ground */
+export const DEATH_TRIP_KIT_RANGE = 32
+
+/** whether a death spot is worth going back to (deathSpotSkip: no reason not to) */
+export function deathSpotWorthIt (death: DeathSpot | null, now: DeathSpotNow, maxTicks: number): boolean {
+  return deathSpotSkip(death, now, maxTicks) == null
+}
+
+/**
+ * Why a death spot isn't gone back to, null when it is: another dimension; shot dead and back bare; nothing worth the
+ * trip; under the ground, but for dear drops (dropsDear) with the way down walked known (skills/wayDown) and the trip
+ * along it DEATH_TRIP_UNDERGROUND_SHARE of the items' time left or less; the void; the items gone (an ItemEntity's
+ * lifespan, 6000 ticks) before the walk there; lava or fire by it
+ */
+export function deathSpotSkip (death: DeathSpot | null, now: DeathSpotNow, maxTicks: number): string | null {
+  if (death == null) return 'no death spot'
+  if (death.dimension !== now.dimension) return `in another dimension (${death.dimension})`
   // shot dead, and back bare (no armor, no shield): the archer is likely where it was (a skeleton in a tree's shade by
   // day), and shoots again; a 26.3 bot went back so to its spot by a skeleton and was shot dead again (full-26.3-fresh-d)
-  if (death.killer != null && RANGED_HOSTILES.has(death.killer) && now.bare === true) return false
+  if (death.killer != null && RANGED_HOSTILES.has(death.killer) && now.bare === true) return `shot dead by a ${death.killer}, back bare`
   // nothing dropped worth the trip (dropsWorthATrip): the mobs that killed the bot are likely still there
-  if (death.worth === false) return false
+  if (death.worth === false) return 'nothing worth the trip'
   // a death in a cave or down a mine is left: the mobs that killed the bot in the dark are still there (and a trip
-  // down after the items on seed 4 ended in a fall and another death)
-  if (death.underground === true) return false
-  if (death.y < now.minY + 1) return false
+  // down after the items on seed 4 ended in a fall and another death); but for dear drops, by the way the bot went
+  // down: a 26.3 bot slain at y 20 with a diamond sword and pickaxe and iron armor left them, and its game stalled at
+  // the enchanting with iron tools (ls-26.3, t100061)
+  const way = death.underground === true && death.dear === true && death.way != null && death.way.length > 0 ? death.way : null
+  if (death.underground === true && death.dear !== true) return 'underground, nothing dear'
+  if (death.underground === true && way == null) return 'underground, no way down known'
+  if (death.y < now.minY + 1) return 'in the void'
   const age = now.tick - death.seen
-  if (age < 0 || age > maxTicks) return false
-  // the way there, at walking speed, before the items despawn
-  const travel = now.position.distanceTo(new Vec3(death.x, death.y, death.z)) * 5
-  if (age + travel > maxTicks) return false
+  if (age < 0 || age > maxTicks) return 'the items gone'
+  // the way there, at walking speed, before the items despawn (down the way walked: to its start and along it)
+  const blocks = way != null ? wayLength(way, now.position) : now.position.distanceTo(new Vec3(death.x, death.y, death.z))
+  const travel = blocks * DEATH_TRIP_TICKS_PER_BLOCK
+  if (age + travel > maxTicks) return `the items gone before the walk there (${Math.round(travel)} ticks)`
+  if (way != null && travel > (maxTicks - age) * DEATH_TRIP_UNDERGROUND_SHARE) return `underground, the way down too long for the items' time (${Math.round(travel)} ticks of ${maxTicks - age})`
   for (const dy of [0, 1, -1]) {
     for (const [dx, dz] of [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]) {
       const name = now.blockAt(new Vec3(death.x + dx, death.y + dy, death.z + dz))?.name
-      if (name === 'lava' || name === 'fire') return false
+      if (name === 'lava' || name === 'fire') return `${name} by it`
     }
   }
-  return true
+  return null
 }
 
 /**
@@ -319,8 +347,9 @@ export function deathSpotWorthIt (death: { x: number, y: number, z: number, dime
  * or go off by day) if the items would still be there by then and the way there (`travel` ticks), else not at all.
  * 'go' otherwise.
  */
-export function deathSpotTiming (death: { seen: number, killer?: string } | null, now: { tick: number, timeOfDay: number, dimension: string }, travel: number, maxTicks: number): 'go' | 'wait' | 'skip' {
-  if (death == null || death.killer == null || now.dimension !== 'overworld' || !canSleepNow(now.timeOfDay, false)) return 'go'
+export function deathSpotTiming (death: { seen: number, killer?: string, underground?: boolean } | null, now: { tick: number, timeOfDay: number, dimension: string }, travel: number, maxTicks: number): 'go' | 'wait' | 'skip' {
+  // (under the ground the dark is the same by day: a wait only loses the items)
+  if (death == null || death.killer == null || death.underground === true || now.dimension !== 'overworld' || !canSleepNow(now.timeOfDay, false)) return 'go'
   // (the night's end: the undead burn from about 23460, VanillaTime's sunrise)
   const toDay = (24000 + 23460 - now.timeOfDay) % 24000
   return now.tick - death.seen + toDay + travel <= maxTicks ? 'wait' : 'skip'
@@ -1588,7 +1617,7 @@ export class Runner {
     const deadly = death != null && this.deadlySpots.some(p => p.distanceTo(new Vec3(death.x, death.y, death.z)) < DEADLY_SPOT_RADIUS)
     if (deadly) this.log(`not back to the death spot at ${death.x} ${death.y} ${death.z}: died there going back before`)
     if (deadly) diag?.recovery({ deathSpot: 'skipped: died there going back before' })
-    const worth = !deadly && deathSpotWorthIt(death, {
+    const skip = deadly ? null : deathSpotSkip(death, {
       // (the memory's clock, the death's stamp's)
       tick: this.memory.now,
       dimension: normalizeDimension(bot.game?.dimension),
@@ -1597,7 +1626,16 @@ export class Runner {
       blockAt: pos => bot.blockAt(pos),
       bare: armorPoints(bot) === 0 && bot.inventory.items().every(i => i.name !== 'shield') && bot.inventory.slots[45]?.name !== 'shield'
     }, this.options.deathItemTicks ?? 6000)
-    if (!deadly && !worth) diag?.recovery({ deathSpot: death == null ? 'skipped: no death spot' : 'skipped: not worth it (nothing worth the trip, another dimension, underground, lava, the void, or the items gone first)' })
+    const worth = !deadly && skip == null
+    if (death != null && !deadly && skip != null) this.log(`not back to the death spot at ${death.x} ${death.y} ${death.z}: ${skip}`)
+    if (!deadly && skip != null) diag?.recovery({ deathSpot: death == null ? 'skipped: no death spot' : `skipped: not worth it (${skip})` })
+    // down a cave or a mine (the drops dear, the way down known): the base's kit first when the base is by, the mobs
+    // that killed the bot likely still about the spot
+    if (death != null && worth && death.underground === true && !kitted && base != null && bot.entity.position.distanceTo(new Vec3(base.origin.x, base.origin.y, base.origin.z)) <= DEATH_TRIP_KIT_RANGE) {
+      const kit = await this.rekit(signal)
+      diag?.recovery({ kit: kit ?? 'no base' })
+      kitted = true
+    }
     // a death to a mob at night: back by day, the night waited out (indoors, in the base, a hole) where the bot is
     const timing = death == null || !worth ? 'go' : deathSpotTiming(death, { tick: this.memory.now, timeOfDay: bot.time?.timeOfDay ?? 0, dimension: normalizeDimension(bot.game?.dimension) }, bot.entity.position.distanceTo(new Vec3(death.x, death.y, death.z)) * 5, this.options.deathItemTicks ?? 6000)
     if (death != null && worth && timing === 'skip') {
@@ -1614,15 +1652,24 @@ export class Runner {
         const spot = new Vec3(death.x, death.y, death.z)
         const picked = await this.executor.task('to the death spot', async (s) => {
           // a long trip the pathfinder may plan short of: a few tries, getting moving by hand between them
-          for (let i = 0; ; i++) {
-            try {
-              await navigateNear(bot, spot, 3, s)
-              break
-            } catch (err) {
-              if (isAbort(err) || i >= 3) throw err
-              await unstick(bot, s)
+          const near = async (at: Vec3, range: number): Promise<void> => {
+            for (let i = 0; ; i++) {
+              try {
+                await navigateNear(bot, at, range, s)
+                break
+              } catch (err) {
+                if (isAbort(err) || i >= 3) throw err
+                await unstick(bot, s)
+              }
             }
           }
+          // down a cave or a mine: to where the way down left the open sky, then along it (followWay)
+          if (death.underground === true && death.way != null && death.way.length > 0) {
+            const [first, ...rest] = death.way
+            await near(new Vec3(first.x, first.y, first.z), 2)
+            await followWay(bot, rest, s)
+          }
+          await near(spot, 3)
           return await pickupDrops(bot, { near: spot.offset(0.5, 0.5, 0.5), radius: 10 }, s)
         }, signal)
         diag?.recovery({ deathSpot: 'went', picked: { ...picked.items } })
