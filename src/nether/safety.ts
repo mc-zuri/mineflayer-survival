@@ -10,7 +10,9 @@ import { placeBlock } from '../skills/placeBlock'
 import { walkTo } from '../skills/navigate'
 import { countItems, findInventoryItem, settleInventory, trace, waitTicks } from '../skills/util'
 import { type Entity, distanceToBox, entityBox, eyePosition, hasLineOfSight, isAlive, yawPitchOf } from '../skills/combatUtil'
-import { attackStrengthOf } from '../skills/weapons'
+import { attackStrengthOf, bestMeleeWeapon } from '../skills/weapons'
+import { ArrowGuard, isUsingItem, lowerShield, raiseShield } from '../skills/fight'
+import { shoot } from '../skills/shoot'
 import { requireGoldArmor } from '../skills/armor'
 import type { Pos } from '../core/memory'
 import { NETHER_DEATH_COST, nearDeath } from './deaths'
@@ -627,6 +629,88 @@ export async function keepFromGhast (bot: Bot, ghast: Entity, opts: { signal?: A
     opts.onHold?.()
   }
   return held
+}
+
+/** ticks the hostiles reflex holds off one archer in the nether in all, before it's let be and the bot walks on */
+export const ARCHER_BUDGET = 600
+/** an archer this near is hit with the sword, not shot (the bow's draw is 20 ticks) */
+export const ARCHER_MELEE = 3.5
+
+/**
+ * An archer in the nether (a soul sand valley's skeletons on its ledges) held off from where the bot stands, never
+ * chased: off a deadly edge first and again whenever the arrows knock it to one (firmCell: no lava or long drop beside
+ * the feet), the shield up toward it while it draws and its arrow flies (ArrowGuard), the bow's shots between, and the
+ * sword only at one come within reach. A 26.3 bot walking the nether's trail back to its portal with 16 pearls and 10
+ * rods chased a skeleton 20 blocks over a soul sand valley and 13 down, into the lava sea, and burned with them
+ * (nether-26.3-q3). Ends when the archer is dead, out of sight or past `range`, after maxTicks, or once `until` holds;
+ * resolves the ticks held and the arrows shot.
+ */
+export async function holdOffArcher (bot: Bot, archer: Entity, opts: { signal?: AbortSignal, maxTicks?: number, range?: number, onHold?: (ticks: number) => void, until?: () => boolean } = {}): Promise<{ ticks: number, shots: number }> {
+  const lookup: BlockLookup = p => bot.blockAt(p) as any
+  const guard = new ArrowGuard()
+  const strength = attackStrengthOf(bot)
+  const shield = (): boolean => bot.inventory.slots[45]?.name === 'shield' || countItems(bot, 'shield') > 0
+  const bowReady = (): boolean => countItems(bot, 'bow') > 0 && countItems(bot, ['arrow', 'spectral_arrow', 'tipped_arrow']) > 0
+  let blocking = false
+  let shots = 0
+  let ticks = 0
+  let noArc = -100
+  // (the ticks gone by, a shot's draw and flight among them)
+  const onTick = (): void => { ticks++ }
+  bot.on('physicsTick', onTick)
+  const firm = async (): Promise<void> => {
+    if (!deadlyDropBeside(lookup, bot.entity.position)) return
+    const to = firmCell(lookup, bot.entity.position)
+    if (to == null) return
+    trace('holdOffArcher: off the edge to', to.toString(), 'from', bot.entity.position.toString(), 'the', archer.name, 'at', archer.position.toString())
+    if (blocking) { lowerShield(bot); blocking = false }
+    await walkTo(bot, to.offset(0.5, 0, 0.5), { within: 0.25, maxTicks: 40 }, opts.signal)
+  }
+  try {
+    while (ticks < (opts.maxTicks ?? 400)) {
+      throwIfAborted(opts.signal)
+      const d = archer.position.distanceTo(bot.entity.position)
+      if (!isAlive(bot, archer) || d > (opts.range ?? 24) || !hasLineOfSight(bot, archer) || opts.until?.() === true) break
+      opts.onHold?.(ticks)
+      bot.clearControlStates()
+      await firm()
+      const middle = archer.position.offset(0, (archer.height ?? 1.99) * 0.6, 0)
+      const { yaw, pitch } = yawPitchOf(middle.minus(eyePosition(bot)))
+      if (guard.update(isUsingItem(bot, archer), d, ticks) && shield()) {
+        await bot.look(yaw, pitch, true)
+        if (!blocking) blocking = await raiseShield(bot)
+        await waitTicks(bot, 1, opts.signal)
+        continue
+      }
+      if (blocking) { lowerShield(bot); blocking = false }
+      if (distanceToBox(eyePosition(bot), entityBox(archer)) <= 2.9) {
+        const sword = bestMeleeWeapon(bot, archer.name)
+        if (sword != null && bot.heldItem?.type !== sword.type) await bot.equip(sword, 'hand')
+        await bot.look(yaw, pitch, true)
+        if (strength.scale(0.5) >= 1) strength.attack(archer as any)
+        await waitTicks(bot, 1, opts.signal)
+        continue
+      }
+      if (bowReady() && d > ARCHER_MELEE && ticks - noArc > 40) {
+        try {
+          const res = await shoot(bot, archer, { signal: opts.signal, maxShots: 1 })
+          shots += res.shots
+        } catch (err) {
+          if (isAbort(err)) throw err
+          noArc = ticks
+          trace('holdOffArcher:', (err as Error).message)
+        }
+        continue
+      }
+      await bot.look(yaw, pitch, true)
+      await waitTicks(bot, 1, opts.signal)
+    }
+  } finally {
+    bot.off('physicsTick', onTick)
+    if (blocking) lowerShield(bot)
+    bot.clearControlStates()
+  }
+  return { ticks, shots }
 }
 
 // ---- a guarded bridge over lava

@@ -460,3 +460,67 @@ test('hostiles reflex: a bare bot\'s fight with a lone spider is given up once a
   assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'flee')
   engine.stop()
 })
+
+test('hostiles reflex in the nether: an archer is held off from where the bot stands, not chased; a melee mob fought on a leash (nether-26.3-q3: a skeleton chased into the lava sea)', async () => {
+  const { pastLeash, letBeInNether, NETHER_LEASH, NETHER_FIGHT_DROP, meleeOptions } = await import('../../src/reflexes/rules')
+  const { ARCHER_BUDGET } = await import('../../src/nether/safety')
+  const nether = (e: ReflexEngine): void => { (e as any).bot.game.dimension = 'the_nether' }
+  const kit = [item('diamond_sword'), item('bow'), item('arrow', 32)]
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(10) })], items: kit }, {}, nether), 'hold off skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(10) })], items: kit }), 'fight skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'zombified_piglin', position: at(3) })], items: kit }, {}, (e) => { nether(e); (e as any).onHurt((e as any).bot.entity, (e as any).bot.entities[Object.keys((e as any).bot.entities).find(k => k !== '1') as string]) }), 'fight zombified_piglin')
+  assert.strictEqual(meleeOptions({ name: 'wither_skeleton' }, DEFAULT_REFLEX_CONFIG, true).maxDrop, 1)
+  assert.strictEqual(meleeOptions({ name: 'wither_skeleton' }, DEFAULT_REFLEX_CONFIG).maxDrop, undefined)
+  // the leash: NETHER_LEASH across, NETHER_FIGHT_DROP down
+  const a = new Vec3(0.5, 64, 0.5)
+  assert.equal(pastLeash(a, new Vec3(0.5 + NETHER_LEASH - 0.5, 64, 0.5)), false)
+  assert.equal(pastLeash(a, new Vec3(0.5 + NETHER_LEASH + 0.5, 64, 0.5)), true)
+  assert.equal(pastLeash(a, new Vec3(0.5, 64 - NETHER_FIGHT_DROP - 1, 0.5)), true)
+  // an archer held off ARCHER_BUDGET ticks in all is let be
+  const bot = fakeBot({ items: kit })
+  bot.game.dimension = 'the_nether'
+  const skeleton = entity({ name: 'skeleton', position: at(10) })
+  bot.entities[skeleton.id] = skeleton
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const task = hostilesReflex.check(engine.context())
+  assert.ok(task != null)
+  assert.equal(letBeInNether(bot, skeleton, 0), false)
+  const safety = require('../../src/nether/safety')
+  const real = safety.holdOffArcher
+  safety.holdOffArcher = async (_b: unknown, _e: unknown, o: any) => { o.onHold(ARCHER_BUDGET) }
+  try { await task.run(new AbortController().signal) } finally { safety.holdOffArcher = real }
+  assert.equal(letBeInNether(bot, skeleton, 0), true)
+  assert.strictEqual(hostilesReflex.check(engine.context()), null)
+  engine.stop()
+})
+
+test('holdOffArcher: off a ledge over lava first, then the shield up while the skeleton draws, never a step toward it', async () => {
+  const { holdOffArcher } = await import('../../src/nether/safety')
+  const navigate = require('../../src/skills/navigate')
+  // a ledge: stone under x <= 0, lava from x 1 at y 62 (two under the feet)
+  const world = (p: Vec3): string => p.y === 63 && p.x <= 0 ? 'stone' : p.y <= 62 && p.x >= 1 ? 'lava' : p.y < 63 ? 'stone' : 'air'
+  const skeleton = entity({ name: 'skeleton', position: new Vec3(-9.5, 64, 0.5), meta: { living_entity_flags: 1 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world, entities: [skeleton], offhand: item('shield') })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.waitForTicks = async (n: number) => { for (let i = 0; i < n; i++) bot.emit('physicsTick') }
+  let raised = 0
+  bot.activateItem = () => { raised++; bot.usingHeldItem = true }
+  bot.deactivateItem = () => { bot.usingHeldItem = false }
+  const walks: Vec3[] = []
+  const realWalk = navigate.walkTo
+  navigate.walkTo = async (_b: any, to: Vec3) => { walks.push(to); bot.entity.position = to.clone(); bot.emit('physicsTick') }
+  const forward: boolean[] = []
+  const set = bot.setControlState
+  bot.setControlState = (k: string, v: boolean) => { if (k === 'forward') forward.push(v); set(k, v) }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await holdOffArcher(bot, skeleton as any, { maxTicks: 30 })
+  } finally {
+    clearInterval(ticking)
+    navigate.walkTo = realWalk
+  }
+  assert.ok(walks.length >= 1 && walks[0].x < 0, walks.map(w => w.toString()).join(' '))
+  assert.ok(raised >= 1, 'no shield')
+  assert.ok(!forward.includes(true), 'it walked at the skeleton')
+})

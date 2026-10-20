@@ -9,7 +9,7 @@ import type { Vec3 } from 'vec3'
 import { bestMeleeWeapon } from '../skills/weapons'
 import { hasLineOfSight, isAlive, type Entity } from '../skills/combatUtil'
 import { holdOffBlazes } from '../nether/blazeFight'
-import { GHAST_FIREBALL, deadlyDropBeside, deflectFireball, fireballIncoming, keepFromGhast, nearestGhast } from '../nether/safety'
+import { ARCHER_BUDGET, GHAST_FIREBALL, deadlyDropBeside, deflectFireball, fireballIncoming, holdOffArcher, keepFromGhast, nearestGhast } from '../nether/safety'
 import { isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
 import type { ReflexConfig } from './config'
@@ -253,8 +253,46 @@ export function hostilesInRange (ctx: ReflexContext): Entity[] {
  */
 export const SWARM_MAX_DROP = 1
 
+/**
+ * In the nether a fight keeps to the ground it started on (the lava sea is under every slope): within NETHER_LEASH
+ * across of where the bot first fought that mob and no more than NETHER_FIGHT_DROP under it, each step down at most a
+ * block; past that the mob is let be. A 26.3 bot chased a skeleton 20 blocks over a soul sand valley and 13 down, into
+ * the lava sea, with its 16 pearls and 10 rods (nether-26.3-q3)
+ */
+export const NETHER_LEASH = 8
+export const NETHER_FIGHT_DROP = 2
+/** ticks a leash's anchor is kept for a mob */
+export const LEASH_TICKS = 1200
+
+export function inNether (bot: Bot): boolean {
+  return /nether/.test(String(bot.game?.dimension ?? ''))
+}
+
+/** whether `pos` is past the leash of `anchor` (NETHER_LEASH across, NETHER_FIGHT_DROP down) */
+export function pastLeash (anchor: Vec3, pos: Vec3): boolean {
+  return Math.hypot(pos.x - anchor.x, pos.z - anchor.z) > NETHER_LEASH || pos.y < anchor.y - NETHER_FIGHT_DROP
+}
+
+/** each bot's nether fights: where it first fought each mob, and when; and the ticks it has held off each archer */
+const netherFights = new WeakMap<Bot, { anchors: Map<number, { at: Vec3, tick: number }>, archers: Map<number, number> }>()
+function netherFightsOf (bot: Bot): { anchors: Map<number, { at: Vec3, tick: number }>, archers: Map<number, number> } {
+  let f = netherFights.get(bot)
+  if (f == null) netherFights.set(bot, f = { anchors: new Map(), archers: new Map() })
+  return f
+}
+
+/** a mob the hostiles reflex lets be in the nether: an archer held off ARCHER_BUDGET ticks, one the bot is past the leash of */
+export function letBeInNether (bot: Bot, e: Entity, tick: number): boolean {
+  const f = netherFightsOf(bot)
+  for (const [id, a] of f.anchors) if (bot.entities[id] == null || tick - a.tick > LEASH_TICKS) f.anchors.delete(id)
+  for (const id of f.archers.keys()) if (bot.entities[id] == null) f.archers.delete(id)
+  if (RANGED_HOSTILES.has(e.name ?? '') && e.name !== 'blaze') return (f.archers.get(e.id) ?? 0) >= ARCHER_BUDGET
+  const a = f.anchors.get(e.id)
+  return a != null && pastLeash(a.at, bot.entity.position)
+}
+
 /** the hostiles reflex's melee against `target` (fight's options) */
-export function meleeOptions (target: { name?: string }, config: ReflexConfig): { maxTicks: number, maxDistance: number, aimHeight?: number, maxDrop?: number } {
+export function meleeOptions (target: { name?: string }, config: ReflexConfig, nether = false): { maxTicks: number, maxDistance: number, aimHeight?: number, maxDrop?: number } {
   return {
     maxTicks: config.hostiles.fightTicks,
     maxDistance: config.combat.scanRange * 2,
@@ -263,7 +301,7 @@ export function meleeOptions (target: { name?: string }, config: ReflexConfig): 
     // (an enderman's fight kept on the bot's level too: its hits knock the bot back, and one after it over a warped
     // forest's ledges was knocked off one to its death, 26.3 run n2-d; another fought one by the lava sea and went in,
     // run p11)
-    maxDrop: SWARMERS.has(target.name ?? '') || target.name === 'enderman' ? SWARM_MAX_DROP : undefined
+    maxDrop: nether || SWARMERS.has(target.name ?? '') || target.name === 'enderman' ? SWARM_MAX_DROP : undefined
   }
 }
 
@@ -301,7 +339,8 @@ export const hostilesReflex: Reflex = {
   check (ctx) {
     const { bot, config } = ctx
     if (!config.hostiles.enabled) return null
-    const near = hostilesInRange(ctx)
+    const nether = inNether(bot)
+    const near = hostilesInRange(ctx).filter(e => !nether || !letBeInNether(bot, e, ctx.tick))
     if (near.length === 0) return null
     const armed = armorPoints(bot) >= config.hostiles.fightOnArmor && bestMeleeWeapon(bot) != null
     const fightOn = near.length === 1 && armed
@@ -366,6 +405,30 @@ export const hostilesReflex: Reflex = {
     const turned = (): boolean => {
       const now = hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange) })
       return now.length > 0 && unarmedOutmatched(bot, now, config)
+    }
+    if (nether && !useBow) {
+      const f = netherFightsOf(bot)
+      // an archer held off from where the bot stands, never chased (holdOffArcher), ARCHER_BUDGET ticks at most
+      if (RANGED_HOSTILES.has(target.name ?? '') && target.name !== 'blaze') {
+        const spent = f.archers.get(target.id) ?? 0
+        return {
+          name: 'hostiles',
+          priority: config.hostiles.priority,
+          detail: `hold off ${target.name ?? ''}`,
+          run: async (signal) => await holdOffArcher(bot, target, { signal, maxTicks: Math.min(config.hostiles.fightTicks, ARCHER_BUDGET - spent), onHold: t => f.archers.set(target.id, spent + t), until: turned })
+        }
+      }
+      // a melee fight on its leash
+      const anchor = f.anchors.get(target.id)?.at ?? bot.entity.position.clone()
+      f.anchors.set(target.id, { at: anchor, tick: ctx.tick })
+      if (!(target.name === 'blaze' && hasShield(bot))) {
+        return {
+          name: 'hostiles',
+          priority: config.hostiles.priority,
+          detail: `fight ${target.name ?? ''}`,
+          run: async (signal) => await fight(bot, target, { signal, ...meleeOptions(target, config, true), until: () => turned() || pastLeash(anchor, bot.entity.position) })
+        }
+      }
     }
     return {
       name: 'hostiles',
