@@ -157,6 +157,44 @@ export function chooseDigSite (getBlock: BlockGetter, feet: Vec3, cast = false):
 }
 
 /**
+ * Water a dig let into the site stopped: a side row's water cell gets a block (the way it came in), a source in the
+ * frame's plane a block then dug out again; the flowing water left drains. A few rounds, WATER_DRAIN_TICKS apart.
+ */
+async function plugSiteWater (bot: Bot, origin: Vec3, axis: Axis, cast: boolean, signal?: AbortSignal): Promise<void> {
+  const getBlock = blockGetter(bot)
+  const inPlane = (p: Pos): boolean => (axis === 'x' ? p.z : p.x) === (axis === 'x' ? origin.z : origin.x)
+  const cells = (): Vec3[] => portalSiteCells(origin, axis, cast).map(v3)
+  for (let round = 0; round < 3; round++) {
+    const wet = cells().filter(p => getBlock(p)?.name === 'water')
+    if (wet.length === 0) return
+    trace('preparePortalSite: water in the site at', wet.length, 'cells, round', round)
+    const filler = (): string | null => SITE_FILLERS.find(n => countItems(bot, n) > 0) ?? null
+    for (const p of wet) {
+      throwIfAborted(signal)
+      const b = getBlock(p)
+      if (b?.name !== 'water') continue
+      const source = Number(b.properties?.level ?? 0) === 0
+      if (inPlane(p) && !source) continue
+      const item = filler()
+      if (item == null) return
+      await placeBlock(bot, { pos: p, item, intoFluid: true }, signal).catch(err => { if (isAbort(err)) throw err; trace('preparePortalSite: no plug at', p.toString(), (err as Error).message) })
+      if (inPlane(p) && isSolid(getBlock(p))) {
+        await collectBlock(bot, { positions: [p], pickup: false }, signal).catch(err => { if (isAbort(err)) throw err })
+      }
+    }
+    await waitTicks(bot, WATER_DRAIN_TICKS, signal)
+  }
+}
+
+/** the ticks flowing water left in a portal site takes to drain (a level every 5, 7 levels) */
+export const WATER_DRAIN_TICKS = 40
+
+/** the cells a portal site digs out (portalSiteWork's, whatever is in them now) */
+function portalSiteCells (origin: Pos, axis: Axis, cast: boolean): Pos[] {
+  return portalSiteWork(() => ({ name: 'stone' }), origin, axis, cast).dig
+}
+
+/**
  * Makes a site for a placed frame where the bot stands when there is no flat clear ground near (a cave, a slope):
  * the frame's cells and a row each side dug out, the ground under them filled; resolves the origin, along x
  * (a cave's bot with 11 obsidian found 'no flat clear ground' and the milestone failed five times at once, 26.3)
@@ -173,13 +211,14 @@ export async function preparePortalSite (bot: Bot, signal?: AbortSignal, cast = 
   for (let pass = 0; pass < 3 && dig.length > 0; pass++) {
     for (const p of dig) {
       throwIfAborted(signal)
-      if (PASSABLE.has(getBlock(p)?.name ?? 'air')) continue
+      // (water the dig let in is plugged after: plugSiteWater)
+      if (PASSABLE.has(getBlock(p)?.name ?? 'air') || getBlock(p)?.name === 'water') continue
       await collectBlock(bot, { positions: [p], pickup: false }, signal).catch(err => { if (isAbort(err)) throw err; trace('preparePortalSite:', p.toString(), (err as Error).message) })
     }
     dig = portalSiteWork(getBlock, origin, axis, cast).dig.map(v3)
   }
   // the frame's own plane must be clear (the obsidian goes in it); a side row's block left is walked round
-  const blocked = portalSiteWork(getBlock, origin, axis, cast).dig.filter(p => (axis === 'x' ? p.z : p.x) === (axis === 'x' ? origin.z : origin.x))
+  const blocked = portalSiteWork(getBlock, origin, axis, cast).dig.filter(p => (axis === 'x' ? p.z : p.x) === (axis === 'x' ? origin.z : origin.x) && getBlock(p)?.name !== 'water')
   if (blocked.length > 0) throw new SkillError('CANNOT_PLACE', `${blocked.length} blocks left in the portal site at ${origin.toString()}`)
   // the ground filled: a hole's bottom first, up (a cell with nothing solid by it can't take a block: 'nothing solid
   // to place against', 26.3); the frame's own row must hold, a side row's hole is walked round
@@ -192,12 +231,14 @@ export async function preparePortalSite (bot: Bot, signal?: AbortSignal, cast = 
       if (isSolid(getBlock(p))) continue
       const filler = SITE_FILLERS.find(n => countItems(bot, n) > 0)
       if (filler == null) throw new SkillError('MISSING_ITEMS', 'no block to fill the ground of the portal site with')
-      await placeBlock(bot, { pos: p, item: filler }, signal).catch(err => {
+      // (into water too: a dig let a lake's water into the site, and its ground 'water is at' failed, 26.3)
+      await placeBlock(bot, { pos: p, item: filler, intoFluid: true }, signal).catch(err => {
         if (isAbort(err) || inPlane(top)) throw err
         trace('preparePortalSite: the ground of a side row at', p.toString(), (err as Error).message)
       })
     }
   }
+  await plugSiteWater(bot, origin, axis, cast, signal)
   trace('preparePortalSite: dug', work.dig.length, 'filled', work.fill.length, 'at', origin.toString())
   return { origin, axis }
 }

@@ -46,6 +46,43 @@ describe(`a portal site dug out of a cave on a ${DEFAULT_VERSION} server`, { tim
   })
 })
 
+describe(`a portal site a dig lets water into on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 * 1000 }, () => {
+  let server: TestServer
+  let bot: Bot
+  const run = async (cmd: string): Promise<string> => (await server.command(cmd)).join(' | ')
+
+  before(async () => {
+    server = await startServer({ flat: true, seed: 'wetsite', difficulty: 'peaceful', gamerules: { advance_time: false, spawn_mobs: false, advance_weather: false } })
+    bot = await connectLockstepBot(server, { username: USERNAME })
+    await bot.waitForChunksToLoad()
+    bot.loadPlugin(createPlugin({ reflexes: false }))
+  })
+  after(async () => {
+    if (bot != null) await quitBot(bot)
+    if (server != null) await server.cleanup()
+  })
+
+  it('plugs the water and fills the ground under it, then places and lights the frame', async () => {
+    const o = bot.entity.position.floored()
+    const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
+    await run(`fill ${xyz(-20, -3, -20)} ${xyz(20, 8, 20)} stone`)
+    await run(`fill ${xyz(0, 0, 0)} ${xyz(0, 1, 0)} air`)
+    // a hole 3 deep under where every site's frame would stand, as in the dry site's test
+    await run(`fill ${xyz(-2, -3, -2)} ${xyz(2, -1, 2)} air`)
+    await run(`setblock ${xyz(0, -1, 0)} stone`)
+    // water sources hidden in the stone just past each site's outer row: the dig opens one of them
+    for (const [x, z] of [[0, 4], [0, -4], [4, 0], [-4, 0]]) await run(`setblock ${xyz(x, 0, z)} water`)
+    await run(`clear ${USERNAME}`)
+    for (const [item, n] of [['obsidian', 10], ['flint_and_steel', 1], ['diamond_pickaxe', 1], ['cobblestone', 64]] as const) await run(`give ${USERNAME} ${item} ${n}`)
+    await run(`tp ${USERNAME} ${o.x + 0.5} ${o.y} ${o.z + 0.5}`)
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'obsidian') >= 10 && bot.blockAt(o.offset(0, 0, 4))?.name === 'water' && bot.entity.position.distanceTo(o.offset(0.5, 0, 0.5)) < 1, 200))
+    const site = await preparePortalSite(bot)
+    const res = await buildPortal(bot, { method: 'obsidian', origin: site.origin, axis: site.axis })
+    console.log(`wet site portal: ${res.portal.length} portal blocks`)
+    assert.ok(res.portal.length > 0)
+  })
+})
+
 describe(`a cast portal on a dug site in a cave on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 * 1000 }, () => {
   let server: TestServer
   let bot: Bot
