@@ -285,8 +285,23 @@ export function bestHitDamage (bot: Bot): number {
 /** A bed in the bag or one placed nearby: sleep; good gear: stay out and fight; else dig in. */
 export function nightPlan (bot: Bot, opts: NightPlanOptions & { bedNearby?: boolean } = {}): NightPlan {
   if (opts.bedNearby === true || bot.inventory.items().some(i => isBed(i.name))) return 'sleep'
-  if (armorPoints(bot) >= (opts.minArmor ?? 10) && bestHitDamage(bot) >= (opts.minDamage ?? 6)) return 'fight'
+  if (armorPoints(bot) >= (opts.minArmor ?? 10) && bestHitDamage(bot) >= (opts.minDamage ?? 6) && canHoldOut(bot)) return 'fight'
   return 'shelter'
+}
+
+/** the health a night out is fought at no lower, when it doesn't come back (canHoldOut) */
+export const NIGHT_FIGHT_HEALTH = 10
+
+/**
+ * Whether the bot holds out a night's fights: health over NIGHT_FIGHT_HEALTH, or health that comes back (the food bar
+ * at 18 or more heals, FoodData.tick's naturalRegeneration, or food carried to fill it). Full iron and a diamond
+ * sword went exploring for melons at 3 health, its food bar at 6 and nothing to eat, at midnight: two skeleton arrows
+ * (full-26.3-fresh-l)
+ */
+export function canHoldOut (bot: Bot): boolean {
+  if ((bot.health ?? 20) > NIGHT_FIGHT_HEALTH) return true
+  if ((bot.food ?? 20) >= 18) return true
+  return bestFoodInInventory(bot) != null
 }
 
 export interface ShelterOptions {

@@ -155,6 +155,14 @@ test('nightPlan: a bed means sleep; armor and a weapon that can fight, fight; el
   assert.strictEqual(nightPlan(fakeBot({ armor: { torso: item('leather_chestplate') }, items: [item('diamond_sword')] })), 'shelter')
 })
 
+test('nightPlan: good gear at low health that does not come back (the food bar under 18, nothing to eat) shelters; with food, or a full bar, it fights (full-26.3-fresh-l: shot at 3 health exploring at midnight)', () => {
+  const iron = () => ({ head: item('iron_helmet'), torso: item('iron_chestplate'), legs: item('iron_leggings'), feet: item('iron_boots') })
+  assert.strictEqual(nightPlan(fakeBot({ armor: iron(), health: 3, food: 6, items: [item('diamond_sword'), item('wheat', 6)] })), 'shelter')
+  assert.strictEqual(nightPlan(fakeBot({ armor: iron(), health: 3, food: 6, items: [item('diamond_sword'), item('cooked_beef', 2)] })), 'fight')
+  assert.strictEqual(nightPlan(fakeBot({ armor: iron(), health: 3, food: 18, items: [item('diamond_sword')] })), 'fight')
+  assert.strictEqual(nightPlan(fakeBot({ armor: iron(), health: 14, food: 6, items: [item('diamond_sword')] })), 'fight')
+})
+
 test('sealItem: dirt or cobblestone first, never a block that falls or one with a use', () => {
   assert.strictEqual(sealItem(fakeBot({ items: [item('sand', 5), item('cobblestone', 2), item('dirt', 1)] })), 'dirt')
   assert.strictEqual(sealItem(fakeBot({ items: [item('sand', 5), item('gravel', 3), item('crafting_table')] })), null)
