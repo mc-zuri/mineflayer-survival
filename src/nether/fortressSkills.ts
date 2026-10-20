@@ -588,6 +588,14 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         trace('collectBlazeRods: the nook not built:', (err as Error).message)
       }
     }
+    // short of NOOK_ARROWS for the bow's nook, and no melee nook by this spawner (a throne walled in): back to the bow's
+    // nook while there are arrows (its sword meets the blazes that come to its front). A 26.3 bot in iron at seed 2's
+    // throne at (-277, 77, -159), with fire resistance and 5 rods of 8, shot its 64 arrows down to 15, found no melee
+    // nook, no camp out of the spawn volume, and gave the spawner up (tests/integration/blaze BLAZE_BREW=1)
+    if (nook == null && melee && candidates.length === 0 && countItems(bot, 'bow') > 0 && countItems(bot, ['arrow', 'spectral_arrow', 'tipped_arrow']) > 0) {
+      trace('collectBlazeRods: no melee nook by the spawner at', spawner.toString(), ': the bow nook with', countItems(bot, ['arrow', 'spectral_arrow', 'tipped_arrow']), 'arrows')
+      return await fightFromCover(spawner, retried, false, stuckBefore)
+    }
     if (nook == null) { trace('collectBlazeRods: no nook by the spawner at', spawner.toString(), 'of', candidates.length); return null }
     keepNook(bot, spawner, nook, melee)
     try {

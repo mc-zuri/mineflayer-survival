@@ -652,3 +652,28 @@ test('the blaze camp backs off at 12 health when alight (fightHealth: the fire s
   assert.ok(off(await run(true)), 'backed off alight')
   assert.ok(!off(await run(false)), 'not unburnt')
 })
+
+test('collectBlazeRods: short of the bow nook\'s arrows with no melee nook by the spawner (a throne walled in), the bow\'s nook while there are arrows, not given up (seed 2\'s throne at (-277, 77, -159), 15 arrows left)', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/nether/blazeFight')
+  const { item } = await import('../reflexes/fakeBot')
+  const real = { build: fightModule.buildNook, fight: fightModule.fightFromNook, plan: fightModule.planBlazeNooks }
+  const built: any[] = []
+  fightModule.buildNook = async (_b: unknown, nook: any) => { built.push(nook) }
+  fightModule.planBlazeNooks = (lookup: any, spawner: any, opts: any, n: number) => opts?.melee === true ? [] : real.plan(lookup, spawner, opts, n)
+  try {
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('cobblestone', 64), item('bow'), item('arrow', 15)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+    bot.game.dimension = 'the_nether'
+    ;(bot as any).world = { raycast: () => null }
+    bot.findBlocks = () => []
+    fightModule.fightFromNook = async () => { bot.inventory.slots[20] = item('blaze_rod'); return { kills: 1, shots: 2, blocked: 0, ticks: 10 } }
+    const r = await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    assert.equal(r.rods, 1)
+    assert.equal(built.length, 1)
+    assert.ok(Math.hypot(built[0].stand.x, built[0].stand.z) >= 7, built[0].stand.toString())
+  } finally {
+    fightModule.buildNook = real.build
+    fightModule.fightFromNook = real.fight
+    fightModule.planBlazeNooks = real.plan
+  }
+})
