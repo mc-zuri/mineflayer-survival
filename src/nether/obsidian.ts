@@ -19,7 +19,7 @@ import { findBlocks } from '../core/findBlocks'
 export type ObsidianLookup = (pos: Vec3) => { name: string, boundingBox: string, properties?: Record<string, any> } | null
 
 /** runs `fn` with the pathfinder's paths digging nothing (canDig off), as before after */
-async function withoutDigging<T> (bot: Bot, fn: () => Promise<T>): Promise<T> {
+export async function withoutDigging<T> (bot: Bot, fn: () => Promise<T>): Promise<T> {
   const before = { ...((bot.pathfinder as any)?.defaultMoveSettings ?? {}) }
   bot.pathfinder?.setMoveOptions?.({ ...before, canDig: false })
   try {

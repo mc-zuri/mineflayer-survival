@@ -22,7 +22,7 @@ function dug (lookup: BlockLookup, cells: Vec3[]): BlockLookup {
   return p => open.has(p.toString()) ? block('air') : lookup(p)
 }
 
-test('coverAt: the ceiling over the tunnel no enderman takes: 3 deep its ceiling is the nylium (EndermanTakeBlockGoal), 4 deep the netherrack', () => {
+test('coverAt: the ceiling over the tunnel no enderman takes: 3 deep its ceiling is the nylium (EndermanTakeBlockGoal), 4 deep the netherrack', async () => {
   assert.ok(ENDERMAN_HOLDABLE.test('warped_nylium') && ENDERMAN_HOLDABLE.test('grass_block') && !ENDERMAN_HOLDABLE.test('netherrack'))
   const lookup = forest()
   const top = new Vec3(0, 64, 0)
@@ -38,6 +38,11 @@ test('coverAt: the ceiling over the tunnel no enderman takes: 3 deep its ceiling
   assert.equal(cover.dig.length, 14)
   assert.ok(cover.dig.every(p => p.y < 64))
   assert.ok(!cover.dig.some(p => p.equals(new Vec3(5, 62, 0)) || p.equals(new Vec3(6, 62, 0))), 'the ceiling is kept')
+  // not yet dug: its kept cells all there (what digCover checks after each dig), the tunnel still shut
+  const { coverBreach } = await import('../../src/nether/endermanCover')
+  assert.equal(coverBreach(lookup, cover, true), null)
+  assert.match(coverBreach(lookup, cover) ?? '', /in the tunnel/)
+  assert.match(coverBreach(dug(lookup, [new Vec3(6, 61, 1)]), cover, true) ?? '', /for a wall/)
   // dug, it holds; with the ceiling over the bot's cell or a wall beside it gone, not
   const after = dug(lookup, cover.dig)
   assert.equal(coverIntact(after, cover), true)

@@ -22,6 +22,7 @@ import { nearbyDrops, pickupDrops } from '../skills/pickupDrops'
 import { fight } from '../skills/fight'
 import { shoot } from '../skills/shoot'
 import { dig } from '../core/actions'
+import { withoutDigging } from './obsidian'
 import type { BlockLookup, BlockView } from '../skills/placement'
 import { STARE_TELEPORT, eyesInSight, isAngryEnderman, provokeEnderman } from './pearls'
 
@@ -209,10 +210,11 @@ export function coverView (feet: Vec3, raycast: Raycast): number {
  * What's wrong with the cover as it stands, or null when it's as dug: its cells open, the ceiling and the walls there
  * (an enderman took none, a creeper blew none)
  */
-export function coverBreach (lookup: BlockLookup, cover: EndermanCover): string | null {
+export function coverBreach (lookup: BlockLookup, cover: EndermanCover, kept = false): string | null {
   const name = (p: Vec3): string => `${lookup(p)?.name ?? 'nothing'} at ${p.toString()}`
   for (const c of [cover.front, cover.stand]) {
-    for (const p of [c, c.offset(0, 1, 0)]) if (!open(lookup(p))) return `${name(p)} in the tunnel`
+    // (`kept`: the cells kept only, the tunnel still to dig)
+    if (!kept) for (const p of [c, c.offset(0, 1, 0)]) if (!open(lookup(p))) return `${name(p)} in the tunnel`
     if (!solid(lookup(c.offset(0, 2, 0)))) return `${name(c.offset(0, 2, 0))} for the ceiling`
     if (!solid(lookup(c.offset(0, -1, 0)))) return `${name(c.offset(0, -1, 0))} for the floor`
   }
@@ -301,7 +303,10 @@ async function walkLine (bot: Bot, cover: EndermanCover, to: number, signal?: Ab
   let from = lineIndex(bot, cover)
   if (from < 0) {
     // off the line: to its top first
-    await navigate(bot, { goal: new goals.GoalBlock(cover.top.x, cover.top.y, cover.top.z) }, signal)
+    // (digging nothing by the cover: the pathfinder's way through broke its walls, 26.3, three covers in a run)
+    const go = async (): Promise<unknown> => await navigate(bot, { goal: new goals.GoalBlock(cover.top.x, cover.top.y, cover.top.z) }, signal)
+    if (bot.entity.position.distanceTo(cover.top) <= 8) await withoutDigging(bot, go)
+    else await go()
     from = 0
   }
   const way = Math.sign(to - from)
@@ -320,7 +325,7 @@ async function stepTo (bot: Bot, cell: Vec3, signal?: AbortSignal, until?: () =>
   await walkTo(bot, centre(cell), { within: 0.2, maxTicks: 30, until }, signal)
   await settle(bot, signal)
   if (inCell(bot, cell) || until?.() === true) return
-  await navigate(bot, { goal: new goals.GoalBlock(cell.x, cell.y, cell.z) }, signal).catch(err => { if (isAbort(err)) throw err })
+  await withoutDigging(bot, async () => await navigate(bot, { goal: new goals.GoalBlock(cell.x, cell.y, cell.z) }, signal)).catch(err => { if (isAbort(err)) throw err })
   await settle(bot, signal)
 }
 
@@ -368,6 +373,9 @@ export async function digCover (bot: Bot, cover: EndermanCover, signal?: AbortSi
       if (fluid(lookup(p))) throw new SkillError('VERIFY_FAILED', `fluid at ${p.toString()}`)
       await toolFor(bot, b)
       await dig(bot, b, { signal, digObstruction: keep })
+      // (a dig that broke the cover's walls or ceiling instead: named, the cover given up)
+      const breach = coverBreach(lookup, cover, true)
+      if (breach != null) throw new SkillError('VERIFY_FAILED', `the cover broken digging ${p.toString()} from ${line[i].toString()}: ${breach}`)
       trace('digCover: dug', b.name, 'at', p.toString(), 'from', line[i].toString(), open(lookup(p)) ? '' : `(${bot.blockAt(p)?.name ?? '?'} still there)`)
     }
   }
@@ -595,7 +603,7 @@ export async function fightFromCover (bot: Bot, cover: EndermanCover, opts: Cove
           if (spot != null) {
             badSpots.add(spot.toString())
             trace('fightFromCover: to', spot.toString(), 'for an enderman in sight')
-            await navigate(bot, { goal: new goals.GoalBlock(spot.x, spot.y, spot.z) }, signal).catch(err => { if (isAbort(err)) throw err })
+            await withoutDigging(bot, async () => await navigate(bot, { goal: new goals.GoalBlock(spot.x, spot.y, spot.z) }, signal)).catch(err => { if (isAbort(err)) throw err })
             const seen = endermen().find(e => !isAngryEnderman(bot, e) && !passOver.has(e.id) && e.position.distanceTo(bot.entity.position) > STARE_TELEPORT && comes(e) && eyesInSight(bot, e))
             if (seen != null) { badSpots.delete(spot.toString()); lastStare = ticks }
             if (seen != null && !await provokeEnderman(bot, seen, signal)) passOver.add(seen.id)
