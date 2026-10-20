@@ -344,7 +344,7 @@ test('spareShield smelts the raw iron for a shield when the bag has no ingot (a 
   }
 })
 
-test('collectBlazeRods: a nook with no kill for long (STUCK) is left for the melee nook by the spawner, that one too for the camp\'s fight', async () => {
+test('collectBlazeRods: a nook with no kill for long (STUCK) is left for another of the bow\'s nooks once, then the melee nook out of the spawn volume, that one too for the camp\'s fight', async () => {
   const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
   const { SkillError } = await import('../../src/skills/errors')
   const fightModule = require('../../src/nether/blazeFight')
@@ -368,10 +368,11 @@ test('collectBlazeRods: a nook with no kill for long (STUCK) is left for the mel
   const ticking = setInterval(() => bot.emit('physicsTick'), 1)
   try {
     await assert.rejects(collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 30, safety: false }), /TIMEOUT|rods/)
-    assert.equal(fought.length, 2, fought.join(' '))
-    const [far, near] = fought.map(t => t.replace(/[()]/g, '').split(', ').map(Number))
+    assert.equal(fought.length, 3, fought.join(' '))
+    const [far, far2, near] = fought.map(t => t.replace(/[()]/g, '').split(', ').map(Number))
     assert.ok(Math.hypot(far[0], far[2]) >= 7, fought[0])
-    assert.ok(Math.hypot(near[0], near[2]) <= 5, fought[1])
+    assert.ok(Math.hypot(far2[0], far2[2]) >= 7 && fought[1] !== fought[0], fought[1])
+    assert.ok(Math.hypot(near[0], near[2]) <= 5.1 && Math.max(Math.abs(near[0]), Math.abs(near[2])) >= 4, fought[2])
     // then the camp
     assert.ok(moves.length > 0)
   } finally {

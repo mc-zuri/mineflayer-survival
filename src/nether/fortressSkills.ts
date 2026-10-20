@@ -555,7 +555,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
    * The fight from a nook by the spawner (planBlazeNook: the one built before, else the cheapest), built and fought
    * from; null when there's no nook to be had (too few blocks, no site, its building failed), the camp's fight then
    */
-  const fightFromCover = async (spawner: Vec3, retried = false, melee = !shootsWell(bot)): Promise<BlazeRodsResult | null> => {
+  const fightFromCover = async (spawner: Vec3, retried = false, melee = !shootsWell(bot), stuckBefore = false): Promise<BlazeRodsResult | null> => {
     if (nookBlocks(bot) < NOOK_MIN_BLOCKS) { trace('collectBlazeRods: too few blocks for a nook,', nookBlocks(bot)); return null }
     if (farFrom(spawner)) {
       await travel(bot, { target: spawner, range: 16, exactY: true }, signal).catch(err => {
@@ -603,6 +603,16 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         nooks.get(bot)?.delete(nookKey(spawner, melee))
         bad.push(nook.stand)
         return await fightFromCover(spawner, true, melee)
+      }
+      // no kill from it for long (NOOK_STALL_TICKS) with the arrows for more: another of the bow's nooks, once (the
+      // hall's nook under seed 2's throne at (-277, 77, -159) saw none of its blazes for 3000 ticks, another sees
+      // other cells of the throne; the melee nook after it, in the spawn volume then, killed the 26.3 bot in iron with
+      // a bow and 32 arrows, BLAZE_KIT=gateIronBow)
+      if (isSkillError(err, 'STUCK') && (err as Error).message.includes('no blaze killed') && !melee && !stuckBefore && shootsWell(bot)) {
+        trace('collectBlazeRods: no kill from the nook at', nook.stand.toString(), ': another bow nook')
+        nooks.get(bot)?.delete(nookKey(spawner, melee))
+        bad.push(nook.stand)
+        return await fightFromCover(spawner, retried, false, true)
       }
       // no kill from it for long (NOOK_STALL_TICKS): the melee nook by the spawn volume, the blazes coming out within
       // the sword's reach of its front; from that one too, the camp's fight with the shield
