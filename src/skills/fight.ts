@@ -4,7 +4,7 @@ import type { Vec3 } from 'vec3'
 import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { edgeAhead, steerAway, steerToward } from './steer'
 import { onDripstone } from './hazardCells'
-import { type Entity, metadataIndex, metadataValue, distanceToBox, entityBox, entityName, eyePosition, isAlive, TaskError, type SkillOptions, throwIfAborted, waitTicks, yawPitchOf } from './combatUtil'
+import { type Entity, hasLineOfSight, metadataIndex, metadataValue, distanceToBox, entityBox, entityName, eyePosition, isAlive, TaskError, type SkillOptions, throwIfAborted, waitTicks, yawPitchOf } from './combatUtil'
 
 export interface FightOptions extends SkillOptions {
   /** the reach to swing from (Player.entityInteractionRange 3, less a margin) */
@@ -101,6 +101,56 @@ export class ArrowGuard {
   }
 }
 
+/** a mob that shoots a crossbow (CrossbowAttackMob: its is_charging_crossbow field, a pillager's or a piglin's) */
+export function isCrossbowMob (bot: Bot, entity: Entity): boolean {
+  const keys: string[] | undefined = (bot.registry.entitiesByName as any)[entity.name ?? '']?.metadataKeys
+  return keys?.includes('is_charging_crossbow') === true
+}
+
+/** CrossbowAttackMob.isChargingCrossbow: the crossbow being drawn (Pillager.IS_CHARGING_CROSSBOW, its arm pose) */
+export function isChargingCrossbow (bot: Bot, entity: Entity): boolean {
+  return metadataValue(bot, entity, 'is_charging_crossbow') === true
+}
+
+/** ticks a crossbow is taken as loaded without its shot seen, at most (a mob out of sight holds it loaded) */
+export const CROSSBOW_LOADED_TICKS = 200
+
+/**
+ * When to hold the shield up against a mob's crossbow (RangedCrossbowAttackGoal): it is CHARGING for the crossbow's
+ * charge (is_charging_crossbow, CrossbowItem.getChargeDuration: 25 ticks), then CHARGED for its attackDelay (20 to 39
+ * ticks), then READY_TO_ATTACK, and it shoots once it sees the target. The danger is the other way round from a bow's:
+ * the loaded crossbow, from the charge's end to the shot, not the draw. A pillager's bolt left the bot's shield down
+ * (ArrowGuard lowered it a few ticks after the draw, 20 to 39 before the shot). Held up from the charge's end until the
+ * bolt has had the time to get here: a bolt seen leaving the mob, or its next charge begun (it shot).
+ */
+export class CrossbowGuard {
+  private charging = false
+  private loadedAt = -1
+  private holdUntil = -1
+  /** this tick's say: the mob charging, a bolt seen leaving it, its distance, the tick; whether to block */
+  update (charging: boolean, shot: boolean, distance: number, tick: number): boolean {
+    const flight = Math.ceil(distance / MOB_ARROW_SPEED) + 2
+    if (this.charging && !charging) this.loadedAt = tick
+    // a new charge begun while loaded: the bolt went unseen, and is on its way
+    if (!this.charging && charging && this.loadedAt >= 0) { this.loadedAt = -1; this.holdUntil = tick + flight }
+    this.charging = charging
+    if (shot && this.loadedAt >= 0) { this.loadedAt = -1; this.holdUntil = tick + flight }
+    if (this.loadedAt >= 0 && tick - this.loadedAt > CROSSBOW_LOADED_TICKS) this.loadedAt = -1
+    return this.loadedAt >= 0 || tick <= this.holdUntil
+  }
+
+  /** charged and not shot yet */
+  get loaded (): boolean {
+    return this.loadedAt >= 0
+  }
+}
+
+/** Pillager.performRangedAttack's bolt (CrossbowItem.performShooting, an arrow) leaves this close to the mob */
+const BOLT_SPAWN_DISTANCE = 2.5
+
+/** how far off a crossbow mob's loaded crossbow is watched by fight() (Pillager's FOLLOW_RANGE 32 and then some less) */
+const CROSSBOW_WATCH_DISTANCE = 24
+
 function findItem (bot: Bot, name: string): Item | undefined {
   return bot.inventory.items().find(i => i.name === name) ?? (bot.inventory.slots[45]?.name === name ? bot.inventory.slots[45] ?? undefined : undefined)
 }
@@ -152,6 +202,21 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
   const strength = attackStrengthOf(bot)
   const swell = new SwellCounter()
   const arrows = new ArrowGuard()
+  // every crossbow mob about, the target or not (a patrol's others shoot while the bot closes in on one)
+  const crossbows = new Map<number, CrossbowGuard>()
+  const shotFrom = new Set<number>()
+  const onSpawn = (e: Entity): void => {
+    if (e.name !== 'arrow') return
+    let best: Entity | null = null
+    let bestD = BOLT_SPAWN_DISTANCE
+    for (const m of Object.values(bot.entities)) {
+      if (m === bot.entity || !isCrossbowMob(bot, m)) continue
+      const d = m.position.offset(0, (m.height ?? 1.95) * 0.85, 0).distanceTo(e.position)
+      if (d < bestD) { best = m; bestD = d }
+    }
+    if (best != null) shotFrom.add(best.id)
+  }
+  bot.on('entitySpawn', onSpawn)
   let hits = 0
   let ticks = 0
   let lastPosition = target.position.clone()
@@ -174,9 +239,27 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       if (bot.entity.position.distanceTo(target.position) > maxDistance) throw new TaskError('NO_PATH', `${name} got away`)
       const center = target.position.offset(0, (target.height ?? 1.8) * (opts.aimHeight ?? 0.85), 0)
 
+      // the crossbows about: the nearest loaded one in sight (CrossbowGuard)
+      let loadedCrossbow: Entity | null = null
+      let loadedDistance = Infinity
+      for (const m of Object.values(bot.entities)) {
+        if (m === bot.entity || !isCrossbowMob(bot, m)) continue
+        const d = bot.entity.position.distanceTo(m.position)
+        if (d > CROSSBOW_WATCH_DISTANCE || !isAlive(bot, m)) { crossbows.delete(m.id); continue }
+        let guard = crossbows.get(m.id)
+        if (guard == null) crossbows.set(m.id, guard = new CrossbowGuard())
+        if (guard.update(isChargingCrossbow(bot, m), shotFrom.has(m.id), d, ticks) && d < loadedDistance && hasLineOfSight(bot, m)) {
+          loadedCrossbow = m
+          loadedDistance = d
+        }
+      }
+      shotFrom.clear()
+
       // what to do about the shield this tick
       let wantBlock = false
       let wantRetreat = false
+      // closing in under the shield on a crossbow mob that's loaded (the player's walk while using an item)
+      let advance = false
       if (isCreeper) {
         const fuse = swell.update(creeperSwelling(bot, target))
         if (fuse >= swellDanger) {
@@ -186,7 +269,10 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
         // back off until it stops swelling (it stops past 7 blocks), then come back
         if (retreating && (fuse === 0 || bot.entity.position.distanceTo(target.position) >= creeperSafe)) retreating = false
         if (retreating && !hasShield()) wantRetreat = true
-      } else if (RANGED.has(name) && arrows.update(isUsingItem(bot, target), distance, ticks) && distance > reach && hasShield()) {
+      } else if (loadedCrossbow != null && distance > reach && hasShield()) {
+        wantBlock = true
+        advance = loadedCrossbow.id === target.id
+      } else if (RANGED.has(name) && !isCrossbowMob(bot, target) && arrows.update(isUsingItem(bot, target), distance, ticks) && distance > reach && hasShield()) {
         wantBlock = true
       } else if (name === 'blaze' && blazeCharged(bot, target) && distance > reach && hasShield()) {
         // its three small fireballs: the shield takes them (Player.isDamageSourceBlocked)
@@ -195,7 +281,9 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
 
       if (wantBlock) {
         bot.clearControlStates()
-        lookAt(bot, center)
+        if (advance) steerToward(bot, target.position, { sprint: false, guard: true, maxDrop: opts.maxDrop })
+        // (the shield blocks what comes from in front: Player's BlocksAttacks, faced to the loaded one)
+        lookAt(bot, loadedCrossbow != null && !isCreeper ? loadedCrossbow.position.offset(0, (loadedCrossbow.height ?? 1.95) * 0.85, 0) : center)
         if (!blocking) blocking = await raiseShield(bot)
         await waitTicks(bot, 1, signal)
         continue
@@ -251,6 +339,7 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
     }
   } finally {
     bot.off('entityDead', onDead)
+    bot.off('entitySpawn', onSpawn)
     if (blocking) lowerShield(bot)
     bot.clearControlStates()
   }
