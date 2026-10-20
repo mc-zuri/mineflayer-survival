@@ -37,9 +37,18 @@ export const GIVE_UP_FACTOR = 64
 /** the blocks whose sighting the plans count on: the food that grows on the surface (the rest go by the memory) */
 export const SIGHTED_BLOCKS = ['sweet_berry_bush', 'melon', 'carrots', 'potatoes', 'wheat', 'beetroots', 'hay_block', 'kelp', 'kelp_plant']
 
+/**
+ * how long an animal a kill step found none of within its search radius (while another meat animal was there) stays
+ * dear: the plan made again goes for the one in sight, its meat and cooking named (a 26.3 bot's 'kill 3 cow for 5
+ * beef' hunted the rabbits of a snowy mountain 'for beef 0 / 5', full-26.3-s31337-e)
+ */
+export const NOT_NEAR_TICKS = 6000
+
 export class Sightings {
   /** the tick a name was last looked for and not found, and the misses in a row */
   private readonly missed = new Map<string, { at: number, misses: number }>()
+  /** the tick a name was last not near a step that looked for it (no exploring: no miss) */
+  private readonly away = new Map<string, number>()
 
   /**
    * @param now the tick count (the task runner's)
@@ -56,6 +65,17 @@ export class Sightings {
       const misses = last != null && now - last.at < MISS_STREAK_TICKS ? last.misses + 1 : 1
       this.missed.set(n, { at: now, misses })
     }
+  }
+
+  /** the names a step found none of near it, without exploring for them */
+  notNear (names: readonly string[]): void {
+    for (const n of names) this.away.set(n, this.now())
+  }
+
+  /** whether a name was not near a step within NOT_NEAR_TICKS (and not seen since) */
+  isNotNear (name: string): boolean {
+    const at = this.away.get(name)
+    return at != null && this.now() - at < NOT_NEAR_TICKS
   }
 
   /** the misses in a row of a name, the last within MISS_STREAK_TICKS (0 when none lately) */
@@ -81,17 +101,18 @@ export class Sightings {
     return last != null && last.misses >= misses && this.now() - last.at < GIVE_UP_TICKS
   }
 
-  /** the find cost for the planner: in sight, a walk; not found lately, SCARCE_FACTOR times the estimate */
+  /** the find cost for the planner: in sight, a walk; not found lately (or not near a step lately), SCARCE_FACTOR times the estimate */
   cost (t: FindTarget): number | undefined {
     const bot = this.bot
     if (bot.entity == null || t.dimension !== normalizeDimension(bot.game?.dimension)) return undefined
     const seen = this.sighted(t)
     if (seen != null) {
       this.missed.delete(t.name)
+      this.away.delete(t.name)
       return Math.ceil(seen * WALK_TICKS_PER_BLOCK)
     }
     if (this.givenUp(t.name)) return t.find * GIVE_UP_FACTOR
-    if (this.isScarce(t.name)) return t.find * SCARCE_FACTOR
+    if (this.isScarce(t.name) || this.isNotNear(t.name)) return t.find * SCARCE_FACTOR
     return undefined
   }
 

@@ -60,6 +60,10 @@ export interface StepContext {
   room?: (toward?: Vec3) => Promise<void>
   /** the explorations for a name lately that found none, in a row (Executor.sightings) */
   misses?: (name: string) => number
+  /** notes names a step found none of near it, without exploring (Sightings.notNear): dear to the next plans a while */
+  notNear?: (names: readonly string[]) => void
+  /** whether a name was noted not near lately (Sightings.isNotNear) */
+  isNotNear?: (name: string) => boolean
   /**
    * an exploration's progress kept across steps (the executor's, by `key`): a hunt's plan made again (a stock top-up
    * between, a death) started its spiral over, and it never came to its end to go further out
@@ -118,10 +122,16 @@ export function blockSubstitutes (step: Pick<MineStep, 'block' | 'blocks'>): str
   return []
 }
 
-/** animals that will do instead of the step's: any other meat animal for meat */
 /** the meats the meat animals drop: a hunt for one may take another animal's (the plan goes on with that meat) */
 const MEATS = ['beef', 'porkchop', 'mutton', 'chicken', 'rabbit']
 
+/** the meat a meat animal drops (its loot table's), else null */
+export function meatOf (mob: string): string | null {
+  const i = MEAT_ANIMALS.indexOf(mob)
+  return i < 0 ? null : MEATS[i]
+}
+
+/** animals that will do instead of the step's: any other meat animal for meat */
 export function mobSubstitutes (step: Pick<KillStep, 'mob' | 'item'>): string[] {
   // (for its meat only: a sheep's wool, a cow's leather, a chicken's feather is that animal's; a 26.3 bot hunted pigs
   // 15 plans in a row 'for white_wool', the base's bed never made)
@@ -469,9 +479,22 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
     let mob = step.mob
     if (nearest([step.mob], SEARCH_RADIUS) == null) {
       const sub = subs.find(m => nearest([m], SEARCH_RADIUS) != null)
+      if (sub != null && ctx.notNear != null && ctx.isNotNear?.(step.mob) !== true) {
+        // none of the step's near, another meat animal is: planned again for that one, its own meat and its cooking
+        // (the step's animal and the others not near dear a while, Sightings.notNear)
+        ctx.log(`no ${step.mob} near, a ${sub} is: planning for its ${meatOf(sub) ?? 'meat'}`)
+        ctx.notNear([step.mob, ...subs.filter(m => nearest([m], SEARCH_RADIUS) == null)])
+        return { gained: countItems(bot, step.item) - start, replan: true }
+      }
       if (sub != null) mob = sub
       else if (ctx.state.herdVisited !== true && await toTheHerd(bot, ctx, [step.mob, ...subs])) {
         continue
+      } else if (countItems(bot, step.item) > start && ctx.notNear != null && ctx.isNotNear?.(step.mob) !== true) {
+        // the ones near taken, some of the meat got: planned again from here (the water by the bot to fish, the meat to
+        // cook) before an exploring for more (the 3 rabbits of a snowy field killed, the step explored 8000 ticks on)
+        ctx.log(`no more ${step.mob} near: planning again with the ${countItems(bot, step.item) - start} ${step.item} got`)
+        ctx.notNear([step.mob, ...subs])
+        return { gained: countItems(bot, step.item) - start, replan: true }
       } else {
         ctx.log(`exploring for a ${[step.mob, ...subs].join(' or ')}`)
         passed.clear()
@@ -494,11 +517,15 @@ export const runKill: StepRunner<KillStep> = async (step, ctx) => {
     // a trip to an animal from the bottom of a mine is a search the pathfinder doesn't finish: climb out first
     if (prey.position.distanceTo(bot.entity.position) > 8) await ensureSurface(bot, signal)
     try {
-      trace('executor: hunting a', mob, 'for', step.item, countItems(bot, step.item), '/', target)
+      // (another animal's meat counted as its own: a 26.3 bot hunting rabbits for a cow's step logged 'for beef 0 / 5')
+      const meat = mob === step.mob ? step.item : meatOf(mob) ?? step.item
+      trace('executor: hunting a', mob, 'for', meat, countItems(bot, meat), mob === step.mob ? `/ ${target}` : `(in place of ${step.mob} for ${step.item})`)
       // after an animal over the surface, not down a ravine or through a cave on the way
       const res = await onTheSurface(bot, async () => await hunt(bot, prey, { signal, range: SEARCH_RADIUS }))
       trace('executor: hunt', res.killed ? 'killed' : 'lost', 'the', mob, 'drops', res.drops)
       if (mob !== step.mob && res.killed) substituted++
+      // its meat got: planned again with it (cooked, or more of that animal), not hunted on for the step's
+      if (mob !== step.mob && res.killed && (res.drops[meatOf(mob) ?? ''] ?? 0) > 0) return { gained: countItems(bot, step.item) - start, replan: true }
     } catch (err) {
       if (isAbort(err) || TaskError.is(err, 'DIED', 'INVENTORY_FULL')) throw err
       passed.add(prey.id)

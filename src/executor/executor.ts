@@ -662,6 +662,8 @@ export class Executor {
         unwanted: name => this.unwantedDrop(name),
         room: async (toward) => await this.makeRoomDuringStep(taskSignal, toward),
         misses: name => this.sightings.misses(name),
+        notNear: names => this.sightings.notNear(names),
+        isNotNear: name => this.sightings.isNotNear(name),
         progress: key => this.exploreProgress.get(key) ?? this.exploreProgress.set(key, { leg: 0 }).get(key) as { leg: number },
         forgetProgress: key => { this.exploreProgress.delete(key) }
       }
