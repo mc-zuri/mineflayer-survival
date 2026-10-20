@@ -38,7 +38,12 @@ const enchanted = (item: Item | null | undefined): boolean => {
  * CAVE_FOOD_POINTS of cooked food carried; CAVE_HEALTH.
  */
 export function caveUnreadiness (bot: Bot): string | null {
-  const worn = Object.values(wornArmor(bot))
+  let worn: Array<Item | null>
+  try {
+    worn = Object.values(wornArmor(bot))
+  } catch {
+    return 'no armor'
+  }
   if (worn.some(i => i == null || !CAVE_TIERS.includes(tierOf(i.name) ?? ''))) return 'no full iron armor worn'
   if (worn.filter(enchanted).length < CAVE_ENCHANTED_ARMOR) return 'the armor not enchanted'
   const items = [...bot.inventory.items(), ...(bot.heldItem != null ? [bot.heldItem] : [])]
@@ -278,4 +283,71 @@ export function caveCells (bot: Bot): CaveCells {
 export function dugByBot (bot: Bot, p: { x: number, y: number, z: number }): boolean {
   caveCells(bot)
   return botCaves.get(bot)?.dug.has(`${dimensionOf(bot)}:${keyOf(p)}`) === true
+}
+
+const readyCache = new WeakMap<Bot, { tick: number, ready: boolean }>()
+const ticks = new WeakMap<Bot, { n: number }>()
+
+/** caveReady as of this physics tick (the pathfinder asks it for every cell of a search) */
+export function caveReadyNow (bot: Bot): boolean {
+  let t = ticks.get(bot)
+  if (t == null) {
+    const counter = { n: 0 }
+    ticks.set(bot, t = counter)
+    bot.on?.('physicsTick' as any, () => { counter.n++ })
+  }
+  const cached = readyCache.get(bot)
+  if (cached != null && cached.tick === t.n) return cached.ready
+  const ready = caveReady(bot)
+  readyCache.set(bot, { tick: t.n, ready })
+  return ready
+}
+
+/** whether the cave rule holds for the bot now: in the overworld (the nether's and the End's ground have their own), not caveReady */
+export function caveRuleOn (bot: Bot): boolean {
+  const dim = String(bot.game?.dimension ?? 'overworld')
+  if (!/overworld/.test(dim)) return false
+  return !caveReadyNow(bot)
+}
+
+/**
+ * the extra cost (ticks) of a move ending in a cave's cell for a bot under the cave rule: far over a tunnel's step dug
+ * through the rock (stone with a stone pickaxe some 12 ticks a block, deepslate 23; a step is two), so a way stays in
+ * the rock unless a cave's saves a long way round; never forbidden (a bot in a cave walks out of it)
+ */
+export const CAVE_STEP_COST = 100
+/** the extra cost of breaking a block with a cave's cell against a face: the dig opens the way into the cave */
+export const CAVE_BREAK_COST = 100
+
+/** the pathfinder's step rule of the cave rule: CAVE_STEP_COST into a cave's cell */
+export function caveStepCost (bot: Bot): (block: { position: { x: number, y: number, z: number } }) => number {
+  const cells = caveCells(bot)
+  return (block) => caveRuleOn(bot) && cells.isCave(block.position) ? CAVE_STEP_COST : 0
+}
+
+/** the pathfinder's break rule of the cave rule: CAVE_BREAK_COST for a block with a cave's cell against a face */
+export function caveBreakCost (bot: Bot): (block: { position: { x: number, y: number, z: number } }) => number {
+  const cells = caveCells(bot)
+  return (block) => {
+    if (!caveRuleOn(bot)) return 0
+    const p = block.position
+    for (const d of FACES) if (cells.isCave({ x: p.x + d.x, y: p.y + d.y, z: p.z + d.z })) return CAVE_BREAK_COST
+    return 0
+  }
+}
+
+/**
+ * caveStepCost and caveBreakCost added to the pathfinder's rules for good (once, createPlugin): every way the bot is
+ * walked (a mine step's, a pickup's, a trip's) keeps to the rock and out of the caves while the rule holds
+ */
+export function keepOutOfCaves (bot: Bot): void {
+  const pf = bot.pathfinder as any
+  const settings = pf?.defaultMoveSettings
+  if (pf?.setMoveOptions == null || settings == null) return
+  if ((settings.exclusionAreasStep ?? []).some((f: any) => f.survivalCaves === true)) return
+  const step = caveStepCost(bot)
+  const brk = caveBreakCost(bot)
+  ;(step as any).survivalCaves = true
+  ;(brk as any).survivalCaves = true
+  pf.setMoveOptions({ ...settings, exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), step], exclusionAreasBreak: [...(settings.exclusionAreasBreak ?? []), brk] })
 }

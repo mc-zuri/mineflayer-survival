@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { CAVE_CELLS, CaveCells, caveCells, caveReady, caveUnreadiness, dugByBot, type CaveView } from '../../src/skills/caves'
+import { CAVE_BREAK_COST, CAVE_CELLS, CAVE_STEP_COST, CaveCells, caveBreakCost, caveCells, caveReady, caveStepCost, caveUnreadiness, dugByBot, keepOutOfCaves, type CaveView } from '../../src/skills/caves'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
 const SOLID = new Set(['stone', 'deepslate', 'cobblestone', 'dirt', 'oak_planks'])
@@ -137,4 +137,71 @@ test('the bot\'s classifier notes the cells it digs as its own and forgets its v
   cave = false
   bot.emit('blockUpdate', { name: 'air', boundingBox: 'empty', position: new Vec3(2, 21, 1) }, { name: 'stone', boundingBox: 'block', position: new Vec3(2, 21, 1) })
   assert.equal(cells.isCave(new Vec3(2, 21, 1)), false)
+})
+
+const pf = require('@nxg-org/mineflayer-pathfinder')
+const setup = require('@nxg-org/mineflayer-pathfinder/tests/setup')
+
+/**
+ * The fake rig under the rock (stone from y 64 up to 75, x -6 to 20, z -8 to 8): the bot at the end of the tunnel it
+ * dug (x -5 to 0 at z 0, its cells noted as dug), a cave of plain air from x 3 to 9 (y 64 to 67, z -3 to 3) in the way,
+ * and the goal in a pocket at x 14; digging cheap (digCost 0.02: a block 3 ticks by hand). The rig's bot wears nothing:
+ * not cave-ready.
+ */
+async function caveRig (rule: boolean): Promise<{ bot: any, stop: () => void }> {
+  const { rig } = setup.createCacheWorld('1.21.11', 64, new Vec3(-4.5, 64, 0.5))
+  const bot = rig.bot
+  const inCave = (x: number, y: number, z: number): boolean => x >= 3 && x <= 9 && y >= 64 && y <= 67 && z >= -3 && z <= 3
+  for (let x = -6; x <= 20; x++) {
+    for (let y = 64; y <= 75; y++) {
+      for (let z = -8; z <= 8; z++) {
+        const tunnel = z === 0 && x >= -5 && x <= 0 && y <= 65
+        const pocket = z === 0 && x === 14 && y <= 65
+        if (!tunnel && !pocket && !inCave(x, y, z)) bot.world.setBlock(new Vec3(x, y, z), 'stone')
+      }
+    }
+  }
+  bot.loadPlugin(pf.createPlugin({ pathfinderSettings: { partialPathProducer: false, searchTimeoutMs: 15000 } }))
+  bot.pathfinder.setMoveOptions({ ...bot.pathfinder.defaultMoveSettings, canDig: true, canPlace: false, digCost: 0.02 })
+  for (let x = -5; x <= 0; x++) for (const y of [64, 65]) bot.emit('diggingCompleted', { position: new Vec3(x, y, 0) })
+  if (rule) keepOutOfCaves(bot)
+  return { bot, stop: () => rig.stopPassivePhysics() }
+}
+
+test('keepOutOfCaves: a bot not fit for the caves digs its way round a cave in the way, one with the rule off walks through it', { timeout: 60000 }, async () => {
+  const cave = (m: any): boolean => m.x >= 3 && m.x <= 9 && m.y >= 64 && m.y <= 67 && m.z >= -3 && m.z <= 3
+  for (const rule of [false, true]) {
+    const { bot, stop } = await caveRig(rule)
+    try {
+      assert.equal(caveReady(bot), false)
+      let final: any
+      for await (const res of bot.pathfinder.getPathTo(new pf.goals.GoalBlock(14, 64, 0))) final = res
+      assert.equal(final?.result?.status, 'success')
+      const through = final.result.path.filter(cave)
+      if (rule) assert.deepEqual(through.map((m: any) => `${m.x},${m.y},${m.z}`), [], 'the way through the cave')
+      else assert.ok(through.length > 0, 'the way without the rule is the cave\'s')
+    } finally {
+      stop()
+    }
+  }
+})
+
+test('caveStepCost and caveBreakCost: a cave\'s cell, and a block against one, cost more under the rule; nothing in the rock or when cave-ready', () => {
+  const bot = fakeBot({ position: new Vec3(0.5, 20, 0.5) })
+  bot.game.dimension = 'overworld'
+  bot.blockAt = (p: Vec3) => {
+    const open = p.y >= 20 && p.y <= 23 && p.x >= 2 && p.x <= 8 && Math.abs(p.z) <= 3
+    const name = open ? 'air' : p.y > 70 ? 'air' : 'stone'
+    return { name, position: p, boundingBox: name === 'air' ? 'empty' : 'block' }
+  }
+  const step = caveStepCost(bot)
+  const brk = caveBreakCost(bot)
+  assert.equal(step({ position: { x: 4, y: 21, z: 0 } }), CAVE_STEP_COST)
+  assert.equal(step({ position: { x: 0, y: 21, z: 0 } }), 0)
+  assert.equal(brk({ position: { x: 1, y: 21, z: 0 } }), CAVE_BREAK_COST)
+  assert.equal(brk({ position: { x: 0, y: 21, z: 0 } }), 0)
+  // in the nether, or cave-ready: no rule
+  bot.game.dimension = 'the_nether'
+  bot.emit('physicsTick')
+  assert.equal(step({ position: { x: 4, y: 21, z: 0 } }), 0)
 })

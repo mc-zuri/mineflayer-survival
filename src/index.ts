@@ -16,6 +16,7 @@ import { SCAFFOLD_ITEMS } from './executor/steps'
 import { dropsDear, dropsWorthATrip } from './executor/keep'
 import { keepWayDown, wayDown } from './skills/wayDown'
 import { installSculkAvoidance, watchDangers } from './skills/danger'
+import { keepOutOfCaves } from './skills/caves'
 import { installGazeGuard } from './skills/gaze'
 import { capDropsByHealth } from './skills/dropGuard'
 import { guardEdges } from './skills/edgeGuard'
@@ -115,6 +116,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     // the deep dark's sculk seen kept off (its sensors and shriekers: the warden) and looked for every 100 ticks
     installSculkAvoidance(bot)
     watchDangers(bot)
+    // no way through the caves, nor a dig opening into one, for a bot not fit for them (caveReady): its own tunnels
+    keepOutOfCaves(bot)
     // no stare at a calm enderman by accident (EnderMan.isLookingAtMe)
     installGazeGuard(bot)
     // the ticks since the bot last slept (Stats.TIME_SINCE_REST): the night below the surface is slept only when due
