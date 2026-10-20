@@ -4,7 +4,7 @@
 // through, the dragon fought, out by the exit portal). Each skill runs as one foreground task, so the reflexes still
 // preempt it (it starts over after).
 import type { Bot } from 'mineflayer'
-import { BOOKSHELVES, ENCHANTED_ARMOR, EYES_FOR_FRAME, EYES_TARGET, FOOD_GOAL, armorAtLeast, eyesForPortal } from './planner/progression'
+import { BOOKSHELVES, ENCHANTED_ARMOR, EYES_FOR_FRAME, EYES_TARGET, FOOD_GOAL, RAW_TO_COOKED, armorAtLeast, eyesForPortal } from './planner/progression'
 import type { MilestoneHandler } from './runner'
 import { barterForPearls, blockGetter, buildPortal, castPortalAway, preparePortalSite, collectBlazeRods, enterNether, findFortress, huntEndermen, huntable, isAdultPiglin, returnOverworld, wearGold, wearingGold, withNetherSafety } from './nether/skills'
 import { travel } from './skills/travel'
@@ -27,8 +27,11 @@ import { knownFarmableSpawners, nearestXpFarm } from './skills/spawnerFarm'
 import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from './skills/husbandry'
 import { makeWaterHole, plantSugarCane } from './skills/caneFarm'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
-import { herdPen, inPen, leadIntoPen, type PenPlan } from './skills/pen'
-import { BREEDERS_KEPT, HERD } from './skills/herd'
+import { herdPen, inPen, leadIntoPen, leavePen, penBroken, protectPen, type PenPlan } from './skills/pen'
+import { BREEDERS_KEPT, HERD, HERD_MOBS, MEAT_OF, POINTS_PER_KILL, breedingFoodHeld, chooseHerdMob, herdCap, herdCensus, herdChores, herdFromMemory, herdPenOf, herdSurplus, holdsBreedingFood, noteHerd, rememberHerd, slaughterPick } from './skills/herd'
+import { hunt } from './skills/hunt'
+import { isAlive } from './skills/combatUtil'
+import { foodInfo } from './core/items'
 import { TRIP_KIT, kitSpares, stashTripKit } from './skills/tripKit'
 import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
@@ -108,20 +111,13 @@ export function herdChore (state: { leather: number, want: number, adults: numbe
 }
 
 /**
- * Leather from the bot's own herd until `want` are held or HERD_BUDGET_TICKS are gone: every pair bred as its cooldown
- * ends, the calves waited for by the herd, the wheat farm harvested for their food (not baked), and the
- * surplus adults killed once they cover what's wanted (two kept to breed on)
+ * The herd's pen by `at`: the one remembered there, else the biggest the ground near takes (PEN_SIZES; a hillside home
+ * had no ground for 9 across, 26.3 seed 2), its fences and gate got out of the pen's task (an obtain inside it queued
+ * its 'make room' task behind the pen's own and both waited on each other for 300000 ticks, 26.3), a placement that
+ * failed tried again (PEN_TRIES), and the herd of `mob` led in when its food is held. With `maxCost`, a size whose
+ * fences' plan costs more is passed over for a smaller one. Resolves the pen and the animals in it, null for none.
  */
-export async function leatherFromHerd (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
-  const start = executor.tasks.tick
-  const home = executor.memory.getPois(HERD, { dimension: 'overworld', near: bot.entity.position })[0]
-  let at = home != null ? new Vec3(home.x, home.y, home.z) : bot.entity.position.clone()
-  // the herd shut in a pen by home (cows wander: a herd of 8 let out was 5 to 8 by home over 150000 ticks, its calves
-  // gone off), the pen built or the one remembered; the herd left loose and gathered when there's none
-  let pen: PenPlan | null = null
-  // the biggest pen the ground near home takes (a hillside home had no ground for 9 across, 26.3 seed 2)
-  // (the fences and the gate are got here, out of the pen's task: an obtain inside it queued its 'make room' task
-  // behind the pen's own and both waited on each other for 300000 ticks, 26.3)
+export async function penForHerd (bot: Bot, executor: Executor, at: Vec3, mob: string, signal: AbortSignal, log: (line: string) => void, maxCost?: number): Promise<{ pen: PenPlan, inside: number } | null> {
   sizes: for (const size of PEN_SIZES) {
     let obtained = false
     for (let round = 0; round < PEN_TRIES; round++) {
@@ -131,18 +127,24 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
           home: at,
           memory: executor.memory,
           obtain: async (reqs) => { needs = reqs; throw new TaskError('MISSING_ITEMS', `the pen takes ${reqs.map(q => `${q.count} ${q.item}`).join(', ')}`) },
-          mob: 'cow',
+          mob,
           size
         }, s), signal)
-        pen = r.pen
-        at = pen.center.clone()
-        log(`herd: the pen at ${pen.center.toString()} (${pen.size} across)${r.built ? ' built' : ''}, ${r.inside} cows in`)
-        break sizes
+        log(`herd: the pen at ${r.pen.center.toString()} (${r.pen.size} across)${r.built ? ' built' : ''}, ${r.inside} ${mob}s in`)
+        return { pen: r.pen, inside: r.inside }
       } catch (err) {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
         if (needs != null && !obtained) {
           obtained = true
           const want: Array<{ item: string, count: number }> = needs
+          // (a pen dearer than the herd is worth now: a smaller one)
+          if (maxCost != null) {
+            const plan = executor.plan(want)
+            if (!plan.ok || plan.cost > maxCost) {
+              log(`herd: a pen of ${size} would cost ${plan.ok ? `${plan.cost} ticks` : 'no plan'}: a smaller one`)
+              continue sizes
+            }
+          }
           await executor.obtain(want, signal).catch(e => { if (signal.aborted || TaskError.is(e, 'DIED')) throw e; log(`herd: no fences: ${(e as Error).message}`) })
           continue
         }
@@ -154,6 +156,26 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
         break
       }
     }
+  }
+  return null
+}
+
+/**
+ * Leather from the bot's own herd until `want` are held or HERD_BUDGET_TICKS are gone: every pair bred as its cooldown
+ * ends, the calves waited for by the herd, the wheat farm harvested for their food (not baked), and the
+ * surplus adults killed once they cover what's wanted (two kept to breed on)
+ */
+export async function leatherFromHerd (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const start = executor.tasks.tick
+  const home = executor.memory.getPois(HERD, { dimension: 'overworld', near: bot.entity.position })[0]
+  let at = home != null ? new Vec3(home.x, home.y, home.z) : bot.entity.position.clone()
+  // the herd shut in a pen by home (cows wander: a herd of 8 let out was 5 to 8 by home over 150000 ticks, its calves
+  // gone off), the pen built or the one remembered; the herd left loose and gathered when there's none
+  let pen: PenPlan | null = null
+  const penned = await penForHerd(bot, executor, at, 'cow', signal, log)
+  if (penned != null) {
+    pen = penned.pen
+    at = pen.center.clone()
   }
   // the herd: the cows in the pen and those about it still to be led in (counting the pen's alone, a pen built 20
   // blocks off home counted 0 cows of 8, and the herd was given up on with its wheat gone, 26.3)
@@ -1725,7 +1747,8 @@ export const FARM_RANGE = 96
 
 /**
  * The renewable food first: a farm the bot sowed that has grown (Executor.farmCost: nothing left to wait), within
- * FARM_RANGE, harvested and sown again, and its wheat baked into bread. Resolves the bread made.
+ * FARM_RANGE, harvested and sown again, and its wheat baked into bread, the herd's kept (herdWheatKept). Resolves the
+ * bread made.
  */
 export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, bake = true): Promise<number> {
   const dimension = normalizeDimension(bot.game?.dimension)
@@ -1738,7 +1761,8 @@ export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: A
     log(`the ${farm.crop} at ${farm.water.toString()} has grown: harvesting it`)
     await executor.runStep({ kind: 'farm', item, count: farm.cells.length, crop: farm.crop, seed: SEED_OF[farm.crop], plots: 0, cycles: 1, cost }, signal)
   }
-  const wheat = countItems(bot, 'wheat')
+  // (the herd's wheat kept: a calf bred is a cow's 16 points later, 2 wheat baked two thirds of a bread's 5)
+  const wheat = countItems(bot, 'wheat') - herdWheatKept(executor.memory)
   if (bake && wheat >= 3) {
     const before = countItems(bot, 'bread')
     await executor.obtain([{ item: 'bread', count: before + Math.floor(wheat / 3) }], signal)
@@ -1747,7 +1771,188 @@ export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: A
   return bread
 }
 
-/** food: a grown farm harvested and the farm started (the renewable food), then the points from the cheapest source */
+/** ticks the herd's start may take (its pen built, the animals led in), at most */
+export const HERD_START_TICKS = 8000
+/** ticks the pen's fences and gate may cost to get (the plan's estimate) for the herd's start: a smaller pen past it */
+export const HERD_PEN_TICKS = 1500
+/** how far from home the animals a herd is started with are looked for (leadIntoPen's reach) */
+export const HERD_LOOK_RANGE = 48
+/** how far from home the bot may be for the herd's start: it's no trip */
+export const HERD_HOME_RANGE = 48
+/** ticks before a herd's start that found nothing to start with is tried again */
+export const HERD_RETRY_TICKS = 6000
+/** how far off the herd is gone back to for its chores */
+export const HERD_TRIP = 96
+/** the wheat kept from the baking for the herd: leading it in and two pairs bred */
+export const HERD_WHEAT_KEPT = 6
+
+/** the tick a herd's start was last tried at, by bot */
+const herdTriedAt = new WeakMap<Bot, number>()
+
+/** where the herd is started near: the base, else the farm (its wheat), else where the bot is */
+export function herdHome (bot: Bot, memory: WorldMemory): Vec3 {
+  if (memory.base != null && memory.base.dimension === 'overworld') return new Vec3(memory.base.x, memory.base.y, memory.base.z)
+  const farm = knownFarms(memory, 'overworld')[0]
+  return farm != null ? farm.water.clone() : bot.entity.position.floored()
+}
+
+/** the adults of the kinds a herd is started with about `at`, by kind */
+export function adultsNear (bot: Bot, at: Vec3, range: number): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const e of Object.values(bot.entities)) {
+    if (e === bot.entity || e.name == null || !(HERD_MOBS as readonly string[]).includes(e.name) || !isAdult(bot, e)) continue
+    if (e.position.distanceTo(at) > range) continue
+    out[e.name] = (out[e.name] ?? 0) + 1
+  }
+  return out
+}
+
+/**
+ * The herd step: a renewable food beside the farm. With no herd yet, two adults of a kind near home (cows, else sheep,
+ * else pigs: chooseHerdMob) and their food held, a small pen built near home (penForHerd, the biggest of PEN_SIZES
+ * whose fences cost HERD_PEN_TICKS or less) and the animals led in, within HERD_START_TICKS; the herd remembered at its
+ * pen (rememberHerd). Cheap or not at all: with nothing to start with it's tried again after HERD_RETRY_TICKS.
+ * Resolves whether a herd was started.
+ */
+export async function startHerd (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
+  if (normalizeDimension(bot.game?.dimension) !== 'overworld' || bot.entity == null) return false
+  const memory = executor.memory
+  if (herdFromMemory(memory) != null) return false
+  const now = executor.tasks?.tick ?? 0
+  const last = herdTriedAt.get(bot)
+  if (last != null && now - last < HERD_RETRY_TICKS) return false
+  const home = herdHome(bot, memory)
+  if (Math.hypot(bot.entity.position.x - home.x, bot.entity.position.z - home.z) > HERD_HOME_RANGE) return false
+  herdTriedAt.set(bot, now)
+  const near = adultsNear(bot, home, HERD_LOOK_RANGE)
+  const mob = chooseHerdMob(near, m => holdsBreedingFood(bot, m))
+  if (mob == null) {
+    log(`herd: none to start yet (${HERD_MOBS.map(m => `${near[m] ?? 0} ${m}s`).join(', ')} near home, ${countItems(bot, 'wheat')} wheat)`)
+    return false
+  }
+  log(`herd: a pen near home for the ${near[mob]} ${mob}s about`)
+  let penned: { pen: PenPlan, inside: number } | null
+  try {
+    penned = await withTickBudget(bot, HERD_START_TICKS, signal, async (s) => await penForHerd(bot, executor, home, mob, s, log, HERD_PEN_TICKS))
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`herd: not started: ${(err as Error).message}`)
+    return false
+  }
+  if (penned == null) { log('herd: no pen near home: not started'); return false }
+  const herd = { pos: penned.pen.center.clone(), mob, adults: 0, calves: 0, bred: null }
+  rememberHerd(memory, herd)
+  const census = noteHerd(bot, memory, herd)
+  log(`herd: ${census?.adults.length ?? penned.inside} ${mob}s and ${census?.calves.length ?? 0} calves penned at ${penned.pen.center.toString()}`)
+  return true
+}
+
+/** the breeding food kept from the baking (harvestGrownFarms): HERD_WHEAT_KEPT for a herd bred with wheat, or for one to start */
+export function herdWheatKept (memory: WorldMemory): number {
+  const herd = herdFromMemory(memory)
+  if (herd == null) return HERD_WHEAT_KEPT
+  return (BREEDING_FOOD[herd.mob] ?? []).includes('wheat') ? HERD_WHEAT_KEPT : 0
+}
+
+/**
+ * The herd's upkeep and its food (the runner's between trips, the restock's and the nether kit's food first): with no
+ * herd, its start (startHerd); with one within HERD_TRIP, back to it, its pen mended if broken and the strays led back
+ * in, the farm's grown wheat harvested for it, the pairs bred as the cooldown allows (herdChores), the surplus adults
+ * slaughtered for the `want` food points or the pen's overflow (never the BREEDERS_KEPT breeders, never a calf:
+ * slaughterPick), the meat cooked in the base's furnace, and the bot out with the gate shut behind it. The leather and
+ * wool come along (the books' and the beds'). Resolves the cooked food points got.
+ */
+export async function tendHerd (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, opts: { want?: number } = {}): Promise<number> {
+  if (normalizeDimension(bot.game?.dimension) !== 'overworld' || bot.entity == null) return 0
+  const memory = executor.memory
+  const fail = (what: string) => (err: unknown): null => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`herd: ${what}: ${(err as Error).message}`)
+    return null
+  }
+  let herd = herdFromMemory(memory, bot.entity.position)
+  if (herd == null) {
+    await startHerd(bot, executor, signal, log)
+    herd = herdFromMemory(memory, bot.entity.position)
+    if (herd == null) return 0
+  }
+  if (Math.hypot(bot.entity.position.x - herd.pos.x, bot.entity.position.z - herd.pos.z) > HERD_TRIP) return 0
+  const mob = herd.mob
+  const at = herd.pos
+  let pen = herdPenOf(memory, herd)
+  if (Math.hypot(bot.entity.position.x - at.x, bot.entity.position.z - at.z) > 12 || Math.abs(bot.entity.position.y - at.y) > 4) {
+    await executor.task('back to the herd', async (s) => await overland(bot, { target: at, range: 4 }, s), signal).catch(fail('no way back'))
+  }
+  if (pen != null) {
+    protectPen(bot, pen)
+    // a ring broken since (a creeper, the pathfinder before protectPen): mended, the strays led in again
+    if (penBroken(p => bot.blockAt(p), pen)) pen = (await penForHerd(bot, executor, at, mob, signal, log))?.pen ?? pen
+  }
+  // the farm's grown wheat for the breeding (kept, not baked)
+  if (breedingFoodHeld(bot, mob) < 2) await harvestGrownFarms(bot, executor, signal, log, false).catch(fail('no harvest'))
+  if (pen != null && holdsBreedingFood(bot, mob)) {
+    const shut = pen
+    const strays = Object.values(bot.entities).filter(e => e.name === mob && !inPen(shut, e.position) && e.position.distanceTo(shut.center) <= 24).length
+    if (strays > 0) await executor.task('the herd into its pen', async (s) => await leadIntoPen(bot, shut, { mob, trips: 2, radius: 24 }, s), signal).catch(fail('not led in'))
+  }
+  let census = noteHerd(bot, memory, herd)
+  if (census == null) return 0
+  const age = Number((bot.time as any)?.age ?? 0)
+  const chores = herdChores({
+    adults: census.adults.length,
+    calves: census.calves.length,
+    food: breedingFoodHeld(bot, mob),
+    cap: herdCap(pen?.size ?? PEN_SIZES[0]),
+    sinceBred: herd.bred == null ? null : age - herd.bred,
+    want: opts.want ?? 0,
+    perKill: POINTS_PER_KILL[mob] ?? 9
+  })
+  log(`herd: ${census.adults.length} ${mob}s and ${census.calves.length} calves: ${chores.breed} pairs to breed, ${chores.slaughter} to slaughter (${opts.want ?? 0} food points wanted)`)
+  if (chores.breed > 0) {
+    const bred = await executor.task(`breed the ${mob}s`, async (s) => await breedAnimals(bot, { mob, pairs: chores.breed, radius: 16 }, s), signal).catch(fail('not bred'))
+    if (bred != null && bred.fed >= 2) {
+      herd = { ...herd, bred: age }
+      rememberHerd(memory, herd)
+    }
+  }
+  let killed = 0
+  if (chores.slaughter > 0) {
+    const tended = herd
+    census = herdCensus(bot, tended, pen) ?? census
+    // room for the meat and the leather or wool first
+    if ((bot.inventory.emptySlotCount?.() ?? 9) < 2) await executor.makeRoom?.({}, signal)?.catch(fail('no room'))
+    for (const id of slaughterPick(census.adults.map(e => ({ id: e.id, adult: true })), chores.slaughter)) {
+      const animal = bot.entities[id]
+      if (animal == null || !isAlive(bot, animal)) continue
+      // (the breeders counted again before each: never below them)
+      if (herdSurplus(herdCensus(bot, tended, pen)?.adults.length ?? 0) === 0) break
+      const r = await executor.task(`slaughter a ${mob}`, async (s) => await hunt(bot, animal, { signal: s, range: 32 }), signal).catch(fail('no slaughter'))
+      if (r?.killed === true) killed++
+    }
+  }
+  // the meat cooked in the base's furnace (the planner's smelt: the base's furnace when near)
+  let points = 0
+  const raw = MEAT_OF[mob]
+  const cooked = RAW_TO_COOKED[raw]
+  if (killed > 0 && cooked != null && countItems(bot, raw) > 0) {
+    const before = countItems(bot, cooked)
+    await executor.obtain([{ item: cooked, count: before + countItems(bot, raw) }], signal).catch(fail('not cooked'))
+    points = (countItems(bot, cooked) - before) * (foodInfo(bot.registry as any, cooked)?.nutrition ?? 0)
+  }
+  // out of the pen, its gate shut
+  if (pen != null) {
+    const shut = pen
+    await executor.task('shut the herd in', async (s) => await leavePen(bot, shut, s), signal).catch(fail('the gate'))
+  }
+  noteHerd(bot, memory, herd)
+  if (killed > 0) log(`herd: ${killed} ${mob}s slaughtered, ${points} food points cooked`)
+  return points
+}
+
+/**
+ * food: a grown farm harvested and the farm started (the renewable food), the herd started beside it (startHerd), then
+ * the points from the cheapest source
+ */
 export const foodHandler: MilestoneHandler = async ({ bot, milestone, state, executor, signal, log }) => {
   try {
     await harvestGrownFarms(bot, executor, signal, log)
@@ -1756,6 +1961,11 @@ export const foodHandler: MilestoneHandler = async ({ bot, milestone, state, exe
     if (signal.aborted || TaskError.is(err, 'DIED')) throw err
     log(`no farm: ${(err as Error).message}`)
   }
+  // and the herd beside it (cheap or not now: the runner's upkeep starts it once the farm's wheat comes)
+  await startHerd(bot, executor, signal, log).catch(err => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`no herd: ${(err as Error).message}`)
+  })
   await executor.obtain(milestone.goals(state), signal)
 }
 

@@ -28,7 +28,7 @@ import { navigate, navigateNear, pickaxeForTheWay } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
-import { MILESTONE_HANDLERS, harvestGrownFarms } from './milestones'
+import { MILESTONE_HANDLERS, harvestGrownFarms, tendHerd } from './milestones'
 import { EPOCHS, EPOCH_HANDLERS, isEpoch, nextEpoch } from './epochs'
 import { TRIP_KIT, keepUnbroken, takeTripKit } from './skills/tripKit'
 import { armorPoints, shelter, sleepThroughNight, undergroundAtWork } from './skills/shelter'
@@ -306,6 +306,11 @@ export const REFLEX_LOG_TICKS = 200
 /** food points under which a bot past the food milestone gets food again (up to FOOD_POINTS) before going on */
 export const FOOD_RESTOCK = FOOD_POINTS / 2
 
+/** ticks between the herd's upkeeps between trips: the breeding's cooldown (Animal.setAge(6000)) */
+export const HERD_TEND_TICKS = 6000
+/** ticks an upkeep of the herd between trips may take */
+export const HERD_UPKEEP_TICKS = 6000
+
 /** ticks a restock that failed waits before it is tried again (the work goes on meanwhile) */
 export const RESTOCK_RETRY_TICKS = 6000
 
@@ -390,6 +395,8 @@ export class Runner {
   private nightMinedDay = -1
   private inNightWork = false
   private restockRetryAt = 0
+  /** the tick the herd was last tended at between trips (keepHerd) */
+  private herdTendedAt = -Infinity
   private readonly store: SaveStore | null
   /** what play keeps on hand beyond the milestones' needs (planner/stock.ts), null for nothing */
   readonly stock: StockPolicy | null
@@ -750,8 +757,9 @@ export class Runner {
     return result
   }
 
-  /** the valuables into the base's chests when the bot is back near it */
+  /** the valuables into the base's chests when the bot is back near it, the herd tended first (keepHerd) */
   private async afterTrip (signal?: AbortSignal): Promise<void> {
+    await this.keepHerd(signal)
     const base = baseRecord(this.memory)
     if (base == null || base.chests.length === 0) return
     const p = this.bot.entity.position
@@ -764,6 +772,37 @@ export class Runner {
       if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
       this.log(`storing failed: ${(err as Error).message}`)
     }
+  }
+
+  /**
+   * The herd's upkeep between trips (tendHerd: started when there's none, bred, the surplus slaughtered for the food
+   * the stock is short of and cooked, the gate shut), from the food milestone on, by day, every HERD_TEND_TICKS at
+   * most, within HERD_UPKEEP_TICKS; what fails is logged and the game goes on
+   */
+  async keepHerd (signal?: AbortSignal): Promise<void> {
+    const bot = this.bot
+    if (!this.reached.some(r => r.id === 'food') || bot.entity == null || normalizeDimension(bot.game?.dimension) !== 'overworld') return
+    if (dayPhase(bot.time?.timeOfDay ?? 0) !== 'day') return
+    const now = this.bot.survival.tasks.tick
+    if (now - this.herdTendedAt < HERD_TEND_TICKS) return
+    this.herdTendedAt = now
+    // the food short of the stock's high mark (carried and stored), the herd's to give first
+    const food = this.stockLevels()?.find(l => l.mark.id === 'food')
+    const want = food != null ? food.mark.high - food.have : 2 * FOOD_POINTS - ownedInventory(bot).foodPoints()
+    const ctrl = new AbortController()
+    const outer = signal ?? ctrl.signal
+    await this.withBudget(HERD_UPKEEP_TICKS, outer, async (s) => await this.tendHerdFor(want, s)).catch(err => {
+      if (TaskError.is(err, 'DIED') || signal?.aborted === true) throw err
+      this.log(`herd: upkeep: ${(err as Error).message}`)
+    })
+  }
+
+  /** the herd tended for `want` food points (tendHerd), a failure logged */
+  private async tendHerdFor (want: number, signal: AbortSignal): Promise<void> {
+    await tendHerd(this.bot, this.executor, signal, this.log, { want: Math.max(0, want) }).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      this.log(`herd: ${(err as Error).message}`)
+    })
   }
 
   /**

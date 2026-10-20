@@ -188,3 +188,33 @@ test('on a trip (the eyes\' search, the End) the stock tops up only what the tri
   r2.reached.push(...at(['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting']))
   assert.ok(r2.dueTopUps(['surface', 'underground']).some(u => u.mark.id === 'gold'))
 })
+
+test('between trips the herd is tended for the food the stock is short of: from the food milestone on, by day, once a breeding cooldown', async () => {
+  const { HERD_TEND_TICKS } = await import('../../src/runner')
+  const milestones = require('../../src/milestones')
+  const bot = fakeBot({ bread: 4 })
+  const runner = new Runner(bot, { log: () => {} })
+  const real = milestones.tendHerd
+  const wants: number[] = []
+  milestones.tendHerd = async (_b: any, _e: any, _s: any, _l: any, opts: any) => { wants.push(opts.want); return 0 }
+  try {
+    // not before the food milestone
+    await runner.keepHerd()
+    assert.deepEqual(wants, [])
+    runner.reached.push(...at(['wood', 'stone', 'food']))
+    await runner.keepHerd()
+    // the food's high mark, 80, less the 20 points of bread carried
+    assert.deepEqual(wants, [60])
+    // not again within the cooldown, nor at night
+    await runner.keepHerd()
+    bot.survival.tasks.tick += HERD_TEND_TICKS
+    bot.time.timeOfDay = 18000
+    await runner.keepHerd()
+    assert.deepEqual(wants, [60])
+    bot.time.timeOfDay = 1000
+    await runner.keepHerd()
+    assert.deepEqual(wants, [60, 60])
+  } finally {
+    milestones.tendHerd = real
+  }
+})
