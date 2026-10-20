@@ -73,13 +73,13 @@ test('hostiles reflex: fight the nearest, flee when hurt or outnumbered', () => 
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(3, 70)] }), null)
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(5)], health: 6 }), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(3), zombie(4), zombie(5), zombie(6)] }), 'flee')
-  assert.strictEqual(check(hostilesReflex, { entities: [zombie(3), zombie(4), zombie(5), zombie(6)] }, { hostiles: { maxFight: 5 } }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [zombie(3), zombie(4), zombie(5), zombie(6)], items: [item('stone_sword')] }, { hostiles: { maxFight: 5 } }), 'fight zombie')
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(5)], health: 10 }, { hostiles: { fleeHealth: 10 } }), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(5)] }, { hostiles: { fleeUnarmed: true } }), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: [zombie(5)], items: [item('iron_sword')] }, { hostiles: { fleeUnarmed: true } }), 'fight zombie')
   // neutral mobs and bosses aren't fought; passive ones aren't hostile
   assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'enderman', position: at(3) }), entity({ name: 'cow', position: at(2) })] }), null)
-  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(7) })] }), 'fight skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(7) })], items: [item('stone_sword')] }), 'fight skeleton')
 })
 
 test('hostiles reflex: creepers are shot from a distance, fought only with a shield, else fled', () => {
@@ -87,7 +87,7 @@ test('hostiles reflex: creepers are shot from a distance, fought only with a shi
   assert.strictEqual(check(hostilesReflex, { entities: [creeper(6)] }), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: [creeper(6)], items: [item('bow'), item('arrow', 16)] }), 'shoot creeper')
   assert.strictEqual(check(hostilesReflex, { entities: [creeper(4)], items: [item('bow'), item('arrow', 16)] }), 'flee')
-  assert.strictEqual(check(hostilesReflex, { entities: [creeper(4), entity({ name: 'zombie', position: at(5) })] }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [creeper(4), entity({ name: 'zombie', position: at(5) })], items: [item('stone_sword')] }), 'fight zombie')
   assert.strictEqual(check(hostilesReflex, { entities: [creeper(4)], offhand: item('shield') }), 'fight creeper')
 })
 
@@ -176,8 +176,8 @@ test('night reflex: at night a bed means sleep, poor gear a shelter, good gear n
 })
 
 test('hostiles reflex: a skeleton shooting from 12 blocks is taken on (the ones that shoot count to rangedRange, 16), a zombie there isn\'t', () => {
-  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(12) })] }), 'fight skeleton')
-  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'pillager', position: at(14) })] }), 'fight pillager')
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(12) })], items: [item('stone_sword')] }), 'fight skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'pillager', position: at(14) })], items: [item('stone_sword')] }), 'fight pillager')
   assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'zombie', position: at(12) })] }), null)
   assert.strictEqual(check(hostilesReflex, { entities: [entity({ name: 'skeleton', position: at(15) })] }, { hostiles: { rangedRange: 8 } }), null)
   const wall = (pos: Vec3): string => pos.y < 64 ? 'stone' : pos.x === 4 && pos.y <= 66 ? 'stone' : 'air'
@@ -430,4 +430,19 @@ test('night reflex: no shelter by night nor leave-shelter by day while a shelter
   // the task done (cut off, say) with the bot still down its column: the reflex gets it out
   assert.strictEqual(nightReflex.check(engine.context())?.detail, 'leave shelter')
   engine.stop()
+})
+
+test('hostiles reflex: with fists only, the ones that shoot and more than one are fled, a lone zombie fought (26.3 full-26.3-m: a pillager patrol, a skeleton and a spider, fought bare)', () => {
+  const mob = (name: string, x: number): any => entity({ name, position: at(x) })
+  for (const name of ['pillager', 'skeleton', 'stray', 'witch']) {
+    assert.strictEqual(check(hostilesReflex, { entities: [mob(name, 6)] }), 'flee', name)
+    assert.strictEqual(check(hostilesReflex, { entities: [mob(name, 6)], items: [item('iron_sword')] }), `fight ${name}`, name)
+  }
+  assert.strictEqual(check(hostilesReflex, { entities: [mob('spider', 3), mob('skeleton', 6)] }), 'flee')
+  assert.strictEqual(check(hostilesReflex, { entities: [mob('zombie', 3), mob('zombie', 5)] }), 'flee')
+  assert.strictEqual(check(hostilesReflex, { entities: [mob('zombie', 3), mob('zombie', 5)], items: [item('wooden_sword')] }), 'fight zombie')
+  assert.strictEqual(check(hostilesReflex, { entities: [mob('zombie', 3)] }), 'fight zombie')
+  // an axe is a weapon; a pickaxe's hits a second are no better than the fist's (3 at 1.2 a second, 1 at 4)
+  assert.strictEqual(check(hostilesReflex, { entities: [mob('skeleton', 6)], items: [item('stone_axe')] }), 'fight skeleton')
+  assert.strictEqual(check(hostilesReflex, { entities: [mob('skeleton', 6)], items: [item('stone_pickaxe')] }), 'flee')
 })

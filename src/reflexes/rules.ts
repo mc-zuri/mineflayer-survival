@@ -248,6 +248,18 @@ export function meleeOptions (target: { name?: string }, config: ReflexConfig): 
   }
 }
 
+/**
+ * Fists only (no weapon carried, bestMeleeWeapon): fled from, not fought, when one of them shoots or there's more than
+ * one (or always, with fleeUnarmed). A fist's 1 a hit takes 20 hits to kill a skeleton or 24 a pillager, under their
+ * arrows and bolts all the while; a lone zombie is still fought. Three 26.3 bots back from a death with nothing fought
+ * a pillager patrol, a skeleton and a spider, and a skeleton by a creeper with their fists, and died each time
+ * (full-26.3-m)
+ */
+export function unarmedOutmatched (bot: Bot, near: Entity[], config: ReflexConfig): boolean {
+  if (bestMeleeWeapon(bot) != null) return false
+  return config.hostiles.fleeUnarmed || near.length > 1 || near.some(e => RANGED_HOSTILES.has(e.name ?? ''))
+}
+
 export const hostilesReflex: Reflex = {
   name: 'hostiles',
   priority: 60,
@@ -260,8 +272,7 @@ export const hostilesReflex: Reflex = {
     const fightOn = near.length === 1 && armed
     // (an armed and armored bot isn't outnumbered by the cubes of a split slime or magma cube: SWARMERS)
     const outnumbered = (armed ? near.filter(e => !SWARMERS.has(e.name ?? '')) : near).length > config.hostiles.maxFight
-    const flee = (bot.health <= config.hostiles.fleeHealth && !fightOn) || outnumbered ||
-      (config.hostiles.fleeUnarmed && bestMeleeWeapon(bot) == null)
+    const flee = (bot.health <= config.hostiles.fleeHealth && !fightOn) || outnumbered || unarmedOutmatched(bot, near, config)
     if (flee) {
       return {
         name: 'hostiles',
