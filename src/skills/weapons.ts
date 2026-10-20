@@ -96,6 +96,43 @@ export function bestMeleeWeapon (bot: Bot, targetName?: string): Item | null {
 }
 
 /**
+ * Mobs calm till hurt whose anger is dear, which a sword's sweep (Player.attack's sweep attack) is never let hit: a
+ * zombified piglin hurt angers the others about it (ZombifiedPiglin.alertOthers), a piglin its group, an iron golem
+ * and the villagers' the same; an enderman teleports onto the bot
+ */
+export const SWEEP_SPARED = new Set(['zombified_piglin', 'piglin', 'enderman', 'iron_golem', 'villager', 'wandering_trader', 'wolf', 'bee', 'llama', 'trader_llama', 'polar_bear', 'panda', 'goat'])
+
+interface SweepEntity { id?: number, name?: string, position: { x: number, y: number, z: number }, width?: number, height?: number }
+
+/**
+ * The spared mobs (SWEEP_SPARED) a swing at `target` now would sweep: Player.attack sweeps with a sword when the swing
+ * is charged (its strength over 0.9), not a crit (in the air) nor a sprint's knockback, on the ground, and hits each
+ * living thing but the target whose box meets the target's inflated 1 across and 0.25 up and down, within 3 of the
+ * player. A 26.3 bot fighting a wither skeleton by seed 2's throne with zombified piglins at its side was killed by them
+ * (full-26.3-fresh-x, t207314)
+ */
+export function sweepSpared (bot: Bot, target: SweepEntity, strength: number): SweepEntity[] {
+  const held = bot.heldItem?.name ?? ''
+  const e = bot.entity as any
+  if (!held.endsWith('_sword') || strength <= 0.9 || e?.onGround !== true || bot.getControlState?.('sprint') === true) return []
+  const tw = (target.width ?? 0.6) / 2
+  const th = target.height ?? 1.8
+  const box = { minX: target.position.x - tw - 1, maxX: target.position.x + tw + 1, minY: target.position.y - 0.25, maxY: target.position.y + th + 0.25, minZ: target.position.z - tw - 1, maxZ: target.position.z + tw + 1 }
+  const me = bot.entity.position
+  const out: SweepEntity[] = []
+  for (const m of Object.values(bot.entities ?? {}) as SweepEntity[]) {
+    // (one of the target's own kind: they're fought already, the group angry; a zombified piglin's anger is all of them)
+    if (m === (bot.entity as any) || m.id === target.id || m.name === target.name || !SWEEP_SPARED.has(m.name ?? '')) continue
+    const w = (m.width ?? 0.6) / 2
+    const h = m.height ?? 1.8
+    const meets = m.position.x + w > box.minX && m.position.x - w < box.maxX && m.position.z + w > box.minZ && m.position.z - w < box.maxZ && m.position.y + h > box.minY && m.position.y < box.maxY
+    const dx = m.position.x - me.x; const dy = m.position.y - me.y; const dz = m.position.z - me.z
+    if (meets && dx * dx + dy * dy + dz * dz < 9) out.push(m)
+  }
+  return out
+}
+
+/**
  * Player.getAttackStrengthScale, counted on the client: the ticks since the last swing or since the main hand took
  * another item (Player.tick's attackStrengthTicker), over the held item's delay. As 26.3 counts it; 1.21.11's server
  * also starts over on any other arm swing (ServerPlayer.swing: a dig or a placement mid-fight), which this leaves out.
@@ -132,6 +169,8 @@ export class AttackStrength {
    */
   attack (target: Parameters<Bot['attack']>[0]): boolean {
     if (!entityInCrosshair(this.bot, target as any)) return false
+    // (nor a sword's sweep onto a mob that is calm till hurt: sweepSpared)
+    if (sweepSpared(this.bot, target as any, this.scale()).length > 0) return false
     this.bot.attack(target)
     this.ticker = 0
     return true

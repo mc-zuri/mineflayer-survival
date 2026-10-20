@@ -1,7 +1,7 @@
 import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
 import type { Vec3 } from 'vec3'
-import { attackStrengthOf, bestMeleeWeapon } from './weapons'
+import { attackStrengthOf, bestMeleeWeapon, sweepSpared } from './weapons'
 import { edgeAhead, steerAway, steerToward } from './steer'
 import { onDripstone } from './hazardCells'
 import { entityUnderCrosshair } from '../core/actions'
@@ -517,7 +517,9 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
         // death and withered (full-26.3-fresh-d)
         // (in our reach only with the swing landing on it or one in front of it: a swing the crosshair refuses keeps
         // the shield up; and only in the mobs' cooldowns, MeleeCycle)
-        const guard = meleeGuard(inMobReach(target, bot.entity.position, MELEE_GUARD_MARGIN), distance <= reach && swingVictim(bot, target) != null, strength.scale(0.5) >= 1, blocking, opening())
+        // (nor with a calm mob beside it the sword's sweep would hit: sweepSpared, the swing refused, the shield kept up)
+        const victimNow = distance <= reach ? swingVictim(bot, target) : null
+        const guard = meleeGuard(inMobReach(target, bot.entity.position, MELEE_GUARD_MARGIN), victimNow != null && sweepSpared(bot, victimNow, 1).length === 0, strength.scale(0.5) >= 1, blocking, opening())
         if (guard === 'block') wantBlock = true
         if (guard === 'lower') {
           lowerShield(bot)

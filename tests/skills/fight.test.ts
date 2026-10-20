@@ -360,3 +360,63 @@ test('fight with yieldToNearer: another melee mob at the bot while the target is
   assert.equal(meleeOptions({ name: 'wither_skeleton' }, DEFAULT_REFLEX_CONFIG, true).yieldToNearer, true)
 })
 
+test('sweepSpared: a sword\'s sweep (on the ground, charged, not sprinting) at a wither skeleton with a zombified piglin beside it would hit the piglin; not from the air, sprinting, with an axe, a piglin farther off, or fighting the piglins themselves (full-26.3-fresh-x)', async () => {
+  const { sweepSpared } = await import('../../src/skills/weapons')
+  const skeleton = entity({ id: 8, name: 'wither_skeleton', position: new Vec3(1.9, 64, 0.5) })
+  const piglin = entity({ id: 9, name: 'zombified_piglin', position: new Vec3(2.2, 64, 1.6) })
+  const bot = fightBot([skeleton, piglin])
+  assert.deepEqual(sweepSpared(bot, skeleton, 1).map(e => e.id), [9])
+  assert.deepEqual(sweepSpared(bot, skeleton, 0.5), [])
+  bot.entity.onGround = false
+  assert.deepEqual(sweepSpared(bot, skeleton, 1), [])
+  bot.entity.onGround = true
+  bot.controls.sprint = true
+  assert.deepEqual(sweepSpared(bot, skeleton, 1), [])
+  bot.controls.sprint = false
+  bot.heldItem = item('iron_axe')
+  assert.deepEqual(sweepSpared(bot, skeleton, 1), [])
+  bot.heldItem = bot.inventory.slots[9]
+  // the piglin 2 off the skeleton's side: out of the sweep's box
+  piglin.position = new Vec3(1.9, 64, 3.2)
+  assert.deepEqual(sweepSpared(bot, skeleton, 1), [])
+  // a zombified piglin fought: the others of its kind are angry already
+  const other = entity({ id: 10, name: 'zombified_piglin', position: new Vec3(2.2, 64, 1.4) })
+  const bot2 = fightBot([piglin, other])
+  piglin.position = new Vec3(1.9, 64, 0.5)
+  assert.deepEqual(sweepSpared(bot2, piglin, 1), [])
+})
+
+test('fight: a wither skeleton with a zombified piglin at its side is never swung at with the sword (its sweep would anger the piglins), the shield kept up; swung at once the piglin is off (full-26.3-fresh-x)', async () => {
+  const { fight } = await import('../../src/skills/fight')
+  const skeleton = entity({ id: 8, name: 'wither_skeleton', position: new Vec3(1.9, 64, 0.5) })
+  const piglin = entity({ id: 9, name: 'zombified_piglin', position: new Vec3(2.2, 64, 1.6) })
+  const bot = fightBot([skeleton, piglin])
+  const swung: number[] = []
+  bot.attack = (e: any) => { swung.push(e.id) }
+  let blocked = 0
+  let ticks = 0
+  bot.on('physicsTick', () => { ticks++; if (bot.usingHeldItem === true) blocked++ })
+  await fight(bot, skeleton as any, { maxTicks: 60 }).catch(() => {})
+  assert.deepEqual(swung, [])
+  assert.ok(blocked >= ticks - 3, `the shield up ${blocked} of ${ticks} ticks`)
+  piglin.position = new Vec3(8, 64, 8)
+  await fight(bot, skeleton as any, { maxTicks: 60 }).catch(() => {})
+  assert.ok(swung.length >= 2 && swung.every(id => id === 8), swung.join(', '))
+})
+
+test('AttackStrength.attack refuses a charged sword swing whose sweep would hit a zombified piglin (nothing sent), and lets it through with none about', async () => {
+  const { AttackStrength } = await import('../../src/skills/weapons')
+  const skeleton = entity({ id: 8, name: 'wither_skeleton', position: new Vec3(1.9, 64, 0.5) })
+  const piglin = entity({ id: 9, name: 'zombified_piglin', position: new Vec3(2.2, 64, 1.6) })
+  const bot = fightBot([skeleton, piglin])
+  const sent: number[] = []
+  bot.attack = (e: any) => { sent.push(e.id) }
+  const s = new AttackStrength(bot)
+  for (let i = 0; i < 20; i++) bot.emit('physicsTick')
+  assert.strictEqual(s.attack(skeleton as any), false)
+  assert.deepEqual(sent, [])
+  delete bot.entities[9]
+  assert.strictEqual(s.attack(skeleton as any), true)
+  assert.deepEqual(sent, [8])
+  s.detach()
+})
