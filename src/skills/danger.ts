@@ -1,11 +1,16 @@
 // danger: the places the bot keeps away from: the deep dark's sculk, seen as it goes (its sensors hear the bot's steps
-// and digs, its shriekers call the warden: the pathfinder's costs for it, the mining targets left there), and where
-// pillagers are in view (an outpost's, a patrol's: the mining targets left there).
+// and digs, its shriekers call the warden: the pathfinder's costs for it, the mining targets left there, the warden
+// fled), and where pillagers are in view (an outpost's, a patrol's: the mining targets left there).
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
+import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { findBlocks } from '../core/findBlocks'
 import { normalizeDimension } from '../core/memory'
-import { isAlive } from './combatUtil'
+import { isAbort } from './errors'
+import { navigate } from './navigate'
+import { steerAway } from './steer'
+import { isAlive, type Entity, TaskError, throwIfAborted, waitTicks } from './combatUtil'
+import { trace } from './util'
 
 /** the deep dark's blocks that hear or call: sensors (SculkSensorBlockEntity's listener, 8 blocks; the calibrated one 16), shriekers, catalysts */
 export const SCULK_LISTENERS = new Set(['sculk_sensor', 'calibrated_sculk_sensor', 'sculk_shrieker'])
@@ -160,4 +165,68 @@ export function installSculkAvoidance (bot: Bot): void {
   if ((settings.exclusionAreasStep as any[]).some(a => a?.survivalSculk === true)) return
   const { step, brk } = sculkMoveAreas(bot)
   pf.setMoveOptions({ ...settings, exclusionAreasStep: [...settings.exclusionAreasStep, step], exclusionAreasBreak: [...(settings.exclusionAreasBreak ?? []), brk] })
+}
+
+/** the warden's sonic boom's reach (SonicBoom: within 15 blocks across and 20 up or down, through walls, shields and armor) */
+export const SONIC_BOOM_XZ = 15
+export const SONIC_BOOM_Y = 20
+/** how far the bot runs from a warden: past its FOLLOW_RANGE 24 and the boom's 15 */
+export const WARDEN_SAFE_DISTANCE = 28
+
+/** out of the warden's boom and its follow: further than WARDEN_SAFE_DISTANCE across, or more than SONIC_BOOM_Y up or down */
+export function clearOfWarden (bot: Bot, warden: Entity): boolean {
+  const p = bot.entity.position
+  const q = warden.position
+  return Math.hypot(p.x - q.x, p.z - q.z) >= WARDEN_SAFE_DISTANCE || Math.abs(p.y - q.y) > SONIC_BOOM_Y
+}
+
+/**
+ * Away from a warden till clear of it (clearOfWarden): the pathfinder's way out of its reach (a goal anywhere
+ * WARDEN_SAFE_DISTANCE from it, its tunnels and stairs gone back up), the open ground's run straight away between.
+ * Never fought: 500 health, a 30 hit and a sonic boom of 10 through shield and armor every 40 ticks it can't reach
+ * (SonicBoom: charged 34 ticks, within 15 across). A 26.3 bot digging a staircase up out of the deep dark was boomed
+ * twice from 16 and 18 blocks off, its diamond pickaxe in hand (full-26.3-s9183-a).
+ */
+export async function escapeWarden (bot: Bot, warden: Entity, opts: { signal?: AbortSignal, maxTicks?: number } = {}): Promise<{ ticks: number }> {
+  const maxTicks = opts.maxTicks ?? 1200
+  const start = (bot as any).lockstep?.ticks as number | undefined
+  let ticks = 0
+  const spent = (): number => start != null ? ((bot as any).lockstep.ticks as number) - start : ticks
+  try {
+    while (spent() < maxTicks) {
+      throwIfAborted(opts.signal)
+      if (!isAlive(bot, warden) || clearOfWarden(bot, warden)) return { ticks: spent() }
+      const at = warden.position.floored()
+      try {
+        // (the pathfinder's own sprint; a few hundred ticks, then the warden's place looked at again)
+        await navigate(bot, { goal: new goals.GoalInvert(new goals.GoalNear(at.x, at.y, at.z, WARDEN_SAFE_DISTANCE)) as any, maxTicks: 200, planTicks: 60 }, opts.signal)
+      } catch (err) {
+        if (isAbort(err)) throw err
+        trace('escapeWarden: no way off:', (err as Error).message)
+        for (let t = 0; t < 20; t++) {
+          if (!steerAway(bot, warden.position)) break
+          bot.setControlState('sprint', true)
+          await waitTicks(bot, 1, opts.signal)
+          ticks++
+        }
+        bot.clearControlStates()
+      }
+      ticks++
+    }
+    throw new TaskError('TIMEOUT', 'the warden is still close')
+  } finally {
+    bot.clearControlStates()
+  }
+}
+
+/** the nearest warden within `range`, alive */
+export function nearestWarden (bot: Bot, range = 40): Entity | null {
+  let best: Entity | null = null
+  let bestD = range
+  for (const e of Object.values(bot.entities)) {
+    if (e.name !== 'warden' || !isAlive(bot, e)) continue
+    const d = e.position.distanceTo(bot.entity.position)
+    if (d <= bestD) { best = e; bestD = d }
+  }
+  return best
 }

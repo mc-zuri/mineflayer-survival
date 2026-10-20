@@ -17,6 +17,7 @@ import { isBed } from '../core/items'
 import { breakFall, landingY, shouldBreakFall } from '../skills/fall'
 import { blockIdsNamed, findBlock } from '../core/findBlocks'
 import { findDoorRefuge, retreatIndoors, type DoorRefuge } from '../skills/indoors'
+import { clearOfWarden, escapeWarden, nearestWarden } from '../skills/danger'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
 /**
@@ -111,6 +112,23 @@ export const ghastReflex: Reflex = {
         until: fightNear
       })
     }
+  }
+}
+
+/**
+ * A warden near: away from it till out of its sonic boom's reach and its follow (escapeWarden), never fought (500
+ * health, a 30 hit, and the boom of 10 through shield and armor from 15 blocks off, Warden's SonicBoom). A 26.3 bot
+ * digging its way up out of the deep dark was boomed twice from 16 and 18 blocks off (full-26.3-s9183-a).
+ */
+export const wardenReflex: Reflex = {
+  name: 'warden',
+  priority: 89,
+  check (ctx) {
+    const { bot, config } = ctx
+    if (!config.warden.enabled) return null
+    const warden = nearestWarden(bot, config.warden.range)
+    if (warden == null || clearOfWarden(bot, warden)) return null
+    return { name: 'warden', priority: config.warden.priority, detail: 'escape warden', run: async (signal) => await escapeWarden(bot, warden, { signal, maxTicks: config.warden.maxTicks }) }
   }
 }
 
@@ -598,4 +616,4 @@ export const nightReflex: Reflex = {
   }
 }
 
-export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, nightReflex, armorReflex]
+export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, wardenReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, eatReflex, nightReflex, armorReflex]

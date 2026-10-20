@@ -1,6 +1,6 @@
 // The deep dark on a SURVIVAL_VERSION (default 1.21.11) superflat world (the tests/harness lockstep server, normal difficulty, no
 // natural spawning): a walk past a patch of sculk with sensors and shriekers (the route keeps out of the sensors' hearing,
-// no shriek: the player's warning level stays 0).
+// no shriek: the player's warning level stays 0), and a warden summoned by a working bot (the bot gets away and lives).
 // DEEP_RUNS=n repeats each (default 3); NIGHT_VERBOSE=1 logs each hit and reflex.
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert'
@@ -10,6 +10,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { createPlugin } from '../../src'
 import { navigate } from '../../src/skills/navigate'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
+import { NightLog, summary, type RunLog } from './nightLog'
 
 const USER = 'deepbot'
 const RUNS = Number(process.env.DEEP_RUNS ?? 3)
@@ -108,5 +109,46 @@ describe(`the deep dark on ${DEFAULT_VERSION} (normal difficulty)`, { timeout: 6
     }
     t.diagnostic(`past sculk: ${RUNS - failed}/${RUNS} kept off`)
     assert.strictEqual(failed, 0, results.join('\n'))
+  })
+
+  test(`a warden summoned by the bot at its walk: the bot gets away, alive (${RUNS} runs)`, async (t) => {
+    const logs: RunLog[] = []
+    const away: boolean[] = []
+    for (let i = 0; i < RUNS; i++) {
+      const home = await freshGround()
+      await run(`summon minecraft:warden ${home.x + 10.5} ${GROUND} 0.5`)
+      const log = new NightLog(bot)
+      bot.survival.reflexes!.enabled = true
+      let stopped = false
+      const handle = bot.survival.tasks.enqueue({ name: 'walk', onPreempt: 'resume' }, async (ctx) => {
+        let leg = (ctx.state as any).leg ?? 0
+        while (!stopped) {
+          const to = leg % 2 === 0 ? home.offset(6, 0, 6) : home.offset(-6, 0, -6)
+          await navigate(bot, { goal: new goals.GoalNearXZ(to.x, to.z, 1) }, ctx.signal).catch(err => { if (ctx.signal.aborted) throw err })
+          ;(ctx.state as any).leg = ++leg
+          await ctx.waitTicks(20)
+        }
+      })
+      handle.result.catch(() => {})
+      let died = false
+      const onDeath = (): void => { died = true }
+      bot.on('death', onDeath)
+      try {
+        await waitFor(() => died, 1200)
+      } finally {
+        bot.off('death', onDeath)
+        stopped = true
+        handle.cancel('run over')
+        bot.survival.reflexes!.enabled = false
+      }
+      if (died) await bot.waitForTicks(5)
+      const warden = bot.nearestEntity(e => e.name === 'warden')
+      away.push(warden == null || warden.position.distanceTo(bot.entity.position) > 15)
+      logs.push(log.finish())
+    }
+    logs.forEach((log, i) => t.diagnostic(`run ${i + 1}: ${away[i] ? 'away, ' : 'NEAR IT, '}${summary(log)}`))
+    const deaths = logs.filter(l => l.deaths.length > 0).length
+    t.diagnostic(`warden: ${RUNS - deaths}/${RUNS} survived`)
+    assert.strictEqual(deaths, 0, logs.map(summary).join('\n'))
   })
 })

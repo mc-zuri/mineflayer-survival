@@ -1,7 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { DangerMap, NEVER, SCULK_COST, dangerAt, dangerMap, inDanger, listenerRadius, pillagersNear, scanDangers, sculkMoveAreas } from '../../src/skills/danger'
+import { DangerMap, NEVER, SCULK_COST, WARDEN_SAFE_DISTANCE, clearOfWarden, dangerAt, dangerMap, inDanger, listenerRadius, pillagersNear, scanDangers, sculkMoveAreas } from '../../src/skills/danger'
+import { wardenReflex } from '../../src/reflexes/rules'
+import { ReflexEngine } from '../../src/reflexes/engine'
 import { entity, fakeBot } from '../reflexes/fakeBot'
 
 /** deepslate under y -10, a sensor at (5, -10, 0) and a shrieker at (8, -10, 0) on the floor */
@@ -61,16 +63,28 @@ test('sculkMoveAreas: never a step on a sensor or a shrieker, nor one broken; a 
   assert.strictEqual(brk({ position: new Vec3(100, -10, 0), name: 'sculk_shrieker' }), NEVER)
 })
 
-test('dangerAt: a mining target in the hearing of the sculk is left', () => {
-  const bot = deepBot()
+test('dangerAt: a mining target in the sculk\'s hearing or by a pillager in view (an outpost\'s hay bales)', () => {
+  const bot = deepBot({ entities: [entity({ name: 'pillager', position: new Vec3(40.5, -9, 0.5) })] })
   scanDangers(bot)
   assert.strictEqual(dangerAt(bot, { x: 6, y: -11, z: 0 }), true)
-  assert.strictEqual(dangerAt(bot, { x: 30, y: -11, z: 0 }), false)
-})
-
-test('dangerAt: a mining target by a pillager in view is left (an outpost: a bot with a stone sword went for its hay bales and was shot, 26.3)', () => {
-  const bot = deepBot({ entities: [entity({ name: 'pillager', position: new Vec3(40.5, -9, 0.5) })] })
   assert.strictEqual(pillagersNear(bot, { x: 60, y: -9, z: 0 }), true)
   assert.strictEqual(dangerAt(bot, { x: 60, y: -9, z: 0 }), true)
   assert.strictEqual(dangerAt(bot, { x: 80, y: -9, z: 0 }), false)
+})
+
+test('the warden reflex: a warden in its boom\'s reach (15 across, 20 up or down) or its follow (24) is run from, till 28 off or 20 up', () => {
+  const check = (pos: Vec3): string | null => {
+    const bot = deepBot({ entities: [entity({ name: 'warden', position: pos })] })
+    const engine = new ReflexEngine(bot, { enabled: false })
+    const task = wardenReflex.check(engine.context())
+    engine.stop()
+    return task?.detail ?? null
+  }
+  assert.strictEqual(check(new Vec3(10.5, -9, 0.5)), 'escape warden')
+  assert.strictEqual(check(new Vec3(25.5, -9, 0.5)), 'escape warden')
+  assert.strictEqual(check(new Vec3(0.5 + WARDEN_SAFE_DISTANCE + 1, -9, 0.5)), null)
+  assert.strictEqual(check(new Vec3(5.5, 13, 0.5)), null)
+  const bot = deepBot()
+  assert.strictEqual(clearOfWarden(bot, entity({ name: 'warden', position: new Vec3(0.5, -30, 0.5) })), true)
+  assert.strictEqual(clearOfWarden(bot, entity({ name: 'warden', position: new Vec3(0.5, -20, 0.5) })), false)
 })

@@ -75,6 +75,16 @@ export interface ReflexConfig {
     maxTicks: number
     priority: number
   }
+  /** away from a warden (the warden reflex) */
+  warden: {
+    enabled: boolean
+    /** a warden within this distance is run from (default 40) */
+    range: number
+    /** ticks the run takes at most (default 1200) */
+    maxTicks: number
+    /** under the lava and fire (90), over the ghast (88) and the creeper (default 89) */
+    priority: number
+  }
   hazard: {
     enabled: boolean
     /** how far to look for safe ground out of lava or fire (default 6) */
@@ -178,6 +188,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
     priority: 60
   },
   creeper: { enabled: true, triggerDistance: 3, safeDistance: 7.5, blockAtSwell: 24, blockDistance: 5, maxTicks: 200, priority: 80 },
+  warden: { enabled: true, range: 40, maxTicks: 1200, priority: 89 },
   hazard: { enabled: true, searchRadius: 6, waterRadius: 6, maxTicks: 200, priority: 90 },
   drowning: { enabled: true, air: 6, recoverTo: 18, searchRadius: 8, maxTicks: 300, priority: 85 },
   // above fighting (60): a few clicks, and a fight in bare skin took every hit at full (a zombie's 3, not 1.2 through iron)
