@@ -1016,6 +1016,9 @@ export function netherGearNeeds (inv: Inventory, gate: NetherGate = { food: NETH
   // a shield for the blazes' fireballs (the raw iron smelted for it), and a bow's arrows: a 26.3 bot with neither shield
   // nor arrows left got no rods at the spawner, and starved (blaze2)
   if (inv.count('shield') === 0) out.push({ item: 'shield', count: 1 })
+  // a flint and steel (or a fire charge) for a portal a ghast's fireball puts out on either side: the bot came back to
+  // its arrival portal out and had no way home (full-1.21.11-fresh-l)
+  if (inv.count('flint_and_steel') === 0 && inv.count('fire_charge') === 0) out.push({ item: 'flint_and_steel', count: 1 })
   // a bow and NETHER_ARROWS, a bow carried or not: with a sword alone the blazes of a throne walled in (seed 2's at
   // (-277, 77, -159), the whole game's from its portal) were fought among them, in their spawn volume, and 26.3 bots
   // with a stone sword (the gate's least, nether-26.3-q3's bag) died there 6 runs of 6 for 0 to 1 rods, one in iron with
