@@ -71,29 +71,6 @@ export function waterHoleSite (lookup: CaneLookup, center: Vec3, radius = 12): V
   return best?.p ?? null
 }
 
-/**
- * A water hole dug where cane ground is about (waterHoleSite) and filled from a water bucket held: dug, then the water
- * poured from beside it looking down at its floor (a bucket is used on what the look hits, BucketItem.use, the
- * player's ray: from 3 blocks off it hit the hole's rim and the water went on top of the ground beside it, 26.3).
- * Resolves the hole, null with no site or no bucket.
- */
-export async function makeWaterHole (bot: Bot, center: Vec3, signal?: AbortSignal): Promise<Vec3 | null> {
-  const lookup: CaneLookup = p => bot.blockAt(p) as any
-  const hole = waterHoleSite(lookup, center)
-  if (hole == null || countItems(bot, 'water_bucket') === 0) return null
-  trace('makeWaterHole: at', hole.toString())
-  await collectBlock(bot, { positions: [hole], pickup: false }, signal)
-  const bucket = findInventoryItem(bot, 'water_bucket')
-  if (bucket == null) return null
-  await navigateNear(bot, hole, 1, signal).catch(err => { if (isAbort(err)) throw err })
-  await bot.equip(bucket, 'hand')
-  await bot.lookAt(hole.offset(0.5, 0.02, 0.5), true)
-  bot.activateItem()
-  await waitUntil(bot, () => bot.blockAt(hole)?.name === 'water', 20, signal)
-  if (bot.blockAt(hole)?.name !== 'water') throw new SkillError('VERIFY_FAILED', `no water in the hole at ${hole.toString()}`)
-  return hole
-}
-
 /** how far about the bot the loaded chunks' canes are noted (rememberCanes): a river's in sight from its bank */
 export const CANE_SIGHT_RADIUS = 96
 
@@ -126,41 +103,253 @@ export function rememberCanes (bot: Bot, memory: WorldMemory, radius = CANE_SIGH
   return cuts.size
 }
 
+/**
+ * A water channel's cells in a row (the source poured in the middle: FlowingFluid spreads 7 blocks on the flat, so 4
+ * each way stays water), and the banks either side the canes stand on: 2 a cell
+ */
+export const CANE_CHANNEL_LENGTH = 9
+/** the spots a cane farm is planted on at most (a channel's two banks) */
+export const CANE_FARM_SPOTS = 2 * CANE_CHANNEL_LENGTH
+/** ticks a cane takes to grow a block (SugarCaneBlock.randomTick: 16 random ticks, a block's every 4096 / 3 ticks) */
+export const CANE_GROW_TICKS = Math.round(16 * 4096 / 3)
+/** a cane farm the memory keeps (a 'cane_farm' point of interest: its note, the spots' ground) */
+export const CANE_FARM_POI = 'cane_farm'
+
+export interface CaneChannelSite {
+  /** the cells dug and filled with water, in a row; the source poured in the middle one */
+  cells: Vec3[]
+  /** the ground beside the cells the canes are planted on */
+  banks: Vec3[]
+}
+
+const LIQUIDS = new Set(['water', 'lava', 'bubble_column'])
+
+/**
+ * A row of CANE_CHANNEL_LENGTH (or `length`) cells for a water channel within `radius` of `center` (2 up, 6 down): each
+ * cell cane ground with room over it and a solid block under it (the water held), the cells beyond its ends solid too
+ * (the water kept in), and cane ground with room over it on both sides (its banks); none of it `avoid`'s (the base's
+ * walls) nor under the bot's feet. The nearest to `center`, or null.
+ */
+export function caneChannelSite (lookup: CaneLookup, center: Vec3, args: { length?: number, radius?: number, avoid?: (pos: Vec3) => boolean } = {}): CaneChannelSite | null {
+  const length = args.length ?? CANE_CHANNEL_LENGTH
+  const radius = args.radius ?? 16
+  const avoid = args.avoid ?? (() => false)
+  const c = center.floored()
+  const name = (p: Vec3): string => lookup(p)?.name ?? ''
+  const ground = (p: Vec3): boolean => CANE_GROUND.has(name(p)) && AIRS.has(name(p.offset(0, 1, 0))) && !avoid(p)
+  const holds = (p: Vec3): boolean => { const n = name(p); return n !== '' && !AIRS.has(n) && !LIQUIDS.has(n) }
+  const underBot = (p: Vec3): boolean => Math.abs(p.x - c.x) <= 1 && Math.abs(p.z - c.z) <= 1 && Math.abs(p.y - c.y) <= 2
+  let best: { site: CaneChannelSite, d: number } | null = null
+  for (const [dir, side] of [[new Vec3(1, 0, 0), new Vec3(0, 0, 1)], [new Vec3(0, 0, 1), new Vec3(1, 0, 0)]]) {
+    for (let dy = -6; dy <= 2; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        for (let dz = -radius; dz <= radius; dz++) {
+          const start = c.offset(dx, dy, dz)
+          const cells = Array.from({ length }, (_, i) => start.plus(dir.scaled(i)))
+          const d = cells[Math.floor(length / 2)].distanceTo(c)
+          if (best != null && d >= best.d) continue
+          if (!holds(start.minus(dir)) || !holds(start.plus(dir.scaled(length)))) continue
+          if (!cells.every(p => ground(p) && holds(p.offset(0, -1, 0)) && !underBot(p))) continue
+          const banks = cells.flatMap(p => [p.plus(side), p.minus(side)])
+          if (!banks.every(ground)) continue
+          best = { site: { cells, banks }, d }
+        }
+      }
+    }
+  }
+  return best?.site ?? null
+}
+
+/**
+ * Pours the water bucket held into the dug cell `hole` from beside it, looking down at its floor (a bucket is used on
+ * what the look hits, BucketItem.use, the player's ray: from 3 blocks off it hit the hole's rim and the water went on
+ * the ground beside it, 26.3). Resolves whether the cell holds water.
+ */
+async function pourInto (bot: Bot, hole: Vec3, signal?: AbortSignal): Promise<boolean> {
+  const bucket = findInventoryItem(bot, 'water_bucket')
+  if (bucket == null) return false
+  await navigateNear(bot, hole, 1, signal).catch(err => { if (isAbort(err)) throw err })
+  await bot.equip(bucket, 'hand')
+  await bot.lookAt(hole.offset(0.5, 0.02, 0.5), true)
+  bot.activateItem()
+  await waitUntil(bot, () => bot.blockAt(hole)?.name === 'water', 20, signal)
+  return bot.blockAt(hole)?.name === 'water'
+}
+
+/**
+ * A water channel dug at `site` (caneChannelSite) and filled from the water bucket held, poured in its middle cell:
+ * the water flows along the rest (FlowingFluid.spreadToSides, a block every 5 ticks). Resolves the cells that hold water
+ * (VERIFY_FAILED with none).
+ */
+export async function makeCaneChannel (bot: Bot, site: CaneChannelSite, signal?: AbortSignal): Promise<Vec3[]> {
+  if (countItems(bot, 'water_bucket') === 0) throw new SkillError('MISSING_ITEMS', 'no water bucket for the channel')
+  trace('makeCaneChannel: from', site.cells[0].toString(), 'to', site.cells[site.cells.length - 1].toString())
+  await collectBlock(bot, { positions: site.cells, pickup: false }, signal)
+  const source = site.cells[Math.floor(site.cells.length / 2)]
+  if (!await pourInto(bot, source, signal)) throw new SkillError('VERIFY_FAILED', `no water in the channel at ${source.toString()}`)
+  const wet = (): Vec3[] => site.cells.filter(p => bot.blockAt(p)?.name === 'water')
+  await waitUntil(bot, () => wet().length === site.cells.length, 5 * site.cells.length + 20, signal)
+  return wet()
+}
+
+/**
+ * A water hole dug where cane ground is about (waterHoleSite) and filled from a water bucket held (pourInto). Resolves
+ * the hole, null with no site or no bucket.
+ */
+export async function makeWaterHole (bot: Bot, center: Vec3, signal?: AbortSignal): Promise<Vec3 | null> {
+  const lookup: CaneLookup = p => bot.blockAt(p) as any
+  const hole = waterHoleSite(lookup, center)
+  if (hole == null || countItems(bot, 'water_bucket') === 0) return null
+  trace('makeWaterHole: at', hole.toString())
+  await collectBlock(bot, { positions: [hole], pickup: false }, signal)
+  if (findInventoryItem(bot, 'water_bucket') == null) return null
+  if (!await pourInto(bot, hole, signal)) throw new SkillError('VERIFY_FAILED', `no water in the hole at ${hole.toString()}`)
+  return hole
+}
+
+/** a cane farm: the ground its canes are planted on */
+export interface CaneFarm {
+  /** where it is (over its first spot) */
+  at: Vec3
+  spots: Vec3[]
+}
+
+/** the cane farm the memory has, or null (one kept before its spots were: the canes standing about its point) */
+export function knownCaneFarm (memory: WorldMemory, lookup?: CaneLookup): CaneFarm | null {
+  const poi = memory.getPois(CANE_FARM_POI, { dimension: 'overworld' })[0]
+  if (poi == null) return null
+  const at = new Vec3(poi.x, poi.y, poi.z)
+  try {
+    const spots = (JSON.parse(poi.note ?? '') as { spots: Array<[number, number, number]> }).spots.map(([x, y, z]) => new Vec3(x, y, z))
+    return { at, spots }
+  } catch {}
+  return { at, spots: lookup != null ? canesAbout(lookup, at) : [at.offset(0, -1, 0)] }
+}
+
+/** the ground of the canes standing about `center` (8 round, 2 up and down): an old farm's spots */
+function canesAbout (lookup: CaneLookup, center: Vec3): Vec3[] {
+  const out: Vec3[] = []
+  for (let dy = -3; dy <= 1; dy++) {
+    for (let dx = -8; dx <= 8; dx++) {
+      for (let dz = -8; dz <= 8; dz++) {
+        const p = center.offset(dx, dy, dz)
+        if (lookup(p.offset(0, 1, 0))?.name === 'sugar_cane' && CANE_GROUND.has(lookup(p)?.name ?? '')) out.push(p)
+      }
+    }
+  }
+  return out
+}
+
+/** the farm's spots kept in the memory (its point over the first) */
+export function rememberCaneFarm (memory: WorldMemory, spots: readonly Vec3[]): void {
+  if (spots.length === 0) return
+  for (const p of memory.getPois(CANE_FARM_POI, { dimension: 'overworld' })) memory.removePoi(CANE_FARM_POI, p, 'overworld')
+  memory.addPoi(CANE_FARM_POI, spots[0].offset(0, 1, 0), 'overworld', JSON.stringify({ spots: spots.map(p => [p.x, p.y, p.z]) }))
+}
+
+/** the blocks to cut of the farm's canes grown (columnHarvestTarget: the second block up, the bottom one kept) */
+export function grownCanes (lookup: CaneLookup, farm: CaneFarm): Vec3[] {
+  return farm.spots.map(s => columnHarvestTarget(lookup, s.offset(0, 1, 0))).filter((p): p is Vec3 => p != null)
+}
+
+/** the farm's spots with no cane on them, still by water (caneSpot) */
+export function emptyCaneSpots (lookup: CaneLookup, farm: CaneFarm): Vec3[] {
+  return farm.spots.filter(s => lookup(s.offset(0, 1, 0))?.name !== 'sugar_cane' && caneSpot(lookup, s))
+}
+
 export interface CaneFarmResult {
+  /** the cells of water made */
   water: Vec3[]
+  /** the canes planted */
   planted: Vec3[]
 }
 
 /**
- * Plants up to `count` canes (default 8) by water near `center` (default the bot): water holes dug and filled from the
- * water buckets held where the spots by water are too few, then a cane on each spot. Remembered as a 'cane_farm'
- * point. Throws MISSING_ITEMS without canes.
+ * Plants up to `count` canes (default 8) by water near `center` (default the bot): where the spots by water are too few,
+ * a water channel dug and filled from the water bucket held (caneChannelSite: 2 spots a cell), else water holes (4 spots
+ * round each), then a cane on each spot, the nearest first; none in `avoid` (the base's walls). Remembered as the cane
+ * farm (rememberCaneFarm), the spots planted added to those it had. Throws MISSING_ITEMS without canes.
  */
-export async function plantSugarCane (bot: Bot, args: { count?: number, center?: Vec3, memory?: WorldMemory } = {}, signal?: AbortSignal): Promise<CaneFarmResult> {
+export async function plantSugarCane (bot: Bot, args: { count?: number, center?: Vec3, memory?: WorldMemory, avoid?: (pos: Vec3) => boolean } = {}, signal?: AbortSignal): Promise<CaneFarmResult> {
   const count = Math.min(args.count ?? 8, countItems(bot, 'sugar_cane'))
   if (count <= 0) throw new SkillError('MISSING_ITEMS', 'no sugar cane to plant')
   const center = args.center ?? bot.entity.position
   const lookup: CaneLookup = p => bot.blockAt(p) as any
+  const avoid = args.avoid ?? (() => false)
+  const spots = (): Vec3[] => caneSpots(lookup, center).filter(p => !avoid(p))
   const water: Vec3[] = []
-  // water where there's too little: a hole dug in level ground and a bucket poured in it (4 spots round each)
-  while (caneSpots(lookup, center).length < count && countItems(bot, 'water_bucket') > 0) {
+  // water where there's too little: a channel dug and a bucket poured in it, else holes (4 spots round each)
+  if (spots().length < count && countItems(bot, 'water_bucket') > 0) {
+    const site = caneChannelSite(lookup, center, { avoid })
+    if (site != null) {
+      try {
+        water.push(...await makeCaneChannel(bot, site, signal))
+      } catch (err) {
+        if (isAbort(err)) throw err
+        trace('plantSugarCane: the channel failed:', (err as Error).message)
+      }
+    }
+  }
+  while (spots().length < count && countItems(bot, 'water_bucket') > 0) {
     throwIfAborted(signal)
     const hole = await makeWaterHole(bot, center, signal)
     if (hole == null) break
     water.push(hole)
   }
   const planted: Vec3[] = []
-  for (const spot of caneSpots(lookup, center).slice(0, count)) {
+  for (const spot of spots().slice(0, count)) {
     throwIfAborted(signal)
-    try {
-      const res = await placeBlock(bot, { pos: spot.offset(0, 1, 0), item: 'sugar_cane', against: spot }, signal)
-      if (res.placed || bot.blockAt(spot.offset(0, 1, 0))?.name === 'sugar_cane') planted.push(spot.offset(0, 1, 0))
-    } catch (err) {
-      if (isAbort(err)) throw err
-      trace('plantSugarCane: a cane on', spot.toString(), 'failed:', (err as Error).message)
-    }
+    if (await plantCane(bot, spot, signal)) planted.push(spot)
   }
-  if (planted.length > 0) args.memory?.addPoi('cane_farm', planted[0], 'overworld', `canes=${planted.length}`)
-  trace('plantSugarCane:', planted.length, 'canes,', water.length, 'water holes')
-  return { water, planted }
+  if (planted.length > 0 && args.memory != null) {
+    const old = knownCaneFarm(args.memory)?.spots ?? []
+    rememberCaneFarm(args.memory, [...old, ...planted.filter(p => !old.some(o => o.equals(p)))])
+  }
+  trace('plantSugarCane:', planted.length, 'canes,', water.length, 'water cells')
+  return { water, planted: planted.map(p => p.offset(0, 1, 0)) }
+}
+
+/** a cane put on the ground at `spot`; resolves whether one stands there */
+async function plantCane (bot: Bot, spot: Vec3, signal?: AbortSignal): Promise<boolean> {
+  try {
+    const res = await placeBlock(bot, { pos: spot.offset(0, 1, 0), item: 'sugar_cane', against: spot }, signal)
+    return res.placed || bot.blockAt(spot.offset(0, 1, 0))?.name === 'sugar_cane'
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('plantSugarCane: a cane on', spot.toString(), 'failed:', (err as Error).message)
+    return false
+  }
+}
+
+export interface CaneHarvest {
+  /** canes got */
+  canes: number
+  /** spots planted again */
+  replanted: number
+}
+
+/**
+ * The cane farm tended: its grown canes cut above their bottom blocks (they grow again: SugarCaneBlock.randomTick up to
+ * 3 high), and its empty spots planted again from the canes held beyond `keep`. Resolves the canes got and the spots
+ * planted.
+ */
+export async function tendCaneFarm (bot: Bot, farm: CaneFarm, args: { keep?: number } = {}, signal?: AbortSignal): Promise<CaneHarvest> {
+  const lookup: CaneLookup = p => bot.blockAt(p) as any
+  const before = countItems(bot, 'sugar_cane')
+  const cuts = grownCanes(lookup, farm)
+  if (cuts.length > 0) {
+    await collectBlock(bot, { names: ['sugar_cane'], positions: cuts }, signal).catch(err => {
+      if (isAbort(err)) throw err
+      trace('tendCaneFarm: the harvest:', (err as Error).message)
+    })
+  }
+  const canes = countItems(bot, 'sugar_cane') - before
+  let replanted = 0
+  for (const spot of emptyCaneSpots(lookup, farm)) {
+    throwIfAborted(signal)
+    if (countItems(bot, 'sugar_cane') <= (args.keep ?? 0)) break
+    if (await plantCane(bot, spot, signal)) replanted++
+  }
+  trace('tendCaneFarm:', canes, 'canes got,', replanted, 'spots planted again')
+  return { canes, replanted }
 }
