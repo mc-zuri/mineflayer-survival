@@ -621,3 +621,37 @@ test('the farm\'s bake: a bread eaten while the rest are baked (the goal\'s coun
   bot.inventory.slots[9] = item('wheat', 7)
   await assert.rejects(harvestGrownFarms(bot, executor, new AbortController().signal, () => {}, true, undefined, 0), /no table/)
 })
+
+test('anotherFarm: a farm with no plot ground left about its water (13 of its 14, the 14th podzol) counts as full: a second sown', async () => {
+  const { anotherFarm, FARM_TARGET_PLOTS } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const farmModule = require('../../src/skills/farm')
+  const caneModule = require('../../src/skills/caneFarm')
+  const first = new Vec3(10, 63, 10)
+  const holes: Vec3[] = []
+  const all = plotCells(world([first]), first)
+  const podzol: Record<string, string> = { [`${all[13].x},${all[13].y},${all[13].z}`]: 'podzol' }
+  const lookup = (p: Vec3): any => {
+    if (all.slice(0, 13).some(c => c.equals(p))) return { name: 'farmland' }
+    if (all.slice(0, 13).some(c => c.equals(p.offset(0, -1, 0)))) return { name: 'wheat', getProperties: () => ({ age: 1 }) }
+    return world([first, ...holes], [], podzol)(p)
+  }
+  const memory = new WorldMemory()
+  rememberFarm(memory, { water: first, cells: all.slice(0, FARM_TARGET_PLOTS - 1), crop: 'wheat' }, 0)
+  const bot = fakeBot({ position: new Vec3(12.5, 64, 12.5), items: [item('wooden_hoe', 1), item('wheat_seeds', 20), item('water_bucket', 1)] })
+  bot.blockAt = (p: Vec3) => ({ ...lookup(p.floored()), position: p.floored() })
+  bot.game.dimension = 'overworld'
+  bot.time = { age: 5000 }
+  const executor: any = { memory, plan: () => ({ ok: true, cost: 100 }), obtain: async () => {}, task: async (_n: string, fn: any, s: AbortSignal) => await fn(s) }
+  const real = { plant: farmModule.plantFarm, hole: caneModule.makeWaterHole }
+  caneModule.makeWaterHole = async (_b: any, _c: any, _s: any, at: Vec3) => { holes.push(at); return at }
+  farmModule.plantFarm = async (_b: any, args: any) => ({ water: args.water, cells: plotCells(lookup, args.water, args.plots), crop: 'wheat' })
+  try {
+    assert.ok(await anotherFarm(bot, executor, new AbortController().signal, () => {}) > 0)
+    assert.equal(knownFarms(memory).length, 2)
+  } finally {
+    farmModule.plantFarm = real.plant
+    caneModule.makeWaterHole = real.hole
+  }
+})
+

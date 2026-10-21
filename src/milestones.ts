@@ -2692,7 +2692,10 @@ export async function anotherFarm (bot: Bot, executor: Executor, signal: AbortSi
   if (dimension !== 'overworld') return 0
   const farms = knownFarms(executor.memory, dimension).filter(f => f.crop === 'wheat')
   const near = farms.filter(f => bot.entity.position.distanceTo(f.water) <= FARM_GROW_RANGE)
-  if (near.length === 0 || near.some(f => f.cells.length < FARM_TARGET_PLOTS)) return 0
+  // (full: at FARM_TARGET_PLOTS, or no plot ground left about its water: a farm by podzol stayed at 13 of its 14 and no
+  // second was sown, f5-1.21.11 t174169)
+  const room = (f: typeof near[number]): boolean => f.cells.length < FARM_TARGET_PLOTS && plotCells(pos => bot.blockAt(pos) as any, f.water, 1).length > 0
+  if (near.length === 0 || near.some(room)) return 0
   const total = farms.reduce((n, f) => n + f.cells.length, 0)
   const plots = Math.min(FARM_TARGET_PLOTS, FARM_TOTAL_PLOTS - total, countItems(bot, 'wheat_seeds'))
   if (plots < FARM_MIN_PLOTS) return 0
