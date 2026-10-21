@@ -7,7 +7,7 @@ import { Vec3 } from 'vec3'
 import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { placeBlock } from '../skills/placeBlock'
-import { emptyBucket, fillBucket } from '../skills/bucket'
+import { emptyBucket, fillBucket, isSource } from '../skills/bucket'
 import { aimAtFace } from '../core/actions'
 import { navigateNear } from '../skills/navigate'
 import { countItems, findInventoryItem, trace, waitTicks, waitUntil } from '../skills/util'
@@ -302,10 +302,22 @@ export async function obsidianInPit (bot: Bot, get: ObsidianLookup, lava: readon
   await emptyBucket(bot, { pos: spot, fluid: 'water' }, signal)
   await waitUntil(bot, () => bot.blockAt(pit)?.name === 'obsidian', 40, signal)
   await waitTicks(bot, 5, signal)
-  if (bot.blockAt(spot)?.name === 'water' && findInventoryItem(bot, 'bucket') != null) {
-    await fillBucket(bot, { fluid: 'water', pos: spot }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the water by the pit:', (err as Error).message) })
+  await waterBack(bot, spot, signal)
+  // the lava not set (the water ran off elsewhere): the water poured again straight over it, once
+  if (isLavaSource(get(pit)) && countItems(bot, 'water_bucket') > 0 && AIR.has(get(pit.offset(0, 1, 0))?.name ?? '')) {
+    trace('obsidianFromLava: the pit still lava: the water over it')
+    await emptyBucket(bot, { pos: pit.offset(0, 1, 0), fluid: 'water' }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the water over the pit:', (err as Error).message) })
+    await waitUntil(bot, () => bot.blockAt(pit)?.name === 'obsidian', 40, signal)
+    await waitTicks(bot, 5, signal)
+    await waterBack(bot, pit.offset(0, 1, 0), signal)
   }
-  if (bot.blockAt(pit)?.name !== 'obsidian') return false
+  if (bot.blockAt(pit)?.name !== 'obsidian') {
+    // none set: the lava taken back up (no lava left in a pit by home, the bucket's lava not lost)
+    if (isLavaSource(get(pit)) && findInventoryItem(bot, 'bucket') != null) {
+      await fillBucket(bot, { fluid: 'lava', pos: pit }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the lava back from the pit:', (err as Error).message) })
+    }
+    return false
+  }
   // mined from the floor beside it, again from there when the first dig didn't hold the crosshair (26.3)
   await collectBlock(bot, { positions: [pit], pickup: true }, signal).catch(async err => {
     if (isAbort(err)) throw err
@@ -314,6 +326,19 @@ export async function obsidianInPit (bot: Bot, get: ObsidianLookup, lava: readon
     await collectBlock(bot, { positions: [pit], pickup: true }, signal)
   })
   return countItems(bot, 'obsidian') > before
+}
+
+/**
+ * The water poured for a cast got back: from where it was poured, else the nearest source (refillWater). A 1.21.11
+ * bot's cast at home lost its water bucket (the lava poured, no obsidian, the water not got back) and went on to the
+ * deep pools with none (f3-1.21.11, t203692).
+ */
+async function waterBack (bot: Bot, poured: Vec3, signal?: AbortSignal): Promise<void> {
+  if (countItems(bot, 'water_bucket') > 0 || findInventoryItem(bot, 'bucket') == null) return
+  if (isSource(bot.blockAt(poured) as any, 'water')) {
+    await fillBucket(bot, { fluid: 'water', pos: poured }, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the water by the pit:', (err as Error).message) })
+  }
+  if (countItems(bot, 'water_bucket') === 0) await refillWater(bot, signal)
 }
 
 /** how far a water source is looked for to fill an empty bucket from */

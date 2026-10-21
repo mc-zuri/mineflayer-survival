@@ -71,3 +71,65 @@ test('pitSite: a floor cell walled and floored in stone, open two above, PIT_CLE
   for (let x = -8; x <= 8; x++) for (let z = -8; z <= 8; z++) seaLava.push(new Vec3(x, 63, z))
   assert.equal(pitSite(sea as any, new Vec3(0, 64, 0), seaLava), null)
 })
+
+// a pit cast whose water doesn't set the lava: poured again over it, then the lava taken back up; the water got back
+// either way (f3-1.21.11, t203692: the lava poured at home, no obsidian, the water bucket lost)
+async function pitCast (setsOnSecondPour: boolean): Promise<{ result: boolean, held: string[], cells: Map<string, string>, pours: string[] }> {
+  const { Vec3: V } = await import('vec3')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const obsidianMod = require('../../src/nether/obsidian')
+  const bucket = require('../../src/skills/bucket')
+  const collect = require('../../src/skills/collectBlock')
+  const cells = new Map<string, string>()
+  const key = (p: any): string => `${p.x},${p.y},${p.z}`
+  const name = (p: any): string => cells.get(key(p)) ?? (p.y < 64 ? 'stone' : 'air')
+  const bot = fakeBot({ position: new V(0.5, 64, 0.5), items: [item('lava_bucket', 1), item('water_bucket', 1), item('diamond_pickaxe', 1)] })
+  bot.blockAt = (p: any) => { const n = name(p.floored()); return { name: n, position: p.floored(), boundingBox: n === 'stone' || n === 'obsidian' ? 'block' : 'empty', getProperties: () => ({ level: 0 }) } }
+  const slots = bot.inventory.slots
+  const swap = (from: string, to: string): void => { const i = slots.findIndex((s: any) => s?.name === from); slots[i] = Object.assign(item(to, 1), { slot: i }) }
+  const pours: string[] = []
+  let pit: any = null
+  const real = { empty: bucket.emptyBucket, fill: bucket.fillBucket, collect: collect.collectBlock }
+  bucket.emptyBucket = async (_b: any, args: any) => {
+    const p = args.pos.floored()
+    pours.push(`${args.fluid} ${key(p)}`)
+    swap(`${args.fluid}_bucket`, 'bucket')
+    if (args.fluid === 'lava') { pit = p; cells.set(key(p), 'lava'); return }
+    cells.set(key(p), 'water')
+    // the first pour beside the pit runs off; the second, over it, sets it (when it does)
+    if (p.equals(pit.offset(0, 1, 0)) && setsOnSecondPour) cells.set(key(pit), 'obsidian')
+  }
+  bucket.fillBucket = async (_b: any, args: any) => {
+    const p = (args.pos ?? [...cells.entries()].filter(([, n]) => n === args.fluid).map(([k]) => new V(...k.split(',').map(Number)))[0])
+    if (p == null || name(p) !== args.fluid) throw new Error(`no ${args.fluid}`)
+    cells.set(key(p.floored()), 'air')
+    swap('bucket', `${args.fluid}_bucket`)
+  }
+  collect.collectBlock = async (_b: any, args: any) => {
+    for (const p of args.positions) { const was = name(p); cells.set(key(p), 'air'); if (was === 'obsidian') slots[30] = Object.assign(item('obsidian', 1), { slot: 30 }) }
+  }
+  bot.findBlock = () => null
+  const ticks = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    const result = await obsidianMod.obsidianInPit(bot, obsidianMod.obsidianLookup(bot), [])
+    return { result, held: slots.filter((s: any) => s != null).map((s: any) => s.name).sort(), cells, pours }
+  } finally {
+    clearInterval(ticks)
+    Object.assign(bucket, { emptyBucket: real.empty, fillBucket: real.fill })
+    Object.assign(collect, { collectBlock: real.collect })
+  }
+}
+
+test('obsidianInPit: the water run off, poured again over the lava, the obsidian mined and the water got back', async () => {
+  const { result, held, pours } = await pitCast(true)
+  assert.equal(result, true)
+  assert.equal(pours.length, 3, pours.join(', '))
+  assert.deepEqual(held, ['bucket', 'diamond_pickaxe', 'obsidian', 'water_bucket'])
+})
+
+test('obsidianInPit: the lava never set: taken back up, the water got back, no obsidian', async () => {
+  const { result, held, cells } = await pitCast(false)
+  assert.equal(result, false)
+  assert.deepEqual(held, ['diamond_pickaxe', 'lava_bucket', 'water_bucket'])
+  assert.ok(![...cells.values()].includes('lava'))
+})
