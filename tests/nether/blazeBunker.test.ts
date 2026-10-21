@@ -433,6 +433,30 @@ test('fightFromNook in a bunker: a draw given up (its blaze gone out of sight) i
   }
 })
 
+test('fightFromNook in a bunker: the magma cubes and the skeletons are its own while in it, the reflex\'s while out on an errand (a pit\'s cube on a lighting trip)', async () => {
+  const { fightFromNook } = await import('../../src/nether/blazeFight')
+  const { ReflexEngine } = await import('../../src/reflexes/engine')
+  const { bot, b, restore } = await bunkerBot([])
+  const engine = new ReflexEngine(bot, { reflexes: [] })
+  bot.survival = { reflexes: engine }
+  const ac = new AbortController()
+  const during: string[][] = []
+  try {
+    const done = fightFromNook(bot, b, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 3000, errand: async () => { during.push(engine.leftAloneNames); return false } }, ac.signal).catch(err => err)
+    await ticks(bot, 20)
+    assert.ok(during.length > 0)
+    assert.ok(during.every(h => !h.includes('magma_cube') && !h.includes('wither_skeleton')), JSON.stringify(during[0]))
+    assert.ok(engine.leftAloneNames.includes('magma_cube'))
+    ac.abort()
+    await ticks(bot, 5)
+    await done
+    assert.deepStrictEqual(engine.leftAloneNames, [])
+  } finally {
+    engine.stop()
+    restore()
+  }
+})
+
 test('fireballReaches: a small fireball from a blaze ahead at the bot\'s height meets the bunker\'s sill, one from over it comes in at the slit, one from beside it meets the wall', async () => {
   const { fireballReaches, FIREBALL_SPAWN_HEIGHT } = await import('../../src/nether/blazeFight')
   const { bot, restore } = await bunkerBot([])

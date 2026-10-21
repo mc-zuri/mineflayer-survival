@@ -752,7 +752,19 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   // after them out of the nook, about the basalt delta under the blazes' fire (26.3, seed 2's spawner: 19 times in a
   // fight of 9898 ticks)
   const melee = nook.bunker != null ? BUNKER_MELEE : NOOK_MELEE
-  const leave = (bot as any).survival?.reflexes?.leaveAlone?.(melee) as (() => void) | undefined
+  const engine = (bot as any).survival?.reflexes
+  let leave = engine?.leaveAlone?.(melee) as (() => void) | undefined
+  // (out of it, on a fetch or an errand, they're the reflex's again: the cube in a pit on a 26.3 bunker's lighting
+  // trip by seed 2's open throne at (-290, 77, -209) hit it 14 times on its way, 18.8 health to its death, unfought)
+  const outOfIt = async <T>(work: () => Promise<T>): Promise<T> => {
+    leave?.()
+    leave = undefined
+    try {
+      return await work()
+    } finally {
+      leave = engine?.leaveAlone?.(melee) as (() => void) | undefined
+    }
+  }
   const sword = (): any => bestMeleeWeapon(bot, 'blaze')
   const bow = (): any => bot.inventory.items().find(i => i.name === 'bow') ?? null
   const hasArrows = (): boolean => countItems(bot, ARROWS) > 0
@@ -993,7 +1005,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
 
       if (nook.bunker != null && drawn === 0 && opts.errand != null && seeing.length === 0) {
         unblock()
-        if (await opts.errand()) { blocking = false; continue }
+        const errand = opts.errand
+        if (await outOfIt(errand)) { blocking = false; continue }
       }
       // a bunker's walls looked over each BUNKER_MEND_EVERY ticks with nothing about to shoot, a hole put again (a turn's
       // old slit not walled, a block a fetch's walk broke): a 1.21.11 bunker by seed 2's throne at (-277, 77, -159) took
@@ -1052,8 +1065,10 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         tried.set(drop.id, (tried.get(drop.id) ?? 0) + 1)
         unblock()
         stopDraw()
-        if (nook.bunker != null) await fetchFromBunker(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
-        else await fetchDrops(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
+        await outOfIt(async () => {
+          if (nook.bunker != null) await fetchFromBunker(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
+          else await fetchDrops(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
+        })
         blocking = false
         continue
       }
