@@ -1197,3 +1197,39 @@ test('rekit: with the base\'s door in sight no pickaxe is made for the way in; w
     Object.assign(nav, { pickaxeForTheWay: real.pickaxeForTheWay, navigate: real.navigate })
   }
 })
+
+test('a death spot\'s killers still about: given up killed by more than one with no better gear now, by a drowned in the water, in a cave not cave-ready, or died at twice (ls4-26.3, t386611: slain by four zombies in a cave at y -58, slain again going back; ls3b-1.21.11, t401692: impaled by a drowned in the sea, again going back)', async () => {
+  const { deathSpotSkip, DEATH_SPOT_SAME } = await import('../../src/runner')
+  const { gearScore } = await import('../../src/executor/keep')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const air = (): { name: string } => ({ name: 'air' })
+  const now = { tick: 386700, dimension: 'overworld', position: new Vec3(126, -58, -40), minY: -64, blockAt: air, caveReady: true }
+  // the death's gear: an iron chestplate and an iron sword; back from the base in iron but the boots and with the sword
+  const then = gearScore(['iron_chestplate', 'iron_sword'])
+  const better = gearScore(['iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_sword', 'shield'])
+  assert.ok(better > then && gearScore([]) < then, `${gearScore([])} ${then} ${better}`)
+  const death = { x: 126, y: -58, z: -77, dimension: 'overworld', seen: 386611, underground: true, worth: true, killer: 'zombie', dear: true, way: [{ x: 126, y: -50, z: -60 }], killers: 4, gear: then }
+  assert.match(String(deathSpotSkip(death, { ...now, gear: then }, 6000)), /killed by 4 mobs \(zombie\), no better armed now/)
+  assert.match(String(deathSpotSkip(death, { ...now, gear: gearScore(['iron_sword']) }, 6000)), /no better armed now/)
+  // better armed: gone back to; a lone zombie: gone back to
+  assert.equal(deathSpotSkip(death, { ...now, gear: better }, 6000), null)
+  assert.equal(deathSpotSkip({ ...death, killers: 1 }, { ...now, gear: then }, 6000), null)
+  // in a cave and not fit for the caves: left; a death in its own tunnel (no cave) is gone back to
+  assert.equal(deathSpotSkip({ ...death, cave: true }, { ...now, gear: better, caveReady: false }, 6000), 'in a cave, not cave-ready')
+  assert.equal(deathSpotSkip({ ...death, cave: false }, { ...now, gear: better, caveReady: false }, 6000), null)
+  // a drowned in the water: left, whatever the gear
+  assert.equal(deathSpotSkip({ ...death, underground: false, killer: 'drowned', killers: 1, inWater: true }, { ...now, gear: better }, 6000), 'killed by a drowned in the water')
+  assert.equal(deathSpotSkip({ ...death, underground: false, killer: 'drowned', killers: 1, inWater: false }, { ...now, gear: better }, 6000), null)
+  // died there before: given up
+  const memory = new WorldMemory()
+  memory.setDeath({ x: 126, y: -58, z: -77 }, 'overworld', true, true, 'zombie', { killers: 4 })
+  assert.equal(memory.deathsNear({ x: 126, y: -58, z: -77 }, 'overworld', DEATH_SPOT_SAME), 0)
+  memory.setDeath({ x: 128, y: -54, z: -69 }, 'overworld', true, true, 'zombie', { killers: 3 })
+  const before = memory.deathsNear(memory.death!, 'overworld', DEATH_SPOT_SAME)
+  assert.equal(before, 1)
+  assert.equal(deathSpotSkip({ ...death, before }, { ...now, gear: better }, 6000), 'died there 2 times')
+  // the deaths kept over a save
+  const again = WorldMemory.fromJSON(JSON.parse(JSON.stringify(memory.toJSON())))
+  assert.equal(again.deathsNear(again.death!, 'overworld', DEATH_SPOT_SAME), 1)
+  assert.equal(again.death?.killers, 3)
+})

@@ -50,7 +50,18 @@ export interface Death extends Located {
   dear?: boolean
   /** the way down it walked to the spot from the open sky (skills/wayDown), when it died underground */
   way?: Pos[]
+  /** the hostiles (each one mob) that hurt the bot within a few seconds of the death */
+  killers?: number
+  /** the bot's gear before the death (gearScore: its armor's points, its best weapon's, a shield's) */
+  gear?: number
+  /** died in the water (its feet's or its head's cell) */
+  inWater?: boolean
+  /** died in a cave (its feet's or its head's cell a cave's, or the way down through one: skills/caves CaveCells) */
+  cave?: boolean
 }
+
+/** the deaths kept (deathsNear), the oldest dropped past it */
+export const DEATHS_KEPT = 32
 
 export interface WorldMemoryJSON {
   version: 1
@@ -59,6 +70,8 @@ export interface WorldMemoryJSON {
   base: Located | null
   pois: Poi[]
   death: Death | null
+  /** the deaths before, where and when (deathsNear); none in a save before they were kept */
+  deaths?: Array<Located & { seen: number }>
 }
 
 export interface WorldMemoryOptions {
@@ -114,6 +127,8 @@ export class WorldMemory {
   private pois: Poi[] = []
   base: Located | null = null
   death: Death | null = null
+  /** every death's spot and tick, the last DEATHS_KEPT (setDeath) */
+  deaths: Array<Located & { seen: number }> = []
   private readonly maxPerBlock: number
   private readonly chestListeners = new Set<(chest: Located) => void>()
 
@@ -242,8 +257,28 @@ export class WorldMemory {
     return opts.count != null ? out.slice(0, opts.count) : out
   }
 
-  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean, worth?: boolean, killer?: string, extra: { dear?: boolean, way?: Pos[] | null } = {}): void {
-    this.death = { ...at(pos, dimension), seen: this.now, ...(underground != null ? { underground } : {}), ...(worth != null ? { worth } : {}), ...(killer != null ? { killer } : {}), ...(extra.dear != null ? { dear: extra.dear } : {}), ...(extra.way != null ? { way: extra.way.map(p => ({ x: p.x, y: p.y, z: p.z })) } : {}) }
+  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean, worth?: boolean, killer?: string, extra: { dear?: boolean, way?: Pos[] | null, killers?: number, gear?: number, inWater?: boolean, cave?: boolean } = {}): void {
+    this.death = {
+      ...at(pos, dimension),
+      seen: this.now,
+      ...(underground != null ? { underground } : {}),
+      ...(worth != null ? { worth } : {}),
+      ...(killer != null ? { killer } : {}),
+      ...(extra.dear != null ? { dear: extra.dear } : {}),
+      ...(extra.way != null ? { way: extra.way.map(p => ({ x: p.x, y: p.y, z: p.z })) } : {}),
+      ...(extra.killers != null ? { killers: extra.killers } : {}),
+      ...(extra.gear != null ? { gear: extra.gear } : {}),
+      ...(extra.inWater != null ? { inWater: extra.inWater } : {}),
+      ...(extra.cave != null ? { cave: extra.cave } : {})
+    }
+    this.deaths.push({ ...at(pos, dimension), seen: this.now })
+    if (this.deaths.length > DEATHS_KEPT) this.deaths.splice(0, this.deaths.length - DEATHS_KEPT)
+  }
+
+  /** the deaths before the last one within `radius` of `pos` in the dimension (the last death itself left out) */
+  deathsNear (pos: Pos, dimension: Dimension, radius: number): number {
+    const d = normalizeDimension(dimension)
+    return this.deaths.slice(0, -1).filter(p => p.dimension === d && Math.hypot(p.x - pos.x, p.y - pos.y, p.z - pos.z) <= radius).length
   }
 
   toJSON (): WorldMemoryJSON {
@@ -255,7 +290,8 @@ export class WorldMemory {
       chests: [...this.chests.values()].map(c => ({ ...c, items: { ...c.items } })),
       base: this.base == null ? null : { ...this.base },
       pois: this.pois.map(p => ({ ...p })),
-      death: this.death == null ? null : { ...this.death }
+      death: this.death == null ? null : { ...this.death },
+      deaths: this.deaths.map(p => ({ ...p }))
     }
   }
 
@@ -271,6 +307,7 @@ export class WorldMemory {
     this.pois = loaded.pois
     this.base = loaded.base
     this.death = loaded.death
+    this.deaths = loaded.deaths
   }
 
   static fromJSON (json: WorldMemoryJSON | string, opts: WorldMemoryOptions = {}): WorldMemory {
@@ -291,6 +328,7 @@ export class WorldMemory {
     }
     mem.base = data.base == null ? null : { ...data.base }
     mem.death = data.death == null ? null : { ...data.death }
+    mem.deaths = (data.deaths ?? []).map(p => ({ ...p }))
     mem.now = Math.max(0, ...data.blocks.map(b => b.seen), ...data.chests.map(c => c.seen), ...data.pois.map(p => p.seen), data.death?.seen ?? 0)
     return mem
   }

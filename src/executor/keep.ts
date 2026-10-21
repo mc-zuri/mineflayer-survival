@@ -7,6 +7,8 @@ import { heldFor, unitValue, type ObtainPlan, type ObtainRequest } from '../plan
 import { FOOD_GOAL, toolsAtLeast, type Milestone, type MilestoneId, type ProgressState } from '../planner/progression'
 import type { StockPolicy } from '../planner/stock'
 import { DIGGING_PICKAXE, wantsDiggingPickaxe } from '../skills/digTool'
+import { armorPiece } from '../skills/armor'
+import { meleeStats } from '../skills/weapons'
 
 /** how many of an item to carry; Infinity: all of them (the registry: the version's, for what is food) */
 export type KeepRule = (name: string, registry?: RegistryLike) => number | null
@@ -152,6 +154,29 @@ const DEAR = new Set(['elytra', 'totem_of_undying', 'trident', 'ender_eye', 'end
  */
 export function dropsDear (names: string[]): boolean {
   return names.some(n => /^(diamond|netherite)(_|$)/.test(n) || /^iron_(helmet|chestplate|leggings|boots)$/.test(n) || /_shulker_box$/.test(n) || DEAR.has(n))
+}
+
+/** a shield's worth in gearScore: what it takes off the hits it blocks */
+export const SHIELD_GEAR = 4
+
+/**
+ * How well armed what the bot carries and wears is (`names`, the items' names): its armor's points (the best piece of
+ * each slot), its best melee weapon's damage a second (Player's attack_damage over the swing's delay, a fist's 4 for
+ * none) and SHIELD_GEAR for a shield. A death spot's mobs are gone back to only with more than the death's
+ * (deathSpotSkip).
+ */
+export function gearScore (names: readonly string[]): number {
+  const best: Record<string, number> = {}
+  let weapon = meleeStats(undefined).damage * meleeStats(undefined).speed
+  let shield = 0
+  for (const n of names) {
+    const piece = armorPiece(n)
+    if (piece != null) best[piece.slot] = Math.max(best[piece.slot] ?? 0, piece.defense)
+    const stats = meleeStats(n)
+    weapon = Math.max(weapon, stats.damage * stats.speed)
+    if (n === 'shield') shield = SHIELD_GEAR
+  }
+  return Object.values(best).reduce((a, b) => a + b, 0) + weapon + shield
 }
 
 /** never thrown away (VALUABLE): gear, stations, ores, metal and gems, the rare drops */

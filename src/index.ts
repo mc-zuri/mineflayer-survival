@@ -13,10 +13,10 @@ import { Diagnostics, type DiagnosticsOptions } from './diagnostics'
 import { StockPolicy, type StockOptions } from './planner/stock'
 import { advancementsDone, type AdvancementProgressPacket } from './core/advancements'
 import { SCAFFOLD_ITEMS } from './executor/steps'
-import { dropsDear, dropsWorthATrip } from './executor/keep'
+import { dropsDear, dropsWorthATrip, gearScore } from './executor/keep'
 import { keepWayDown, wayDown } from './skills/wayDown'
 import { installSculkAvoidance, watchDangers } from './skills/danger'
-import { keepOutOfCaves } from './skills/caves'
+import { caveCells, keepOutOfCaves } from './skills/caves'
 import { installGazeGuard } from './skills/gaze'
 import { capDropsByHealth } from './skills/dropGuard'
 import { guardEdges } from './skills/edgeGuard'
@@ -143,8 +143,13 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     })
     // the last mob to hurt the bot, and when: the death's killer (the death spot's trip judged by it)
     let lastAttacker: { name: string, tick: number } | null = null
+    // and each of the mobs that hurt it lately (the death's killers: one zombie or four)
+    const attackers = new Map<number, number>()
     bot.on('entityHurt', (entity: any, source?: any) => {
-      if (entity === bot.entity && source != null && source !== bot.entity && typeof source.name === 'string') lastAttacker = { name: source.name, tick: tasks.tick }
+      if (entity === bot.entity && source != null && source !== bot.entity && typeof source.name === 'string') {
+        lastAttacker = { name: source.name, tick: tasks.tick }
+        if (typeof source.id === 'number' && source.type !== 'player') attackers.set(source.id, tasks.tick)
+      }
     })
     // what the bot carries, worn too (null with no inventory to look at)
     const carried = (): string[] | null => {
@@ -182,10 +187,21 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
         carriedAt = null
         lastCarried = null
         const killer = lastAttacker != null && tasks.tick - lastAttacker.tick <= KILLER_TICKS ? lastAttacker.name : undefined
-        const underground = dimension === 'overworld' ? !openSky(lookup, bot.entity.position.floored()) : undefined
+        const killers = [...attackers.values()].filter(t => tasks.tick - t <= KILLER_TICKS).length
+        attackers.clear()
+        const pos = bot.entity.position
+        const underground = dimension === 'overworld' ? !openSky(lookup, pos.floored()) : undefined
+        const way = underground === true ? wayDown(bot) : null
+        const cells = underground === true ? caveCells(bot) : null
+        const cave = cells == null ? undefined : (cells.isCave(pos) || cells.isCave(pos.offset(0, 1, 0)) || (way ?? []).some(p => cells.isCave(p)))
+        const inWater = typeof pos.offset === 'function' && [pos, pos.offset(0, 1, 0)].some(p => bot.blockAt(p)?.name === 'water')
         memory.setDeath(bot.entity.position, dimension, underground, dropped == null ? undefined : dropsWorthATrip(dropped, bot.registry as any), killer, {
           dear: dropped == null ? undefined : dropsDear(dropped),
-          way: underground === true ? wayDown(bot) : null
+          way,
+          killers: killer != null ? Math.max(1, killers) : undefined,
+          gear: dropped == null ? undefined : gearScore(dropped),
+          inWater: inWater ? true : undefined,
+          cave
         })
         if (dimension === 'the_nether') {
           rememberNetherDeath(memory, bot.entity.position)

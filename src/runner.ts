@@ -22,11 +22,11 @@ import type { Station } from './planner/steps'
 import { buildBase, keepBaseUnbroken, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
 import { baseRecord } from './base/pois'
 import { DEPOT_POI, Executor, describeRequest, ownedInventory, type ExecutorOptions, type PlanOptions } from './executor/executor'
-import { SPARE_FOOD_POINTS, milestoneNeeds, spareKitGoals, stockKeepRule, tripSpareGoals } from './executor/keep'
+import { SPARE_FOOD_POINTS, gearScore, milestoneNeeds, spareKitGoals, stockKeepRule, tripSpareGoals } from './executor/keep'
 import { isAbort } from './skills/errors'
 import { navigate, navigateNear, pickaxeForTheWay } from './skills/navigate'
 import { pickupDrops } from './skills/pickupDrops'
-import { caveRuleOn, sealPocket } from './skills/caves'
+import { caveReady, caveRuleOn, sealPocket } from './skills/caves'
 import { SPAWNER_POI } from './skills/spawnerFarm'
 import { keepWaterBucket, waterBucketEmpty } from './skills/bucket'
 import { retrieveItems } from './skills/chest'
@@ -290,8 +290,39 @@ export async function waitOutTheNight (bot: Bot, signal: AbortSignal): Promise<u
   return await shelter(bot, { signal })
 }
 
-interface DeathSpot { x: number, y: number, z: number, dimension: string, seen: number, underground?: boolean, worth?: boolean, killer?: string, dear?: boolean, way?: Array<{ x: number, y: number, z: number }> }
-interface DeathSpotNow { tick: number, dimension: string, position: Vec3, minY: number, blockAt: (pos: Vec3) => { name: string } | null, bare?: boolean }
+interface DeathSpot {
+  x: number
+  y: number
+  z: number
+  dimension: string
+  seen: number
+  underground?: boolean
+  worth?: boolean
+  killer?: string
+  dear?: boolean
+  way?: Array<{ x: number, y: number, z: number }>
+  killers?: number
+  gear?: number
+  inWater?: boolean
+  cave?: boolean
+  /** the deaths before this one at the spot (WorldMemory.deathsNear, DEATH_SPOT_SAME) */
+  before?: number
+}
+interface DeathSpotNow {
+  tick: number
+  dimension: string
+  position: Vec3
+  minY: number
+  blockAt: (pos: Vec3) => { name: string } | null
+  bare?: boolean
+  /** the bot's gear now (gearScore) */
+  gear?: number
+  /** fit for the caves now (skills/caves caveReady) */
+  caveReady?: boolean
+}
+
+/** how near another death a death spot is the same spot (deathSpotSkip: twice there, given up): the two of ls4-26.3's zombie cave were 9 apart */
+export const DEATH_SPOT_SAME = 12
 
 /** ticks a block of the way to a death spot takes at a walk (some 4.3 blocks a second, the bends and the climbs between) */
 export const DEATH_TRIP_TICKS_PER_BLOCK = 5
@@ -317,6 +348,17 @@ export function deathSpotSkip (death: DeathSpot | null, now: DeathSpotNow, maxTi
   // shot dead, and back bare (no armor, no shield): the archer is likely where it was (a skeleton in a tree's shade by
   // day), and shoots again; a 26.3 bot went back so to its spot by a skeleton and was shot dead again (full-26.3-fresh-d)
   if (death.killer != null && RANGED_HOSTILES.has(death.killer) && now.bare === true) return `shot dead by a ${death.killer}, back bare`
+  // died there before: the spot is given up (a third trip ends as the two did). A 26.3 bot slain by zombies in a cave at
+  // y -58 went back for its dear drops along its way down with less on, and was slain there again (ls4-26.3, t386611)
+  if ((death.before ?? 0) > 0) return `died there ${(death.before ?? 0) + 1} times`
+  // drowned guard it: a drowned stays in the water by day (no sun under it), and the drops in the water are a swim
+  // in its tridents' reach; a 1.21.11 bot went back bare to its spot in the sea and was impaled there again
+  // (ls3b-1.21.11, t401692 and t404182)
+  if (death.killer === 'drowned' && death.inWater === true) return 'killed by a drowned in the water'
+  // in a cave, the cave rule: not gone into by a bot not fit for the caves (the way down through one too)
+  if (death.cave === true && now.caveReady === false) return 'in a cave, not cave-ready'
+  // killed by more than one, and no better armed now than then: they're still about it, and win again
+  if ((death.killers ?? 0) > 1 && death.gear != null && now.gear != null && now.gear <= death.gear) return `killed by ${death.killers ?? 0} mobs (${death.killer ?? 'mob'}), no better armed now (${now.gear} to ${death.gear})`
   // nothing dropped worth the trip (dropsWorthATrip): the mobs that killed the bot are likely still there
   if (death.worth === false) return 'nothing worth the trip'
   // a death in a cave or down a mine is left: the mobs that killed the bot in the dark are still there (and a trip
@@ -1653,14 +1695,16 @@ export class Runner {
     const deadly = death != null && this.deadlySpots.some(p => p.distanceTo(new Vec3(death.x, death.y, death.z)) < DEADLY_SPOT_RADIUS)
     if (deadly) this.log(`not back to the death spot at ${death.x} ${death.y} ${death.z}: died there going back before`)
     if (deadly) diag?.recovery({ deathSpot: 'skipped: died there going back before' })
-    const skip = deadly ? null : deathSpotSkip(death, {
+    const skip = deadly ? null : deathSpotSkip(death == null ? null : { ...death, before: this.memory.deathsNear(death, death.dimension, DEATH_SPOT_SAME) }, {
       // (the memory's clock, the death's stamp's)
       tick: this.memory.now,
       dimension: normalizeDimension(bot.game?.dimension),
       position: bot.entity.position,
       minY: (bot.game as any)?.minY ?? -64,
       blockAt: pos => bot.blockAt(pos),
-      bare: armorPoints(bot) === 0 && bot.inventory.items().every(i => i.name !== 'shield') && bot.inventory.slots[45]?.name !== 'shield'
+      bare: armorPoints(bot) === 0 && bot.inventory.items().every(i => i.name !== 'shield') && bot.inventory.slots[45]?.name !== 'shield',
+      gear: gearScore([...bot.inventory.items(), ...[5, 6, 7, 8, 45].map(i => bot.inventory.slots[i])].filter(i => i != null).map(i => i.name)),
+      caveReady: caveReady(bot)
     }, this.options.deathItemTicks ?? 6000)
     const worth = !deadly && skip == null
     if (death != null && !deadly && skip != null) this.log(`not back to the death spot at ${death.x} ${death.y} ${death.z}: ${skip}`)
