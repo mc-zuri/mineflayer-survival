@@ -4,7 +4,7 @@ import { TaskRunner } from './core/taskRunner'
 import { WorldMemory, normalizeDimension } from './core/memory'
 import { ReflexEngine, type ReflexEngineOptions } from './reflexes'
 import { play, type MilestoneHandler, type PlayOptions, type PlayResult } from './runner'
-import { keepHeadAboveWater, noteDrowning } from './skills/breath'
+import { keepHeadAboveWater, noSneakInWater, noteDrowning } from './skills/breath'
 import { countRest } from './skills/shelter'
 import { keepOffDripstone, keepOffLavaEdges, keepOffMagma, keepOutOfHazardsLeft } from './skills/hazardCells'
 import { openSky } from './executor/explore'
@@ -133,6 +133,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     const stock = options.stock === false || options.stock.enabled === false ? null : new StockPolicy(options.stock)
     bot.survival = { options, tasks, memory, reflexes, handlers: {}, advancements: new Set(), play: async (playOptions) => await play(bot, playOptions), diagnostics, stock }
     bot.on('physicsTick', () => { memory.now = memory.tickBase + tasks.tick })
+    // no sneak held in the water (it swims the bot down), the pathfinder's dives' and every other's, but a dive meant
+    noSneakInWater(bot)
     // where the bot walks the nether, to go that way again (travel by trailRoute)
     keepNetherTrail(bot, memory)
     // the way down a cave or a mine from the open sky (a death there gone back to by it)

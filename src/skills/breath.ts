@@ -128,3 +128,37 @@ export function drownedStepCost (bot: Bot, lookup: NameLookup): (block: { positi
     return DROWNED_STEP_COST
   }
 }
+
+const dives = new WeakMap<Bot, number>()
+
+/** lets the bot hold sneak in the water (a dive meant) till the release is called */
+export function allowDive (bot: Bot): () => void {
+  dives.set(bot, (dives.get(bot) ?? 0) + 1)
+  let done = false
+  return () => {
+    if (done) return
+    done = true
+    dives.set(bot, Math.max(0, (dives.get(bot) ?? 1) - 1))
+  }
+}
+
+/**
+ * No sneak held with the feet or the head in water but for a dive meant (allowDive): sneak in water swims a player
+ * down (LivingEntity.travel's goDownInWater). The pathfinder's ForwardDropDown into water held it till the bot was
+ * under an exit below it, forward and sprint with it, and a 1.21.11 Grim game's bot sank 0.15 a tick to the sea's
+ * floor and drowned (f1-grim, t120244 to t120443); a 1.21.11 game's night mine sank into a pond so, over and over
+ * (f2-1.21.11, t35547). Let go of at each tick's start (physicsTickBegin, the tick's keys settled before its move:
+ * after the walks' awaits that set them between the ticks), and at its end.
+ */
+export function noSneakInWater (bot: Bot): void {
+  if ((bot as any).__survivalNoSneakInWater === true || typeof bot.on !== 'function') return
+  ;(bot as any).__survivalNoSneakInWater = true
+  const letGo = (): void => {
+    if (bot.entity == null || bot.getControlState?.('sneak') !== true || (dives.get(bot) ?? 0) > 0) return
+    const feet = bot.entity.position.floored()
+    const wet = [feet, feet.offset(0, 1, 0)].some(p => WATER.has(bot.blockAt(p)?.name ?? ''))
+    if (wet) bot.setControlState('sneak', false)
+  }
+  bot.on('physicsTickBegin' as any, letGo)
+  bot.on('physicsTick', letGo)
+}
