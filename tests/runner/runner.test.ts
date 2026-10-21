@@ -822,6 +822,52 @@ test('a milestone short of only its food banks more of it each try without a try
   assert.equal(logs.filter(l => /milestone wood not ready \(1\)/.test(l)).length, 1, logs.join(' | '))
 })
 
+test('a milestone waiting for a farm to grow (growing) waits by home its waitTicks each try, no try counted, GROW_WAIT_TRIES times; then its tries count (f3-1.21.11)', async () => {
+  const { SkillError } = await import('../../src/skills/errors')
+  const { GROW_WAIT_TRIES } = await import('../../src/runner')
+  for (const grows of [true, false]) {
+    const bot = fakeBot()
+    let calls = 0
+    const logs: string[] = []
+    const ticksAt: number[] = []
+    const runner = new Runner(bot, {
+      until: 'wood',
+      log: (l: string) => logs.push(l),
+      maxFailures: 1,
+      handlers: {
+        wood: async () => {
+          calls++
+          ticksAt.push(bot.survival.tasks.tick)
+          // the farm's canes in after 3 waits; or never
+          if (!grows || calls <= 3) throw Object.assign(new SkillError('MISSING_ITEMS', 'the table\'s book: 0 canes of 3, the cane farm growing'), { notReady: true, growing: true, waitTicks: 500 })
+          bot.give('wooden_pickaxe', 1)
+          bot.give('crafting_table', 1)
+        }
+      }
+    })
+    const ticking = setInterval(() => { for (let i = 0; i < 200; i++) bot.emit('physicsTick') }, 1)
+    let r: any
+    try {
+      r = await runner.play()
+    } finally {
+      clearInterval(ticking)
+    }
+    const waits = logs.filter(l => /the cane farm growing: waiting by home/.test(l)).length
+    if (grows) {
+      assert.equal(r.reason, 'until', logs.join(' | '))
+      assert.equal(calls, 4)
+      assert.equal(waits, 3)
+      // a wait of its waitTicks between the tries
+      assert.ok(ticksAt.slice(1).every((t, i) => t - ticksAt[i] >= 500), ticksAt.join(' '))
+    } else {
+      // the waits had, then not-ready tries and a failure as before
+      assert.equal(waits, GROW_WAIT_TRIES, logs.join(' | '))
+      assert.ok(logs.some(l => /milestone wood not ready \(1\)/.test(l)))
+      assert.notEqual(r.reason, 'until')
+    }
+  }
+})
+
 test('the death spot: not gone back to bare where an archer shot the bot dead; a death to a mob at night gone back to by day if the items last (full-26.3-fresh-d)', async () => {
   const { deathSpotTiming } = await import('../../src/runner')
   const air = (): { name: string } => ({ name: 'air' })

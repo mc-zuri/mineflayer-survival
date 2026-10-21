@@ -48,7 +48,7 @@ test('waterHoleSite: level cane ground with the same on its four sides, not unde
   assert.strictEqual(waterHoleSite((p: Vec3) => ({ name: p.y > 63 ? 'air' : 'stone' }), new Vec3(0, 64, 0)), null)
 })
 
-test('keepFarms: eggs held let out, a pair of cows near bred with the wheat held, a cane farm planted from 8 canes; nothing without them', async () => {
+test('keepFarms: eggs held let out, a pair of cows near bred with the wheat held (the cane farm keepCaneFarm\'s); nothing without them', async () => {
   const { keepFarms } = await import('../../src/milestones')
   const { WorldMemory } = await import('../../src/core/memory')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
@@ -57,7 +57,7 @@ test('keepFarms: eggs held let out, a pair of cows near bred with the wheat held
   const cow = (id: number, x: number): any => ({ id, name: 'cow', position: new Vec3(x, 64, 0), metadata: [] })
   const bot = fakeBot({ items: [item('cow_spawn_egg', 4), item('wheat', 16), item('sugar_cane', 64)], entities: [cow(5, 3), cow(6, 4)] })
   await keepFarms(bot, executor, new AbortController().signal, () => {})
-  assert.deepStrictEqual(tasks, ['let out the cows', 'breed the cows', 'plant a cane farm'])
+  assert.deepStrictEqual(tasks, ['let out the cows', 'breed the cows'])
   // where the herd was let out, for its chores after (the levels' mining takes the bot far off)
   assert.strictEqual(executor.memory.getPois('herd').length, 1)
   // a farm known, no eggs, no food: nothing

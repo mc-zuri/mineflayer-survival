@@ -28,7 +28,9 @@ import { applyBooks } from './skills/anvil'
 import { experience, gainLevels } from './skills/xp'
 import { knownFarmableSpawners, nearestXpFarm } from './skills/spawnerFarm'
 import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from './skills/husbandry'
-import { makeWaterHole, plantSugarCane } from './skills/caneFarm'
+import { CANE_FARM_SPOTS, emptyCaneSpots, grownCanes, knownCaneFarm, makeWaterHole, plantSugarCane, tendCaneFarm } from './skills/caneFarm'
+import { baseRecord } from './base/pois'
+import { withinOwnTicks } from './executor/steps'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
 import { enterPen, herdPen, inPen, leadIntoPen, leavePen, penBroken, protectPen, type PenPlan } from './skills/pen'
 import { BREEDERS_KEPT, HERD, HERD_MOBS, MEAT_OF, POINTS_PER_KILL, breedingFoodHeld, chooseHerdMob, herdCap, herdCensus, herdChores, herdFromMemory, herdPenOf, herdSurplus, holdsBreedingFood, noteHerd, rememberHerd, slaughterPick } from './skills/herd'
@@ -213,6 +215,8 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
     }
     if (chore === 'grow') {
       await harvestGrownFarms(bot, executor, signal, log, false).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+      // (and the cane farm's grown canes: the books' paper, while the herd grows their leather)
+      if (knownCaneFarm(executor.memory) != null) await keepCaneFarm(bot, executor, signal, log)
       await executor.task('wait for the calves', async (s) => { await waitTicks(bot, HERD_CHORE_TICKS, s) }, signal)
       continue
     }
@@ -229,6 +233,7 @@ export async function leatherFromHerd (bot: Bot, executor: Executor, want: numbe
     // the farm's wheat for the herd, the strays brought home (cows wander: the herd of 8 let out was 5 to 8 by home
     // over 150000 ticks, its calves gone off), and the pairs ready
     await harvestGrownFarms(bot, executor, signal, log, false).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+    if (knownCaneFarm(executor.memory) != null) await keepCaneFarm(bot, executor, signal, log)
     const strays = pen == null ? 0 : Object.values(bot.entities).filter(e => e.name === 'cow' && !inPen(pen as PenPlan, e.position) && e.position.distanceTo(at) <= 32).length
     if (pen != null && strays > 0 && countItems(bot, 'wheat') > 0) {
       await executor.task('the herd into its pen', async (s) => await leadIntoPen(bot, pen as PenPlan, { mob: 'cow' }, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
@@ -320,10 +325,98 @@ export async function keepFarms (bot: Bot, executor: Executor, signal: AbortSign
     if (Object.values(bot.entities).filter(e => e.name === mob && e.position.distanceTo(bot.entity.position) <= 24).length < 2) continue
     await tryIt(`breed the ${mob}s`, async (s) => { const r = await breedAnimals(bot, { mob }, s); return `${r.fed} fed, ${r.pairs} pairs` })
   }
-  if (countItems(bot, 'sugar_cane') >= CANE_FARM_CANES && executor.memory.getPois('cane_farm').length === 0) {
-    await tryIt('plant a cane farm', async (s) => { const r = await plantSugarCane(bot, { count: CANE_FARM_CANES, memory: executor.memory }, s); return `${r.planted.length} canes, ${r.water.length} water holes` })
-  }
+  // (the cane farm: keepCaneFarm's, by home)
 }
+
+/** the canes the enchanting table's book still takes (3 paper a book): none with a table or a book, or the paper held */
+export function tableBookCanes (bot: Bot, memory: WorldMemory): number {
+  if (countItems(bot, 'enchanting_table') > 0 || countItems(bot, 'book') > 0 || memory.getPois('enchanting_table').length > 0) return 0
+  return Math.max(0, 3 - countItems(bot, 'paper'))
+}
+
+/** how far off the cane farm is tended from (keepCaneFarm) */
+export const CANE_FARM_RANGE = 96
+
+/** where the cane farm goes: by the base's door (on the surface by it), else its middle; null with no base in the overworld */
+export function caneFarmHome (memory: WorldMemory): Vec3 | null {
+  const base = baseRecord(memory)
+  if (base == null || memory.base?.dimension !== 'overworld') return null
+  const at = base.entrance ?? base.origin
+  return new Vec3(at.x, at.y, at.z)
+}
+
+/**
+ * The cane farm by home, the paper of the enchanting's books (3 a book, 3 books a shelf: some 138 canes for a table of
+ * 15 shelves and its own book): with none yet, CANE_FARM_CANES canes beyond the table's book's got where they grow (the
+ * shores: exploreCaneShores, the mine steps') and planted by the base (plantSugarCane: by the water there, else a
+ * channel dug and filled from the water bucket, the bucket filled first), none in the base's walls; with one, tended
+ * when the bot is within CANE_FARM_RANGE of it (tendCaneFarm: the grown cut above their bottom blocks, the empty spots
+ * planted again from the canes beyond the table's book's). A 1.21.11 game found its first canes only by chance on a
+ * walk and had no farm (f3-1.21.11). None of it stops the milestone: what fails is logged. Resolves the canes held.
+ */
+export async function keepCaneFarm (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const memory = executor.memory
+  const canes = (): number => countItems(bot, 'sugar_cane')
+  if (normalizeDimension(bot.game?.dimension) !== 'overworld' || bot.entity == null) return canes()
+  const fail = (what: string) => (err: unknown): void => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`cane farm: ${what}: ${(err as Error).message}`)
+  }
+  const book = tableBookCanes(bot, memory)
+  const bounds = baseRecord(memory)?.bounds
+  const avoid = bounds == null ? undefined : (p: Vec3): boolean => p.x >= bounds.min.x - 1 && p.x <= bounds.max.x + 1 && p.y >= bounds.min.y - 1 && p.y <= bounds.max.y + 1 && p.z >= bounds.min.z - 1 && p.z <= bounds.max.z + 1
+  const plantBy = async (center: Vec3, count: number): Promise<void> => {
+    if (Math.hypot(bot.entity.position.x - center.x, bot.entity.position.z - center.z) > 8 || Math.abs(bot.entity.position.y - center.y) > 4) {
+      await executor.task('to the cane farm', async (s) => await overland(bot, { target: center, range: 4 }, s), signal).catch(fail('the way there'))
+    }
+    if (countItems(bot, 'water_bucket') === 0 && countItems(bot, 'bucket') > 0) await refillWater(bot, signal)
+    const r = await executor.task('plant a cane farm', async (s) => await plantSugarCane(bot, { count, center, memory, avoid }, s), signal).catch(fail('planting'))
+    if (r != null) log(`cane farm: ${r.planted.length} canes planted, ${r.water.length} water cells made (${knownCaneFarm(memory)?.spots.length ?? 0} spots)`)
+  }
+  const farm = knownCaneFarm(memory, p => bot.blockAt(p) as any)
+  if (farm != null) {
+    if (farm.at.distanceTo(bot.entity.position) > CANE_FARM_RANGE) return canes()
+    const lookup = (p: Vec3): any => bot.blockAt(p)
+    if (grownCanes(lookup, farm).length > 0 || (emptyCaneSpots(lookup, farm).length > 0 && canes() > book)) {
+      const r = await executor.task('tend the cane farm', async (s) => await tendCaneFarm(bot, farm, { keep: book }, s), signal).catch(fail('tending'))
+      if (r != null) log(`cane farm: ${r.canes} canes cut, ${r.replanted} spots planted again (${canes()} held)`)
+    }
+    // (a farm started small grows to CANE_FARM_SPOTS from its own canes: each planted gives a cane every
+    // CANE_GROW_TICKS the bot is by it, more than the paper it would make now)
+    if (farm.spots.length < CANE_FARM_SPOTS && canes() > book) await plantBy(farm.at, Math.min(CANE_FARM_SPOTS - farm.spots.length, canes() - book))
+    return canes()
+  }
+  const home = caneFarmHome(memory)
+  if (home == null) return canes()
+  const want = CANE_FARM_CANES + book
+  // (CANE_SEEK_TICKS in all, across the milestone's tries: the shores and the spiral have been walked by then)
+  const seek = caneSeeks.get(bot) ?? caneSeeks.set(bot, {}).get(bot) as Record<string, any>
+  if (canes() < want && Number(seek.ticks ?? 0) < CANE_SEEK_TICKS) {
+    log(`cane farm: ${canes()} canes held, ${want} wanted to start it (the table's book's ${book})`)
+    const out = await withinOwnTicks(bot, seek, 'ticks', CANE_SEEK_TICKS, signal, async (s) => await executor.obtain([{ item: 'sugar_cane', count: want }], s))
+      .catch(fail(`${canes()} canes of ${want}`))
+    if (out === 'timeout') log(`cane farm: ${canes()} canes of ${want} in ${CANE_SEEK_TICKS} ticks of looking`)
+  }
+  if (canes() - book > 0) await plantBy(home, Math.min(CANE_FARM_SPOTS, canes() - book))
+  return canes()
+}
+
+/**
+ * The milestone's wait for the cane farm: the table's book short of canes (tableBookCanes) with a cane farm planted, a
+ * not-ready error the runner waits by home on (growing, CANE_WAIT_TICKS), else null
+ */
+export function tableBookWait (bot: Bot, memory: WorldMemory): Error | null {
+  const want = tableBookCanes(bot, memory)
+  const held = countItems(bot, 'sugar_cane')
+  if (want <= held || knownCaneFarm(memory) == null) return null
+  return Object.assign(new SkillError('MISSING_ITEMS', `the table's book: ${held} canes of ${want}, the cane farm growing`), { notReady: true, growing: true, waitTicks: CANE_WAIT_TICKS })
+}
+
+/** the ticks a cane farm's first canes are looked for, in all (keepCaneFarm) */
+export const CANE_SEEK_TICKS = 36000
+/** the wait by home for the cane farm to grow the table's book's canes (the runner's, between the milestone's tries) */
+export const CANE_WAIT_TICKS = 6000
+const caneSeeks = new WeakMap<Bot, Record<string, any>>()
 
 /** enchanted books made at the table from the levels left after the gear, put on the gear at an anvil (at most) */
 export const BOOKS_TO_ENCHANT = 3
@@ -452,6 +545,12 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
     const got = await obsidianFromPools(bot, executor, TABLE_OBSIDIAN, signal, log, tries < OBSIDIAN_BOUND_TRIES ? { home, range: OBSIDIAN_HOME_RANGE } : {})
     if (!got) obsidianShortTries.set(bot, tries + 1)
   }
+  // the cane farm by home started (its first canes from the shores) or tended; the table's book short of canes with
+  // the farm growing waits for it (the runner's wait by home: not a failure), not an exploring for more again and
+  // again: a 1.21.11 game failed the milestone five times in 2100 ticks on 'mine 3 sugar_cane' (f3-1.21.11)
+  await keepCaneFarm(bot, executor, signal, log)
+  const wait = tableBookWait(bot, executor.memory)
+  if (wait != null) throw wait
   await executor.obtain(milestone.goals(state), signal)
   // the herd grown for the 15 shelves' books (45, a leather each) and the anvil's book, when the bot keeps cows
   const herd = executor.memory.getPois(HERD, { dimension: 'overworld', near: bot.entity.position })[0]
