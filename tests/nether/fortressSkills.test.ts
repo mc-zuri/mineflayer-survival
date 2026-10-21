@@ -829,3 +829,34 @@ test('campSpots leaves out a spot by lava (netherStepForbidden), and a camp spot
   assert.ok(tries.size > 0)
   for (const [spot, n] of tries) assert.ok(n <= CAMP_SPOT_TRIES, `${spot} ${n}`)
 })
+
+test('collectBlazeRods gives up a spawner the bot died by (the memory\'s nether death within 20), no fight there with a fresh kit: the milestone\'s next spawner (ls3-1.21.11 died twice at (-56, 76, 250))', async () => {
+  const { collectBlazeRods, unreachableSpawners, deathsByBlazeSpawner } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/nether/blazeFight')
+  const { item } = await import('../reflexes/fakeBot')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const real = { build: fightModule.buildNook, fight: fightModule.fightFromNook }
+  const fought: string[] = []
+  fightModule.buildNook = async () => {}
+  fightModule.fightFromNook = async () => { fought.push('nook'); return { kills: 0, shots: 0, blocked: 0, ticks: 1 } }
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('cobblestone', 64), item('bow'), item('arrow', 64)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  const memory = new WorldMemory()
+  ;(bot as any).survival = { memory }
+  const spawner = new Vec3(0, 64, 0)
+  // a death 30 off: not the spawner's
+  memory.addPoi('nether_death', { x: 30, y: 64, z: 0 }, 'the_nether')
+  assert.equal(deathsByBlazeSpawner(bot, spawner), 0)
+  memory.addPoi('nether_death', { x: -6, y: 66, z: 9 }, 'the_nether')
+  assert.equal(deathsByBlazeSpawner(bot, spawner), 1)
+  try {
+    await assert.rejects(collectBlazeRods(bot, { count: 1, spawner, maxTicks: 20, safety: false }), /no way to the blaze spawner at \(0, 64, 0\): the bot died by it 1 times/)
+  } finally {
+    fightModule.buildNook = real.build
+    fightModule.fightFromNook = real.fight
+  }
+  assert.deepEqual(fought, [])
+  assert.deepEqual(unreachableSpawners(bot).map(p => [p.x, p.y, p.z]), [[0, 64, 0]])
+})

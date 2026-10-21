@@ -28,7 +28,7 @@ import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
-import { collectBlazeRods } from '../../src/nether/fortressSkills'
+import { collectBlazeRods, UNREACHABLE_SPAWNER } from '../../src/nether/fortressSkills'
 import { blazeRodsWithBrew, resetBrewTries } from '../../src/nether/brewing'
 import { Executor } from '../../src/executor/executor'
 import { countItems, waitUntil } from '../../src/skills/util'
@@ -290,6 +290,12 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
     bot.on('messagestr' as any, onMessage)
     const executor = new Executor(bot, { log: () => {} })
     resetBrewTries(bot)
+    // each run from a fresh memory of the nether's deaths and the spawners given up (a spawner the bot died by is given
+    // up: deathsByBlazeSpawner), unless BLAZE_KEEP_DEATHS; BLAZE_DEATH="x y z" a death remembered there first (a game's
+    // death by that spawner before the resume)
+    const memory = bot.survival.memory
+    if (process.env.BLAZE_KEEP_DEATHS == null) { memory.removePoi('nether_death', undefined, 'the_nether'); memory.removePoi(UNREACHABLE_SPAWNER, undefined, 'the_nether') }
+    if (process.env.BLAZE_DEATH != null) { const d = vec(process.env.BLAZE_DEATH); memory.addPoi('nether_death', { x: d.x, y: d.y, z: d.z }, 'the_nether') }
     // (the wither skeletons come once the bot is near the first's spot)
     let summoned = WITHER.length === 0 || WITHER_NEAR <= 0
     const onApproach = (): void => {
@@ -302,9 +308,20 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
     let result = { rods: 0, kills: 0 }
     let error = ''
     try {
-      result = await executor.task('blaze rods', async (s) => BREW
-        ? await blazeRodsWithBrew(bot, { count: RODS, spawner: SPAWNER, maxTicks: MAX_TICKS, away: START }, s)
-        : await collectBlazeRods(bot, { count: RODS, spawner: SPAWNER, maxTicks: MAX_TICKS }, s))
+      // BLAZE_FIND=1: no spawner given, the one found (findBlazeSpawner, the ones given up left out), the next after one
+      // there's no way to, as the milestone goes (BLAZE_SPAWNER_TRIES)
+      const spawner = process.env.BLAZE_FIND != null ? undefined : SPAWNER
+      for (let attempt = 1; ; attempt++) {
+        try {
+          result = await executor.task('blaze rods', async (s) => BREW
+            ? await blazeRodsWithBrew(bot, { count: RODS, spawner, maxTicks: MAX_TICKS, away: START }, s)
+            : await collectBlazeRods(bot, { count: RODS, spawner, maxTicks: MAX_TICKS }, s))
+          break
+        } catch (err) {
+          if (spawner != null || attempt >= 4 || !/no way to the blaze spawner/.test((err as Error).message) || bot.health <= 0) throw err
+          console.log(`blaze run ${n}: ${(err as Error).message}: another spawner`)
+        }
+      }
     } catch (err) {
       error = (err as Error).message
     } finally {

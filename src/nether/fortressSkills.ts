@@ -196,6 +196,17 @@ export function seesFrom (bot: Bot, eye: Vec3, point: Vec3, through?: Vec3): boo
  * Where to stand by a spawner: a cell on the floor 3 to `standOff` + 2 blocks from it, within 2 of its height, that
  * sees it (the blazes come out within 4 of it: SpawnData's spawn range) - nearest the bot first.
  */
+/** the deaths by a blaze spawner (within SPAWNER_DEATH_RANGE) it is given up at */
+export const SPAWNER_DEATHS = 1
+/** a death this near a spawner across (and 16 up or down) is the spawner's */
+export const SPAWNER_DEATH_RANGE = 20
+
+/** the bot's deaths in the nether by the spawner (the memory's 'nether_death' points, rememberNetherDeath) */
+export function deathsByBlazeSpawner (bot: Bot, spawner: Pos): number {
+  const deaths = bot.survival?.memory?.getPois('nether_death', { dimension: 'the_nether' }) ?? []
+  return deaths.filter(d => Math.hypot(d.x - spawner.x, d.z - spawner.z) <= SPAWNER_DEATH_RANGE && Math.abs(d.y - spawner.y) <= 16).length
+}
+
 /** a camp spot the bot found no way to this many times isn't gone for again */
 export const CAMP_SPOT_TRIES = 2
 const campFailureMaps = new WeakMap<Bot, Map<string, number>>()
@@ -664,6 +675,14 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
   }
   const fightForRods = async (): Promise<BlazeRodsResult> => {
     const spawner = args.spawner != null ? v3(args.spawner) : v3(await findBlazeSpawner(bot, { safety: false, exclude: args.exclude ?? unreachableSpawners(bot) }, signal))
+    // a spawner the bot died by is given up (the milestone's next: the fortress's other, else another fortress), not
+    // fought again with a fresh kit: ls3-1.21.11's by a basalt delta's lava at (-56, 76, 250) killed it, and the game
+    // resumed from its enchanting went back with a fresh kit and died there again, fireballed at (-70, 67, 222)
+    const died = deathsByBlazeSpawner(bot, spawner)
+    if (died >= SPAWNER_DEATHS) {
+      markSpawnerUnreachable(bot, spawner)
+      throw new SkillError('NO_PATH', `no way to the blaze spawner at ${spawner.toString()}: the bot died by it ${died} times`, { rods: countItems(bot, 'blaze_rod'), kills, ticks, spawner })
+    }
     // the spawner kept from the pathfinder's breaking through the fight (the walks to a nook by it, to the rods on the
     // throne): a 26.3 bot's way to the melee nook on seed 7741's throne went through it, and no blaze came after
     return await withBlocksKept(bot, [spawner], async () => await fightAt(spawner))
