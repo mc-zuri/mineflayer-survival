@@ -31,7 +31,7 @@ import { countItems, emptySlots, trace, waitTicks } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, routeStoneToToss, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, TIGHT_SLOTS, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
-import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, UnreachableBlocks, VILLAGE_RANGE, WATCHED_MOBS, WATER_MOBS, type MobLand } from './sight'
+import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, UNREACHABLE_TICKS, UnreachableBlocks, VILLAGE_RANGE, WATCHED_MOBS, WATER_MOBS, type MobLand } from './sight'
 import { BiomeSurvey, KELP_BIOMES, LAND_FOODS, MIN_SURVEYED, MOB_BIOMES, MOB_LAND_RANGE } from './foodLand'
 import { fishableWaterNear } from '../skills/fish'
 import { herdSpares, herdSupply, homeFoodKeeps, noteAnimals } from '../skills/herd'
@@ -282,6 +282,10 @@ export class Executor {
   readonly sightings: Sightings
   /** the blocks the mine steps couldn't get to lately, left a while (UnreachableBlocks) */
   readonly unreachable: UnreachableBlocks
+  /** the chests a loot step failed at lately, no loot planned from them a while (noteFailedSource) */
+  readonly failedChests: UnreachableBlocks
+  /** the base out of reach (a loot from its chests, a craft or smelt at its stations, no way there) till this tick */
+  private baseOffUntil = -Infinity
   /** the loaded chunks' surface biomes, the food biomes' noted (foodLand.ts) */
   readonly biomes: BiomeSurvey
   /** explorations' progress kept across the plans (StepContext.progress) */
@@ -344,6 +348,7 @@ export class Executor {
     this.home = opts.home ?? (() => null)
     this.seed = opts.seed
     this.unreachable = new UnreachableBlocks(() => this.tasks.tick)
+    this.failedChests = new UnreachableBlocks(() => this.tasks.tick)
     this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos), () => herdSpares(bot, this.memory), () => {
       const at = bot.entity?.position
       return at != null && this.memory.getPois('village', { dimension: normalizeDimension(bot.game?.dimension) }).some(p => Math.hypot(p.x - at.x, p.z - at.z) <= VILLAGE_RANGE)
@@ -439,14 +444,61 @@ export class Executor {
     return baseRecord(this.memory)
   }
 
-  /** the base's stations when the bot is near it (a plan counts on them only then) */
+  /** the base's stations when the bot is near it and it's in reach (a plan counts on them only then) */
   stations (): Station[] {
     const base = this.base
-    if (base == null || !this.nearBase(base, 48)) return []
+    if (base == null || !this.nearBase(base, 48) || this.baseOff()) return []
     const out: Station[] = []
     if (base.table != null) out.push('crafting_table')
     if (base.furnaces.length > 0) out.push('furnace')
     return out
+  }
+
+  /** whether the base was found out of reach lately (noteFailedSource): its stations and chests left till then */
+  baseOff (): boolean {
+    return this.tasks.tick < this.baseOffUntil
+  }
+
+  /** a chest no loot is planned from now: one a loot step failed at lately, or the base's while it's out of reach */
+  chestLeft (chest: { x: number, y: number, z: number, dimension?: string }): boolean {
+    const dimension = normalizeDimension(chest.dimension ?? this.bot.game?.dimension)
+    if (this.failedChests.has(new Vec3(chest.x, chest.y, chest.z), dimension)) return true
+    if (!this.baseOff() || dimension !== normalizeDimension(this.memory.base?.dimension ?? 'overworld')) return false
+    return this.base?.chests.some(c => c.x === chest.x && c.y === chest.y && c.z === chest.z) === true
+  }
+
+  /**
+   * A step that failed at its source, left a while by the plans after it (UNREACHABLE_TICKS), in this obtain and the
+   * next ones: a loot step's chest (any failure but the bag's room: no way there, the chunk not loaded, the window
+   * refused), and the base as a whole (its chests and its stations) when there was no way to a chest of it or to the
+   * table or furnace a craft or smelt step went to. A 1.21.11 bot back from a death bare, the step before the base's
+   * door dug out, planned 'loot 3 cobblestone at -552 76 40, craft 1 stone_pickaxe' three times for each of its 10
+   * re-equip goals, every one 'no path', and never the stone about it, 100000 ticks bare till a zombie killed it
+   * (f9-1.21.11, t321486 to t411859); the mine steps' blocks are UnreachableBlocks' alike
+   */
+  private noteFailedSource (step: PlanStep, err: unknown): void {
+    if (TaskError.is(err, 'INVENTORY_FULL', 'DIED', 'ABORTED', 'PREEMPTED') || isAbort(err)) return
+    // (a SkillError's STUCK is a NO_PATH)
+    const noWay = TaskError.is(err, 'NO_PATH')
+    const base = this.base
+    if (step.kind === 'loot') {
+      const dimension = normalizeDimension(step.from.dimension)
+      this.failedChests.note([new Vec3(step.from.x, step.from.y, step.from.z)], dimension)
+      this.log(`the chest at ${step.from.x} ${step.from.y} ${step.from.z} failed: left a while`)
+      const ofBase = base != null && dimension === normalizeDimension(this.memory.base?.dimension ?? 'overworld') &&
+        base.chests.some(c => c.x === step.from.x && c.y === step.from.y && c.z === step.from.z)
+      if (noWay && ofBase) this.leaveBase()
+      return
+    }
+    // (a craft or smelt step that went to the base's station: runStep's, near it)
+    const station = (step.kind === 'craft' && step.table && base?.table != null) || (step.kind === 'smelt' && (base?.furnaces.length ?? 0) > 0)
+    if (noWay && station && base != null && this.nearBase(base, 48) && !this.baseOff()) this.leaveBase()
+  }
+
+  /** the base out of reach for UNREACHABLE_TICKS: its chests and its stations out of the plans (noteFailedSource) */
+  leaveBase (): void {
+    this.baseOffUntil = this.tasks.tick + UNREACHABLE_TICKS
+    this.log('the base out of reach: its chests, table and furnace left a while')
   }
 
   private nearBase (base: BaseRecord, distance: number): boolean {
@@ -465,6 +517,7 @@ export class Executor {
       position: this.bot.entity.position,
       dimension: this.bot.game?.dimension,
       exclude: [...this.options.exclude, ...(extra.exclude ?? [])],
+      skipChest: chest => this.chestLeft(chest),
       uncraftable: Object.fromEntries([...this.uncraftable].map(([item, not]) => [item, [...not]])),
       findCost: t => this.sightings.cost(t),
       // no cobweb's string for a bot not fit for the caves: a mineshaft's, by the cave spiders' spawners (caveReady)
@@ -566,6 +619,7 @@ export class Executor {
           this.log(`step failed (${n}): ${describeStep(step)}: ${(err as Error).message}`)
           diag?.stepFailed(step, describeStep(step), err, n)
           if (step.kind === 'mine') this.forgetFailedBlocks(step)
+          this.noteFailedSource(step, err)
           this.forgetMissingStation(err)
           this.noteMissing(step, err, began)
           await this.noteUncraftable(step, err)
@@ -928,7 +982,7 @@ export class Executor {
   async runStep (step: PlanStep, signal?: AbortSignal): Promise<StepOutcome> {
     const runner = this.runners[step.kind]
     const base = this.base
-    const near = base != null && this.nearBase(base, 48)
+    const near = base != null && this.nearBase(base, 48) && !this.baseOff()
     // kept across the attempts a reflex's preemption makes
     const state: Record<string, any> = {}
     const diag = this.diagnostics

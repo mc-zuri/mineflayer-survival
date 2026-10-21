@@ -1,6 +1,6 @@
 import { Inventory, type ItemCount } from '../core/inventory'
 import { burnTicks, foodInfo, parseTool, SMELT_TICKS, TOOL_MATERIAL_RANK, TOOL_MATERIALS, toolKindForMaterial } from '../core/items'
-import type { Dimension, Pos, WorldMemory } from '../core/memory'
+import type { Dimension, KnownChest, Pos, WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import type { RegistryLike } from '../core/registry'
 import { itemTags } from '../core/tags'
@@ -106,6 +106,13 @@ export interface ObtainOptions {
    * milestone's end ('craft 8 oak_planks' of oak_wood, f2-grim)
    */
   uncraftable?: Readonly<Record<string, readonly string[]>>
+  /**
+   * Remembered chests no loot is planned from (the executor's: a loot step that failed at them lately, the base's while
+   * it's out of reach, Executor.chestLeft). A 1.21.11 bot back from a death bare planned 'loot 3 cobblestone at -552 76
+   * 40' for each of its re-equip goals, plan after plan, the base's chest out of reach, and never mined the stone about
+   * it (f9-1.21.11, t321486 to t325062)
+   */
+  skipChest?: (chest: KnownChest) => boolean
 }
 
 /** what findCost is asked about: a block or mob of a source, and the source's own estimate */
@@ -417,7 +424,7 @@ export class Resolver {
   private strategies (item: string, n: number, skip?: StrategyKind): Strategy[] {
     const out: Strategy[] = []
     const use = (kind: StrategyKind): boolean => kind !== skip && !this.exclude.has(kind)
-    if (use('loot') && this.opts.memory != null && this.opts.memory.findItem(item).length > 0) out.push((s, p, l) => this.loot(s, item, n, p, l))
+    if (use('loot') && this.lootable(item).length > 0) out.push((s, p, l) => this.loot(s, item, n, p, l))
     if (use('craft')) {
       for (const recipe of recipesFor(this.registry, item)) {
         const r = this.usable(recipe)
@@ -776,12 +783,19 @@ export class Resolver {
     return t
   }
 
+  /** the remembered chests with the item a loot may be planned from (none of skipChest's) */
+  private lootable (item: string): Array<{ chest: KnownChest, count: number }> {
+    const found = this.opts.memory?.findItem(item) ?? []
+    const skip = this.opts.skipChest
+    return skip == null ? found : found.filter(f => !skip(f.chest))
+  }
+
   private loot (s: State, item: string, n: number, path: string[], limit: number): State | null {
     const memory = this.opts.memory as WorldMemory
     let left = n
     // the chests opened lately first, then the most
     const stale = (seen: number): boolean => (memory.now ?? 0) - seen > CHEST_TRUST_TICKS
-    const found = memory.findItem(item).map((f, i) => ({ ...f, i, stale: stale(f.chest.seen) ? 1 : 0 })).sort((a, b) => a.stale !== b.stale ? a.stale - b.stale : a.i - b.i)
+    const found = this.lootable(item).map((f, i) => ({ ...f, i, stale: stale(f.chest.seen) ? 1 : 0 })).sort((a, b) => a.stale !== b.stale ? a.stale - b.stale : a.i - b.i)
     for (const { chest, count } of found) {
       if (left <= 0) break
       const k = `${chest.dimension}:${chest.x},${chest.y},${chest.z}|${item}`

@@ -1408,3 +1408,66 @@ for (const version of ['1.21.11', '26.3']) {
     assert.deepEqual(stuck.tossed, ['64 cobbled_deepslate', '64 cobbled_deepslate'])
   })
 }
+
+for (const version of ['1.21.11', '26.3']) {
+  test(`${version}: a loot step that failed leaves its chest a while (UNREACHABLE_TICKS), in this obtain and the next ones: the stone mined instead, the chest planned again after (f9-1.21.11: 'loot 3 cobblestone at -552 76 40' for each re-equip goal, every one 'no path')`, async () => {
+    const { UNREACHABLE_TICKS } = await import('../../src/executor/sight')
+    const bot = fakeBot({ wooden_pickaxe: 1 })
+    bot.registry = require('minecraft-data')(version)
+    bot.survival.memory.rememberChest(new Vec3(4, 64, 0), { cobblestone: 32 })
+    const log: string[] = []
+    const lines: string[] = []
+    const runners = honestRunners(bot, log)
+    runners.loot = async (step) => { log.push(describeStep(step)); throw new SkillError('NO_PATH', 'no path to the goal') }
+    const ex = new Executor(bot, { runners, log: line => lines.push(line) })
+    await ex.obtain([{ item: 'cobblestone', count: 3 }])
+    assert.equal(log[0], 'loot 3 cobblestone at 4 64 0')
+    assert.equal(log.filter(l => l.startsWith('loot')).length, 1, log.join('; '))
+    assert.match(log[log.length - 1], /^mine 3 cobblestone/)
+    assert.ok(lines.some(l => /the chest at 4 64 0 failed: left a while/.test(l)), lines.join(' | '))
+    // the next obtain (the next re-equip goal) neither
+    log.length = 0
+    await ex.obtain([{ item: 'cobblestone', count: 6 }])
+    assert.equal(log.filter(l => l.startsWith('loot')).length, 0, log.join('; '))
+    assert.equal(count(bot, 'cobblestone'), 6)
+    // UNREACHABLE_TICKS on: the chest again
+    for (let i = 0; i <= UNREACHABLE_TICKS; i++) bot.emit('physicsTick')
+    log.length = 0
+    await ex.obtain([{ item: 'cobblestone', count: 9 }]).catch(() => {})
+    assert.equal(log[0], 'loot 3 cobblestone at 4 64 0')
+  })
+
+  test(`${version}: no way to a chest of the base's leaves the base a while: its chests and its table out of the plans, the stone mined and a table made (f9-1.21.11: the base's step dug out, its chest no way to)`, async () => {
+    const { BASE_POI } = await import('../../src/base/pois')
+    const bot = fakeBot({ wooden_pickaxe: 1, stick: 2, oak_planks: 4 })
+    bot.registry = require('minecraft-data')(version)
+    const memory: WorldMemory = bot.survival.memory
+    memory.setBase({ x: 10, y: 64, z: 10 }, 'overworld')
+    memory.addPoi(BASE_POI.bounds, { x: 8, y: 63, z: 8 }, 'overworld', '14,68,14')
+    memory.addPoi(BASE_POI.table, { x: 12, y: 64, z: 12 }, 'overworld')
+    memory.rememberChest(new Vec3(10, 64, 10), { cobblestone: 32 })
+    memory.rememberChest(new Vec3(11, 64, 10), { cobblestone: 32 })
+    const log: string[] = []
+    const lines: string[] = []
+    const runners = honestRunners(bot, log)
+    runners.loot = async (step) => { log.push(describeStep(step)); throw new SkillError('NO_PATH', 'no path to the goal') }
+    const ex = new Executor(bot, { runners, log: line => lines.push(line) })
+    assert.deepEqual(ex.stations(), ['crafting_table'])
+    await ex.obtain([{ item: 'stone_pickaxe', count: 1 }])
+    assert.match(log[0], /^loot 3 cobblestone at 1[01] 64 10$/)
+    assert.equal(log.filter(l => l.startsWith('loot')).length, 1, log.join('; '))
+    assert.ok(log.includes('craft 1 crafting_table'), log.join('; '))
+    assert.equal(log[log.length - 1], 'craft 1 stone_pickaxe')
+    assert.ok(lines.some(l => /the base out of reach/.test(l)), lines.join(' | '))
+    assert.equal(ex.baseOff(), true)
+    assert.deepEqual(ex.stations(), [])
+    // another failure (not the way there): the chest alone, not the base
+    const other = fakeBot({ wooden_pickaxe: 1 })
+    other.registry = bot.registry
+    other.survival.memory = memory
+    const ex2 = new Executor(other, { runners: { ...honestRunners(other, []), loot: async () => { throw new SkillError('VERIFY_FAILED', 'the window kept changing') } }, log: () => {} })
+    await ex2.obtain([{ item: 'cobblestone', count: 3 }])
+    assert.equal(ex2.baseOff(), false)
+    assert.equal(ex2.chestLeft({ x: 10, y: 64, z: 10, dimension: 'overworld' }) || ex2.chestLeft({ x: 11, y: 64, z: 10, dimension: 'overworld' }), true)
+  })
+}

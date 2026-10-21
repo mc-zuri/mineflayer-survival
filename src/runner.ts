@@ -2511,6 +2511,11 @@ export class Runner {
     const took: Record<string, number> = {}
     const bot = this.bot
     const dimension = this.memory.base?.dimension ?? 'overworld'
+    // (found out of reach lately: its chests no way to, the plans going without them meanwhile, Executor.leaveBase)
+    if (this.executor.baseOff()) {
+      this.log('no kit from the base: out of reach lately')
+      return null
+    }
     this.log('to the base for a kit')
     // (in its box already, shut in after a respawn: the walk out to the entrance and back left out)
     if (base.entrance != null && (base.bounds == null || !inBounds(bot.entity.position, base.bounds))) {
@@ -2556,6 +2561,12 @@ export class Runner {
       } catch (err) {
         if (TaskError.is(err, 'DIED')) throw err
         this.log(`kit from ${chest.x} ${chest.y} ${chest.z} failed: ${(err as Error).message}`)
+        // no way to it: the base left a while, the re-equip's plans after going without its chests and its table (each
+        // of a 1.21.11 bot's 10 goals planned the chest again, 'no path' three times, f9-1.21.11 t325062)
+        if (TaskError.is(err, 'NO_PATH')) {
+          this.executor.leaveBase()
+          break
+        }
       }
     }
     return took

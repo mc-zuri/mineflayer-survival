@@ -7,6 +7,7 @@ import * as path from 'node:path'
 import { Vec3 } from 'vec3'
 import { TaskRunner } from '../../src/core/taskRunner'
 import { TaskError } from '../../src/core/errors'
+import { SkillError } from '../../src/skills/errors'
 import { WorldMemory } from '../../src/core/memory'
 import { Runner, deathSpotWorthIt, progressState, tickLine, type MilestoneHandler } from '../../src/runner'
 import { dropsWorthATrip } from '../../src/executor/keep'
@@ -611,6 +612,38 @@ test('rekit gets to a dug-in base the long way (hops, a stair down) when the pat
   // a pickaxe made for the stone on the way first (the bot back from a death has none)
   assert.deepEqual(calls.slice(0, 3), ['ensurePickaxe', 'navigate', `overland ${new Vec3(-52, 60, -19).toString()}`])
   assert.ok(calls.includes('retrieve'))
+})
+
+test('rekit whose kit has no way to the chest leaves the base a while: the next rekit goes nowhere, the plans go without its chests (f9-1.21.11: each re-equip goal planned the chest again)', async () => {
+  const navModule = require('../../src/skills/navigate')
+  const strongholdModule = require('../../src/end/strongholdSkills')
+  const chestModule = require('../../src/skills/chest')
+  const exploreModule = require('../../src/executor/explore')
+  const bot = fakeBot({ dirt: 4 })
+  bot.survival.memory.setBase({ x: -552, y: 76, z: 40 })
+  bot.survival.memory.addPoi('base_entrance', { x: -547, y: 76, z: 36 }, 'overworld')
+  bot.survival.memory.rememberChest({ x: -552, y: 76, z: 40 }, { cobblestone: 121, iron_ingot: 6 }, 'overworld')
+  const lines: string[] = []
+  const runner = new Runner(bot, { log: l => lines.push(l) })
+  const calls: string[] = []
+  const real = [navModule.navigate, strongholdModule.overland, chestModule.retrieveItems, exploreModule.ensurePickaxe]
+  navModule.navigate = async () => { calls.push('navigate') }
+  strongholdModule.overland = async () => { calls.push('overland') }
+  chestModule.retrieveItems = async () => { calls.push('retrieve'); throw new SkillError('NO_PATH', 'no path to the goal') }
+  exploreModule.ensurePickaxe = async () => 'wooden_pickaxe'
+  runner.executor.task = (async (_name: string, fn: any) => await fn(new AbortController().signal)) as any
+  bot.give('wooden_pickaxe', 1)
+  try {
+    assert.deepEqual(await runner.rekit(), {})
+    assert.equal(runner.executor.baseOff(), true)
+    assert.equal(runner.executor.chestLeft({ x: -552, y: 76, z: 40, dimension: 'overworld' }), true)
+    calls.length = 0
+    assert.equal(await runner.rekit(), null)
+    assert.deepEqual(calls, [])
+    assert.ok(lines.some(l => /no kit from the base: out of reach lately/.test(l)), lines.join(' | '))
+  } finally {
+    [navModule.navigate, strongholdModule.overland, chestModule.retrieveItems, exploreModule.ensurePickaxe] = real
+  }
 })
 
 test('rekit with nothing to make a pickaxe from gets one the way the game starts (wood, then stone) before the way into the base', async () => {
