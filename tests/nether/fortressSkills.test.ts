@@ -751,6 +751,29 @@ test('guardedTrip: a blaze about to hit holds the trip off, then on; hurt to TRI
   }
 })
 
+test('collectBlazeRods: the way into a bunker keeps off the pits under the floor (keepOffPits while it is built), not after', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/nether/blazeFight')
+  const { item } = await import('../reflexes/fakeBot')
+  const real = { build: fightModule.buildNook, fight: fightModule.fightFromNook }
+  const during: number[] = []
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('cobblestone', 64), item('bow'), item('arrow', 64)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  bot.pathfinder = { defaultMoveSettings: { exclusionAreasStep: [] as any[] }, setMoveOptions (o: any) { this.defaultMoveSettings = o } }
+  fightModule.buildNook = async () => { during.push(bot.pathfinder.defaultMoveSettings.exclusionAreasStep.length) }
+  fightModule.fightFromNook = async () => { bot.inventory.slots[20] = item('blaze_rod'); return { kills: 1, shots: 2, blocked: 0, ticks: 10 } }
+  try {
+    await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    assert.deepStrictEqual(during, [1])
+    assert.equal(bot.pathfinder.defaultMoveSettings.exclusionAreasStep.length, 0)
+  } finally {
+    fightModule.buildNook = real.build
+    fightModule.fightFromNook = real.fight
+  }
+})
+
 test('collectBlazeRods: the kept nook the bot finds no way back into is followed by another of the planned ones, not the camp (no nook of 1: the spawner given up mid-fight)', async () => {
   const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
   const { SkillError } = await import('../../src/skills/errors')

@@ -28,7 +28,7 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, blazesAbout, fetchThreats, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, inNook, shutInWhereItStands, netherStepForbidden, nookBlocks, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, shellAgain, withBlocksKept, walkDanger, holdOffBlazes, inFireCell, NOOK_GUARD_TICKS } from './blazeFight'
+import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, blazesAbout, fetchThreats, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, inNook, shutInWhereItStands, netherStepForbidden, nookBlocks, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, shellAgain, withBlocksKept, walkDanger, holdOffBlazes, inFireCell, keepOffPits, NOOK_GUARD_TICKS } from './blazeFight'
 import { handleFire, isOnFire } from '../skills/escape'
 import { lightFromBunker, litCells, spawnCells } from './spawnerLight'
 
@@ -810,7 +810,13 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       for (let i = 0; i < again && !built; i++) {
         try {
           if (i > 0) await waitTicks(bot, KEPT_BUNKER_WAIT, signal)
-          await buildNook(bot, c, signal)
+          // (the way in kept off the pits under the throne's floor too, as the fight's: keepOffPits)
+          const pits = keepOffPits(bot, c.stand, Math.min(c.stand.y, spawner.floored().y))
+          try {
+            await buildNook(bot, c, signal)
+          } finally {
+            pits()
+          }
           built = true
         } catch (err) {
           if (isAbort(err) || bot.health <= 0) throw err
