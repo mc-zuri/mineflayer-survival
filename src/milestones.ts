@@ -444,7 +444,13 @@ export const enchantingHandler: MilestoneHandler = async ({ bot, milestone, stat
   // the table's 4 obsidian made from lava with the water bucket when there's no table yet (the planner only mines
   // obsidian that's there: a 26.3 whole-game run explored for some for 200000 ticks)
   if (countItems(bot, 'enchanting_table') === 0 && findEnchantingTable(bot, { memory: executor.memory }) == null && countItems(bot, 'obsidian') < TABLE_OBSIDIAN) {
-    await obsidianFromPools(bot, executor, TABLE_OBSIDIAN, signal, log)
+    // (within OBSIDIAN_HOME_RANGE of home, the base's, else where the milestone began; past it only once
+    // OBSIDIAN_BOUND_TRIES tries in the bound came short: no other way)
+    const base = executor.memory.base
+    const home = base != null && base.dimension === 'overworld' ? base : bot.entity.position.clone()
+    const tries = obsidianShortTries.get(bot) ?? 0
+    const got = await obsidianFromPools(bot, executor, TABLE_OBSIDIAN, signal, log, tries < OBSIDIAN_BOUND_TRIES ? { home, range: OBSIDIAN_HOME_RANGE } : {})
+    if (!got) obsidianShortTries.set(bot, tries + 1)
   }
   await executor.obtain(milestone.goals(state), signal)
   // the herd grown for the 15 shelves' books (45, a leather each) and the anvil's book, when the bot keeps cows
@@ -1249,7 +1255,7 @@ export const RUINED_PORTAL_TRIED = 'ruined_portal_tried'
  * portal's within RUINED_PORTAL_TRIP (ruinedPortalCandidates; its crying obsidian is another block, not taken),
  * within RUINED_PORTAL_TICKS. Up to `want` held in all.
  */
-export async function naturalObsidian (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+export async function naturalObsidian (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void, bound: ObsidianBound = {}): Promise<void> {
   const have = (): number => countItems(bot, 'obsidian')
   if (have() >= want || countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) return
   const quiet = (err: unknown): void => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err }
@@ -1271,7 +1277,7 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
   const tried = (c: { x: number, z: number }): boolean => executor.memory.getPois(RUINED_PORTAL_TRIED, { dimension: 'overworld' }).some(p => Math.hypot(p.x - c.x, p.z - c.z) < 32)
   // (none in the sea: its obsidian lies on the sea's floor among its magma, read from the seed's biomes, seaPortal)
   let portal: ReturnType<typeof ruinedPortalCandidates>[number] | undefined
-  const candidates = ruinedPortalCandidates(seed, bot.entity.position).filter(c => c.distance <= RUINED_PORTAL_TRIP && !tried(c))
+  const candidates = ruinedPortalCandidates(seed, bot.entity.position).filter(c => c.distance <= RUINED_PORTAL_TRIP && !tried(c) && withinBound(bound, c))
   const biomes = candidates.length > 0 ? await openSeedBiomes(seed, bot.version).catch(() => null) : null
   try {
     for (const c of candidates) {
@@ -1301,6 +1307,26 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
     await executor.task('to the shore', async (s) => await toShore(bot, s), signal).catch(quiet)
     await executor.task('back from the sea', async (s) => await overland(bot, { target: from, range: 8 }, s), signal).catch(quiet)
   }
+}
+
+/**
+ * how far from home the enchanting table's obsidian is gone for (its ruined portals, its pools): a 26.3 bot's went to
+ * ruined portals 286 and 333 blocks off and on to a pool some 1000 blocks from home in the deep dark, where a warden
+ * killed it (f2-26.3, t57291 to t87920)
+ */
+export const OBSIDIAN_HOME_RANGE = 160
+
+/** the enchanting's tries at its obsidian within OBSIDIAN_HOME_RANGE before its trips go past it */
+export const OBSIDIAN_BOUND_TRIES = 3
+const obsidianShortTries = new WeakMap<Bot, number>()
+
+/** where the obsidian's trips may go: within `range` of `home` (across), all when no home */
+export interface ObsidianBound { home?: { x: number, z: number } | null, range?: number }
+
+/** whether a spot is within the obsidian's bound */
+export function withinBound (bound: ObsidianBound, at: { x: number, z: number }): boolean {
+  if (bound.home == null || bound.range == null) return true
+  return Math.hypot(at.x - bound.home.x, at.z - bound.home.z) <= bound.range
 }
 
 /** how far round a lava pool's middle (across, and up or down 2) its cave is looked for (lavaPoolOrder) */
@@ -1374,7 +1400,7 @@ export async function waterForTheLava (bot: Bot, executor: Pick<Executor, 'obtai
   return false
 }
 
-export async function obsidianFromPools (bot: Bot, executor: Executor, count: number, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
+export async function obsidianFromPools (bot: Bot, executor: Executor, count: number, signal: AbortSignal, log: (line: string) => void, bound: ObsidianBound = {}): Promise<boolean> {
   const have = (): number => countItems(bot, 'obsidian')
   if (have() >= count) return true
   const quiet = (err: unknown): void => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err }
@@ -1382,13 +1408,13 @@ export async function obsidianFromPools (bot: Bot, executor: Executor, count: nu
   await refillWater(bot, signal)
   if (countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) await executor.obtain([{ item: 'diamond_pickaxe', count: 1 }], signal).catch(quiet)
   // the obsidian in the world first (in sight, a ruined portal's)
-  await naturalObsidian(bot, executor, count, signal, log)
+  await naturalObsidian(bot, executor, count, signal, log, bound)
   for (let depth = 0; depth < 2 && have() < count; depth++) {
     if (depth === 1 && bot.entity.position.y >= DEEP_LAVA_Y + 10) {
       await executor.task('down to the deep lava', async (s) => await descendTo(bot, DEEP_LAVA_Y, {}, s), signal).catch(quiet)
     }
     // (the pools out of the caves first, under the sky first; none in a cave for a bot not fit for the caves: lavaPoolOrder)
-    for (const pool of lavaPoolOrder(bot, nearestLavaPools(bot)).slice(0, 3)) {
+    for (const pool of lavaPoolOrder(bot, nearestLavaPools(bot)).filter(p => withinBound(bound, p)).slice(0, 3)) {
       if (have() >= count) break
       const at = new Vec3(pool.x, pool.y, pool.z)
       // no trip to the lava without the water to make the obsidian with (waterForTheLava)

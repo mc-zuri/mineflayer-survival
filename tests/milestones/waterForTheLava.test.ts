@@ -51,3 +51,28 @@ test('lavaPoolOrder: the pool under the sky first, then the one in the rock; the
   ready.game.dimension = 'overworld'
   assert.deepEqual(lavaPoolOrder(ready, pools), [{ x: 60, y: 63, z: 0 }, { x: 10, y: 30, z: 0 }, { x: 40, y: 18, z: 0 }])
 })
+
+test('withinBound: the obsidian\'s trips within OBSIDIAN_HOME_RANGE of home; no home, no bound; naturalObsidian goes to no ruined portal past it (f2-26.3)', async () => {
+  const { OBSIDIAN_HOME_RANGE, naturalObsidian, withinBound } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const home = { x: 0, z: 0 }
+  assert.equal(withinBound({ home, range: OBSIDIAN_HOME_RANGE }, { x: 100, z: 100 }), true)
+  assert.equal(withinBound({ home, range: OBSIDIAN_HOME_RANGE }, { x: 286, z: 0 }), false)
+  assert.equal(withinBound({}, { x: 1000, z: 0 }), true)
+  // seed 2's ruined portals, none within 20 of home: no trip
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.survival = { playOptions: { seed: '2' } }
+  bot.findBlocks = () => []
+  const calls: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (name: string) => { calls.push(name) } }
+  const seedBiomes = require('../../src/worldgen/seedBiomes')
+  const realOpen = seedBiomes.openSeedBiomes
+  seedBiomes.openSeedBiomes = async () => null
+  try {
+    await naturalObsidian(bot, executor, 4, new AbortController().signal, () => {}, { home, range: 20 })
+  } finally {
+    seedBiomes.openSeedBiomes = realOpen
+  }
+  assert.ok(!calls.includes('to a ruined portal'), calls.join(', '))
+})
