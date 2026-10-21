@@ -1113,7 +1113,9 @@ export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: Abor
   // rule with no way up but through a cave doesn't explore from down there (a 26.3 bot's hunt for a meal began at
   // y 33 by a cave and went down it to y 27, where cave spiders killed it, f5-26.3 t58998 to t59474)
   if (!(await ensureSurface(bot, signal)) && caveRuleOn(bot)) {
-    throw new SkillError('NO_PATH', `underground at ${feetOf(bot).toString()} with no way up out of the rock but through a cave: no exploring from here`)
+    // (not ready, not a failure: the milestone tried again later, uncounted, the runner's searching; a 26.3 game's
+    // stone milestone failed 5 times on it and play stopped, f8-26.3 t55902)
+    throw Object.assign(new SkillError('NO_PATH', `underground at ${feetOf(bot).toString()} with no way up out of the rock but through a cave: no exploring from here`), { notReady: true, searching: true })
   }
   if (args.found()) return true
   const center = args.center ?? bot.entity.position.clone()

@@ -572,6 +572,9 @@ test('exploreSurface: a bot under the cave rule underground with no way up but t
   // the caves shut first, then (none by the rock) the cave's cells by it, its way out; a staircase dug after each
   assert.deepEqual(shut, [true, false])
   assert.equal(err?.reason, 'NO_PATH', String(err))
+  // not ready and searching: the milestone tried again later, never a failure toward play's stop (f8-26.3 t55902)
+  assert.equal(err?.notReady, true)
+  assert.equal(err?.searching, true)
 })
 
 test('caveStepCost: a bot at a cave has its way out through the cave\'s cells within CAVE_ESCAPE_RADIUS only, none on through the cave further (f6-26.3: up through a lush cave to the base, shot dead at y -7)', async () => {
