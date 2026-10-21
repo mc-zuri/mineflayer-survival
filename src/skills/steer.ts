@@ -67,13 +67,31 @@ export function deadlyStep (bot: Bot, feet: Vec3, maxDrop = 3): boolean {
  * (deadlyStep) within `reach` blocks of the bot's middle, at its feet's height: the edge of a ledge over the lava sea,
  * a basalt delta's lava pocket. Checked from the near side of the bot's box on (its half width, 0.3).
  */
-export function edgeAhead (bot: Bot, yaw: number, reach = 1.2, maxDrop = 3): boolean {
+export function edgeAhead (bot: Bot, yaw: number, reach = 1.2, maxDrop = 3, dry = false): boolean {
   const pos = bot.entity.position
   const dx = -Math.sin(yaw)
   const dz = -Math.cos(yaw)
   for (const k of [0.45, 0.8, reach]) {
     if (k > reach) continue
-    if (deadlyStep(bot, new Vec3(pos.x + dx * k, pos.y + 0.01, pos.z + dz * k), maxDrop)) return true
+    const p = new Vec3(pos.x + dx * k, pos.y + 0.01, pos.z + dz * k)
+    if (deadlyStep(bot, p, maxDrop) || (dry && wetStep(bot, p, maxDrop))) return true
+  }
+  return false
+}
+
+/**
+ * Whether a step into the column at `feet` is into the water: the water at the feet, or the first thing under them
+ * within `maxDrop` + 1 the water (a pond's edge). With SteerOptions.dry a fight keeps out of it: a 1.21.11 bot fought a
+ * drowned off the shore into the sea (ls3b-1.21.11, t401692)
+ */
+export function wetStep (bot: Bot, feet: Vec3, maxDrop = 3): boolean {
+  const f = feet.floored()
+  if (blockName(bot, f) === 'water') return true
+  if (isSolid(bot, f)) return false
+  for (let d = 1; d <= maxDrop + 1; d++) {
+    const name = blockName(bot, f.offset(0, -d, 0))
+    if (name === 'water') return true
+    if (isSolid(bot, f.offset(0, -d, 0))) return false
   }
   return false
 }
@@ -92,6 +110,8 @@ export interface SteerOptions {
    * own level
    */
   maxDrop?: number
+  /** with `guard`, a step into the water is an edge too (wetStep): a fight from dry ground stays on it */
+  dry?: boolean
 }
 
 /**
@@ -102,7 +122,7 @@ export function steerToward (bot: Bot, point: Vec3, opts: SteerOptions = {}): bo
   const pos = bot.entity.position
   const yaw = Math.atan2(-(point.x - pos.x), -(point.z - pos.z))
   void bot.look(yaw, opts.lookPitch ?? 0, true)
-  if (opts.guard === true && edgeAhead(bot, yaw, 1.2, opts.maxDrop ?? 3)) {
+  if (opts.guard === true && edgeAhead(bot, yaw, 1.2, opts.maxDrop ?? 3, opts.dry === true)) {
     bot.setControlState('forward', false)
     bot.setControlState('back', false)
     bot.setControlState('sprint', false)

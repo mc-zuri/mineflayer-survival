@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { HEADWAY_TICKS, Headway, creeperKeepOff, deadlyStep, edgeAhead, fleeHeading, fleeRoute, fleeWay, jumpRoom, lineCost, stepCost, steerToward } from '../../src/skills/steer'
+import { HEADWAY_TICKS, Headway, creeperKeepOff, wetStep, deadlyStep, edgeAhead, fleeHeading, fleeRoute, fleeWay, jumpRoom, lineCost, stepCost, steerToward } from '../../src/skills/steer'
 import { LS3B_CREEPER_1, LS3B_CREEPER_2, bodyGets, gridBlocks, gridWorld } from './fleeTerrain'
 import { fakeBot } from '../reflexes/fakeBot'
 
@@ -189,4 +189,20 @@ test('creeperKeepOff: a route away from a creeper never passes it nearer than th
   assert.equal(fleeRoute(blocks, from, [creeper], { keepOff: creeperKeepOff(from, creeper) }), null)
   // nearer than FLEE_ROUTE_KEEP_OFF already: that much
   assert.equal(creeperKeepOff(from, new Vec3(2.5, 64, 0.5)), 2.5)
+})
+
+test('steerToward with guard and dry stops at a pond\'s edge (wetStep), and walks on along the shore (ls3b-1.21.11, t401692: a drowned fought off the shore into the sea)', () => {
+  // the shore: stone to y 63 west of x 1, a pond east of it (water y 61 to 63)
+  const pond = (p: Vec3): string => p.x >= 1 ? (p.y <= 63 && p.y >= 61 ? 'water' : p.y < 61 ? 'stone' : 'air') : (p.y < 64 ? 'stone' : 'air')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: pond })
+  assert.equal(wetStep(bot, new Vec3(1.5, 64, 0.5)), true)
+  assert.equal(wetStep(bot, new Vec3(0.5, 64, 1.5)), false)
+  // (no deadly edge: the water breaks a fall)
+  assert.equal(edgeAhead(bot, -Math.PI / 2), false)
+  assert.equal(edgeAhead(bot, -Math.PI / 2, 1.2, 3, true), true)
+  assert.strictEqual(steerToward(bot, new Vec3(5, 62, 0.5), { guard: true, dry: true }), false)
+  assert.strictEqual(bot.getControlState('forward'), false)
+  assert.strictEqual(steerToward(bot, new Vec3(5, 62, 0.5), { guard: true }), true)
+  bot.clearControlStates()
+  assert.strictEqual(steerToward(bot, new Vec3(0.5, 64, 6), { guard: true, dry: true }), true)
 })

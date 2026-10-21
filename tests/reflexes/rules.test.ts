@@ -848,3 +848,26 @@ test('putOutFireOnBot: the fire in the body\'s cells broken, none elsewhere', as
   assert.deepEqual(dug, ['(0, 64, 0)'])
   assert.equal(await putOutFireOnBot(bot), 0)
 })
+
+test('hostiles reflex by the water: a drowned in it past WATER_FIGHT_REACH let be, one at the shore fought; a trident drowned in it kept off; in the water itself, to dry ground first (ls3b-1.21.11, t401692: a drowned fought off the shore into the sea, impaled there)', () => {
+  // the shore: stone to y 63 west of x 3, the sea east of it (water y 58 to 63)
+  const sea = (p: Vec3): string => p.x >= 3 ? (p.y <= 63 && p.y >= 58 ? 'water' : p.y < 58 ? 'stone' : 'air') : (p.y < 64 ? 'stone' : 'air')
+  const drowned = (x: number, y = 62, trident = false): any => {
+    const e = entity({ name: 'drowned', position: new Vec3(0.5 + x, y, 0.5) })
+    if (trident) e.heldItem = item('trident')
+    return e
+  }
+  const sword = [item('iron_sword')]
+  // swimming 6 off the shore: not chased into the sea
+  assert.strictEqual(check(hostilesReflex, { items: sword, entities: [drowned(6)], world: sea }), null)
+  // at the shore's edge, in the sword's reach and a step: fought
+  assert.strictEqual(check(hostilesReflex, { items: sword, entities: [drowned(3)], world: sea }), 'fight drowned')
+  // on dry ground it's a mob like the others
+  assert.strictEqual(check(hostilesReflex, { items: sword, entities: [drowned(2, 64)], world: sea }), 'fight drowned')
+  // a trident drowned in the sea 12 off, in sight: kept off (out of its range or sight), not fought
+  assert.strictEqual(check(hostilesReflex, { items: sword, entities: [drowned(12, 62, true)], world: sea }), 'keep off drowned')
+  // the bot in the sea with a zombie on the shore: to dry ground first
+  assert.strictEqual(check(hostilesReflex, { items: sword, position: new Vec3(6.5, 63, 0.5), entities: [entity({ name: 'zombie', position: new Vec3(1.5, 64, 0.5) })], world: sea }), 'to shore')
+  // and with a drowned at it in the water too
+  assert.strictEqual(check(hostilesReflex, { items: sword, position: new Vec3(6.5, 63, 0.5), entities: [drowned(8)], world: sea }), 'to shore')
+})

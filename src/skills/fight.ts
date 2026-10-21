@@ -54,6 +54,11 @@ export interface FightOptions extends SkillOptions {
    * wither skeleton with the shield down while the other hit the bot from its side (full-26.3-fresh-u)
    */
   yieldToNearer?: boolean
+  /**
+   * no step into the water while closing in or backing off (SteerOptions.dry): a fight begun on dry ground stays on
+   * it, the mob in the water let be
+   */
+  dry?: boolean
 }
 
 /** the most ticks ahead a chase leads its target by, and the most blocks */
@@ -539,13 +544,13 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
 
       if (wantBlock) {
         bot.clearControlStates()
-        if (advance) steerToward(bot, target.position, { sprint: false, guard: true, maxDrop: opts.maxDrop })
+        if (advance) steerToward(bot, target.position, { sprint: false, guard: true, maxDrop: opts.maxDrop, dry: opts.dry })
         // among two melee mobs or more in their reach, faced between them (shieldCover); with one of them out of the
         // shield's front, backed off with it up, away from them, till they're both in front (not over an edge)
         const cover = guarded && loadedCrossbow == null ? shieldCover(bot.entity.position, meleeInReach().map(m => m.position)) : null
         if (cover != null) {
           void bot.look(cover.yaw, yawPitchOf(center.minus(eyePosition(bot))).pitch, true)
-          if (!cover.covered && !edgeAhead(bot, cover.yaw + Math.PI, 1.2, opts.maxDrop ?? 3)) bot.setControlState('back', true)
+          if (!cover.covered && !edgeAhead(bot, cover.yaw + Math.PI, 1.2, opts.maxDrop ?? 3, opts.dry === true)) bot.setControlState('back', true)
         } else {
           // (the shield blocks what comes from in front: Player's BlocksAttacks, faced to the loaded one)
           lookAt(bot, loadedCrossbow != null && !isCreeper ? loadedCrossbow.position.offset(0, (loadedCrossbow.height ?? 1.95) * 0.85, 0) : center)
@@ -592,9 +597,9 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
         // close in, sprinting (a sprint hit knocks back further), but not over a deadly edge: a magma cube in a basalt
         // delta was chased into a lava pocket, a blaze off a ledge over the lava sea (26.3); it comes to the bot
         const aim = tracker != null ? chaseLead(bot.entity.position, target.position, tracker.velocity(target)) : target.position
-        const walked = steerToward(bot, aim, { sprint: true, guard: true, maxDrop: opts.maxDrop })
+        const walked = steerToward(bot, aim, { sprint: true, guard: true, maxDrop: opts.maxDrop, dry: opts.dry })
         // a sprint jump from afar on open ground: no edge within the jump's reach ahead (Player.jumpFromGround's sprint boost)
-        if (opts.sprintJump === true && walked && distance > reach + 2 && bot.entity.onGround && !edgeAhead(bot, Math.atan2(-(aim.x - bot.entity.position.x), -(aim.z - bot.entity.position.z)), 3, opts.maxDrop ?? 3)) bot.setControlState('jump', true)
+        if (opts.sprintJump === true && walked && distance > reach + 2 && bot.entity.onGround && !edgeAhead(bot, Math.atan2(-(aim.x - bot.entity.position.x), -(aim.z - bot.entity.position.z)), 3, opts.maxDrop ?? 3, opts.dry === true)) bot.setControlState('jump', true)
         lookAt(bot, center)
         await waitTicks(bot, 1, signal)
         continue
@@ -604,7 +609,7 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       // over a 26.3 bot on a ledge walked it backwards off the end, into the lava sea) and time the swing
       bot.setControlState('forward', false)
       bot.setControlState('sneak', false)
-      bot.setControlState('back', distance < 1 && !edgeAhead(bot, bot.entity.yaw + Math.PI, 1.2, opts.maxDrop ?? 3))
+      bot.setControlState('back', distance < 1 && !edgeAhead(bot, bot.entity.yaw + Math.PI, 1.2, opts.maxDrop ?? 3, opts.dry === true))
       lookAt(bot, center)
       const e = bot.entity as any
       // no crit jump off a stalagmite: each landing back on its tip impales (PointedDripstoneBlock.fallOn; a 26.3 bot

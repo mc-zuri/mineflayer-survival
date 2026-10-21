@@ -11,7 +11,7 @@ import { hasLineOfSight, isAlive, type Entity } from '../skills/combatUtil'
 import { holdOffBlazes } from '../nether/blazeFight'
 import { ARCHER_BUDGET, GHAST_FIREBALL, deadlyDropBeside, deflectFireball, fireballIncoming, holdOffArcher, keepFromGhast, nearestGhast, withNetherSafety } from '../nether/safety'
 import { nearbyDrops, pickupDrops } from '../skills/pickupDrops'
-import { isSkillError } from '../skills/errors'
+import { SkillError, isSkillError } from '../skills/errors'
 import type { Reflex, ReflexContext } from './types'
 import type { ReflexConfig } from './config'
 import { isBed } from '../core/items'
@@ -286,6 +286,44 @@ export const SWARMERS = new Set(['slime', 'magma_cube'])
 /** the mobs that shoot (BlazeAttackGoal's 48 blocks, RangedBowAttackGoal's 15, RangedCrossbowAttackGoal's 8 and more, the witch's RangedAttackGoal 10) */
 export const RANGED_HOSTILES = new Set(['skeleton', 'stray', 'bogged', 'parched', 'pillager', 'witch', 'blaze'])
 
+/** whether a mob holds a trident (a drowned's: DrownedTridentAttackGoal, a RangedAttackGoal of 10 blocks every 40 ticks) */
+export function holdsTrident (e: Entity): boolean {
+  const held = (e as any).heldItem ?? (e as any).equipment?.[0]
+  return held?.name === 'trident'
+}
+
+/** whether a body at `pos` is in the water: its feet's cell or the one half a block up water (or waterlogged, kelp, seagrass) */
+export function bodyInWater (bot: Bot, pos: Vec3): boolean {
+  for (const dy of [0, 0.5]) {
+    const b: any = bot.blockAt(pos.offset(0, dy, 0))
+    if (b == null) continue
+    if (b.name === 'water' || b.name === 'bubble_column' || /kelp|seagrass/.test(b.name) || b.getProperties?.()?.waterlogged === true) return true
+  }
+  return false
+}
+
+/**
+ * how near a mob in the water must be for the hostiles reflex to fight it from dry ground (the sword's reach and a
+ * step): one further off is let be, never chased into the water. A 1.21.11 bot at 6 health fought a drowned off the
+ * shore into the sea, under the water till the drowning reflex took it up, and a trident drowned there killed it
+ * (ls3b-1.21.11, t401692 at (51, 63, -4))
+ */
+export const WATER_FIGHT_REACH = 4
+/** blocks from a trident drowned in the water the hostiles reflex keeps (its RangedAttackGoal's 10, and a margin) */
+export const TRIDENT_KEEP_OFF = 14
+/** ticks a way to dry ground that failed (toShore) waits before the hostiles reflex tries it again */
+export const SHORE_RETRY_TICKS = 200
+
+/** a mob the hostiles reflex lets be: in the water past WATER_FIGHT_REACH while the bot is on dry ground */
+export function leftInWater (bot: Bot, e: Entity): boolean {
+  return bodyInWater(bot, e.position) && !bodyInWater(bot, bot.entity.position) && distance(bot, e) > WATER_FIGHT_REACH
+}
+
+/** a trident drowned in the water: kept off, not fought (TRIDENT_KEEP_OFF) */
+export function tridentInWater (bot: Bot, e: Entity): boolean {
+  return e.name === 'drowned' && holdsTrident(e) && bodyInWater(bot, e.position)
+}
+
 /**
  * The hostiles within the reflex's range that the bot can see, nearest first (the ignored ones left out): within
  * `range`, or `rangedRange` for the ones that shoot (a skeleton 12 blocks off shot the bot for 500 ticks while it stood
@@ -295,7 +333,7 @@ export const RANGED_HOSTILES = new Set(['skeleton', 'stray', 'bogged', 'parched'
 export function hostilesInRange (ctx: ReflexContext): Entity[] {
   const { bot, config } = ctx
   return ctx.hostiles.filter(e => (!config.hostiles.ignore.includes(e.name ?? '') || provoked(ctx, e)) &&
-    distance(bot, e) <= (RANGED_HOSTILES.has(e.name ?? '') ? Math.max(config.hostiles.range, config.hostiles.rangedRange) : config.hostiles.range) &&
+    distance(bot, e) <= (RANGED_HOSTILES.has(e.name ?? '') || (e.name === 'drowned' && holdsTrident(e)) ? Math.max(config.hostiles.range, config.hostiles.rangedRange) : config.hostiles.range) &&
     Math.abs(e.position.y - bot.entity.position.y) <= config.hostiles.maxDy &&
     hasLineOfSight(bot, e))
 }
@@ -512,6 +550,8 @@ export function wallInDue (bot: Bot, near: Entity[], config: ReflexConfig, tick:
  */
 export const CORNERED_TICKS = 200
 const corneredAt = new WeakMap<Bot, number>()
+/** each bot's last failed way out of the water (the hostiles reflex's toShore) */
+const shoreFails = new WeakMap<Bot, number>()
 
 /** a flee's failure noted when it was cornered; rethrown */
 function noteCornered (bot: Bot, tick: number, err: unknown): never {
@@ -551,6 +591,44 @@ export const hostilesReflex: Reflex = {
     const wither = witherToShoot(ctx)
     if (near.length === 0 && wither == null) return null
     const cornered = wasCornered(bot, ctx.tick) && bestMeleeWeapon(bot) != null
+    // in the water with hostiles about: to dry ground first (toShore), the fight after: a 1.21.11 bot fought a drowned
+    // off the shore into the sea, and drowned and was impaled there (ls3b-1.21.11, t401692)
+    if (!nether && near.length > 0 && bodyInWater(bot, bot.entity.position) && ctx.tick - (shoreFails.get(bot) ?? -Infinity) > SHORE_RETRY_TICKS) {
+      return {
+        name: 'hostiles',
+        priority: config.hostiles.priority,
+        detail: 'to shore',
+        run: async (signal) => {
+          const { toShore } = await import('../executor/explore')
+          const out = await toShore(bot, signal).catch(err => { if (signal.aborted) throw err; return false })
+          if (!out) {
+            shoreFails.set(bot, ctx.tick)
+            throw new SkillError('NO_PATH', 'no way out of the water to dry ground')
+          }
+        }
+      }
+    }
+    // a trident drowned in the water, the bot on dry ground: kept off, out of its range or its sight (never fought
+    // from the shore: it throws from 10 blocks every 40 ticks, 8 a hit on normal); cornered, the shield up to it
+    const tridents = nether ? [] : near.filter(e => tridentInWater(bot, e) && distance(bot, e) < TRIDENT_KEEP_OFF)
+    if (tridents.length > 0 && !bodyInWater(bot, bot.entity.position)) {
+      if (!wasCornered(bot, ctx.tick)) {
+        return {
+          name: 'hostiles',
+          priority: config.hostiles.priority,
+          detail: 'keep off drowned',
+          run: async (signal) => await fleeFrom(bot, () => hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e)) }).filter(e => tridentInWater(bot, e)), { signal, distance: TRIDENT_KEEP_OFF }).catch(err => noteCornered(bot, ctx.tick, err))
+        }
+      }
+      if (hasShield(bot)) {
+        return {
+          name: 'hostiles',
+          priority: config.hostiles.priority,
+          detail: 'hold off drowned',
+          run: async (signal) => await holdOffArcher(bot, tridents[0], { signal, maxTicks: config.hostiles.fightTicks, range: TRIDENT_KEEP_OFF })
+        }
+      }
+    }
     if (sealDue(bot, near, config, ctx.tick)) {
       return {
         name: 'hostiles',
@@ -625,8 +703,11 @@ export const hostilesReflex: Reflex = {
       }
     }
     if (near.length === 0) return null
+    // the ones in the water off dry ground let be (leftInWater, tridentInWater), never chased into it
+    const fightable = nether ? near : near.filter(e => !leftInWater(bot, e) && !tridentInWater(bot, e))
+    if (fightable.length === 0) return null
     // creepers: shot from a distance when there's a bow; melee only with a shield to take the blast
-    const target = near.find(e => {
+    const target = fightable.find(e => {
       if (e.name !== 'creeper') return true
       if (hasBowAndArrows(bot) && distance(bot, e) >= config.hostiles.shootCreepersFrom) return true
       // (and cornered, no way to run: hit, its knockback keeps it from the 3 blocks its fuse starts at, SwellGoal)
@@ -687,13 +768,15 @@ export const hostilesReflex: Reflex = {
         }
       }
     }
+    // (a fight begun on dry ground keeps out of the water, and ends with the bot's feet in it: never after a mob into it)
+    const dry = !bodyInWater(bot, bot.entity.position)
     return {
       name: 'hostiles',
       priority: config.hostiles.priority,
       detail: `${useBow ? 'shoot' : 'fight'} ${target.name ?? ''}`,
       run: async (signal) => useBow
         ? await shoot(bot, target, { signal, maxShots: 3 })
-        : await fight(bot, target, { signal, ...meleeOptions(target, config), until: turned })
+        : await fight(bot, target, { signal, ...meleeOptions(target, config), dry, until: () => turned() || (dry && bodyInWater(bot, bot.entity.position)) })
     }
   }
 }
