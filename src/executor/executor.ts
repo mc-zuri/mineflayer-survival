@@ -594,6 +594,12 @@ export class Executor {
     if (partial?.item !== step.item || (partial.crafted ?? 0) > 0 || partial.placedTable === true) return
     let names = [...new Set(step.ingredients.map(i => i.name))]
     if (names.length === 0) return
+    // (its ingredients not all held now: short of them, the bag not what the plan saw, no recipe the skill lacks. A
+    // 1.21.11 bot's 'craft 3 bread' found 1 of its 9 wheat, 'missing wheat (have 1/9)', and bread of wheat was left out of
+    // every plan after, its farm's wheat never baked: f5-1.21.11 resumed from its base, t169678)
+    const held = new Map<string, number>()
+    for (const i of step.ingredients) held.set(i.name, (held.get(i.name) ?? 0) + i.count)
+    if ([...held].some(([name, n]) => countItems(this.bot, name) < n)) return
     // of a one-ingredient recipe (the planks of a log), the alternatives the skill makes none of alone; of the others,
     // the step's ingredients together
     const [one] = step.recipe.ingredients

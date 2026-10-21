@@ -138,6 +138,18 @@ test('a craft the craft skill makes none of from the step\'s ingredients is plan
   // and the executor's plans after go without it
   assert.ok(!ex.plan([{ item: 'oak_planks', count: 16 }]).steps.some(s => s.kind === 'craft' && s.ingredients.some(i => i.name === 'oak_wood')))
 
+  // a craft that fails short of its ingredients (the bag not what the plan saw: the wheat of a 'craft 3 bread' gone,
+  // 1 of 9) is no recipe of the skill's: not left out after
+  const gone = fakeBot({ oak_wood: 4 })
+  const goneLines: string[] = []
+  const once = new Executor(gone, {
+    runners: { craft: async (step) => { gone.take('oak_wood', 3); throw new SkillError('MISSING_ITEMS', 'missing oak_wood (have 1/2)', { item: step.item, crafted: 0, table: null, placedTable: false }) } },
+    maxStepFailures: 1,
+    log: line => goneLines.push(line)
+  })
+  await assert.rejects(once.obtain([{ item: 'oak_planks', count: 8 }]))
+  assert.ok(!goneLines.some(l => /makes no/.test(l)), goneLines.join(' | '))
+
   // a craft that fails for want of what its table took (the table made of the planks first), or of a table it couldn't
   // make, is no recipe of the skill's: the same plan again
   for (const partial of [{ item: 'oak_planks', crafted: 0, table: null, placedTable: true }, { item: 'crafting_table', crafted: 0, table: null, placedTable: false }]) {
