@@ -103,12 +103,13 @@ describe(`combat skills and reflexes on ${DEFAULT_VERSION}`, { timeout: 15 * 60 
     bot.on('reflex' as any, (name: string) => { if (name === 'eat') ate = true })
     bot.survival.reflexes!.enabled = true
     await server.command(`effect give ${USER} minecraft:hunger 10 255`)
-    assert.ok(await waitFor(() => bot.food <= 14, 300), `still at food ${bot.food}`)
+    // (to 12, where the beef's 8 fit the bar whole: dueMeal waits at 13 and 14 with the health full, nothing wasted)
+    assert.ok(await waitFor(() => bot.food <= 12, 400), `still at food ${bot.food}`)
     await server.command(`effect clear ${USER} minecraft:hunger`)
     const beef = (): number => bot.inventory.count(bot.registry.itemsByName.cooked_beef.id, null)
     assert.ok(await waitFor(() => beef() < 8, 200), 'no beef eaten')
     assert.ok(ate)
-    assert.ok(await waitFor(() => bot.food > 14, 200), `food ${bot.food} after eating`)
+    assert.ok(await waitFor(() => bot.food > 12, 200), `food ${bot.food} after eating`)
   })
 
   test('given armor, the bot wears the best of it', async () => {
