@@ -1233,3 +1233,20 @@ test('a death spot\'s killers still about: given up killed by more than one with
   assert.equal(again.deathsNear(again.death!, 'overworld', DEATH_SPOT_SAME), 1)
   assert.equal(again.death?.killers, 3)
 })
+
+test('a death after a milestone (the herd\'s upkeep, the store at the base: afterTrip) goes to the recovery, and play goes on (ls3c-1.21.11, t390765: drowned getting the herd\'s kelp, \'play threw: the bot died\')', async () => {
+  const bot = fakeBot()
+  const logs: string[] = []
+  const runner = new Runner(bot, { handlers: { wood: async () => { bot.give('wooden_pickaxe', 1); bot.give('crafting_table', 1) } }, until: 'wood', log: (l: string) => logs.push(l) })
+  let trips = 0
+  ;(runner as any).afterTrip = async () => {
+    trips++
+    if (trips === 1) throw new TaskError('DIED', 'the bot died')
+  }
+  let recovered = 0
+  ;(runner as any).recover = async () => { recovered++ }
+  const r = await runner.play()
+  assert.equal(recovered, 1)
+  assert.equal(r.reason, 'until')
+  assert.ok(logs.some(l => /died after wood/.test(l)), logs.join('\n'))
+})

@@ -1019,6 +1019,15 @@ export class Runner {
         await this.afterTrip(signal)
       } catch (err) {
         if (stopped()) return this.stop(m.id, 'aborted', err)
+        // a death in the herd's upkeep or the store at the base after a milestone (keepHerd's tendHerd: its hunt, its
+        // kelp) goes to the recovery as every other: thrown on, it ended play and the whole game. A 1.21.11 bot
+        // drowned getting the herd's kelp, and the e2e stopped 'play threw: the bot died' (ls3c-1.21.11, t390765;
+        // full-1.21.11-fresh-j, t210976, blown up by a creeper while exploring for kelp)
+        if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+          this.log(`died after ${m.id}: ${(err as Error).message}`)
+          await this.recover(signal)
+          continue
+        }
         throw err
       }
       this.save()
