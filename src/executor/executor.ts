@@ -30,8 +30,8 @@ import { countItems, emptySlots, trace, waitTicks } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
-import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, UnreachableBlocks, VILLAGE_RANGE, WATER_MOBS } from './sight'
-import { BiomeSurvey, KELP_BIOMES, LAND_FOODS } from './foodLand'
+import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, UnreachableBlocks, VILLAGE_RANGE, WATER_MOBS, type MobLand } from './sight'
+import { BiomeSurvey, KELP_BIOMES, LAND_FOODS, MIN_SURVEYED, MOB_BIOMES, MOB_LAND_RANGE } from './foodLand'
 import { fishableWaterNear } from '../skills/fish'
 import { herdSpares, herdSupply } from '../skills/herd'
 import { noteVillage } from '../skills/village'
@@ -305,7 +305,7 @@ export class Executor {
     this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos), () => herdSpares(bot, this.memory), () => {
       const at = bot.entity?.position
       return at != null && this.memory.getPois('village', { dimension: normalizeDimension(bot.game?.dimension) }).some(p => Math.hypot(p.x - at.x, p.z - at.z) <= VILLAGE_RANGE)
-    }, () => this.oceanNear())
+    }, () => this.oceanNear(), mob => this.mobLand(mob))
     // the animals in sight noted every second (an exploring for berries that saw none is a land without them too)
     let looks = 0
     bot.on('physicsTick', () => { if (++looks % 20 === 0) this.sightings.look() })
@@ -362,6 +362,22 @@ export class Executor {
     if (this.biomes?.near(KELP_BIOMES, at, OCEAN_RANGE) === true) return true
     const dimension = normalizeDimension(this.bot.game?.dimension)
     return this.memory.findBlocks(KELP_BLOCKS, { dimension, near: at, count: 1, maxDistance: OCEAN_RANGE }).length > 0
+  }
+
+  /**
+   * What's known of a mob's land (Sightings' cost): a spawner of it noted within SIGHT_RADIUS (spawnerFarm's
+   * SPAWNER_POI, its note the mob); for the animals of MOB_BIOMES, whether one of their biomes was surveyed or read from
+   * the seed within MOB_LAND_RANGE, null while too little of the land about is known (MIN_SURVEYED chunks)
+   */
+  mobLand (mob: string): MobLand {
+    const at = this.bot.entity?.position
+    if (at == null) return {}
+    const dimension = normalizeDimension(this.bot.game?.dimension)
+    const spawner = this.memory.getPois(SPAWNER_POI, { dimension }).some(p => p.note === mob && Math.hypot(p.x - at.x, p.y - at.y, p.z - at.z) <= SIGHT_RADIUS)
+    const biomes = MOB_BIOMES[mob]
+    if (biomes == null || this.biomes == null) return { spawner }
+    if (this.biomes.land(at, MOB_LAND_RANGE).chunks < MIN_SURVEYED) return { spawner, land: null }
+    return { spawner, land: this.biomes.near(biomes, at, MOB_LAND_RANGE) }
   }
 
   /** on other land (a food land): the land's foods' misses and the explorations' progress forgotten */

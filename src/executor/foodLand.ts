@@ -34,6 +34,18 @@ export const MEAT_BIOMES: ReadonlySet<string> = new Set([
 ])
 
 /**
+ * The biomes whose creature spawns have sheep (the wool of a bed): the food biomes but the mushroom fields (1.21.11's
+ * and 26.3's worldgen/biome files)
+ */
+export const SHEEP_BIOMES: ReadonlySet<string> = new Set([...MEAT_BIOMES].filter(b => b !== 'mushroom_fields'))
+
+/** the land animals the plans price by their biomes about (Sightings' mobLand), and the biomes each spawns in */
+export const MOB_BIOMES: Readonly<Record<string, ReadonlySet<string>>> = { sheep: SHEEP_BIOMES }
+
+/** how far about the bot an animal's biomes count as about (the exploring's 96 blocks and some) */
+export const MOB_LAND_RANGE = 160
+
+/**
  * The biomes whose features grow kelp: kelp_cold in the ocean, deep ocean, cold and deep cold ocean, kelp_warm in the
  * lukewarm and deep lukewarm ocean (1.21.11's and 26.3's worldgen/biome files; no kelp in the warm and frozen oceans,
  * nor in a river)

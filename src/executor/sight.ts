@@ -7,6 +7,7 @@ import { isGrown } from '../core/crops'
 import { normalizeDimension } from '../core/memory'
 import type { FindTarget } from '../planner/obtain'
 import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
+import { dayPhase } from '../planner/schedule'
 import { nearestOfType } from '../skills/hunt'
 import { findNear } from './explore'
 import { fishableWaterNear } from '../skills/fish'
@@ -85,6 +86,27 @@ export const SIGHTED_BLOCKS = ['sweet_berry_bush', 'melon', 'carrots', 'potatoes
  */
 export const NOT_NEAR_TICKS = 6000
 
+/**
+ * The monsters that spawn in the dark only (Monster.checkMonsterSpawnRules, isDarkEnoughToSpawn: block light 0, sky
+ * light under the night's): on the surface at night, in the caves; a hunt for one by day walks the surface for none. A
+ * 26.3 bot's string for the bow and for a bed's wool hunted spiders by day, 'exploring for a spider' from t106025 to its
+ * NOT_FOUND at t114736, and from t28925 on (f3-run1, f3-26.3)
+ */
+export const NIGHT_MOBS = ['spider', 'zombie', 'skeleton', 'creeper', 'enderman', 'witch']
+/** how many times dearer a night monster not in sight is by day in the overworld, with no spawner of it near */
+export const DAY_MONSTER_FACTOR = 16
+/**
+ * how many times dearer a land animal is with none of its biomes surveyed or read from the seed near (MOB_BIOMES): the
+ * land about known (MIN_SURVEYED chunks) and none of them in it
+ */
+export const NO_LAND_FACTOR = 16
+
+/** what the executor knows of a mob's land: a spawner of it noted near, whether its biomes are about (null: not known) */
+export interface MobLand {
+  spawner?: boolean
+  land?: boolean | null
+}
+
 export class Sightings {
   /** the tick a name was last looked for and not found, and the misses in a row */
   private readonly missed = new Map<string, { at: number, misses: number }>()
@@ -103,8 +125,9 @@ export class Sightings {
    * only then)
    * @param oceanNear whether an ocean that grows kelp (or kelp remembered) is known within OCEAN_RANGE (kelp is the
    * plans' to count on only then)
+   * @param mobLand a spawner of a mob noted near, and whether the biomes it spawns in are about (MobLand)
    */
-  constructor (private readonly bot: Bot, private readonly now: () => number, private readonly outOfTheWay: (pos: Vec3) => boolean = () => false, private readonly spared: () => ReadonlySet<number> = () => new Set(), private readonly villageNear: () => boolean = () => true, private readonly oceanNear: () => boolean = () => true) {}
+  constructor (private readonly bot: Bot, private readonly now: () => number, private readonly outOfTheWay: (pos: Vec3) => boolean = () => false, private readonly spared: () => ReadonlySet<number> = () => new Set(), private readonly villageNear: () => boolean = () => true, private readonly oceanNear: () => boolean = () => true, private readonly mobLand: (mob: string) => MobLand = () => ({})) {}
 
   /** the names a step looked for and didn't find */
   missing (names: readonly string[]): void {
@@ -191,6 +214,13 @@ export class Sightings {
     if (t.kind === 'block' && VILLAGE_CROPS.includes(t.name) && !this.villageNear()) return t.find * NO_VILLAGE_FACTOR
     // (kelp with no sea that grows it known near: a guess at one somewhere)
     if (t.kind === 'block' && KELP_BLOCKS.includes(t.name) && !this.oceanNear()) return t.find * NO_OCEAN_FACTOR
+    if (t.kind === 'mob') {
+      const land = this.mobLand(t.name)
+      // (a night monster by day: none on the surface till dusk, but by a spawner of it)
+      if (NIGHT_MOBS.includes(t.name) && t.dimension === 'overworld' && dayPhase(Number(bot.time?.timeOfDay ?? 0)) === 'day' && land.spawner !== true) return t.find * DAY_MONSTER_FACTOR
+      // (an animal with none of its biomes about: a guess at one somewhere)
+      if (land.land === false) return t.find * NO_LAND_FACTOR
+    }
     return undefined
   }
 

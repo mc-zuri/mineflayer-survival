@@ -192,3 +192,41 @@ test('the rt-1 food restock with no sea known: no kelp planned, the animals not 
   assert.ok(plan(true).includes('mine kelp'), plan(true).join(', '))
   assert.ok(!plan(false).includes('mine kelp'), plan(false).join(', '))
 })
+
+test('the wool\'s sources by what\'s about: a night monster by day is dear but by a spawner of it, an animal with none of its biomes about too (f3-26.3 and f3-run1: spiders hunted by day for a bed\'s wool and a rod\'s string)', async () => {
+  const { DAY_MONSTER_FACTOR, NO_LAND_FACTOR } = await import('../../src/executor/sight')
+  const bot = fakeBot([])
+  bot.time = { timeOfDay: 6000 }
+  const land: Record<string, any> = {}
+  const s = new Sightings(bot, () => 0, () => false, () => new Set(), () => true, () => true, mob => land[mob] ?? {})
+  const mob = (name: string, find: number): any => ({ name, kind: 'mob', dimension: 'overworld', find })
+  // by day: a spider somewhere is dear, a cave's (the nether's blaze) not
+  assert.equal(s.cost(mob('spider', 1200)), 1200 * DAY_MONSTER_FACTOR)
+  assert.equal(s.cost(mob('zombie', 600)), 600 * DAY_MONSTER_FACTOR)
+  assert.equal(s.cost(mob('cow', 400)), undefined)
+  // by a spider spawner: not
+  land.spider = { spawner: true }
+  assert.equal(s.cost(mob('spider', 1200)), undefined)
+  delete land.spider
+  // at night: not; in sight: a walk
+  bot.time.timeOfDay = 15000
+  assert.equal(s.cost(mob('spider', 1200)), undefined)
+  bot.time.timeOfDay = 6000
+  bot.entities[1] = { id: 1, name: 'spider', position: new Vec3(8, 64, 0), metadata: [] }
+  assert.equal(s.cost(mob('spider', 1200)), 40)
+  delete bot.entities[1]
+  // sheep: none of their biomes about (the land known) dear; not known, or about, as the source says
+  land.sheep = { land: false }
+  assert.equal(s.cost(mob('sheep', 400)), 400 * NO_LAND_FACTOR)
+  land.sheep = { land: null }
+  assert.equal(s.cost(mob('sheep', 400)), undefined)
+
+  // the plan for a bed's 3 wool by day: the sheep, even with none of their land known
+  const kit = { crafting_table: 1, oak_planks: 3, stone_sword: 1 }
+  const plan = (): string[] => obtainAll(registry, [{ item: 'white_bed', count: 1 }], { inventory: kit, findCost: t => s.cost(t) }).steps.filter(st => st.kind === 'kill').map(st => (st as any).mob)
+  land.sheep = { land: false }
+  assert.deepEqual(plan(), ['sheep'])
+  // at night with no sheep land about: the spiders' string
+  bot.time.timeOfDay = 15000
+  assert.deepEqual(plan(), ['spider'])
+})

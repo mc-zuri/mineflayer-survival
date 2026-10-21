@@ -1143,3 +1143,20 @@ test('a step that fails for room (INVENTORY_FULL) and is given it runs again unc
   assert.ok(TaskError.is(twice.err, 'INVENTORY_FULL'))
   assert.equal(twice.tries, 2)
 })
+
+test('mobLand: a spawner of the mob noted within SIGHT_RADIUS; the sheep\'s biomes about once the land about is known (MIN_SURVEYED chunks, surveyed or read from the seed)', async () => {
+  const { MIN_SURVEYED } = await import('../../src/executor/foodLand')
+  const bot = fakeBot()
+  const ex = new Executor(bot, { runners: {} })
+  assert.deepEqual(ex.mobLand('spider'), { spawner: false })
+  ex.memory.addPoi('spawner', { x: 20, y: 30, z: 0 }, 'overworld', 'spider')
+  ex.memory.addPoi('spawner', { x: 0, y: 30, z: 20 }, 'overworld', 'zombie')
+  assert.equal(ex.mobLand('spider').spawner, true)
+  assert.equal(ex.mobLand('skeleton').spawner, false)
+  // the land not known yet
+  assert.equal(ex.mobLand('sheep').land, null)
+  for (let i = 0; i < MIN_SURVEYED; i++) ex.biomes.note({ x: (i % 6) * 16, z: Math.floor(i / 6) * 16, y: 70, biome: i === 3 ? 'mushroom_fields' : 'snowy_slopes' })
+  assert.equal(ex.mobLand('sheep').land, false)
+  ex.biomes.note({ x: 0, z: 96, y: 70, biome: 'plains' })
+  assert.equal(ex.mobLand('sheep').land, true)
+})
