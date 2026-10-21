@@ -11,6 +11,7 @@ import { collectBlock } from './collectBlock'
 import { navigateToReach } from './navigate'
 import { pickupDrops } from './pickupDrops'
 import { makeWaterHole } from './caneFarm'
+import { dig } from '../core/actions'
 import { isSource } from './bucket'
 import { countItems, findInventoryItem, resyncInventory, settleInventory, trace, waitTicks, waitUntil, type Block } from './util'
 
@@ -480,7 +481,10 @@ export async function makeFarmSpring (bot: Bot, water: Vec3, signal?: AbortSigna
   const [corner, east, south] = springCells(water)
   if (!isSource(lookup(corner), 'water')) {
     const above = lookup(corner.offset(0, 1, 0))
-    if (above != null && above.boundingBox !== 'block' && above.name !== 'air' && above.name !== 'cave_air') await collectBlock(bot, { positions: [corner.offset(0, 1, 0)], anyTool: true, pickup: false }, signal)
+    if (above != null && above.boundingBox !== 'block' && above.name !== 'air' && above.name !== 'cave_air') {
+      await navigateToReach(bot, corner.offset(0, 1, 0), signal)
+      await dig(bot, bot.blockAt(corner.offset(0, 1, 0)) as Block, { signal })
+    }
     const hole = await makeWaterHole(bot, water, signal, corner)
     if (hole == null) throw new SkillError('VERIFY_FAILED', `no water poured at ${corner.toString()}`)
   }
@@ -488,8 +492,13 @@ export async function makeFarmSpring (bot: Bot, water: Vec3, signal?: AbortSigna
     throwIfAborted(signal)
     if (isSource(lookup(cell), 'water')) continue
     // (its crop first, then the farmland: the water of the two sources beside it a source there)
+    // (a crop not grown broken by hand: collectBlock passes one over till it's grown, 'broke 0 of 1 blocks', f5-1.21.11
+    // t223105)
     const above = lookup(cell.offset(0, 1, 0))
-    if (above != null && above.name !== 'air' && above.name !== 'cave_air') await collectBlock(bot, { positions: [cell.offset(0, 1, 0)], anyTool: true }, signal)
+    if (above != null && above.name !== 'air' && above.name !== 'cave_air') {
+      await navigateToReach(bot, cell.offset(0, 1, 0), signal)
+      await dig(bot, bot.blockAt(cell.offset(0, 1, 0)) as Block, { signal })
+    }
     if (lookup(cell) != null && lookup(cell).name !== 'water') await collectBlock(bot, { positions: [cell], anyTool: true }, signal)
   }
   await waitUntil(bot, () => isSpring(lookup, water), 60, signal)

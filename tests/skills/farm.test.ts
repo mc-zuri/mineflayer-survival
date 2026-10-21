@@ -692,3 +692,41 @@ test('farmSpring: the water bucket held by the farm, its water made a spring (it
     obsidian.refillWater = real.refill
   }
 })
+
+test('makeFarmSpring breaks a crop not grown on the cells it takes by hand (collectBlock passes one over: \'broke 0 of 1 blocks\'), the farmland after, the corner poured', async () => {
+  const { makeFarmSpring, springCells } = await import('../../src/skills/farm')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const actions = require('../../src/core/actions')
+  const nav = require('../../src/skills/navigate')
+  const cane = require('../../src/skills/caneFarm')
+  const collect = require('../../src/skills/collectBlock')
+  const water = new Vec3(10, 63, 10)
+  const blocks = new Map<string, any>()
+  const key = (p: Vec3): string => `${p.x},${p.y},${p.z}`
+  blocks.set(key(water), { name: 'water', getProperties: () => ({ level: 0 }) })
+  const [corner, east, south] = springCells(water)
+  for (const c of [east, south, corner]) blocks.set(key(c), { name: 'farmland' })
+  blocks.set(key(east.offset(0, 1, 0)), { name: 'wheat', boundingBox: 'empty', getProperties: () => ({ age: 2 }) })
+  for (const c of [south, corner]) blocks.set(key(c.offset(0, 1, 0)), { name: 'air', boundingBox: 'empty' })
+  const lookup = (p: Vec3): any => blocks.get(key(p.floored())) ?? world([])(p)
+  const bot = fakeBot({ position: new Vec3(12.5, 64, 12.5), items: [item('water_bucket', 1)] })
+  bot.blockAt = (p: Vec3) => ({ ...lookup(p), position: p.floored() })
+  const real = { dig: actions.dig, nav: nav.navigateToReach, hole: cane.makeWaterHole, collect: collect.collectBlock }
+  const dug: string[] = []
+  const water4 = (): void => { for (const c of [corner, east, south]) blocks.set(key(c), { name: 'water', getProperties: () => ({ level: 0 }) }) }
+  actions.dig = async (_b: any, block: any) => { dug.push(`${block.name} ${key(block.position)}`); blocks.set(key(block.position), { name: 'air' }) }
+  nav.navigateToReach = async () => {}
+  cane.makeWaterHole = async (_b: any, _c: any, _s: any, at: Vec3) => { blocks.set(key(at), { name: 'water', getProperties: () => ({ level: 0 }) }); return at }
+  collect.collectBlock = async (_b: any, args: any) => { for (const p of args.positions) { dug.push(`collect ${key(p)}`); blocks.set(key(p), { name: 'air' }) } ; if (args.positions.some((p: Vec3) => p.equals(south))) water4() }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    assert.equal(await makeFarmSpring(bot, water), true)
+  } finally {
+    clearInterval(ticking)
+    Object.assign(actions, { dig: real.dig })
+    nav.navigateToReach = real.nav
+    cane.makeWaterHole = real.hole
+    collect.collectBlock = real.collect
+  }
+  assert.deepEqual(dug, [`wheat ${key(east.offset(0, 1, 0))}`, `collect ${key(east)}`, `collect ${key(south)}`])
+})
