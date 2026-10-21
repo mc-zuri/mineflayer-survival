@@ -86,7 +86,7 @@ test('the option: a radius known from the start (0 none), the message widening i
   assert.strictEqual(underSpawnProtection(none, new Vec3(0, 64, 0)), false)
 })
 
-test(`a dig the server put back at the same cell twice within SPAWN_INFER_RANGE of the spawn is its protection (1.21.11 says nothing); once, a gravel's fall, or one far off is not`, () => {
+test(`two digs the server put back within SPAWN_INFER_RANGE of the spawn are its protection (1.21.11 says nothing); one, a gravel's fall, or ones far off are not`, () => {
   const bot = spawnBot()
   installSpawnProtection(bot, 'auto')
   refusedDig(bot, new Vec3(1, 67, 1))
@@ -105,6 +105,14 @@ test(`a dig the server put back at the same cell twice within SPAWN_INFER_RANGE 
   bot.targetDigBlock = null
   refusedDig(bot, new Vec3(1, 67, 1))
   assert.strictEqual(spawnProtectionState(bot)?.radius, SPAWN_PROTECTION_RADIUS)
+})
+
+test('the digs of two cells put back near the spawn, each once (a refused cell is not dug again), are its protection too; the radius the farther one has', () => {
+  const bot = spawnBot()
+  installSpawnProtection(bot, 'auto')
+  refusedDig(bot, new Vec3(2, 64, 3))
+  refusedDig(bot, new Vec3(-20, 60, 3))
+  assert.strictEqual(spawnProtectionState(bot)?.radius, 20)
 })
 
 test('a place the server put back twice at a cell near the spawn is its protection; a block the bot placed and dug again is not', () => {

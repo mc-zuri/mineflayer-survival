@@ -9,8 +9,7 @@
 // And any server's refusals (a claim, a protected region, adventure mode): a dig or a place the server put back marks
 // its cell for REFUSED_CELL_TICKS, and more than two close together a region with no dig nor place in it.
 //
-// The bot learns the square (from the message, or from the same cell's dig or place put back SPAWN_REFUSALS times
-// near the spawn) and keeps its work out of it: the pathfinder breaks and places nothing in it, the mine steps,
+// The bot learns the square (from the message, or from SPAWN_REFUSALS digs or places put back near the spawn) and keeps its work out of it: the pathfinder breaks and places nothing in it, the mine steps,
 // collectBlock and placeBlock pass its blocks over, and the base's site is chosen out of it. It walks through it.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
@@ -22,7 +21,7 @@ import { findBlocks } from '../core/findBlocks'
 
 /** the vanilla server's spawn-protection (DedicatedServerProperties: 16), the radius taken once a refusal is seen */
 export const SPAWN_PROTECTION_RADIUS = 16
-/** a dig or a place put back at the same cell this many times near the spawn is the spawn's protection */
+/** this many digs or places put back near the spawn within REGION_WINDOW ticks (a bot no op) are the spawn's protection */
 export const SPAWN_REFUSALS = 2
 /** how far from the spawn a cell's refusals are taken for its protection (twice the default radius) */
 export const SPAWN_INFER_RANGE = 32
@@ -60,8 +59,6 @@ export interface SpawnProtectionState {
   dimension: string
   /** the bot's op level (the server's entity event 24 + level): an op is never under the protection */
   opLevel: number
-  /** refusals counted by cell */
-  refusals: Map<string, number>
   /** the breaks the client predicted, by cell: the block that was there */
   digs: Map<string, Pending>
   /** the places the client predicted, by cell: the block that was there before */
@@ -266,8 +263,8 @@ function undoRefusedPlaces (bot: Bot, cell: Vec3): void {
 /**
  * A refusal at the cell (its dig or place put back by the server): the cell marked for REFUSED_CELL_TICKS (any server:
  * a claim, a protected region, adventure mode) and the path under way planned round it; REGION_REFUSALS of them
- * within REGION_RANGE of each other lately (no op) a protected region; SPAWN_REFUSALS at the same cell near the
- * spawn ('auto' and no op) its protection.
+ * within REGION_RANGE of each other lately (no op) a protected region; SPAWN_REFUSALS of them near the spawn
+ * ('auto' and no op) its protection.
  */
 export function noteRefusal (bot: Bot, cell: Vec3, why: string): void {
   const state = states.get(bot)
@@ -283,11 +280,12 @@ export function noteRefusal (bot: Bot, cell: Vec3, why: string): void {
   if (state.option !== 'auto' || state.opLevel > 0) return
   if (!inSpawnDimension(bot, state)) return
   if (spawnDistance(bot, cell) > SPAWN_INFER_RANGE) return
-  const key = keyOf(cell)
-  const n = (state.refusals.get(key) ?? 0) + 1
-  state.refusals.set(key, n)
-  trace('spawnProtection: refused', why, cell.toString(), n)
-  if (n >= SPAWN_REFUSALS) learnSpawnProtection(bot, cell, `${n} ${why}s put back`)
+  // (the refusals of the last REGION_WINDOW ticks near the spawn, this one among them: the cells refused aren't dug
+  // again, so they're each another's)
+  const near = state.recent.filter(r => r.dimension === state.dimension && spawnDistance(bot, r.cell) <= SPAWN_INFER_RANGE)
+  if (near.length < SPAWN_REFUSALS) return
+  const farthest = near.reduce((a, b) => spawnDistance(bot, b.cell) > spawnDistance(bot, a.cell) ? b : a)
+  learnSpawnProtection(bot, farthest.cell, `${near.length} digs or places put back near the spawn`)
 }
 
 /** the refusals close together lately: REGION_REFUSALS of them a protected region about them */
@@ -320,7 +318,6 @@ export function installSpawnProtection (bot: Bot, option: SpawnProtectionOption 
     radius: typeof option === 'number' && option > 0 ? option : null,
     dimension: 'overworld',
     opLevel: 0,
-    refusals: new Map(),
     digs: new Map(),
     places: new Map(),
     refused: new Map(),
