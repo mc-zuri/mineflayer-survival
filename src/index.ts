@@ -17,6 +17,7 @@ import { dropsDear, dropsWorthATrip, gearScore } from './executor/keep'
 import { keepWayDown, wayDown } from './skills/wayDown'
 import { installSculkAvoidance, watchDangers } from './skills/danger'
 import { caveCells, keepOutOfCaves } from './skills/caves'
+import { keepOffTridentZones } from './skills/tridentZone'
 import { installGazeGuard } from './skills/gaze'
 import { capDropsByHealth } from './skills/dropGuard'
 import { guardEdges } from './skills/edgeGuard'
@@ -122,6 +123,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     watchDangers(bot)
     // no way through the caves, nor a dig opening into one, for a bot not fit for them (caveReady): its own tunnels
     keepOutOfCaves(bot)
+    // (and the work's paths round a trident drowned's zone: skills/tridentZone)
+    keepOffTridentZones(bot)
     // no stare at a calm enderman by accident (EnderMan.isLookingAtMe)
     installGazeGuard(bot)
     // the ticks since the bot last slept (Stats.TIME_SINCE_REST): the night below the surface is slept only when due
