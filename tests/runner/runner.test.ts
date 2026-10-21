@@ -47,7 +47,7 @@ test('play works the milestones in order, an event for each reached, and stops b
   const enchantedPick = { done: false }
   const handlers = {
     wood: give({ wooden_pickaxe: 1, crafting_table: 1 }),
-    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1 }),
+    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1 }),
     food: give({ cooked_beef: 8 }),
     base: async () => { worked.push('base'); bot.survival.memory.setBase({ x: 0, y: 40, z: 0 }) },
     iron: give({ iron_pickaxe: 1, iron_sword: 1, iron_helmet: 1, iron_chestplate: 1, iron_leggings: 1, iron_boots: 1, shield: 1, bucket: 1 }),
@@ -77,7 +77,7 @@ test('until and skip; a milestone failing five times stops play; the save file r
     log: () => {},
     handlers: {
       wood: async () => { bot.give('wooden_pickaxe', 1); bot.give('crafting_table', 1) },
-      stone: async () => { bot.give('stone_pickaxe', 1); bot.give('stone_sword', 1); bot.give('stone_axe', 1); bot.give('furnace', 1) }
+      stone: async () => { bot.give('stone_pickaxe', 1); bot.give('stone_sword', 1); bot.give('stone_axe', 1); bot.give('stone_shovel', 1); bot.give('furnace', 1) }
     }
   })
   bot.survival.memory.rememberBlock('iron_ore', { x: 3, y: 12, z: 4 })
@@ -89,7 +89,7 @@ test('until and skip; a milestone failing five times stops play; the save file r
   assert.equal(saved.memory.blocks[0].name, 'iron_ore')
 
   // a new run from the file: the memory and the milestones come back
-  const bot2 = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1 })
+  const bot2 = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1 })
   let tries = 0
   const runner2 = new Runner(bot2, { saveFile, skip: ['food'], log: () => {}, handlers: { base: async () => { tries++; throw new TaskError('NO_PATH', 'no way to the site') } } })
   const result2 = await runner2.play()
@@ -256,7 +256,7 @@ test('a death after the iron: the milestones reached stay reached, the food is g
   let died = false
   const handlers = {
     wood: give({ wooden_pickaxe: 1, crafting_table: 1 }),
-    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1 }),
+    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1 }),
     food: give({ cooked_beef: 8 }),
     iron: give({ iron_pickaxe: 1, iron_sword: 1, iron_helmet: 1, iron_chestplate: 1, iron_leggings: 1, iron_boots: 1, shield: 1, bucket: 1 }),
     diamonds: async () => {
@@ -364,7 +364,7 @@ test('the death messages are told from the other system lines about the bot', as
 })
 
 test('dusk cuts the day\'s work off for the night\'s mine, and the milestone goes on after', async () => {
-  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, torch: 20, cooked_beef: 8, shield: 1, oak_log: 4, coal: 5 })
+  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1, torch: 20, cooked_beef: 8, shield: 1, oak_log: 4, coal: 5 })
   bot.time = { timeOfDay: 11000, day: 0 }
   bot.findBlock = () => null
   const mined: string[] = []
@@ -448,7 +448,7 @@ test('with the iron the work up next, the night is not waited out (its last logs
 })
 
 test('the enchanting milestone failing five times is left out and play goes on to the nether (the dragon needs none of it)', async () => {
-  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, cooked_beef: 8 })
+  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1, cooked_beef: 8 })
   bot.give('iron_pickaxe', 1)
   for (const n of ['iron_sword', 'iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots', 'shield', 'bucket', 'diamond_pickaxe', 'diamond_sword']) bot.give(n, 1)
   bot.survival.memory.setBase({ x: 0, y: 40, z: 0 })
@@ -561,7 +561,7 @@ test('a resumed run keeps the trip kit\'s chest and the spawn bed (its foot and 
 
 test('an optional milestone that has had its ticks is left out before it fails five times', async () => {
   const { OPTIONAL_MILESTONE_TICKS } = await import('../../src/runner')
-  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, cooked_beef: 8 })
+  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1, cooked_beef: 8 })
   bot.give('iron_pickaxe', 1)
   for (const n of ['iron_sword', 'iron_helmet', 'iron_chestplate', 'iron_leggings', 'iron_boots', 'shield', 'bucket', 'diamond_pickaxe', 'diamond_sword']) bot.give(n, 1)
   bot.survival.memory.setBase({ x: 0, y: 40, z: 0 })
@@ -639,20 +639,21 @@ test('rekit with nothing to make a pickaxe from gets one the way the game starts
   assert.deepEqual(calls.slice(0, 3), ['ensurePickaxe', 'obtain stone_pickaxe,wooden_pickaxe', 'navigate'])
 })
 
-test('after a death the basics lacking are made again in order: stone tools (an axe among them, for the wood), a shield (f7-26.3: speared with none), iron ones, a bucket, a chestplate', async () => {
+test('after a death the basics lacking are made again in order: stone tools (a shovel and an axe among them, for the dirt and the wood), a shield (f7-26.3: speared with none), iron ones, a bucket, a chestplate', async () => {
   const { reequipGoals } = await import('../../src/runner')
   const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
-  assert.deepEqual(reequipGoals(inv({ dirt: 3 })).map(g => g.item), ['stone_pickaxe', 'stone_sword', 'stone_axe', 'shield', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
-  assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), ['stone_axe'])
+  assert.deepEqual(reequipGoals(inv({ dirt: 3 })).map(g => g.item), ['stone_pickaxe', 'stone_sword', 'stone_shovel', 'stone_axe', 'shield', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
+  assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), ['stone_shovel', 'stone_axe'])
   // any axe will do
-  for (const axe of ['wooden_axe', 'iron_axe', 'diamond_axe']) assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, [axe]: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), [], axe)
+  for (const axe of ['wooden_axe', 'iron_axe', 'diamond_axe']) assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, [axe]: 1, iron_shovel: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), [], axe)
+  assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, iron_shovel: 1, stone_axe: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), [])
   const bot = fakeBot({ dirt: 3 })
   const runner = new Runner(bot, { log: () => {} })
   const asked: string[] = []
   runner.executor.obtain = (async (reqs: any[]) => { asked.push(reqs[0].item); bot.give(reqs[0].item, 1) }) as any
   await runner.reequip()
   // the stone ones, then the iron ones (the stone sword's need gone once iron came is still asked in order)
-  assert.deepEqual(asked, ['stone_pickaxe', 'stone_sword', 'stone_axe', 'shield', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
+  assert.deepEqual(asked, ['stone_pickaxe', 'stone_sword', 'stone_shovel', 'stone_axe', 'shield', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
 })
 
 test('in the nether milestone the executor\'s stores keep what it and the eyes need: the goals, their plan, the kit (Runner.milestoneNeeds)', async () => {
@@ -694,7 +695,7 @@ test('the save is written after every chest change, not only at the milestones, 
         bot.give('wooden_pickaxe', 1)
         bot.give('crafting_table', 1)
       },
-      stone: async () => { bot.give('stone_pickaxe', 1); bot.give('stone_sword', 1); bot.give('stone_axe', 1); bot.give('furnace', 1) }
+      stone: async () => { bot.give('stone_pickaxe', 1); bot.give('stone_sword', 1); bot.give('stone_axe', 1); bot.give('stone_shovel', 1); bot.give('furnace', 1) }
     }
   })
   await runner.play()
@@ -1056,7 +1057,7 @@ test('a food restock that gets nothing gives up after RESTOCK_TICKS of its own (
   let ironTries = 0
   const handlers = {
     wood: give({ wooden_pickaxe: 1, crafting_table: 1 }),
-    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, coal: 16 }),
+    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1, coal: 16 }),
     food: give({ cooked_beef: 8 }),
     iron: async () => {
       worked.push('iron')
@@ -1114,7 +1115,7 @@ test('a food restock in the nether goes back to the overworld first (restockFrom
   let ironTries = 0
   const handlers = {
     wood: give({ wooden_pickaxe: 1, crafting_table: 1 }),
-    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, coal: 16 }),
+    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1, coal: 16 }),
     food: give({ cooked_beef: 8 }),
     iron: async () => {
       worked.push('iron')

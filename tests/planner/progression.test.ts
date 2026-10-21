@@ -30,22 +30,24 @@ test('a fresh spawn starts at wood, and its plan makes a table and a wooden pick
   assert.equal(plan.inventory.count('oak_log'), SPARE_LOGS)
 })
 
-test('stone: stone tools from mined cobblestone and the sticks held, and a furnace', () => {
-  const s = state({ crafting_table: 1, wooden_pickaxe: 1, stick: 6 })
+test('stone: stone tools (a shovel among them, for dirt) from mined cobblestone and the sticks held, and a furnace', () => {
+  const s = state({ crafting_table: 1, wooden_pickaxe: 1, stick: 7 })
   assert.equal(nextMilestone(s)?.id, 'stone')
   const plan = planMilestone(registry, milestone('stone'), s)
   assert.equal(plan.ok, true)
   assert.equal(checkPlan(registry, plan.steps, s.inventory).ok, true)
   assert.deepEqual(plan.steps.map(st => `${st.kind} ${st.item} ${st.count}`), [
-    'mine cobblestone 16', 'craft stone_pickaxe 1', 'craft stone_sword 1', 'craft stone_axe 1', 'craft furnace 1'
+    'mine cobblestone 17', 'craft stone_pickaxe 1', 'craft stone_sword 1', 'craft stone_axe 1', 'craft stone_shovel 1', 'craft furnace 1'
   ])
   assert.equal(milestone('stone').done({ ...s, inventory: plan.inventory }), true)
+  // not done without the shovel
+  assert.equal(milestone('stone').done(state({ crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1 })), false)
   // a furnace at the base counts
   assert.equal(planMilestone(registry, milestone('stone'), { ...s, stations: ['furnace'] }).steps.some(st => st.item === 'furnace'), false)
 })
 
 test('food: hunt and cook until there are 40 food points', () => {
-  const s = state({ crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, oak_log: 4 })
+  const s = state({ crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1, oak_log: 4 })
   assert.equal(nextMilestone(s)?.id, 'food')
   const plan = planMilestone(registry, milestone('food'), s)
   assert.equal(plan.ok, true)
@@ -56,7 +58,7 @@ test('food: hunt and cook until there are 40 food points', () => {
 })
 
 test('food counts its points from any food: the raw meat held is cooked first, berries, melons or crops when near', () => {
-  const kit = { crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1 }
+  const kit = { crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1 }
   const points = (inv: Inventory): number => heldFor(inv, FOOD_GOAL, { unit: 'nutrition' })
   assert.equal(unitValue({ unit: 'nutrition' }, 'cooked_beef', registry), 8)
   assert.equal(unitValue({ unit: 'nutrition' }, 'chicken', registry), 0) // raw chicken poisons
@@ -111,7 +113,7 @@ test('a berry bush or a crop counts as grown at the age its loot table drops the
 })
 
 test('done predicates read inventory, worn equipment, memory and advancements', () => {
-  const gear = { crafting_table: 1, iron_pickaxe: 1, iron_sword: 1, stone_axe: 1, furnace: 1, cooked_beef: 10, shield: 1, water_bucket: 1 }
+  const gear = { crafting_table: 1, iron_pickaxe: 1, iron_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1, cooked_beef: 10, shield: 1, water_bucket: 1 }
   const s = state(gear)
   assert.equal(nextMilestone(s)?.id, 'base')
   s.memory.setBase({ x: 0, y: 40, z: 0 })
@@ -166,7 +168,7 @@ test('nether: the rods and pearls still missing for the eyes, and the portal onl
 test('iron: the armor is iron, not diamond, even with a diamond ore seen nearby (one vein is no armor set)', () => {
   const memory = new WorldMemory()
   memory.rememberBlock('deepslate_diamond_ore', { x: 10, y: 50, z: 0 })
-  const s = state({ iron_pickaxe: 1, stone_sword: 1, stone_axe: 1, crafting_table: 1, cooked_beef: 8, raw_iron: 11, cobblestone: 20 }, { memory })
+  const s = state({ iron_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, crafting_table: 1, cooked_beef: 8, raw_iron: 11, cobblestone: 20 }, { memory })
   const plan = planMilestone(registry, milestone('iron'), s, { position: { x: 0, y: 60, z: 0 } })
   assert.equal(plan.ok, true)
   assert.ok(!plan.steps.some(st => st.item === 'diamond'), plan.steps.map(st => `${st.kind} ${st.count} ${st.item}`).join(', '))
@@ -213,7 +215,7 @@ test(`diamonds: the trip sets out with ${DIAMOND_TRIP_PICKAXES} iron pickaxes, t
 })
 
 test('a crop remembered (maybe not grown: the bot\'s own farm) is no cheaper to the food plan; one seen grown is', () => {
-  const kit = { crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1 }
+  const kit = { crafting_table: 1, stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, stone_shovel: 1, furnace: 1 }
   const memory = new WorldMemory()
   for (let i = 0; i < 8; i++) memory.rememberBlock('wheat', { x: i, y: 64, z: 3 })
   for (let i = 0; i < 8; i++) memory.rememberBlock('carrots', { x: i, y: 64, z: 4 })

@@ -139,6 +139,8 @@ export function reequipGoals (inv: { count: (name: string) => number, countAny?:
   const swords = ['netherite_sword', 'diamond_sword', 'iron_sword']
   if (any([...picks, 'stone_pickaxe', 'wooden_pickaxe']) === 0) out.push({ item: 'stone_pickaxe', count: 1 })
   if (any([...swords, 'stone_sword']) === 0) out.push({ item: 'stone_sword', count: 1 })
+  // (the dirt and gravel of the way back dug with a shovel, not the pickaxe worn by them)
+  if (any(['stone_shovel', 'copper_shovel', 'iron_shovel', 'diamond_shovel', 'netherite_shovel']) === 0) out.push({ item: 'stone_shovel', count: 1 })
   // (an axe: by hand a log is dearer than the wood's top-up takes, 'not now' at each, and a log step takes no bulk;
   // a 26.3 bot back from a death with none had no wood stocked for 70000 ticks, f1-26.3 t49819 to t123552)
   if (any(['wooden_axe', 'stone_axe', 'copper_axe', 'golden_axe', 'iron_axe', 'diamond_axe', 'netherite_axe']) === 0) out.push({ item: 'stone_axe', count: 1 })

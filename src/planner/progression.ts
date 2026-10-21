@@ -199,12 +199,15 @@ export const MILESTONES: readonly Milestone[] = [
   {
     id: 'stone',
     title: 'stone tools and a furnace',
+    // (a shovel among them: dirt, grass, sand and gravel dug by hand are as slow with a pickaxe, and wear it; with no
+    // shovel every dig of dirt on the way took the pickaxe)
     done: s => ownsAny(s, toolsAtLeast('pickaxe', 'stone')) && ownsAny(s, toolsAtLeast('sword', 'stone')) &&
-      ownsAny(s, toolsAtLeast('axe', 'stone')) && hasStation(s, 'furnace'),
+      ownsAny(s, toolsAtLeast('axe', 'stone')) && ownsAny(s, toolsAtLeast('shovel', 'stone')) && hasStation(s, 'furnace'),
     goals: s => [
       { item: toolsAtLeast('pickaxe', 'stone'), count: 1 },
       { item: toolsAtLeast('sword', 'stone'), count: 1 },
       { item: toolsAtLeast('axe', 'stone'), count: 1 },
+      { item: toolsAtLeast('shovel', 'stone'), count: 1 },
       ...(hasStation(s, 'furnace') ? [] : [{ item: 'furnace', count: 1 }])
     ]
   },

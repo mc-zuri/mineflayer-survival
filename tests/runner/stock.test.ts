@@ -58,7 +58,7 @@ test('a milestone ends with its stock topped up when that is cheap: the 2 stacks
     handlers: {
       wood: async () => { bot.give('wooden_pickaxe', 1); bot.give('crafting_table', 1); bot.give('oak_log', 8) },
       stone: async () => {
-        for (const n of ['stone_pickaxe', 'stone_sword', 'stone_axe', 'furnace']) bot.give(n, 1)
+        for (const n of ['stone_pickaxe', 'stone_sword', 'stone_axe', 'stone_shovel', 'furnace']) bot.give(n, 1)
         bot.survival.tasks.tick += STOCK_WAIT_TICKS
       }
     }
@@ -137,7 +137,7 @@ test('at night the stock\'s mine top-ups are the night\'s work: with no mileston
 
 test('by day the top-ups are the surface\'s unless the bot is deep down: a pit under a hill is the surface\'s, y 20 the mine\'s', async () => {
   for (const [y, want] of [[63, 'oak_log'], [20, 'coal']] as const) {
-    const bot = fakeBot({ stone_pickaxe: 1, stone_axe: 1, crafting_table: 1, furnace: 1, oak_log: 8 })
+    const bot = fakeBot({ stone_pickaxe: 1, stone_axe: 1, stone_shovel: 1, crafting_table: 1, furnace: 1, oak_log: 8 })
     bot.entity.position = new Vec3(0, y, 0)
     // a roof over the bot: not the open sky
     bot.blockAt = () => ({ name: 'stone', boundingBox: 'block' })
