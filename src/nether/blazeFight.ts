@@ -1391,7 +1391,7 @@ export const ROD_FALL = 4
 /**
  * The floor a blaze's rod would land on, killed where it is (LivingEntity.dropAllDeathLoot: at its feet, falling
  * straight), when it's one the bunker's fetch goes to: a full block within ROD_FALL under it, no lava nor fire on it,
- * within BUNKER_DROP_REACH of the stand and no lower than 3 under it (bunkerDrops); null for none
+ * within BUNKER_DROP_REACH of the stand and no lower than BUNKER_DROP_BELOW under it (bunkerDrops); null for none
  */
 export function rodFloor (bot: Bot, nook: BlazeNook, at: Vec3): Vec3 | null {
   const feet = at.floored()
@@ -1402,7 +1402,7 @@ export function rodFloor (bot: Bot, nook: BlazeNook, at: Vec3): Vec3 | null {
     if (b.name === 'lava' || b.name === 'fire' || b.name === 'soul_fire') return null
     if (b.boundingBox !== 'block') continue
     const on = p.offset(0, 1, 0)
-    if (on.y < nook.stand.y - 3 || on.offset(0.5, 0, 0.5).distanceTo(nook.stand.offset(0.5, 0, 0.5)) > BUNKER_DROP_REACH) return null
+    if (on.y < nook.stand.y - BUNKER_DROP_BELOW || on.offset(0.5, 0, 0.5).distanceTo(nook.stand.offset(0.5, 0, 0.5)) > BUNKER_DROP_REACH) return null
     return on
   }
   return null
@@ -1438,6 +1438,11 @@ export function inPickupReach (feet: Vec3, item: Vec3): boolean {
   return Math.abs(item.x - feet.x) < across && Math.abs(item.z - feet.z) < across && item.y > feet.y - 0.75 && item.y < feet.y + 2.3
 }
 
+/**
+ * a bunker's fetch goes to a drop this far under its stand at the most: the floor under a bunker on a fortress's wall
+ * (a 1.21.11 bunker by seed 2's open throne at (-290, 77, -209) left 3 rods lying in the corridor 5 under it)
+ */
+export const BUNKER_DROP_BELOW = 6
 /** the most a bunker's fetch goes from it for a drop (a throne's floor 5 to 9 off its slit) */
 export const BUNKER_DROP_REACH = 12
 /** the blazes counted about the bot for a bunker's fetch (a fireball's flight, the spawner's 16) */
@@ -1467,13 +1472,13 @@ export const BUNKER_FETCH_LEAVE = 12
 
 /**
  * The blaze rods (and a magma cube's cream) by the bunker its kills dropped, out of the bot's pickup reach from its
- * cell (one in the slit, on the sill, comes to it by itself: inPickupReach), on a floor no lower than 3 under it,
+ * cell (one in the slit, on the sill, comes to it by itself: inPickupReach), on a floor no lower than BUNKER_DROP_BELOW under it,
  * within BUNKER_DROP_REACH, nearest first
  */
 export function bunkerDrops (bot: Bot, nook: BlazeNook): Entity[] {
   const feet = nook.stand.offset(0.5, 0, 0.5)
   return nearbyDrops(bot, feet, BUNKER_DROP_REACH, ['blaze_rod', 'magma_cream'])
-    .filter(e => e.position.y >= nook.stand.y - 3 && !inPickupReach(feet, e.position))
+    .filter(e => e.position.y >= nook.stand.y - BUNKER_DROP_BELOW && !inPickupReach(feet, e.position))
 }
 
 /** the living blazes within BUNKER_CLEAR of the bot */

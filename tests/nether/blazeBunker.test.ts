@@ -176,7 +176,7 @@ test('inPickupReach (Player.aiStep: the box inflated 1 across, 0.5 up and down):
   assert.ok(!inPickupReach(feet, new Vec3(0.5, 66.4, 5.5)))
 })
 
-test('bunkerDrops: the rods by the bunker out of its reach, to 12 off, nearest first; not one on the sill, nor a bone', async () => {
+test('bunkerDrops: the rods by the bunker out of its reach, to 12 off and 6 under, nearest first; not one on the sill, nor a bone', async () => {
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const w = world()
   const b = bunkerAround(w.lookup, new Vec3(0, 64, 5), new Vec3(0, 0, -1))
@@ -186,9 +186,12 @@ test('bunkerDrops: the rods by the bunker out of its reach, to 12 off, nearest f
   const throne = { id: 73, name: 'item', position: new Vec3(1.5, 65, -3.5), getDroppedItem: () => item('blaze_rod') }
   const far = { id: 75, name: 'item', position: new Vec3(0.5, 64, -9.5), getDroppedItem: () => item('blaze_rod') }
   const bones = { id: 74, name: 'item', position: new Vec3(1.5, 64, 2.5), getDroppedItem: () => item('bone') }
+  // on the floor 5 under it (a corridor under a bunker on its wall), and 7 under it
+  const under = { id: 76, name: 'item', position: new Vec3(0.5, 59, 2.5), getDroppedItem: () => item('blaze_rod') }
+  const deep = { id: 77, name: 'item', position: new Vec3(0.5, 57, 4.5), getDroppedItem: () => item('blaze_rod') }
   const bot = fakeBot({ position: new Vec3(0.5, 64, 5.5) })
-  for (const e of [onSill, past, throne, far, bones]) bot.entities[e.id] = e
-  assert.deepEqual(bunkerDrops(bot, b).map(e => e.id), [72, 73])
+  for (const e of [onSill, past, throne, far, bones, under, deep]) bot.entities[e.id] = e
+  assert.deepEqual(bunkerDrops(bot, b).map(e => e.id), [72, 76, 73])
 })
 
 test('bunkerFetchDue (fetchThreats): the blazes behind the walls of the bunker, seeing neither the bot nor the drop, let a fetch go; more than BUNKER_FETCH_SEEN in sight, one by the drop, a fireball near, or low, not', async () => {
