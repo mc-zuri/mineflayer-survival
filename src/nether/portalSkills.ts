@@ -413,14 +413,49 @@ export async function castFrame (bot: Bot, plan: LavaCastPlan, signal?: AbortSig
   const getBlock = blockGetter(bot)
   // in front of the frame first: the mould goes up behind it, and the bot shouldn't be walled in on that side
   const stand = v3(plan.stand[0])
-  if (bot.entity.position.distanceTo(stand.offset(0.5, 0, 0.5)) > 1.5) await navigate(bot, { goal: new goals.GoalNear(stand.x, stand.y, stand.z, 1) }, signal)
-  for (const step of plan.steps) {
-    throwIfAborted(signal)
-    trace('castFrame:', step.kind, 'pos' in step ? `${step.pos.x},${step.pos.y},${step.pos.z}` : '')
-    await retryMoves(bot, async () => await castStep(bot, step, frameCells, getBlock, signal), signal)
+  // (the mould's and the frame's cells kept by the walks: keepCastCells)
+  const release = keepCastCells(bot, [...plan.scaffold, ...plan.frame.obsidian, ...plan.frame.interior].map(v3))
+  try {
+    if (bot.entity.position.distanceTo(stand.offset(0.5, 0, 0.5)) > 1.5) await navigate(bot, { goal: new goals.GoalNear(stand.x, stand.y, stand.z, 1) }, signal)
+    for (const step of plan.steps) {
+      throwIfAborted(signal)
+      trace('castFrame:', step.kind, 'pos' in step ? `${step.pos.x},${step.pos.y},${step.pos.z}` : '')
+      await retryMoves(bot, async () => await castStep(bot, step, frameCells, getBlock, signal), signal)
+    }
+  } finally {
+    release()
   }
   const check = checkPortalFrame(getBlock, plan.frame)
   if (check.missing.length > 0) throw new SkillError('VERIFY_FAILED', `the cast frame lacks obsidian at ${check.missing.map(p => `${p.x},${p.y},${p.z}`).join(' ')}`)
+}
+
+/**
+ * The cells of a cast (its mould's, its frame's and the frame's inside) kept by the pathfinder's walks till the
+ * returned release: none broken, none stood in, no block of its own put in them (exclusions at COST_INF). The walks to
+ * place the mould's upper rows went up the mould's own plane, a placed block broken for a stand and the bot pillaring
+ * there, and the mould was left with a hole where it stood: the frame's top cells had no face to pour their lava
+ * against, 'no face in view to pour against' (tests/integration/portalSite, 1.21.11 and 26.3)
+ */
+export function keepCastCells (bot: Bot, cells: readonly Vec3[]): () => void {
+  const pathfinder: any = (bot as any).pathfinder
+  const settings = pathfinder?.defaultMoveSettings
+  if (settings == null || typeof pathfinder.setMoveOptions !== 'function') return () => {}
+  const kept = new Set(cells.map(p => p.floored().toString()))
+  const area = (block: any): number => block?.position != null && kept.has(new Vec3(block.position.x, block.position.y, block.position.z).toString()) ? 1e9 : 0
+  pathfinder.setMoveOptions({
+    ...settings,
+    exclusionAreasBreak: [...(settings.exclusionAreasBreak ?? []), area],
+    exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), area],
+    exclusionAreasPlace: [...(settings.exclusionAreasPlace ?? []), area]
+  })
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const now = pathfinder.defaultMoveSettings ?? {}
+    const without = (list: unknown[] | undefined): unknown[] => (list ?? []).filter(f => f !== area)
+    pathfinder.setMoveOptions({ ...now, exclusionAreasBreak: without(now.exclusionAreasBreak), exclusionAreasStep: without(now.exclusionAreasStep), exclusionAreasPlace: without(now.exclusionAreasPlace) })
+  }
 }
 
 async function castStep (bot: Bot, step: CastStep, frameCells: Set<string>, getBlock: BlockGetter, signal?: AbortSignal): Promise<void> {

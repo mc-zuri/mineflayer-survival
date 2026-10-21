@@ -159,6 +159,46 @@ test('castFrame: a lava source the bucket finds no spot to reach is passed over 
   assert.notEqual(tried[1], tried[0])
 })
 
+test('castFrame keeps the mould\'s, the frame\'s and its inside\'s cells from the walks while it works (keepCastCells: none broken, stood in or built in), released after (tests/integration/portalSite: a hole in the mould where the bot climbed it, no face to pour the top\'s lava against)', async () => {
+  const bucketModule = require('../../src/skills/bucket')
+  const { castFrame, keepCastCells } = await import('../../src/nether/portalSkills')
+  const { planLavaCast } = await import('../../src/nether/portal')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 2.5), items: [item('water_bucket', 1), item('bucket', 1), item('cobblestone', 64)] })
+  let settings: any = { exclusionAreasBreak: [], exclusionAreasStep: [], exclusionAreasPlace: [] }
+  bot.pathfinder = { get defaultMoveSettings () { return settings }, setMoveOptions: (s: any) => { settings = s } }
+  const lavaAt = (p: any): boolean => p.y === 60 && p.x >= 20 && p.x < 24 && p.z >= 0 && p.z < 3
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = (p: any) => lavaAt(p) ? { ...realAt(p), position: new Vec3(p.x, p.y, p.z), name: 'lava', getProperties: () => ({ level: 0 }), metadata: 0 } : realAt(p)
+  const lava: Pos[] = []
+  for (let x = 20; x < 24; x++) for (let z = 0; z < 3; z++) lava.push({ x, y: 60, z })
+  const plan = planLavaCast((p: Pos) => { const b = bot.blockAt(new Vec3(p.x, p.y, p.z)); return b == null ? null : { name: b.name, properties: { level: 0 } } }, lava, { origin: { x: 0, y: 64, z: 0 }, axis: 'x' })
+  assert.ok(plan != null)
+  const first = plan.steps.find(s => s.kind === 'fill_lava') as any
+  const cost = (list: any[], p: Pos): number => list.reduce((n, f) => n + f({ position: p }), 0)
+  const mould = plan.scaffold[3]
+  const corner = plan.frame.obsidian[0]
+  const inside = plan.frame.interior[0]
+  const seen: number[] = []
+  const real = bucketModule.fillBucket
+  bucketModule.fillBucket = async () => {
+    for (const p of [mould, corner, inside]) seen.push(cost(settings.exclusionAreasBreak, p), cost(settings.exclusionAreasStep, p), cost(settings.exclusionAreasPlace, p))
+    // a cell in front of the frame, the bot's stand: free
+    seen.push(cost(settings.exclusionAreasStep, { x: 1, y: 64, z: 2 }))
+    throw new Error('done')
+  }
+  try {
+    await assert.rejects(castFrame(bot, { ...(plan as any), stand: [bot.entity.position.floored()], steps: [first] }), /done/)
+  } finally {
+    bucketModule.fillBucket = real
+  }
+  assert.deepEqual(seen, [1e9, 1e9, 1e9, 1e9, 1e9, 1e9, 1e9, 1e9, 1e9, 0])
+  // released
+  assert.equal(settings.exclusionAreasBreak.length + settings.exclusionAreasStep.length + settings.exclusionAreasPlace.length, 0)
+  // with no pathfinder, nothing
+  assert.doesNotThrow(() => keepCastCells(fakeBot(), [new Vec3(0, 64, 0)])())
+})
+
 test('preparePortalSite makes a pickaxe from what is carried first when the bag has none', async () => {
   const exploreModule = require('../../src/executor/explore')
   const collectModule = require('../../src/skills/collectBlock')
