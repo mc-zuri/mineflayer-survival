@@ -5,7 +5,8 @@ import { type Block, blockReach, trace, withinReach } from './util'
 import { Vec3 } from 'vec3'
 import { creeperSwelling, lowerShield, raiseShield, SwellCounter } from './fight'
 import { HEADWAY_TICKS, Headway, creeperKeepOff, fleeWay, isDangerBlock, steerAlong, steerToward } from './steer'
-import { type Entity, distanceToBox, entityBox, eyePosition, isAlive, type SkillOptions, TaskError, throwIfAborted, waitTicks, waitUntil, yawPitchOf } from './combatUtil'
+import { type Entity, distanceToBox, entityBox, eyePosition, hasLineOfSight, isAlive, type SkillOptions, TaskError, throwIfAborted, waitTicks, waitUntil, yawPitchOf } from './combatUtil'
+import { boxInCell } from './placement'
 import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { hotFloorCell, noteHazardLeft } from './hazardCells'
 
@@ -961,8 +962,8 @@ export interface EvadeCreeperOptions extends SkillOptions {
 }
 
 export interface EvadeResult {
-  /** gone: it blew up or died; away: out of reach and not swelling */
-  outcome: 'gone' | 'away'
+  /** gone: it blew up or died; away: out of reach and not swelling; hidden: out of its sight behind the blocks put (sightCells) */
+  outcome: 'gone' | 'away' | 'hidden'
   blocked: boolean
   ticks: number
 }
@@ -1009,6 +1010,39 @@ export class RunHeadway {
 }
 
 /**
+ * The cells that cut a creeper's sight of a cornered bot: its feet's and its head's cells on the side toward the
+ * creeper (the axis it's further off along first, then the other), the open ones of the first side not shut yet, the
+ * feet's first (the head's block goes on it), none with the bot's box or the creeper's in it, nor water or lava. A
+ * creeper's fuse runs only while it sees its target (Creeper's SwellGoal: Sensing.hasLineOfSight, else the swell goes
+ * back down), and the blast is weaker through blocks (Explosion.getSeenPercent).
+ */
+export function sightCells (bot: Bot, creeper: { position: Vec3, width?: number, height?: number }): Vec3[] {
+  const pos = bot.entity.position
+  const feet = new Vec3(Math.floor(pos.x), Math.floor(pos.y + 1e-3), Math.floor(pos.z))
+  const dx = creeper.position.x - (feet.x + 0.5)
+  const dz = creeper.position.z - (feet.z + 0.5)
+  const xSide = new Vec3(dx < 0 ? -1 : 1, 0, 0)
+  const zSide = new Vec3(0, 0, dz < 0 ? -1 : 1)
+  const sides = Math.abs(dx) >= Math.abs(dz) ? [xSide, zSide] : [zSide, xSide]
+  const { min, max } = entityBox(creeper)
+  const creeperIn = (c: Vec3): boolean => min.x < c.x + 1 && max.x > c.x && min.y < c.y + 1 && max.y > c.y && min.z < c.z + 1 && max.z > c.z
+  for (const side of sides) {
+    const cells = [feet.plus(side), feet.plus(side).offset(0, 1, 0)]
+    const open = cells.filter(c => {
+      const b = bot.blockAt(c)
+      return b != null && b.boundingBox !== 'block'
+    })
+    if (open.length === 0) continue
+    if (open.some(c => ['water', 'lava'].includes(bot.blockAt(c)?.name ?? '') || boxInCell(pos, c) || creeperIn(c))) continue
+    return open
+  }
+  return []
+}
+
+/** times a cell that took no block (sightCells) is tried in an evade */
+export const SIGHT_CELL_TRIES = 2
+
+/**
  * Gets clear of a creeper: sprints away past its blast (and past the 7 blocks it stops swelling at), or, cornered or
  * about to be caught by the blast, faces it with the shield up (explosions are blocked from the front). Cornered is
  * no way out (fleeWay: no line nor route that keeps off it, creeperKeepOff) or a run that got nowhere (RunHeadway).
@@ -1021,6 +1055,9 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
   const counter = new SwellCounter()
   counter.swell = opts.swell ?? 0
   const run = new RunHeadway()
+  // the blocks put in its sight, and the cells that took none
+  let sighted = 0
+  const failedCells = new Map<string, number>()
   let blocked = false
   let blocking = false
   try {
@@ -1042,12 +1079,30 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
         if (!blocking) blocking = await raiseShield(bot)
         blocked = blocked || blocking
       } else if (way == null) {
-        // nowhere to run and no shield (a tunnel): hit it, each hit's knockback putting it back from the bot (its
-        // fuse runs within 7 of it, SwellGoal; a kill stops it); stood still, a 26.3 bot at y 11 was blown up
-        // (nether-26.3-q3)
         run.stood()
         if (blocking) { lowerShield(bot); blocking = false }
         bot.clearControlStates()
+        // nowhere to run, no shield, no weapon: its sight cut with the blocks carried (sightCells), its fuse going back
+        // down behind them. (With a weapon its hits do better: the knockback keeps it off, and three or four kill it.)
+        const { sealItem } = await import('./shelter')
+        const block = bestMeleeWeapon(bot, 'creeper') == null ? sealItem(bot) : null
+        const cell = block != null && hasLineOfSight(bot, creeper) ? sightCells(bot, creeper).find(c => (failedCells.get(c.toString()) ?? 0) < SIGHT_CELL_TRIES) : undefined
+        if (block != null && cell != null) {
+          const { placeBlock } = await import('./placeBlock')
+          try {
+            await placeBlock(bot, { pos: cell, item: block }, opts.signal)
+            sighted++
+          } catch (err) {
+            if (isAbort(err)) throw err
+            failedCells.set(cell.toString(), (failedCells.get(cell.toString()) ?? 0) + 1)
+            trace('evadeCreeper: no block at', cell.toString(), (err as Error).message)
+          }
+          continue
+        }
+        // out of its sight behind them, not swelling: hidden (the reflex looks again when it comes round)
+        if (sighted > 0 && !swelling && !hasLineOfSight(bot, creeper)) return { outcome: 'hidden', blocked, ticks: t }
+        // else hit it, each hit's knockback putting it back from the bot (its fuse runs within 7 of it, SwellGoal; a
+        // kill stops it); stood still, a 26.3 bot at y 11 was blown up in a tunnel (nether-26.3-q3)
         const weapon = bestMeleeWeapon(bot, 'creeper')
         if (weapon != null && bot.heldItem?.type !== weapon.type) await bot.equip(weapon, 'hand')
         const { yaw, pitch } = yawPitchOf(creeper.position.offset(0, 0.9, 0).minus(eyePosition(bot)))

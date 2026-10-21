@@ -193,6 +193,34 @@ test('evadeCreeper: a run that gets nowhere (the body caught where its line said
   assert.ok(runner.entity.position.x < -4, String(res))
 })
 
+test('sightCells: a cornered bot\'s feet and head cells toward the creeper, the open ones, then the other side; none with the creeper in them (its fuse runs only in sight: SwellGoal)', async () => {
+  const { sightCells } = await import('../../src/skills/escape')
+  const { entity } = await import('../reflexes/fakeBot')
+  const placed = new Set<string>()
+  // a nook at (0, 64, 0) open to the east (x 1) and the south (z 1), stone round it
+  const nook = (p: Vec3): string => {
+    if (placed.has(p.toString())) return 'cobblestone'
+    if (p.y < 64 || p.y > 65) return p.y < 64 ? 'stone' : 'air'
+    if (p.x === 0 && p.z === 0) return 'air'
+    return (p.x === 1 && p.z === 0) || (p.x === 0 && p.z === 1) || p.x >= 2 || p.z >= 2 ? 'air' : 'stone'
+  }
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: nook })
+  const creeper = entity({ name: 'creeper', position: new Vec3(3.5, 64, 1.5) })
+  // east first (it's further off along x), the feet's then the head's
+  assert.deepStrictEqual(sightCells(bot, creeper).map(String), ['(1, 64, 0)', '(1, 65, 0)'])
+  placed.add('(1, 64, 0)')
+  assert.deepStrictEqual(sightCells(bot, creeper).map(String), ['(1, 65, 0)'])
+  placed.add('(1, 65, 0)')
+  // the east shut: the south next
+  assert.deepStrictEqual(sightCells(bot, creeper).map(String), ['(0, 64, 1)', '(0, 65, 1)'])
+  // the creeper in the south's cells: none to put
+  const at = entity({ name: 'creeper', position: new Vec3(0.5, 64, 1.5) })
+  placed.clear()
+  assert.deepStrictEqual(sightCells(bot, at).map(String), ['(1, 64, 0)', '(1, 65, 0)'])
+  placed.add('(1, 64, 0)').add('(1, 65, 0)')
+  assert.deepStrictEqual(sightCells(bot, at), [])
+})
+
 /** a world of named cells from a function, water and air (and seagrass) empty, the rest solid */
 function cells (name: (p: Vec3) => string): CellLookup {
   return p => {
