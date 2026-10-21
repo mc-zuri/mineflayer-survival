@@ -133,3 +133,57 @@ test('obsidianInPit: the lava never set: taken back up, the water got back, no o
   assert.deepEqual(held, ['diamond_pickaxe', 'lava_bucket', 'water_bucket'])
   assert.ok(![...cells.values()].includes('lava'))
 })
+
+test('obsidianFromLava: a pool with nothing to pour on in place (no shore, no pedestal, no lid) has its lava carried to a pit by it (f3-1.21.11: \'no lava source left to turn to obsidian (8 of 10)\' at three pools)', async () => {
+  const { Vec3: V } = await import('vec3')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const obsidianMod = require('../../src/nether/obsidian')
+  const bucket = require('../../src/skills/bucket')
+  const collect = require('../../src/skills/collectBlock')
+  // a lone lava source set in the stone at (4, 63, 0), open above only: no ground beside it to pour on
+  const cells = new Map<string, string>([['4,63,0', 'lava']])
+  const key = (p: any): string => `${p.x},${p.y},${p.z}`
+  const name = (p: any): string => cells.get(key(p)) ?? (p.y < 64 ? 'stone' : 'air')
+  const bot = fakeBot({ position: new V(0.5, 64, 0.5), items: [item('water_bucket', 1), item('bucket', 1), item('diamond_pickaxe', 1), item('obsidian', 8)] })
+  bot.blockAt = (p: any) => { const n = name(p.floored()); return { name: n, position: p.floored(), boundingBox: n === 'stone' || n === 'obsidian' ? 'block' : 'empty', getProperties: () => ({ level: 0 }) } }
+  bot.findBlocks = (opts: any) => [...cells.entries()].filter(([, n]) => (opts.matching === bot.registry.blocksByName.lava.id && n === 'lava') || (opts.matching === bot.registry.blocksByName.obsidian.id && n === 'obsidian')).map(([k]) => new V(...k.split(',').map(Number))).filter(p => p.distanceTo(opts.point ?? bot.entity.position) <= (opts.maxDistance ?? 16))
+  bot.findBlock = () => null
+  bot.pathfinder = { setMoveOptions: () => {}, defaultMoveSettings: {} }
+  const slots = bot.inventory.slots
+  const swap = (from: string, to: string): void => { const i = slots.findIndex((s: any) => s?.name === from); slots[i] = Object.assign(item(to, 1), { slot: i }) }
+  const real = { empty: bucket.emptyBucket, fill: bucket.fillBucket, collect: collect.collectBlock }
+  let pit: any = null
+  const pours: string[] = []
+  bucket.emptyBucket = async (_b: any, args: any) => {
+    const p = args.pos.floored()
+    pours.push(`${args.fluid} ${key(p)}`)
+    swap(`${args.fluid}_bucket`, 'bucket')
+    if (args.fluid === 'lava') { pit = p; cells.set(key(p), 'lava'); return }
+    cells.set(key(p), 'water')
+    cells.set(key(pit), 'obsidian')
+  }
+  bucket.fillBucket = async (_b: any, args: any) => {
+    const p = args.pos
+    if (p == null || name(p) !== args.fluid) throw new Error(`no ${args.fluid}`)
+    cells.set(key(p.floored()), 'air')
+    swap('bucket', `${args.fluid}_bucket`)
+  }
+  collect.collectBlock = async (_b: any, args: any) => {
+    for (const p of args.positions) {
+      const was = name(p)
+      cells.set(key(p), 'air')
+      if (was === 'obsidian') { const i = slots.findIndex((s: any) => s?.name === 'obsidian'); slots[i].count++ }
+    }
+  }
+  const ticks = setInterval(() => bot.emit('physicsTick'), 1)
+  let made = 0
+  try {
+    made = await obsidianMod.obsidianFromLava(bot, 9)
+  } finally {
+    clearInterval(ticks)
+    Object.assign(bucket, { emptyBucket: real.empty, fillBucket: real.fill })
+    Object.assign(collect, { collectBlock: real.collect })
+  }
+  assert.equal(made, 9)
+  assert.ok(pours[0] === `lava ${key(pit)}` && !pit.equals(new V(4, 63, 0)), pours.join(', '))
+})

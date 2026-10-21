@@ -162,6 +162,15 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
         if (lid.some(p => get(p)?.name !== 'obsidian')) continue
       }
     }
+    // none to pour on in place (no shore, no pedestal, no lid): its lava carried a bucket at a time to a pit by it, as a
+    // deep lake's (obsidianInPit). A 1.21.11 bot's frame stopped at 8 of 10 by three pools in turn, 'no lava source
+    // left to turn to obsidian (8 of 10)' at each (f3-1.21.11, t261483 to t277444)
+    if (target == null && !pitFailed && findInventoryItem(bot, ['bucket', 'lava_bucket']) != null && all.length > 0) {
+      const before = countItems(bot, 'obsidian')
+      const made = await obsidianInPit(bot, get, all, signal).catch(err => { if (isAbort(err)) throw err; trace('obsidianFromLava: the pit:', (err as Error).message); return false })
+      if (made && countItems(bot, 'obsidian') > before) continue
+      pitFailed = true
+    }
     if (target == null) throw new SkillError('NOT_FOUND', `no lava source left to turn to obsidian (${countItems(bot, 'obsidian')} of ${count})`)
     const { source, side } = target
     let spot = target.spot
