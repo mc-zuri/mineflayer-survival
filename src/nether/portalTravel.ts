@@ -70,6 +70,29 @@ export function rememberArrivalHere (bot: Bot, from: Dimension): Vec3 | null {
   return here
 }
 
+/** how far round the bot a lit portal is looked for in the nether when none is near or remembered */
+export const NETHER_PORTAL_SEARCH = 96
+
+/**
+ * The obsidian in the nether about the bot (a ruined portal's, within 48, none with lava against it) mined, as much as
+ * a frame lacks, with a diamond pickaxe and the nether's path rules: the way to a frame of its own when no portal is
+ * near. Resolves the obsidian held.
+ */
+export async function mineNetherObsidian (bot: Bot, signal?: AbortSignal): Promise<number> {
+  const want = 10 - countItems(bot, 'obsidian')
+  if (want <= 0 || countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) return countItems(bot, 'obsidian')
+  const id = bot.registry.blocksByName.obsidian?.id
+  if (id == null) return countItems(bot, 'obsidian')
+  const lavaBy = (p: Vec3): boolean => [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0], [0, -1, 0]].some(([x, y, z]) => bot.blockAt(p.offset(x, y, z))?.name === 'lava')
+  const found = findBlocks(bot, { matching: id, maxDistance: 48, count: 64 }).filter(p => !lavaBy(p))
+  if (found.length < want) return countItems(bot, 'obsidian')
+  trace('mineNetherObsidian:', found.length, 'obsidian about, mining', want)
+  const { collectBlock } = await import('../skills/collectBlock')
+  await withNetherSafety(bot, async () => await collectBlock(bot, { positions: found.slice(0, want), pickup: true, avoidLava: true }, signal))
+    .catch(err => { if (isAbort(err)) throw err; trace('mineNetherObsidian:', (err as Error).message) })
+  return countItems(bot, 'obsidian')
+}
+
 /** ticks after a change of dimension the arrival portal is looked for (the chunks about the bot in by then) */
 export const ARRIVAL_LOOK_TICKS = 20
 
@@ -419,8 +442,24 @@ async function takePortal (bot: Bot, to: Dimension, args: EnterNetherArgs, signa
     // lava in', 'no site to cast', five times, and the game stopped, full-1.21.11-fresh-l)
     const opts = typeof args.build === 'object' ? args.build : {}
     if (here === 'the_nether' && opts.method !== 'obsidian' && countItems(bot, 'obsidian') < 10) {
-      throw new SkillError('MISSING_ITEMS', `no portal near ${bot.entity.position.floored().toString()} to light and ${countItems(bot, 'obsidian')} obsidian of the 10 a frame takes in the nether`)
+      // a portal further off (one lit, NETHER_PORTAL_SEARCH round), else the obsidian about (a ruined portal's) mined
+      // for a frame of its own
+      const far = findPortal(bot, NETHER_PORTAL_SEARCH)
+      if (far != null) {
+        trace('takePortal: a portal further off at', far.toString())
+        await withNetherSafety(bot, async () => await travel(bot, { target: far, range: 3, exactY: true }, signal)).catch(err => { if (isAbort(err)) throw err; trace('takePortal: the way to it:', (err as Error).message) })
+        portal = findPortal(bot, 16)
+      }
+      if (portal == null) await mineNetherObsidian(bot, signal)
+      // none got: not ready, the try again later uncounted (the runner's searching): 'no portal near' five times at once
+      // ended play (f8-1.21.11, t364903 to t367003)
+      if (portal == null && countItems(bot, 'obsidian') < 10) {
+        throw Object.assign(new SkillError('MISSING_ITEMS', `no portal near ${bot.entity.position.floored().toString()} to light and ${countItems(bot, 'obsidian')} obsidian of the 10 a frame takes in the nether`), { notReady: true, searching: true })
+      }
     }
+  }
+  if (portal == null) {
+    const opts = typeof args.build === 'object' ? args.build : {}
     const built = await buildPortal(bot, here === 'the_nether' ? { ...opts, method: 'obsidian' } : opts, signal)
     portal = built.portal[0]
   }

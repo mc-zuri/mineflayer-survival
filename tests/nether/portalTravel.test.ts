@@ -198,3 +198,33 @@ test('returnOverworld: no portal remembered nor lit near, a whole frame gone out
   }
   assert.equal(lit, 1)
 })
+
+test('returnOverworld in the nether with no portal near nor obsidian: the obsidian about mined for a frame, else not ready and searching, never a failure toward play\'s stop (f8-1.21.11)', async () => {
+  const { returnOverworld, mineNetherObsidian } = await import('../../src/nether/portalTravel')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe', 1)], world: (p: any) => p.y < 64 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  bot.findBlocks = () => []
+  bot.survival = { memory: new WorldMemory() }
+  let err: any = null
+  await returnOverworld(bot).catch(e => { err = e })
+  assert.equal(err?.reason, 'MISSING_ITEMS')
+  assert.equal(err?.notReady, true)
+  assert.equal(err?.searching, true)
+  // a ruined portal's 12 obsidian about: 10 mined
+  const ruin = Array.from({ length: 12 }, (_, i) => new Vec3(10 + (i % 4), 64 + Math.floor(i / 4), 5))
+  bot.findBlocks = (opts: any) => opts.matching === bot.registry.blocksByName.obsidian.id ? ruin.slice() : []
+  bot.pathfinder = { setMoveOptions: () => {}, defaultMoveSettings: {} }
+  const collect = require('../../src/skills/collectBlock')
+  const real = collect.collectBlock
+  let mined = 0
+  collect.collectBlock = async (_b: any, args: any) => { mined = args.positions.length; bot.inventory.slots[30] = Object.assign(item('obsidian', mined), { slot: 30 }) }
+  try {
+    assert.equal(await mineNetherObsidian(bot), 10)
+  } finally {
+    collect.collectBlock = real
+  }
+  assert.equal(mined, 10)
+})
