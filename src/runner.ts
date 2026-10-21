@@ -1360,6 +1360,8 @@ export class Runner {
 
   /** the valuables into the base's chests when the bot is back near it, the herd tended first (keepHerd) */
   private async afterTrip (signal?: AbortSignal): Promise<void> {
+    // back by home (a long trip's end, by night too): the farm's ripe plots harvested first, the upkeep's cadence aside
+    if (signal != null && this.farmRipeNear(FARM_RANGE)) await this.harvestPassing(signal)
     await this.keepHerd(signal)
     const base = baseRecord(this.memory)
     if (base == null || base.chests.length === 0) return
@@ -1827,11 +1829,11 @@ export class Runner {
     return () => { this.bot.off('physicsTick', tick) }
   }
 
-  /** a farm of the bot's within FARM_PASS_RANGE (across and up or down) with MEAL_FARM_PLOTS of its plots seen ripe */
-  farmRipeNear (): boolean {
+  /** a farm of the bot's within `range` (FARM_PASS_RANGE; across and up or down) with MEAL_FARM_PLOTS of its plots seen ripe */
+  farmRipeNear (range = FARM_PASS_RANGE): boolean {
     const bot = this.bot
     if (bot.entity == null || normalizeDimension(bot.game?.dimension) !== 'overworld' || typeof bot.blockAt !== 'function') return false
-    return knownFarms(this.memory, 'overworld').some(f => bot.entity.position.distanceTo(f.water) <= FARM_PASS_RANGE &&
+    return knownFarms(this.memory, 'overworld').some(f => bot.entity.position.distanceTo(f.water) <= range &&
       grownPlots(p => bot.blockAt(p) as any, farmCells(f), f.crop).length >= MEAL_FARM_PLOTS)
   }
 

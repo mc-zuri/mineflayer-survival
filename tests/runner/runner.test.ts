@@ -1791,3 +1791,24 @@ test('the farm watch: by day, the bot within 32 of its farm with 3 plots ripe, t
   }
 })
 
+test('back by home after a trip: the farm 60 off with 3 plots ripe harvested first, whatever the upkeep\'s cadence or the hour; none ripe, not', async () => {
+  const bot = fakeBot()
+  const runner: any = new Runner(bot, { log: () => {}, handlers: {} })
+  const cells = [[60, 63, 0], [61, 63, 0], [62, 63, 0]]
+  bot.survival.memory.addPoi('farm', { x: 60, y: 63, z: 1 }, 'overworld', JSON.stringify({ crop: 'wheat', cells, sown: 0 }))
+  let ripe = 3
+  bot.blockAt = (p: any) => {
+    const i = cells.findIndex(([x, y, z]) => x === p.x && y + 1 === p.y && z === p.z)
+    return i >= 0 ? { name: 'wheat', getProperties: () => ({ age: i < ripe ? 7 : 2 }) } : { name: 'air' }
+  }
+  bot.time.timeOfDay = 18000
+  const calls: string[] = []
+  runner.harvestPassing = async () => { calls.push('harvest') }
+  runner.keepHerd = async () => { calls.push('upkeep') }
+  await runner.afterTrip(new AbortController().signal)
+  assert.deepEqual(calls, ['harvest', 'upkeep'])
+  ripe = 1
+  calls.length = 0
+  await runner.afterTrip(new AbortController().signal)
+  assert.deepEqual(calls, ['upkeep'])
+})
