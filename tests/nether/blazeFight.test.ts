@@ -1178,3 +1178,11 @@ test('holdOffBlazes: a fire in the bot\'s cell is put out first, not stood in be
   }
   assert.deepEqual(dug, ['(0, 64, 5)'])
 })
+
+test('nookBlock: the stone\'s last STONE_RESERVE kept while there are other blocks (a brewing stand\'s cobblestone); the stone first above it, and with nothing else', async () => {
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { nookBlock, STONE_RESERVE } = await import('../../src/nether/blazeFight')
+  assert.equal(nookBlock(fakeBot({ items: [item('cobblestone', STONE_RESERVE + 1), item('netherrack', 30)] })), 'cobblestone')
+  assert.equal(nookBlock(fakeBot({ items: [item('cobblestone', STONE_RESERVE), item('netherrack', 30)] })), 'netherrack')
+  assert.equal(nookBlock(fakeBot({ items: [item('cobblestone', 3)] })), 'cobblestone')
+})

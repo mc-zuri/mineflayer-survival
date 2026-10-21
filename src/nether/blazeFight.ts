@@ -379,8 +379,19 @@ export function nookAround (lookup: NookLookup, stand: Vec3, facing: Vec3, maxBl
 /** the blocks the nook is built of, the ones that don't burn first (fire on netherrack never goes out) */
 export const NOOK_BLOCKS = ['cobblestone', 'cobbled_deepslate', 'blackstone', 'stone', 'deepslate', 'andesite', 'diorite', 'granite', 'tuff', 'basalt', 'stone_bricks', 'end_stone', 'dirt', 'netherrack']
 
+/** the stone the nook's blocks leave in the bag while there are others (a brewing stand's 3 cobblestone, a furnace's 8) */
+export const STONE_RESERVE = 8
+const STONES = ['cobblestone', 'cobbled_deepslate', 'blackstone']
+
+/**
+ * The block a nook is built of: the first of NOOK_BLOCKS the bag has, the stone's last STONE_RESERVE kept while there's
+ * another (a 26.3 bot's cover by the spawner used up its cobblestone, and the brew's stand went for the blackstone of the cave by
+ * seed 2's open throne among 41 blazes, and burned)
+ */
 export function nookBlock (bot: Bot): string | null {
-  return NOOK_BLOCKS.find(n => countItems(bot, n) > 0) ?? null
+  const others = NOOK_BLOCKS.some(n => !STONES.includes(n) && countItems(bot, n) > 0)
+  const stoneLow = countItems(bot, STONES) <= STONE_RESERVE
+  return NOOK_BLOCKS.find(n => countItems(bot, n) > 0 && !(others && stoneLow && STONES.includes(n))) ?? null
 }
 
 export function nookBlocks (bot: Bot): number {
