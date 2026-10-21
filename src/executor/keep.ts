@@ -24,7 +24,9 @@ export const KEEP_COUNTS: Record<string, number> = {
   charcoal: 32,
   stick: 16,
   arrow: Infinity,
-  bucket: Infinity,
+  // the empty ones of the lava casts (the nether's portal: MILESTONE_KIT's, all of them on its trip); a 26.3 bag after
+  // the enchanting held 3 and a water bucket among its 17 tools, and the nether kit found no room (f6-26.3, t227037)
+  bucket: 3,
   water_bucket: Infinity,
   lava_bucket: Infinity,
   shield: Infinity,
@@ -94,6 +96,30 @@ export function spareToolsKeep (items: readonly ItemCount[], base: KeepRule = de
     for (const n of keep) kept.set(n, (kept.get(n) ?? 0) + 1)
   }
   return (name, registry) => parseTool(name) != null ? (kept.get(name) ?? 0) : base(name, registry)
+}
+
+/** the tool tiers never thrown away beyond the spare quota (stored instead): what a lost one costs again */
+const DEAR_TOOL_TIERS = new Set(['diamond', 'netherite'])
+
+/**
+ * The tools a bag holds beyond the spare quota (spareToolsKeep: the best of each kind, a spare pickaxe and sword, the
+ * stone digging pickaxe beside iron ones; no hoe but on a farm), by name: junk to a room, after the junk drops, but a
+ * diamond or netherite one (stored, not thrown). A 26.3 bag after its enchanting held 2 diamond swords and pickaxes, 3
+ * iron pickaxes, 2 iron swords, a stone sword, pickaxe and hoe, 3 stone axes and a wooden hoe, and the nether kit's bow,
+ * arrows and food found no room, 'nothing to throw away but what is kept or valuable' (f6-26.3, t208021 to t229884)
+ */
+export function spareToolsBeyond (items: ReadonlyArray<{ name: string, count: number }>, farming = false): Map<string, number> {
+  const rule = spareToolsKeep(items, () => null, { ...TRIP_TOOLS, hoe: farming ? 1 : 0 })
+  const totals = new Map<string, number>()
+  for (const it of items) if (parseTool(it.name) != null) totals.set(it.name, (totals.get(it.name) ?? 0) + it.count)
+  const out = new Map<string, number>()
+  for (const [name, n] of totals) {
+    const tool = parseTool(name)
+    if (tool == null || DEAR_TOOL_TIERS.has(tool.material)) continue
+    const over = n - (rule(name) ?? 0)
+    if (over > 0) out.set(name, over)
+  }
+  return out
 }
 
 /** blocks and drops worth nothing to the plan, thrown away first when there's no room and no base near */
@@ -413,9 +439,13 @@ export function splitInventory (items: readonly ItemCount[], opts: SplitOptions 
  * `splitInventory` would store. Never what's kept or needed, nor a valuable (isValuable) or an enchanted stack, whatever
  * the room it takes: fewer stacks than asked for then, nor the building blocks `scaffold` keeps. Each entry is one stack.
  */
-export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number, enchanted?: boolean }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean, scaffold?: ScaffoldKeep } = {}): Array<{ name: string, count: number }> {
+export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number, enchanted?: boolean }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean, scaffold?: ScaffoldKeep, spareTools?: boolean } = {}): Array<{ name: string, count: number }> {
   const needed = opts.needed ?? {}
-  const keepRule = opts.keep ?? defaultKeep
+  // (spareTools: the tools beyond the spare quota go after the junk drops, spareToolsBeyond)
+  const beyond = opts.spareTools === true ? spareToolsBeyond(stacks.filter(s => s.enchanted !== true), opts.protect?.farming === true) : new Map<string, number>()
+  const baseRule = opts.keep ?? defaultKeep
+  const keepRule: KeepRule = (name, registry) => beyond.has(name) ? Math.max(0, stacks.filter(s => s.name === name).reduce((n, s) => n + s.count, 0) - (beyond.get(name) ?? 0)) : baseRule(name, registry)
+  const value = (name: string): number | null => beyond.has(name) ? 3 : tossValue(name)
   const out: Array<{ name: string, count: number }> = []
   // the stacks beyond what's kept, smallest stacks last so a toss frees whole slots
   const left = new Map<string, number>()
@@ -425,10 +455,10 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number,
   let scaffoldLeft = [...left].reduce((n, [name, c]) => n + (scaffoldItems.has(name) ? c : 0), 0)
   const pick = (filter: (name: string) => boolean): void => {
     const candidates = [...stacks]
-      .filter(s => s.enchanted !== true && tossValue(s.name) != null && filter(s.name))
+      .filter(s => s.enchanted !== true && value(s.name) != null && filter(s.name))
       .sort((a, b) => {
-        const value = (tossValue(a.name) ?? 0) - (tossValue(b.name) ?? 0)
-        if (value !== 0) return value
+        const worth = (value(a.name) ?? 0) - (value(b.name) ?? 0)
+        if (worth !== 0) return worth
         const most = (left.get(b.name) ?? 0) - (left.get(a.name) ?? 0)
         return most !== 0 ? most : b.count - a.count
       })
@@ -447,7 +477,7 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number,
       if (scaffold) scaffoldLeft -= s.count
     }
   }
-  pick(name => JUNK.has(name) || TOSS_FIRST.has(name) || opts.surplus?.(name) === true ||
+  pick(name => JUNK.has(name) || TOSS_FIRST.has(name) || beyond.has(name) || opts.surplus?.(name) === true ||
     (opts.anything === true && (keepRule(name, opts.registry) ?? 0) !== Infinity))
   return out
 }

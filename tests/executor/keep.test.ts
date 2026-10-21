@@ -368,3 +368,30 @@ test('spareToolsKeep: of each tool kind the best kept (a spare pickaxe and sword
   const by = Object.fromEntries(store.map(s => [s.name, s.count]))
   assert.deepStrictEqual(by, { stone_axe: 1, wooden_hoe: 1, stone_pickaxe: 1, stone_sword: 1 })
 })
+
+test('the tools beyond the spare quota are junk to a room, after the junk drops, but a diamond one; the hoe but on a farm; 3 empty buckets kept (f6-26.3: 17 tools in a full bag, the nether kit with no room)', async () => {
+  const { spareToolsBeyond } = await import('../../src/executor/keep')
+  const registry = minecraftData('26.3')
+  // f6-26.3's bag at t226504 (the tools one a stack)
+  const one = (name: string, n: number): Array<{ name: string, count: number }> => Array.from({ length: n }, () => ({ name, count: 1 }))
+  const stacks = [
+    ...one('diamond_sword', 2), ...one('diamond_pickaxe', 2), ...one('iron_pickaxe', 3), ...one('iron_sword', 2), ...one('stone_sword', 1),
+    ...one('stone_pickaxe', 1), ...one('stone_axe', 3), ...one('wooden_hoe', 1), ...one('stone_hoe', 1), ...one('bucket', 3),
+    { name: 'water_bucket', count: 1 }, { name: 'oak_log', count: 21 }, { name: 'coal', count: 31 }, { name: 'cobblestone', count: 57 },
+    { name: 'melon_slice', count: 64 }, { name: 'string', count: 4 }, { name: 'flint', count: 2 }
+  ]
+  const beyond = spareToolsBeyond(stacks)
+  assert.deepEqual(Object.fromEntries(beyond), { iron_pickaxe: 3, iron_sword: 2, stone_sword: 1, stone_pickaxe: 1, stone_axe: 2, wooden_hoe: 1, stone_hoe: 1 })
+  // on a farm the best hoe stays
+  assert.equal(spareToolsBeyond(stacks, true).get('stone_hoe'), undefined)
+  // a room's toss: the junk drops first, then the tools beyond the quota; never a diamond one, the best axe or a bucket of the 3
+  const toss = junkToToss(stacks, 12, { registry, spareTools: true })
+  const names = toss.map(t => t.name)
+  assert.deepEqual(names.slice(0, 2).sort(), ['flint', 'string'])
+  assert.equal(names.filter(n => n === 'iron_pickaxe').length, 3)
+  assert.equal(names.filter(n => n === 'stone_axe').length, 2)
+  assert.ok(!names.some(n => n.startsWith('diamond_') || n === 'bucket' || n === 'water_bucket'), names.join(', '))
+  // and without spareTools, none of the tools
+  assert.ok(!junkToToss(stacks, 12, { registry }).some(t => t.name.endsWith('_pickaxe')))
+  assert.equal(defaultKeep('bucket'), 3)
+})

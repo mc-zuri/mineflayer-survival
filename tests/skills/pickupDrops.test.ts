@@ -255,3 +255,27 @@ test('settlePickups: waits while an item lies in the bot\'s reach, till it comes
   bot.entities[2] = { name: 'item', position: new Vec3(1.2, -60, 0.5) }
   assert.strictEqual(await run(() => false), false)
 })
+
+test('tossAway of a tool with more than one held throws the most worn (the one with the most uses left stays)', async () => {
+  const { tossAway } = await import('../../src/skills/pickupDrops')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const worn = item('iron_pickaxe', 1)
+  const fresh = item('iron_pickaxe', 1)
+  ;(worn as any).durabilityUsed = 200
+  ;(fresh as any).durabilityUsed = 3
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [fresh, worn] })
+  bot.inventory.inventoryStart = 9
+  bot.inventory.inventoryEnd = 45
+  bot._client = { on: () => {}, off: () => {} }
+  bot.entity.yaw = 0
+  bot.look = async () => {}
+  const tossed: any[] = []
+  bot.tossStack = async (it: any) => { tossed.push(it); bot.inventory.slots[it.slot] = null }
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    assert.strictEqual(await tossAway(bot, 'iron_pickaxe', 1), 1)
+  } finally {
+    clearInterval(ticker)
+  }
+  assert.deepStrictEqual(tossed.map(t => t.durabilityUsed), [200])
+})

@@ -199,7 +199,14 @@ export async function tossAway (bot: Bot, name: string, count: number, signal?: 
     await bot.look(tossYaw(bot), 0, true)
   }
   await settleInventory(bot, signal)
-  await bot.toss(id, null, Math.min(count, had))
+  // of tools of a name, the most worn first: the one with the most uses left stays (a spare's throw)
+  const worn = bot.inventory.items().filter(i => i.name === name && (i as any).maxDurability > 0 && i.count === 1)
+  if (worn.length > 1 && worn.length === bot.inventory.items().filter(i => i.name === name).length && typeof (bot as any).tossStack === 'function') {
+    worn.sort((a, b) => ((b as any).durabilityUsed ?? 0) - ((a as any).durabilityUsed ?? 0))
+    for (const item of worn.slice(0, Math.min(count, had))) await (bot as any).tossStack(item)
+  } else {
+    await bot.toss(id, null, Math.min(count, had))
+  }
   // the item entity comes a tick or two after the click (ServerboundContainerClickPacket, then the entity's spawn and
   // its item's data)
   const ours = (): Entity[] => Object.values(bot.entities).filter(e => !before.has(e.id) && isItemEntity(e) && e.position.distanceTo(bot.entity.position) <= 6 && droppedName(e) === name)

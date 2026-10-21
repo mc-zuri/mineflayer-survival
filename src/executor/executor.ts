@@ -1034,7 +1034,7 @@ export class Executor {
       if (thrown.room) return
       const base = this.base
       if (inTask == null && base != null && base.chests.length > 0 && (force || this.nearBase(base, BASE_STORE_RANGE))) {
-        await this.storeAtBase(needed, signal)
+        await this.storeAtBase(needed, signal, { spareTools: true })
         if (emptySlots(this.bot) >= this.options.minFreeSlots) return
       }
       await this.stashNearby(needed, signal, run, new Set(thrown.looping.map(t => t.name)), inTask == null)
@@ -1101,7 +1101,7 @@ export class Executor {
     const want = this.options.minFreeSlots + 2 + (lava() != null ? LAVA_ROOM : 0) - emptySlots(this.bot)
     if (want <= 0) return { room: true, looping: [] }
     const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
-    const pick = (from: typeof stacks): Array<{ name: string, count: number }> => junkToToss(from, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.scaffoldKeep(), protect: this.protect() })
+    const pick = (from: typeof stacks): Array<{ name: string, count: number }> => junkToToss(from, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.scaffoldKeep(), protect: this.protect(), spareTools: true })
     let toss = pick(stacks)
     const looping = this.throws.looping(toss, this.tasks.tick, name => this.bot.registry.itemsByName[name]?.stackSize ?? 64)
     let forChest: Array<{ name: string, count: number }> = []
@@ -1185,7 +1185,8 @@ export class Executor {
    */
   async stashNearby (needed: Record<string, number> = {}, signal?: AbortSignal, run: RoomRunner = async (name, fn) => await this.task(name, fn, signal, { room: false }), also: ReadonlySet<string> = new Set(), obtainChest = false): Promise<Record<string, number>> {
     const moved: Record<string, number> = {}
-    const { store } = splitInventory(this.bot.inventory.items(), { keep: this.options.keep, registry: this.bot.registry, needed, protect: this.protect() })
+    // (the tools beyond the trip's, spareToolsKeep's, stored too)
+    const { store } = splitInventory(this.bot.inventory.items(), { keep: spareToolsKeep(this.bot.inventory.items(), this.options.keep), registry: this.bot.registry, needed, protect: this.protect() })
     const worth = store.filter(it => also.has(it.name) || (!JUNK.has(it.name) && !this.isSurplus(it.name)))
     if (worth.length === 0) return moved
     const dimension = normalizeDimension(this.bot.game?.dimension)
