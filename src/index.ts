@@ -27,6 +27,7 @@ import { saveBetterPickaxes } from './skills/digTool'
 import { rememberNetherDeath } from './nether/deaths'
 import { keepNetherTrail, pruneTrail } from './nether/trail'
 import { installSpawnProtection, type SpawnProtectionOption } from './skills/spawnProtection'
+import { guardCorrections } from './skills/corrections'
 
 export * from './core'
 export * from './planner'
@@ -139,6 +140,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     keepOffTridentZones(bot)
     // nothing broken or placed in the square about the world spawn a dedicated server keeps (spawn-protection)
     installSpawnProtection(bot, options.spawnProtection)
+    // the server teleporting the bot back over and over at one spot: the move stopped and planned another way
+    guardCorrections(bot)
     // no stare at a calm enderman by accident (EnderMan.isLookingAtMe)
     installGazeGuard(bot)
     // the ticks since the bot last slept (Stats.TIME_SINCE_REST): the night below the surface is slept only when due
