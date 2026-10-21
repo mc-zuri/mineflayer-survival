@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
 import { DEFAULT_SCAFFOLDING_BLOCKS, scaffoldCount, scaffoldItem } from '@nxg-org/mineflayer-pathfinder'
-import { createPlugin, TaskError, nether, end, worldgen } from '../src'
+import { createPlugin, Recorder, TaskError, nether, end, worldgen } from '../src'
 import { SCAFFOLD_ITEMS } from '../src/executor/steps'
 
 function fakeBot (): any {
@@ -18,10 +18,28 @@ function fakeBot (): any {
 test('createPlugin sets bot.survival with the default options', () => {
   const bot = fakeBot()
   createPlugin()(bot)
-  assert.deepStrictEqual(bot.survival.options, { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, spawnProtection: 'auto' })
+  assert.deepStrictEqual(bot.survival.options, { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, spawnProtection: 'auto', recorder: false })
+  assert.strictEqual(bot.survival.recorder, null, 'no recording by default')
   assert.ok(bot.survival.stock != null, 'the stock policy is on by default')
   assert.ok(bot.survival.reflexes != null)
   assert.deepStrictEqual(bot.survival.diagnostics.lastReports(), [])
+})
+
+test('createPlugin with the recorder: its options (in memory here), or a recorder made before, hooked on the tasks', async () => {
+  const bot = fakeBot()
+  createPlugin({ recorder: { stateEvery: 0 } })(bot)
+  const rec = bot.survival.recorder
+  assert.ok(rec instanceof Recorder)
+  await bot.survival.tasks.run('chop', async () => 1)
+  assert.strictEqual(rec.counts.task, 2)
+  await rec.stop()
+  const early = fakeBot()
+  const before = new Recorder(early, { stateEvery: 0 })
+  createPlugin({ recorder: before })(early)
+  assert.strictEqual(early.survival.recorder, before)
+  await early.survival.tasks.run('chop', async () => 1)
+  assert.strictEqual(before.counts.task, 2)
+  await before.stop()
 })
 
 test('createPlugin with stock options, or the stock policy off', () => {

@@ -28,6 +28,7 @@ import { rememberNetherDeath } from './nether/deaths'
 import { keepNetherTrail, pruneTrail } from './nether/trail'
 import { installSpawnProtection, type SpawnProtectionOption } from './skills/spawnProtection'
 import { guardCorrections } from './skills/corrections'
+import { Recorder, type RecorderOptions } from './recorder'
 
 export * from './core'
 export * from './planner'
@@ -46,6 +47,9 @@ export type { DiagnosticsOptions, StuckReport, ReportKind } from './diagnostics'
 export * as executor from './executor'
 export { Executor } from './executor/executor'
 export type { ExecutorOptions, ObtainOutcome } from './executor/executor'
+export * as recorder from './recorder'
+export { Recorder, startRecorder } from './recorder'
+export type { RecorderOptions } from './recorder'
 export { Runner, play, progressState, fileSaveStore, UNWIRED } from './runner'
 export type { PlayOptions, PlayResult, MilestoneEvent, MilestoneHandler, MilestoneContext, SaveStore } from './runner'
 
@@ -63,6 +67,11 @@ export interface SurvivalOptions {
    * to learn it from the server's refusals; the bot breaks and places nothing in it
    */
   spawnProtection?: SpawnProtectionOption
+  /**
+   * the run recorded (bot.survival.recorder, src/recorder): its options (a file in Node, else memory), or a Recorder
+   * already recording (made before the plugin, for the packets from the login on); false for none (the default)
+   */
+  recorder?: RecorderOptions | Recorder | false
 }
 
 export interface Survival {
@@ -86,6 +95,8 @@ export interface Survival {
   diagnostics: Diagnostics
   /** what play keeps on hand beyond the milestones' needs (null when turned off) */
   stock: StockPolicy | null
+  /** the run's recording (null when off: the plugin's recorder option, or startRecorder) */
+  recorder: Recorder | null
 }
 
 /**
@@ -107,7 +118,7 @@ export const KILLER_TICKS = 200
 export const DEATH_CARRIED_TICKS = 20
 
 export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
-  const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, spawnProtection: 'auto', ...opts }
+  const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, spawnProtection: 'auto', recorder: false, ...opts }
   return function (bot: Bot): void {
     if (options.loadPathfinder && bot.pathfinder == null) bot.loadPlugin(createPathfinder())
     useScaffoldItems(bot)
@@ -151,7 +162,11 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     const reflexes = options.reflexes === false ? null : new ReflexEngine(bot, { sink: tasks, ...(options.reflexes === true ? {} : options.reflexes) })
     const diagnostics = new Diagnostics(bot, options.diagnostics)
     const stock = options.stock === false || options.stock.enabled === false ? null : new StockPolicy(options.stock)
-    bot.survival = { options, tasks, memory, reflexes, handlers: {}, advancements: new Set(), play: async (playOptions) => await play(bot, playOptions), diagnostics, stock }
+    bot.survival = { options, tasks, memory, reflexes, handlers: {}, advancements: new Set(), play: async (playOptions) => await play(bot, playOptions), diagnostics, stock, recorder: null }
+    // (the recorder's hooks on the tasks and the diagnostics once they're made)
+    const recorder = options.recorder
+    if (recorder instanceof Recorder) bot.survival.recorder = recorder.attachSurvival()
+    else if (recorder !== false && recorder != null) bot.survival.recorder = new Recorder(bot, recorder)
     bot.on('physicsTick', () => { memory.now = memory.tickBase + tasks.tick })
     // no sneak held in the water (it swims the bot down), the pathfinder's dives' and every other's, but a dive meant
     noSneakInWater(bot)
