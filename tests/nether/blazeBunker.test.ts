@@ -196,7 +196,7 @@ test('bunkerDrops: the rods by the bunker out of its reach, to 12 off and 6 unde
 
 test('bunkerFetchDue (fetchThreats): the blazes behind the walls of the bunker, seeing neither the bot nor the drop, let a fetch go; more than BUNKER_FETCH_SEEN in sight, one by the drop, a fireball near, or low, not', async () => {
   const { entity } = await import('../reflexes/fakeBot')
-  const { fetchThreats, BUNKER_FETCH_SEEN, BUNKER_FETCH_SEEN_OLD } = await import('../../src/nether/blazeFight')
+  const { fetchThreats, bunkerFetchHeld, BUNKER_FETCH_SEEN, BUNKER_FETCH_SEEN_OLD, BUNKER_OLD_CLOSE, BUNKER_OLD_CLOSE_HEALTH } = await import('../../src/nether/blazeFight')
   const behind = [0.2, 0.5, 0.8].map(x => entity({ name: 'blaze', position: new Vec3(x, 64, 9.5), meta: { health: 20 } }))
   const ahead = entity({ name: 'blaze', position: new Vec3(0.5, 64, -6.5), meta: { health: 20 } })
   const { bot, b, restore } = await bunkerBot([...behind, ahead])
@@ -212,9 +212,16 @@ test('bunkerFetchDue (fetchThreats): the blazes behind the walls of the bunker, 
     assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, drop), false)
     assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, drop, BUNKER_FETCH_SEEN_OLD), true)
     behind[0].position = new Vec3(0.2, 64, 9.5)
-    // one by the drop
+    // one by the drop; for an old one, healed, one there lets it go (BUNKER_OLD_CLOSE), not two, nor hurt
     ahead.position = new Vec3(0.5, 64, -0.5)
     assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, drop), false)
+    assert.equal(BUNKER_OLD_CLOSE, 1)
+    assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, drop, BUNKER_FETCH_SEEN_OLD, BUNKER_OLD_CLOSE), true)
+    assert.equal(bunkerFetchDue(bot, b, BUNKER_OLD_CLOSE_HEALTH - 0.5, () => true, false, drop, BUNKER_FETCH_SEEN_OLD, BUNKER_OLD_CLOSE), false)
+    assert.match(bunkerFetchHeld(bot, b, BUNKER_OLD_CLOSE_HEALTH - 0.5, () => true, false, drop, BUNKER_FETCH_SEEN_OLD, BUNKER_OLD_CLOSE) ?? '', /1 blazes within 4 of it/)
+    behind[1].position = new Vec3(1.5, 64, 0.5)
+    assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, drop, BUNKER_FETCH_SEEN_OLD, BUNKER_OLD_CLOSE), false)
+    behind[1].position = new Vec3(0.5, 64, 9.5)
     ahead.position = new Vec3(0.5, 64, -6.5)
     // a fireball near
     bot.entities[90] = { id: 90, name: 'small_fireball', position: new Vec3(0.5, 65, -5), velocity: new Vec3(0, 0, 0.5) }

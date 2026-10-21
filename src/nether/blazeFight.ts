@@ -831,6 +831,20 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         lastReport = tick
         const nearest = blazes.reduce((d, b) => Math.min(d, b.position.distanceTo(me)), Infinity)
         trace(`fightFromNook: tick ${tick}, ${blazes.length} blazes within 48 (nearest ${nearest.toFixed(1)}), ${seeing.length} seeing the bot, ${result.kills} kills, ${result.shots} shots, health ${bot.health.toFixed(1)}`)
+        // (the ones seeing it the bow has a shot at, and the arrows left)
+        if (seeing.length > 0) {
+          const inRange = seeing.filter(b => b.position.distanceTo(me) <= shootRange)
+          const withShot = inRange.filter(b => aim(bot, b, { leadTicks: FULL_DRAW, world }) != null)
+          trace(`fightFromNook: of the ${seeing.length} seeing it ${inRange.length} in the bow's range, ${withShot.length} with a shot; ${countItems(bot, 'arrow')} arrows`)
+        }
+        // (a bunker's drops lying out, and what keeps each fetch in)
+        if (nook.bunker != null) {
+          for (const e of bunkerDrops(bot, nook)) {
+            const old = tick - (dropSeen.get(e.id) ?? tick) >= BUNKER_OLD_DROP
+            const held = (tried.get(e.id) ?? 0) >= DROP_TRIES ? `tried ${DROP_TRIES} times` : bunkerFetchHeld(bot, nook, fightHealth(bot), () => true, fireProof(bot), e.position, old ? BUNKER_FETCH_SEEN_OLD : BUNKER_FETCH_SEEN, old ? BUNKER_OLD_CLOSE : 0)
+            trace(`fightFromNook: a drop at ${e.position.floored().toString()}${old ? ' (old)' : ''}: ${held ?? 'to be fetched'}`)
+          }
+        }
       }
       const near = (a: Entity, b: Entity): number => a.position.distanceTo(me) - b.position.distanceTo(me)
       // (fire resistant, no fireball nor volley is a danger: the bow and the fetches go on through them)
@@ -1025,7 +1039,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
             if ((tried.get(e.id) ?? 0) >= DROP_TRIES) return false
             if (!dropSeen.has(e.id)) dropSeen.set(e.id, tick)
             const old = tick - (dropSeen.get(e.id) ?? tick) >= BUNKER_OLD_DROP
-            return bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof, e.position, old ? BUNKER_FETCH_SEEN_OLD : BUNKER_FETCH_SEEN)
+            return bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof, e.position, old ? BUNKER_FETCH_SEEN_OLD : BUNKER_FETCH_SEEN, old ? BUNKER_OLD_CLOSE : 0)
           }) : undefined)
         : drawn === 0 && fetchWanted(fightHealth(bot), sealAt, proof, () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)))
           ? dropsNear(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES)
@@ -1570,6 +1584,14 @@ export const BUNKER_FETCH_SEEN = 1
  */
 export const BUNKER_FETCH_SEEN_OLD = 2
 export const BUNKER_OLD_DROP = 2400
+/**
+ * and BUNKER_OLD_CLOSE blazes within DROP_CLEAR of it, at BUNKER_OLD_CLOSE_HEALTH (the fetch's sword meets it: fetchDrops):
+ * by seed 2's throne spawners the blazes hover over the throne the kills' rods lie on, and 111 of a 26.3 bunker's 157
+ * looks at its drops by (-290, 77, -209) found one to five of them within 4, 84 of 90 by (-277, 77, -159) at 1.21.11;
+ * 5 to 11 rods a run lay there till they were gone
+ */
+export const BUNKER_OLD_CLOSE = 1
+export const BUNKER_OLD_CLOSE_HEALTH = 18
 /** and the most about at all (hidden ones come round), and none this near the drop (BlazeAttackGoal hits within 2) */
 export const BUNKER_FETCH_CROWD = 8
 export const DROP_CLEAR = 4
@@ -1601,17 +1623,27 @@ export function fetchThreats (bot: Bot, points: readonly Vec3[]): Entity[] {
  * blazes that see the bot or the drop (fetchThreats), none within DROP_CLEAR of the drop, BUNKER_FETCH_CROWD about at
  * the most. Fire resistant, BUNKER_FETCH_PROOF_BLAZES that see it (only their punches hurt then).
  */
-export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true, proof = false, drop?: Vec3, seenMost = BUNKER_FETCH_SEEN): boolean {
+export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true, proof = false, drop?: Vec3, seenMost = BUNKER_FETCH_SEEN, closeMost = 0): boolean {
+  return bunkerFetchHeld(bot, nook, health, quiet, proof, drop, seenMost, closeMost) == null
+}
+
+/** what keeps the bunker's fetch in now (bunkerFetchDue's conditions), null when nothing does */
+export function bunkerFetchHeld (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true, proof = false, drop?: Vec3, seenMost = BUNKER_FETCH_SEEN, closeMost = 0): string | null {
   const b = nook.bunker
-  if (b == null || health < BUNKER_FETCH_HEALTH) return false
+  if (b == null) return 'no bunker'
+  if (health < BUNKER_FETCH_HEALTH) return `health ${health.toFixed(1)}`
   const at = drop ?? b.sill.offset(0.5, 0, 0.5)
   const seen = fetchThreats(bot, [eyePosition(bot), at.offset(0, 1.62, 0), b.sill.offset(0.5, 1.62, 0.5)]).length
-  const close = Object.values(bot.entities).some(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(at) <= DROP_CLEAR)
-  if (close || blazesAbout(bot) > BUNKER_FETCH_CROWD) return false
-  if (proof) return seen <= BUNKER_FETCH_PROOF_BLAZES
+  const close = Object.values(bot.entities).filter(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(at) <= DROP_CLEAR).length
+  if (close > closeMost || (close > 0 && health < BUNKER_OLD_CLOSE_HEALTH)) return `${close} blazes within ${DROP_CLEAR} of it`
+  const about = blazesAbout(bot)
+  if (about > BUNKER_FETCH_CROWD) return `${about} blazes about`
+  if (proof) return seen <= BUNKER_FETCH_PROOF_BLAZES ? null : `${seen} blazes in sight`
   // (a drop in the spawn volume counts as any other: with none to be in sight there, a bunker by seed 2's open throne at
   // (-290, 77, -209), whose kills' rods lie on the throne, fetched 0 to 4 times a run for 20 before, and 0 to 6 rods)
-  return seen <= seenMost && !fireballNear(bot) && quiet()
+  if (seen > seenMost) return `${seen} blazes in sight`
+  if (fireballNear(bot)) return 'a fireball near'
+  return quiet() ? null : 'a blaze about to shoot'
 }
 
 /**
