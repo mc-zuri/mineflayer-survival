@@ -13,6 +13,7 @@ import { eyePosition, isAlive, type Entity, TaskError, throwIfAborted, waitTicks
 import { countItems, trace } from './util'
 import { placeBlock } from './placeBlock'
 import { spawnerMob } from './spawnerFarm'
+import { caveRuleOn } from './caves'
 
 /** the deep dark's blocks that hear or call: sensors (SculkSensorBlockEntity's listener, 8 blocks; the calibrated one 16), shriekers, catalysts */
 export const SCULK_LISTENERS = new Set(['sculk_sensor', 'calibrated_sculk_sensor', 'sculk_shrieker'])
@@ -25,8 +26,26 @@ export function listenerRadius (name: string): number {
   return name === 'calibrated_sculk_sensor' ? 16 : 8
 }
 
-/** the kinds of danger kept */
-export type DangerKind = 'sculk'
+/** the kinds of danger kept: a sensor's hearing, and the deep dark's ground (its sculk, DEEP_DARK_RADIUS round) */
+export type DangerKind = 'sculk' | 'deepdark'
+
+/** the deep dark's blocks: its sculk carpets and veins, the sensors, shriekers and catalysts in them */
+export const DEEP_DARK_BLOCKS = new Set([...SCULK_SIGNS, 'sculk', 'sculk_vein'])
+/**
+ * how far round the deep dark's blocks the ground is the deep dark's (its wardens come out of the shriekers' calls,
+ * SculkShriekerBlockEntity; their sonic boom reaches 15): a 26.3 bot went to a lava pool at y -57 in it for its
+ * enchanting table's obsidian, a shrieker called a warden out, and its boom killed the bot (f2-26.3, t83894 to t87920)
+ */
+export const DEEP_DARK_RADIUS = 16
+
+/** whether a block of the deep dark (DEEP_DARK_BLOCKS) lies within `radius` of `pos` in the loaded chunks */
+export function deepDarkNear (bot: Bot, pos: { x: number, y: number, z: number }, radius = DEEP_DARK_RADIUS): boolean {
+  if (normalizeDimension(bot.game?.dimension) !== 'overworld' || pos.y > SCULK_SCAN_Y + radius) return false
+  if (typeof (bot.world as any)?.getColumn !== 'function' && typeof bot.findBlocks !== 'function') return false
+  const ids = [...DEEP_DARK_BLOCKS].map(n => (bot.registry.blocksByName as any)[n]?.id).filter((n): n is number => n != null)
+  if (ids.length === 0) return false
+  return findBlocks(bot, { matching: ids, point: new Vec3(Math.floor(pos.x), Math.floor(pos.y), Math.floor(pos.z)), maxDistance: radius, count: 1 }).length > 0
+}
 
 export interface DangerPoint {
   kind: DangerKind
@@ -121,6 +140,9 @@ export function scanDangers (bot: Bot): void {
     // a catalyst is the heart of a patch: the sensors about it hear as far
     map.note('sculk', pos, (SCULK_LISTENERS.has(name) ? listenerRadius(name) : 8) + 2)
   }
+  // and the deep dark's ground, its sculk and veins too: DEEP_DARK_RADIUS round each
+  const dark = [...DEEP_DARK_BLOCKS].map(n => (bot.registry.blocksByName as any)[n]?.id).filter((n): n is number => n != null)
+  for (const pos of findBlocks(bot, { matching: dark, maxDistance: 32, count: 64 })) map.note('deepdark', pos, DEEP_DARK_RADIUS)
 }
 
 /** the scan every SCAN_TICKS ticks, from the bot's physics ticks (createPlugin) */
@@ -144,8 +166,15 @@ export function sculkMoveAreas (bot: Bot): { step: (b: BlockInfoLike) => number,
   const near = (p: { x: number, y: number, z: number }): boolean => dangerMap(bot).at(p, 'sculk').length > 0
   const step = (b: BlockInfoLike): number => {
     const p = b.position
+    if (dangerMap(bot).points.length === 0) return 0
+    // the deep dark's ground: no step into it for a bot not fit for the caves (skills/caves caveRuleOn), but out of it
+    // for one in it (f2-26.3's warden)
+    if (caveRuleOn(bot) && dangerMap(bot).at(p, 'deepdark').length > 0) {
+      const at = bot.entity?.position
+      if (at == null || dangerMap(bot).at(at.floored(), 'deepdark').length === 0) return NEVER
+    }
     // (every shrieker and sensor is a sculk point itself: a step on one is within its reach)
-    if (dangerMap(bot).points.length === 0 || !near(p)) return 0
+    if (!near(p)) return 0
     const under = bot.blockAt(new Vec3(p.x, p.y - 1, p.z))?.name ?? ''
     return SCULK_UNTOUCHED.has(under) || SCULK_UNTOUCHED.has(nameOf(b)) ? NEVER : SCULK_COST
   }

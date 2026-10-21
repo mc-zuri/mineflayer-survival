@@ -38,9 +38,9 @@ test('listenerRadius: a sensor hears 8 blocks, a calibrated one 16 (SculkSensorB
 test('scanDangers: the sensors and shriekers about under y 20 are noted, a sensor\'s hearing and 2 more; none from the surface', () => {
   const bot = deepBot()
   scanDangers(bot)
-  assert.strictEqual(dangerMap(bot).points.length, 2)
-  assert.strictEqual(inDanger(bot, { x: 5, y: -10, z: 9 }), true)
-  assert.strictEqual(inDanger(bot, { x: 5, y: -10, z: 11 }), false)
+  assert.strictEqual(dangerMap(bot).points.filter(p => p.kind === 'sculk').length, 2)
+  assert.strictEqual(inDanger(bot, { x: 5, y: -10, z: 9 }, 'sculk'), true)
+  assert.strictEqual(inDanger(bot, { x: 5, y: -10, z: 11 }, 'sculk'), false)
   const up = deepBot({ position: new Vec3(0.5, 64, 0.5) })
   scanDangers(up)
   assert.strictEqual(dangerMap(up).points.length, 0)
@@ -87,4 +87,25 @@ test('the warden reflex: a warden in its boom\'s reach (15 across, 20 up or down
   const bot = deepBot()
   assert.strictEqual(clearOfWarden(bot, entity({ name: 'warden', position: new Vec3(0.5, -30, 0.5) })), true)
   assert.strictEqual(clearOfWarden(bot, entity({ name: 'warden', position: new Vec3(0.5, -20, 0.5) })), false)
+})
+
+test('the deep dark: its ground noted DEEP_DARK_RADIUS round its sculk, no step into it for a bot not fit for the caves (out of it from in it), its lava and obsidian passed over (f2-26.3)', async () => {
+  const { DEEP_DARK_RADIUS, deepDarkNear } = await import('../../src/skills/danger')
+  const { obsidianHazard } = await import('../../src/skills/hazardCells')
+  const bot = deepBot()
+  scanDangers(bot)
+  assert.ok(dangerMap(bot).points.some(p => p.kind === 'deepdark' && p.radius === DEEP_DARK_RADIUS))
+  const { step } = sculkMoveAreas(bot)
+  // a cell 14 off the sensor (out of its hearing, in the deep dark's ground): none for the bot out of it
+  bot.entity.position = new Vec3(40.5, -9, 0.5)
+  assert.strictEqual(step({ position: new Vec3(19, -9, 0) }), NEVER)
+  // the bot in it: its way out
+  bot.entity.position = new Vec3(18.5, -9, 0.5)
+  assert.notStrictEqual(step({ position: new Vec3(19, -9, 0) }), NEVER)
+  // a lava pool's or an obsidian's spot by its sculk
+  assert.strictEqual(deepDarkNear(bot, new Vec3(10, -9, 0)), true)
+  assert.strictEqual(obsidianHazard(bot, new Vec3(10, -9, 0)), true)
+  const far = deepBot()
+  far.findBlocks = () => []
+  assert.strictEqual(deepDarkNear(far, new Vec3(100, -9, 0)), false)
 })

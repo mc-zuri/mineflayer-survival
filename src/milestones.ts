@@ -39,6 +39,7 @@ import { TRIP_KIT, awayFromPortals, kitSpares, stashTripKit, type TripKitKeep } 
 import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
 import { obsidianHazard } from './skills/hazardCells'
+import { deepDarkNear } from './skills/danger'
 import { caveCells, caveRuleOn, inCaveWall } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
@@ -1330,7 +1331,8 @@ export function lavaPoolOrder (bot: Bot, pools: ReadonlyArray<{ x: number, y: nu
     const roofed = cells.roofed(new Vec3(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)))
     return { p, cave, rank: (cave ? 2 : roofed ? 1 : 0), d: Math.hypot(p.x - at.x, p.y - at.y, p.z - at.z) }
   })
-  return scored.filter(s => !(rule && s.cave)).sort((a, b) => a.rank - b.rank || a.d - b.d).map(s => s.p)
+  // (none in the deep dark, fit for the caves or not: its shriekers call the warden, deepDarkNear)
+  return scored.filter(s => !(rule && s.cave) && !deepDarkNear(bot, s.p)).sort((a, b) => a.rank - b.rank || a.d - b.d).map(s => s.p)
 }
 
 /** the biomes a ruined portal lies under water in (RuinedPortalStructure's ocean placement: on the sea's floor) */

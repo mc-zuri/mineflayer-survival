@@ -4,6 +4,7 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { caveCells, caveRuleOn, inCaveWall } from './caves'
+import { deepDarkNear } from './danger'
 
 /** ticks a cell the hazard reflex took the bot out of is kept out of (30 s) */
 export const HAZARD_LEFT_TICKS = 600
@@ -151,6 +152,8 @@ export function obsidianHazard (bot: Bot, p: Vec3): boolean {
       }
     }
   }
+  // (none in the deep dark, fit for the caves or not: deepDarkNear)
+  if (deepDarkNear(bot, p)) return true
   if (!caveRuleOn(bot)) return false
   return caveCells(bot).roofed(p.floored()) || inCaveWall(bot, p)
 }
