@@ -1036,6 +1036,27 @@ export class Runner {
         // without counting it a failure, NOT_READY_TRIES times (a 26.3 bot back from its deaths failed the nether
         // twice on 'not going into the nether without' its armor, the game's stop three more away)
         if ((err as any)?.notReady === true) {
+          // its way being searched for (the portal frame's lava, down a staircase at the next spot: lavaSearch): tried
+          // again from there, never counted, a while waited when it came back at once; a 1.21.11 bot with no lava nor
+          // obsidian known failed the nether five times in 4500 ticks and play stopped (f4-1.21.11, t191592)
+          if ((err as any).searching === true) {
+            this.log(`milestone ${m.id}: ${(err as Error).message}`)
+            if (this.bot.survival.tasks.tick - begun < NOT_READY_MIN_TICKS) {
+              const from = this.bot.survival.tasks.tick
+              try {
+                await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
+                const left = NOT_READY_WAIT_TICKS - (this.bot.survival.tasks.tick - from)
+                if (left > 0) await this.waitTicksOrAbort(left, signal)
+              } catch (e) {
+                if (stopped()) return this.stop(m.id, 'aborted', e)
+                if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
+                  this.log(`died waiting to search for ${m.id} again: ${(e as Error).message}`)
+                  await this.recover(signal)
+                }
+              }
+            }
+            continue
+          }
           // waiting for a farm to grow (the enchanting table's book's canes, the cane farm by home): a wait by home
           // with the herd tended and the stock topped up, not a try counted, GROW_WAIT_TRIES times
           if ((err as any).growing === true) {

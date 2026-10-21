@@ -868,6 +868,41 @@ test('a milestone waiting for a farm to grow (growing) waits by home its waitTic
   }
 })
 
+test('a milestone whose way is being searched for (searching: the portal frame lava search) is tried again past maxFailures and NOT_READY_TRIES, never counted, a wait after a fast one (f4-1.21.11: play stopped at the nether)', async () => {
+  const { SkillError } = await import('../../src/skills/errors')
+  const { NOT_READY_TRIES } = await import('../../src/runner')
+  const bot = fakeBot()
+  let calls = 0
+  const logs: string[] = []
+  const ticksAt: number[] = []
+  const runner = new Runner(bot, {
+    until: 'wood',
+    log: (l: string) => logs.push(l),
+    maxFailures: 1,
+    handlers: {
+      wood: async () => {
+        calls++
+        ticksAt.push(bot.survival.tasks.tick)
+        if (calls <= NOT_READY_TRIES + 2) throw Object.assign(new SkillError('NOT_FOUND', 'the portal frame: 0 obsidian, no more known: the lava searched for, the frame tried again'), { notReady: true, searching: true })
+        bot.give('wooden_pickaxe', 1)
+        bot.give('crafting_table', 1)
+      }
+    }
+  })
+  const ticking = setInterval(() => { for (let i = 0; i < 400; i++) bot.emit('physicsTick') }, 1)
+  let r: any
+  try {
+    r = await runner.play()
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.equal(r.reason, 'until', logs.join(' | '))
+  assert.equal(calls, NOT_READY_TRIES + 3)
+  assert.ok(!logs.some(l => /milestone wood (failed|not ready)/.test(l)), logs.join(' | '))
+  // a wait between the fast tries
+  assert.ok(ticksAt.slice(1).every((t, i) => t - ticksAt[i] >= 1000), ticksAt.join(' '))
+})
+
 test('the death spot: not gone back to bare where an archer shot the bot dead; a death to a mob at night gone back to by day if the items last (full-26.3-fresh-d)', async () => {
   const { deathSpotTiming } = await import('../../src/runner')
   const air = (): { name: string } => ({ name: 'air' })

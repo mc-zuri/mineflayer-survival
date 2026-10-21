@@ -301,3 +301,36 @@ test('obsidianAtHome: none in the chunks round a bot far from home, home first a
   }
   assert.deepEqual(calls.filter(c => c !== 'lava for a cast at home' && c !== 'a cast at home'), ['home for the lava', `fill ${lava.toString()}`, 'cast'])
 })
+
+test('lavaSearchSpots: home, then rings of 8 at 48, 96 and 144 round it', async () => {
+  const { lavaSearchSpots } = await import('../../src/milestones')
+  const spots = lavaSearchSpots({ x: 176, z: -3 })
+  assert.equal(spots.length, 25)
+  assert.deepEqual(spots[0].toArray(), [176, 0, -3])
+  assert.deepEqual(spots[1].toArray(), [224, 0, -3])
+  assert.ok(spots.every(s => Math.hypot(s.x - 176, s.z + 3) <= 145))
+})
+
+test('buildAPortal: no lava nor obsidian known, a lava search down at the next spot not searched, and a searching error for the runner to try again (f4-1.21.11 t191592)', async () => {
+  const { buildAPortal } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe', 1), item('water_bucket', 1), item('bucket', 1), item('flint_and_steel', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.findBlocks = () => []
+  const memory = new WorldMemory()
+  const calls: string[] = []
+  const executor: any = { memory, tasks: { tick: 0 }, obtain: async () => { throw new Error('no obsidian known near') }, task: async (name: string) => { calls.push(name) } }
+  const lines: string[] = []
+  let err: any = null
+  for (let i = 0; i < 2; i++) {
+    err = null
+    await buildAPortal(bot, executor, new AbortController().signal, l => { lines.push(l) }).catch(e => { err = e })
+    assert.equal(err?.searching, true, String(err))
+    assert.equal(err?.notReady, true)
+  }
+  assert.equal(calls.filter(c => c === 'down for the lava').length, 2, calls.join(', '))
+  // home's spot first, then the next ring's: two spots searched
+  const searched = memory.getPois('lava_search', { dimension: 'overworld' }).map((p: any) => `${p.x} ${p.z}`)
+  assert.deepEqual(searched, ['0 0', '48 0'])
+  assert.ok(lines.some(l => /looking for lava under 48 0/.test(l)), lines.join('\n'))
+})

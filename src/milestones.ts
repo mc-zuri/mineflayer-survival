@@ -858,8 +858,66 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   log(`a portal frame: no pool to cast by, ${count('obsidian')} obsidian: getting obsidian`)
   // within OBSIDIAN_OBTAIN_TICKS: the milestone tried again after, its pools and legs anew (an unbounded explore for
   // obsidian went over the ocean for 48000 ticks, 26.3)
-  await withTickBudget(bot, OBSIDIAN_OBTAIN_TICKS, signal, async (s) => await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], s))
+  try {
+    await withTickBudget(bot, OBSIDIAN_OBTAIN_TICKS, signal, async (s) => await executor.obtain([{ item: 'obsidian', count: PORTAL_OBSIDIAN }], s))
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    // none of it known: the lava looked for down a sealed staircase at the next spot within the bound (lavaSearch),
+    // and the milestone tried again from there, not a failure counted (the runner's searching): a 1.21.11 bot with
+    // no lava nor obsidian known failed 'no obsidian known near' five times in 4500 ticks and play stopped at the
+    // nether (f4-1.21.11, t187092 to t191592)
+    await lavaSearch(bot, executor, bound, signal, log)
+    throw Object.assign(new SkillError('NOT_FOUND', `the portal frame: ${count('obsidian')} obsidian, no more known (${(err as Error).message}): the lava searched for, the frame tried again`), { notReady: true, searching: true })
+  }
   await placeFromObsidian()
+}
+
+/** how far from home the lava searches go down (rings round it, across) */
+export const LAVA_SEARCH_RINGS = [0, 48, 96, 144]
+/** how near a spot searched already is to count as searched */
+export const LAVA_SEARCHED_NEAR = 24
+
+/** the spots the lava is searched for under, in order: home, then rings of 8 round it (LAVA_SEARCH_RINGS) */
+export function lavaSearchSpots (home: { x: number, z: number }): Vec3[] {
+  const out: Vec3[] = []
+  for (const r of LAVA_SEARCH_RINGS) {
+    if (r === 0) { out.push(new Vec3(Math.floor(home.x), 0, Math.floor(home.z))); continue }
+    for (let i = 0; i < 8; i++) {
+      const a = (i * Math.PI) / 4
+      out.push(new Vec3(Math.floor(home.x + r * Math.cos(a)), 0, Math.floor(home.z + r * Math.sin(a))))
+    }
+  }
+  return out
+}
+
+/**
+ * A search for lava: the next spot of lavaSearchSpots not searched (a 'lava_search' point in the memory; all of them
+ * searched, they're forgotten and the round begins again), walked to on the surface, and a staircase dug down there to
+ * under DEEP_LAVA_Y (descendTo: the cave rule's turns, no step opened onto lava or water), where the deep lava is: the
+ * milestone's next try finds it in the chunks round the bot (its pools, homeLavaSources).
+ */
+export async function lavaSearch (bot: Bot, executor: Executor, bound: ObsidianBound, signal: AbortSignal, log: (line: string) => void): Promise<Vec3> {
+  const quiet = (err: unknown): void => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err }
+  const home = bound.home ?? bot.entity.position
+  const spots = lavaSearchSpots(home)
+  const searched = (): Array<{ x: number, y: number, z: number }> => executor.memory.getPois('lava_search', { dimension: 'overworld' })
+  let spot = spots.find(s => !searched().some(p => Math.hypot(p.x - s.x, p.z - s.z) < LAVA_SEARCHED_NEAR))
+  if (spot == null) {
+    for (const p of searched()) executor.memory.removePoi('lava_search', new Vec3(p.x, p.y, p.z), 'overworld')
+    spot = spots[0]
+  }
+  executor.memory.addPoi('lava_search', spot, 'overworld')
+  log(`a portal frame: looking for lava under ${spot.x} ${spot.z}`)
+  const target = spot
+  await executor.task('to a lava search spot', async (s) => {
+    await ensureSurface(bot, s)
+    await overland(bot, { target: new Vec3(target.x, bot.entity.position.y, target.z), range: 8 }, s)
+  }, signal).catch(err => { quiet(err); log(`a portal frame: the way to the search spot: ${(err as Error).message}`) })
+  await executor.task('down for the lava', async (s) => await descendTo(bot, DEEP_LAVA_Y - 4, {}, s), signal).catch(err => {
+    quiet(err)
+    log(`a portal frame: down for the lava: ${(err as Error).message}`)
+  })
+  return spot
 }
 
 /**
