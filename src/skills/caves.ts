@@ -12,6 +12,8 @@ import { wornArmor } from './armor'
 
 /** the weakest armor and sword the caves are let into in (iron, diamond, netherite) */
 export const CAVE_TIERS = ['iron', 'diamond', 'netherite']
+/** the swords fit for the caves plain (SwordItem's damage: diamond 7, netherite 8, iron's 6 with Sharpness I 7) */
+export const PLAIN_SWORDS = ['diamond_sword', 'netherite_sword']
 /** the worn armor pieces (of the four) with an enchantment, at least */
 export const CAVE_ENCHANTED_ARMOR = 2
 /** the food bar (FoodData.tick heals from 18 up) */
@@ -47,7 +49,10 @@ export function caveUnreadiness (bot: Bot): string | null {
   if (worn.some(i => i == null || !CAVE_TIERS.includes(tierOf(i.name) ?? ''))) return 'no full iron armor worn'
   if (worn.filter(enchanted).length < CAVE_ENCHANTED_ARMOR) return 'the armor not enchanted'
   const items = [...bot.inventory.items(), ...(bot.heldItem != null ? [bot.heldItem] : [])]
-  if (!items.some(i => i.name.endsWith('_sword') && CAVE_TIERS.includes(tierOf(i.name) ?? '') && enchanted(i))) return 'no enchanted iron sword'
+  // (an enchanted one of iron or better, or a diamond or netherite one plain: its 7 and 8 a hit an iron one's
+  // Sharpness I and more; the enchanting milestone's lapis goes on the pickaxe and three armor pieces, ENCHANTING_LAPIS,
+  // and a 1.21.11 bot's diamond sword was left plain, 'no enchanted iron sword', f1-1.21.11)
+  if (!items.some(i => i.name.endsWith('_sword') && ((CAVE_TIERS.includes(tierOf(i.name) ?? '') && enchanted(i)) || PLAIN_SWORDS.includes(i.name)))) return 'no enchanted iron sword nor a diamond one'
   if (bot.food < CAVE_FOOD) return `food ${bot.food}`
   let points = 0
   for (const i of bot.inventory.items()) {

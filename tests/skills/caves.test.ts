@@ -108,6 +108,8 @@ test('caveReady: four iron pieces worn, two enchanted, an enchanted iron sword, 
   assert.match(caveUnreadiness(kit({ armor: { head: item('iron_helmet'), torso: item('iron_chestplate'), legs: item('iron_leggings'), feet: item('iron_boots') } })) ?? '', /not enchanted/)
   assert.match(caveUnreadiness(kit({ items: [item('stone_sword', 1, [{ name: 'sharpness', lvl: 1 }]), item('cooked_beef', 5)] })) ?? '', /sword/)
   assert.match(caveUnreadiness(kit({ items: [item('iron_sword'), item('cooked_beef', 5)] })) ?? '', /sword/)
+  // a diamond sword plain will do (f1-1.21.11: the enchanting's lapis went on the pickaxe and the armor)
+  assert.equal(caveUnreadiness(kit({ items: [item('diamond_sword'), item('cooked_beef', 5)] })), null)
   // a piece missing, or leather
   assert.match(caveUnreadiness(kit({ armor: { head: item('iron_helmet', 1, prot), torso: item('iron_chestplate', 1, prot), legs: item('iron_leggings') } })) ?? '', /armor/)
   assert.match(caveUnreadiness(kit({ armor: { head: item('leather_helmet', 1, prot), torso: item('iron_chestplate', 1, prot), legs: item('iron_leggings'), feet: item('iron_boots') } })) ?? '', /armor/)
