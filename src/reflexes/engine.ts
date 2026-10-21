@@ -1,4 +1,5 @@
 import type { Bot } from 'mineflayer'
+import type { Vec3 } from 'vec3'
 import { creeperSwelling } from '../skills/fight'
 import { armorPiece } from '../skills/armor'
 import { type Entity, isAlive, TaskError } from '../skills/combatUtil'
@@ -17,6 +18,11 @@ export interface ReflexEngineOptions {
 
 /** ticks between the lines of a reflex whose check keeps throwing */
 export const CHECK_ERROR_LOG_TICKS = 1200
+
+/** a mob left alone unlessHitting is the reflexes' again having hit the bot within this many ticks (a blaze punches each 20) */
+export const HITTING_TICKS = 40
+/** and from within this far (a blaze's punch: BlazeAttackGoal within 2; not its fireballs from afar) */
+export const HITTING_RANGE = 3
 
 interface Running {
   task: UrgentTask
@@ -48,6 +54,8 @@ export class ReflexEngine {
   private readonly inhibited = new Map<string, number>()
   /** mobs the reflexes leave to a skill (leaveAlone), with how many holds each has */
   private readonly leftAlone = new Map<string, number>()
+  /** and the ones left to it but for one hitting the bot (leaveAlone's unlessHitting) */
+  private readonly leftAloneSoft = new Map<string, number>()
   private readonly onTick = (): void => this.physicsTick()
   /** the tick each entity last hurt the bot at (the damage event's cause) */
   private readonly attackers = new Map<number, number>()
@@ -94,7 +102,7 @@ export class ReflexEngine {
       // and a neutral mob that hurt the bot lately (a polar bear by its cub, a wolf hit by mistake), to be fought back:
       // on seed 4 a polar bear killed the bot, which never looked at it, not being a hostile
       // (and the mobs a skill fights itself: leaveAlone)
-      .filter(e => (isHostile(bot, e) || this.provokedNeutral(e)) && isAlive(bot, e) && e.position.distanceTo(pos) <= scan && !this.leftAlone.has(e.name ?? ''))
+      .filter(e => (isHostile(bot, e) || this.provokedNeutral(e)) && isAlive(bot, e) && e.position.distanceTo(pos) <= scan && !this.leftOut(e, pos))
       .sort((a, b) => a.position.distanceTo(pos) - b.position.distanceTo(pos))
     const ticksSinceHurt = this.tick - this.lastHurtTick
     const inCombat = ticksSinceHurt < this.config.combat.hurtTicks || hostiles.some(e => e.position.distanceTo(pos) <= this.config.combat.range)
@@ -257,23 +265,37 @@ export class ReflexEngine {
    * blazes: the hostiles reflex took them over each time one came in range and fought them in melee by the spawner,
    * chasing them about the throne under the others' fireballs (every blaze death of 26.3 runs as to av was in it).
    */
-  leaveAlone (names: string[]): () => void {
-    for (const n of names) this.leftAlone.set(n, (this.leftAlone.get(n) ?? 0) + 1)
+  leaveAlone (names: string[], opts: { unlessHitting?: boolean } = {}): () => void {
+    const held = opts.unlessHitting === true ? this.leftAloneSoft : this.leftAlone
+    for (const n of names) held.set(n, (held.get(n) ?? 0) + 1)
     let released = false
     return () => {
       if (released) return
       released = true
       for (const n of names) {
-        const k = (this.leftAlone.get(n) ?? 1) - 1
-        if (k <= 0) this.leftAlone.delete(n)
-        else this.leftAlone.set(n, k)
+        const k = (held.get(n) ?? 1) - 1
+        if (k <= 0) held.delete(n)
+        else held.set(n, k)
       }
     }
   }
 
+  /**
+   * Whether a mob is left out of what the reflexes see (leaveAlone): held, or held unlessHitting and not one that hit
+   * the bot within HITTING_TICKS from within HITTING_RANGE. A blaze punched a 26.3 bot to death on its way to its
+   * bunker's site by seed 2's open throne at (-290, 77, -209), 6 hits in 200 ticks while its path searches failed, the
+   * blazes all left to the blaze fight (tests/integration/blaze BLAZE_AT=s2fortress2)
+   */
+  private leftOut (e: Entity, pos: Vec3): boolean {
+    const name = e.name ?? ''
+    if (this.leftAlone.has(name)) return true
+    if (!this.leftAloneSoft.has(name)) return false
+    return !(this.tick - (this.attackers.get(e.id) ?? -Infinity) <= HITTING_TICKS && e.position.distanceTo(pos) <= HITTING_RANGE)
+  }
+
   /** the mobs left to a skill now (leaveAlone) */
   get leftAloneNames (): string[] {
-    return [...this.leftAlone.keys()]
+    return [...new Set([...this.leftAlone.keys(), ...this.leftAloneSoft.keys()])]
   }
 
   /** the reflexes held back now (inhibit) */

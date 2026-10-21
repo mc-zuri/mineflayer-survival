@@ -755,7 +755,10 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   // fight of 9898 ticks)
   const melee = nook.bunker != null ? BUNKER_MELEE : NOOK_MELEE
   const engine = (bot as any).survival?.reflexes
-  let leave = engine?.leaveAlone?.(melee) as (() => void) | undefined
+  // (and the blazes, a punching one too: collectBlazeRods leaves them to the reflex once one hits the bot, but in
+  // here its sword meets them at the slit; out on a fetch or an errand, the reflex's then)
+  const leftAlone = [...melee, 'blaze']
+  let leave = engine?.leaveAlone?.(leftAlone) as (() => void) | undefined
   // (out of it, on a fetch or an errand, they're the reflex's again: the cube in a pit on a 26.3 bunker's lighting
   // trip by seed 2's open throne at (-290, 77, -209) hit it 14 times on its way, 18.8 health to its death, unfought)
   const outOfIt = async <T>(work: () => Promise<T>): Promise<T> => {
@@ -764,7 +767,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
     try {
       return await work()
     } finally {
-      leave = engine?.leaveAlone?.(melee) as (() => void) | undefined
+      leave = engine?.leaveAlone?.(leftAlone) as (() => void) | undefined
     }
   }
   const sword = (): any => bestMeleeWeapon(bot, 'blaze')

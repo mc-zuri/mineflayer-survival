@@ -172,6 +172,33 @@ test('leaveAlone keeps the named mobs out of the reflexes\' sight until every ho
   engine.stop()
 })
 
+test('leaveAlone unlessHitting: the mob is seen by the reflexes again once it hit the bot from within HITTING_RANGE, for HITTING_TICKS; a strict hold over it keeps it out all the same', async () => {
+  const { HITTING_TICKS, HITTING_RANGE } = await import('../../src/reflexes/engine')
+  const blaze = entity({ name: 'blaze', position: new Vec3(2.5, 64, 0.5), meta: { health: 20 } })
+  const bot = fakeBot({ items: [item('diamond_sword')], entities: [blaze] })
+  bot.world = { raycast: () => null }
+  const engine = new ReflexEngine(bot, { reflexes: [] })
+  const soft = engine.leaveAlone(['blaze'], { unlessHitting: true })
+  assert.deepStrictEqual(engine.leftAloneNames, ['blaze'])
+  assert.deepStrictEqual(engine.context().hostiles, [])
+  bot.emit('entityHurt', bot.entity, blaze)
+  assert.deepStrictEqual(engine.context().hostiles.map(e => e.id), [blaze.id])
+  // a strict hold (the bunker's fight) over it: out
+  const strict = engine.leaveAlone(['blaze'])
+  assert.deepStrictEqual(engine.context().hostiles, [])
+  strict()
+  assert.deepStrictEqual(engine.context().hostiles.map(e => e.id), [blaze.id])
+  // farther than HITTING_RANGE (its fireballs), or HITTING_TICKS on: left alone
+  blaze.position = new Vec3(0.5 + HITTING_RANGE + 1, 64, 0.5)
+  assert.deepStrictEqual(engine.context().hostiles, [])
+  blaze.position = new Vec3(2.5, 64, 0.5)
+  for (let i = 0; i <= HITTING_TICKS; i++) bot.emit('physicsTick')
+  assert.deepStrictEqual(engine.context().hostiles, [])
+  soft()
+  assert.deepStrictEqual(engine.leftAloneNames, [])
+  engine.stop()
+})
+
 test('the drowning reflex holds those under it with the head under water: no meal there, and at low air nothing but a lethal fight, while it waits to go again too', () => {
   // the bot's head in the water from y 60 to 69 (the drowning reflex itself out of the way: as in its retry cooldown)
   const water = (p: Vec3): string => p.y < 60 ? 'stone' : p.y < 70 ? 'water' : 'air'

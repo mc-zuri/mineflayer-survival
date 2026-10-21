@@ -447,6 +447,14 @@ test('fightFromNook in a bunker: the magma cubes and the skeletons are its own w
     assert.ok(during.length > 0)
     assert.ok(during.every(h => !h.includes('magma_cube') && !h.includes('wither_skeleton')), JSON.stringify(during[0]))
     assert.ok(engine.leftAloneNames.includes('magma_cube'))
+    // the blazes too, a punching one (collectBlazeRods' own hold lets that one go to the reflex: unlessHitting)
+    const soft = engine.leaveAlone(['blaze'], { unlessHitting: true })
+    const { entity } = await import('../reflexes/fakeBot')
+    const punching = entity({ name: 'blaze', position: new Vec3(0.5, 64.2, 4.0), meta: { health: 20 } })
+    bot.entities[punching.id] = punching
+    bot.emit('entityHurt', bot.entity, punching)
+    assert.deepStrictEqual(engine.context().hostiles, [])
+    soft()
     ac.abort()
     await ticks(bot, 5)
     await done
