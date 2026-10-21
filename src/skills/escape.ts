@@ -10,6 +10,7 @@ import { boxInCell } from './placement'
 import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { hotFloorCell, noteHazardLeft } from './hazardCells'
 import { advancingLavaAt, lavaNear } from './lavaFlow'
+import { hasEffect } from './potion'
 
 // The escapes the reflexes run: out of lava and fire, up for air, away from a creeper or a crowd.
 
@@ -151,6 +152,48 @@ export function powderSnowToDig (bot: Bot): Vec3 | null {
 export function isOnFire (bot: Bot): boolean {
   const flags = (bot.entity.metadata as any)?.[0]
   return typeof flags === 'number' && (flags & 1) !== 0
+}
+
+/** ticks the fire is waited out for once the water's poured at the feet (the server's flag cleared and sent back) */
+export const DOUSE_TICKS = 10
+
+/**
+ * Whether the fire the bot burns with is one its water bucket puts out (douseBurning): on fire (isOnFire) out of lava
+ * (Entity.lavaIgnite lights it again each tick in it), not fire resistant, a water bucket carried, out of the nether
+ * (water boils away there, DimensionType.ultraWarm), not in water already (it puts the fire out itself)
+ */
+export function burningToDouse (bot: Bot): boolean {
+  if (!isOnFire(bot) || inLava(bot) || (bot.entity as any).isInWater === true || inTheNether(bot)) return false
+  if (hasEffect(bot, 'fire_resistance')) return false
+  return bot.inventory.items().some(i => i.name === 'water_bucket')
+}
+
+/**
+ * The fire the bot burns with put out with its water bucket, as a player does: the water poured into the feet's cell
+ * (the bot in water: Entity.updateInWaterStateAndDoFluidPushing clears the fire), the fire waited out DOUSE_TICKS, and
+ * the water taken back up (the bucket's the next fall's and the portal's). Lava's fire burns 15 seconds after the bot is
+ * out of it (Entity.lavaIgnite), a hit each 20 ticks: a 26.3 bot out of a deep lava pool at 9 health burned to death
+ * with a water bucket in its bag, nothing to put the fire out once it stood out of the lava (f9-26.3, t347525).
+ * Resolves whether the fire is out.
+ */
+export async function douseBurning (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  const feet = bot.entity.position.floored()
+  const { emptyBucket, fillBucket, isSource } = await import('./bucket')
+  bot.clearControlStates()
+  try {
+    await emptyBucket(bot, { pos: feet, fluid: 'water' }, signal)
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('douseBurning: no water poured at the feet:', (err as Error).message)
+  }
+  const out = await waitUntil(bot, () => !isOnFire(bot), DOUSE_TICKS, signal)
+  if (isSource(bot.blockAt(feet) as any, 'water') && bot.inventory.items().some(i => i.name === 'bucket')) {
+    await fillBucket(bot, { fluid: 'water', pos: feet }, signal).catch(err => {
+      if (isAbort(err)) throw err
+      trace('douseBurning: the water not taken back up:', (err as Error).message)
+    })
+  }
+  return out
 }
 
 /** The head is under water (the block at the eyes is water or a bubble column). */
@@ -369,9 +412,13 @@ export interface EscapeHazardOptions extends SkillOptions {
 
 const inTheNether = (bot: Bot): boolean => /nether/.test(String(bot.game?.dimension ?? ''))
 
+/** ticks a burning bot out of the lava with no water bucket runs for the water near before it gives that up */
+export const WATER_RUN_TICKS = 40
+
 /**
  * Gets out of lava or fire, or from lava about to flow into the bot's cells (advancingLavaAt), onto safe ground the lava
- * flows into next neither (swimming up in lava), then to water if still burning and near.
+ * flows into next neither (swimming up in lava), then, still burning, the fire put out: the water bucket poured at the
+ * feet (douseBurning), else a run to water near.
  */
 export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): Promise<{ ticks: number }> {
   const radius = opts.searchRadius ?? 6
@@ -382,6 +429,7 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
   let dug = false
   let dugStand: Vec3 | null = null
   let watered: Vec3 | null = null
+  let toWater = 0
   try {
     for (let t = 0; t < maxTicks; t++) {
       throwIfAborted(opts.signal)
@@ -398,6 +446,9 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
       if (!inHazard(bot) && bot.entity.onGround && isSafeStand(bot, here) && !advancingLavaAt(bot)) {
         // out; still burning with water close: put it out (Entity.updateInWaterStateAndDoFluidPushing clears the fire)
         const waterRadius = opts.waterRadius ?? 6
+        // still burning with a water bucket: the water poured at the feet, then taken up (douseBurning), before the
+        // water poured into the lava is taken up and the bucket's empty
+        if (burningToDouse(bot)) await douseBurning(bot, opts.signal)
         // the water poured scooped up again (the bucket's the portal's and the next fall's)
         if (watered != null && nameAt(bot, watered) === 'water' && bot.inventory.items().some(i => i.name === 'bucket')) {
           const { fillBucket } = await import('./bucket')
@@ -408,6 +459,9 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
         const water = nearestSpot(bot, waterRadius, p => nameAt(bot, p) === 'water')
         if (water == null) return { ticks: t }
         if ((bot.entity as any).isInWater === true) return { ticks: t }
+        // (a run to it that gets the bot no nearer, a wall or a ledge between, is given up: the escape's ticks
+        // steering into the wall were the fire's)
+        if (++toWater > WATER_RUN_TICKS) return { ticks: t }
         steerToward(bot, water.offset(0.5, 0, 0.5), { sprint: true })
         await waitTicks(bot, 1, opts.signal)
         continue

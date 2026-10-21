@@ -1,7 +1,7 @@
 import type { Bot } from 'mineflayer'
 import { armorUpgrades, equipArmor, equipShield, equipTotem, shieldToHold } from '../skills/armor'
 import { eat, dueMeal, reserveAllows } from '../skills/eat'
-import { barrierCells, escapeHazard, evadeCreeper, fireHandled, fleeFrom, headInWater, inFireOnly, inHazard, surface, wallOffShooter } from '../skills/escape'
+import { barrierCells, burningToDouse, douseBurning, escapeHazard, evadeCreeper, fireHandled, fleeFrom, headInWater, inFireOnly, inHazard, surface, wallOffShooter } from '../skills/escape'
 import { MELEE_GUARD_MARGIN, MELEE_MOBS, creeperSwelling, fight, inMobReach } from '../skills/fight'
 import { shoot, sparedInLine } from '../skills/shoot'
 import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterRunning, shelterToLeave, sleepThroughNight, ticksSinceRest, undergroundAtWork, type NightPlan } from '../skills/shelter'
@@ -144,7 +144,8 @@ export const wardenReflex: Reflex = {
 
 /**
  * Out of lava and fire, and away from lava about to flow into the bot's cells (lavaAdvancing: a flow come up to it, a
- * dig that let a pool in) before it touches the bot: in it, the fire's ticks are already on (Entity.lavaHurt)
+ * dig that let a pool in) before it touches the bot: in it, the fire's ticks are already on (Entity.lavaHurt). Out of
+ * them still burning, the fire put out with the water bucket (burningToDouse, douseBurning)
  */
 export const hazardReflex: Reflex = {
   name: 'hazard',
@@ -154,7 +155,13 @@ export const hazardReflex: Reflex = {
     if (!config.hazard.enabled) return null
     watchAdvancingLava(bot)
     if (!inHazard(bot)) {
-      if (!lavaAdvancing(bot)) return null
+      // out of the lava and the fire, still burning: put out with the water bucket (lava's fire burns on 15 seconds,
+      // a hit each 20 ticks, Entity.lavaIgnite: a 26.3 bot out of a deep lava pool at 9 health burned to death, the
+      // reflex done once it stood out of the lava, a water bucket in its bag; f9-26.3, t347525)
+      if (!lavaAdvancing(bot)) {
+        if (!burningToDouse(bot)) return null
+        return { name: 'hazard', priority: config.hazard.priority, detail: 'on fire', run: async (signal) => { await douseBurning(bot, signal) } }
+      }
       return {
         name: 'hazard',
         priority: config.hazard.priority,

@@ -3,6 +3,7 @@ import assert from 'node:assert'
 import { Vec3 } from 'vec3'
 import { breathTicksLeft, ceilingToDig, dryStandBeside, headInWater, inHazard, isSafeStand, nearestSpot, pathToAir, type CellLookup } from '../../src/skills/escape'
 import { fakeBot } from '../reflexes/fakeBot'
+import { VERSIONS } from '../versions'
 
 // a lava pool: x 0 - 3, y 63 - 64 lava, stone around and below
 const lavaPool = (p: Vec3): string => (p.x >= 0 && p.x <= 3 && p.z >= -1 && p.z <= 1 && p.y >= 63 && p.y <= 64) ? 'lava' : p.y < 64 ? 'stone' : 'air'
@@ -311,3 +312,120 @@ test('ceilingToDig goes up through seagrass as water; breathTicksLeft counts the
   assert.strictEqual(breathTicksLeft({ oxygenLevel: 6, health: 20 } as any), 6 * 15 + 9 * 20)
   assert.strictEqual(breathTicksLeft({ oxygenLevel: 0, health: 2 } as any), 0)
 })
+
+/**
+ * A fake bot on fire on a stone floor at y 64 (its feet's cell (0, 64, 0)), with `items`: its use of a water bucket
+ * pours a source at the feet (the server clears the fire: the shared flags' bit 0 off), of an empty one takes it up
+ */
+function burningBot (version: string, items: string[], world?: (p: Vec3) => string): { bot: any, uses: string[] } {
+  const { item } = require('../reflexes/fakeBot')
+  const feet = new Vec3(0, 64, 0)
+  let water = false
+  const bot = fakeBot({ version, position: new Vec3(0.5, 64, 0.5), items: items.map(n => item(n, 1, undefined, version)) })
+  bot.entity.metadata[0] = 1
+  bot.survival = { tasks: { tick: 100 } }
+  bot._client = new (require('node:events').EventEmitter)()
+  const ground = world ?? ((p: Vec3) => p.y < 64 ? 'stone' : 'air')
+  bot.blockAt = (p: Vec3) => {
+    const c = p.floored()
+    const name = water && c.equals(feet) ? 'water' : ground(c)
+    return { name, position: c, boundingBox: name === 'stone' ? 'block' : 'empty', getProperties: () => ({ level: 0 }) }
+  }
+  // the world's ray (fluids passed through): the floor's top face under it
+  bot.world = {
+    raycast: (eye: Vec3, dir: Vec3, range: number) => {
+      if (dir.y >= 0) return null
+      const t = (64 - eye.y) / dir.y
+      if (t > range) return null
+      const at = eye.plus(dir.scaled(t))
+      return { position: new Vec3(Math.floor(at.x), 63, Math.floor(at.z)), face: 1, intersect: at }
+    }
+  }
+  bot.equip = async (it: any) => { bot.heldItem = it }
+  bot.lookAt = async () => {}
+  const uses: string[] = []
+  const slotOf = (name: string): number => bot.inventory.slots.findIndex((s: any, i: number) => i >= 9 && s?.name === name)
+  bot.activateItem = () => {
+    const held = bot.heldItem?.name
+    uses.push(held)
+    if (held === 'water_bucket' && !water) {
+      water = true
+      bot.inventory.slots[slotOf('water_bucket')] = Object.assign(item('bucket', 1, undefined, version), { slot: slotOf('water_bucket') })
+      bot.entity.metadata[0] = 0
+    } else if (held === 'bucket' && water) {
+      water = false
+      bot.inventory.slots[slotOf('bucket')] = Object.assign(item('water_bucket', 1, undefined, version), { slot: slotOf('bucket') })
+    }
+    bot.heldItem = null
+  }
+  return { bot, uses }
+}
+
+for (const version of VERSIONS) {
+  test(`douseBurning (${version}): the water bucket poured at the feet puts the fire out, and the water's taken back up (f9-26.3, t347525: burned to death out of the lava, a water bucket in the bag)`, async () => {
+    const { burningToDouse, douseBurning, isOnFire } = await import('../../src/skills/escape')
+    const { bot, uses } = burningBot(version, ['water_bucket', 'bucket'])
+    assert.strictEqual(burningToDouse(bot), true)
+    const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+    try {
+      assert.strictEqual(await douseBurning(bot), true)
+    } finally {
+      clearInterval(ticking)
+    }
+    assert.strictEqual(isOnFire(bot), false)
+    assert.deepStrictEqual(uses, ['water_bucket', 'bucket'])
+    assert.strictEqual(bot.inventory.items().filter((i: any) => i.name === 'water_bucket').length, 1)
+    assert.strictEqual(bot.blockAt(new Vec3(0, 64, 0)).name, 'air')
+    assert.strictEqual(burningToDouse(bot), false)
+  })
+
+  test(`burningToDouse (${version}): only on fire, out of the lava and the water, with a water bucket, out of the nether, not fire resistant`, async () => {
+    const { burningToDouse } = await import('../../src/skills/escape')
+    assert.strictEqual(burningToDouse(burningBot(version, ['water_bucket']).bot), true)
+    // not on fire
+    const cold = burningBot(version, ['water_bucket']).bot
+    cold.entity.metadata[0] = 0
+    assert.strictEqual(burningToDouse(cold), false)
+    // no water bucket: an empty one is none
+    assert.strictEqual(burningToDouse(burningBot(version, ['bucket']).bot), false)
+    // in lava (the escape's), in water (out by itself)
+    const lava = burningBot(version, ['water_bucket']).bot
+    lava.entity.isInLava = true
+    assert.strictEqual(burningToDouse(lava), false)
+    const wet = burningBot(version, ['water_bucket']).bot
+    wet.entity.isInWater = true
+    assert.strictEqual(burningToDouse(wet), false)
+    // the nether: water boils away (DimensionType.ultraWarm)
+    const nether = burningBot(version, ['water_bucket']).bot
+    nether.game.dimension = 'the_nether'
+    assert.strictEqual(burningToDouse(nether), false)
+    // fire resistance: the fire hurts nothing
+    const proof = burningBot(version, ['water_bucket']).bot
+    proof.entity.effects = { [proof.registry.effectsByName.FireResistance.id]: { amplifier: 0, duration: 600 } }
+    assert.strictEqual(burningToDouse(proof), false)
+  })
+
+  test(`escapeHazard (${version}): out of the lava still burning, the water bucket poured at the feet; with none, a run to water it gets no nearer to is given up after WATER_RUN_TICKS`, async () => {
+    const { escapeHazard, isOnFire, WATER_RUN_TICKS } = await import('../../src/skills/escape')
+    const ticking = setInterval(() => { for (const b of bots) b.emit('physicsTick') }, 1)
+    const bots: any[] = []
+    try {
+      const { bot, uses } = burningBot(version, ['water_bucket'])
+      bots.push(bot)
+      await escapeHazard(bot, { maxTicks: 200 })
+      assert.strictEqual(isOnFire(bot), false)
+      assert.deepStrictEqual(uses, ['water_bucket', 'bucket'])
+      // water 3 east over a wall the fake never gets past: the escape back well before its 200 ticks
+      const wall = (p: Vec3): string => p.x === 3 && p.y === 64 ? 'water' : p.x === 2 && p.y >= 64 && p.y <= 66 ? 'stone' : p.y < 64 ? 'stone' : 'air'
+      const dry = burningBot(version, [], wall).bot
+      bots.push(dry)
+      let ticks = 0
+      dry.on('physicsTick', () => { ticks++ })
+      const out = await escapeHazard(dry, { maxTicks: 200 })
+      assert.ok(out.ticks <= WATER_RUN_TICKS + 2 && ticks < 150, `${out.ticks} ticks, ${ticks} waited`)
+      assert.strictEqual(isOnFire(dry), true)
+    } finally {
+      clearInterval(ticking)
+    }
+  })
+}

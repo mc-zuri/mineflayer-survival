@@ -9,6 +9,7 @@ import { CREEPER_IGNITED_INDEX, CREEPER_SWELL_DIR_INDEX, creeperSwelling } from 
 import { metadataIndex } from '../../src/skills/combatUtil'
 import { rememberShelter, setTicksSinceRest, shelter, shelterToLeave } from '../../src/skills/shelter'
 import { entity, fakeBot, item, type FakeBotInput } from './fakeBot'
+import { VERSIONS } from '../versions'
 
 const at = (x: number, y = 64, z = 0.5): Vec3 => new Vec3(0.5 + x, y, z)
 
@@ -852,6 +853,26 @@ test('hazard reflex: the fire left to a task that handles it (handleFire: the bl
   assert.strictEqual(run({ inLava: true }, true), 'hazard')
   assert.strictEqual(run({ ...fire, inLava: true }, true), 'hazard')
 })
+
+for (const version of VERSIONS) {
+  test(`hazard reflex (${version}): on fire out of the lava and the fire, a water bucket carried: 'on fire', the bucket poured at the feet (f9-26.3, t347525: burned to death, the reflex done once out of the lava)`, () => {
+    const run = (items: string[], burning: boolean, input: FakeBotInput = {}): string | null => {
+      const bot = fakeBot({ version, items: items.map(n => item(n, 1, undefined, version)), ...input })
+      if (burning) bot.entity.metadata[0] = 1
+      const engine = new ReflexEngine(bot, { config: {}, enabled: false })
+      const task = hazardReflex.check(engine.context())
+      engine.stop()
+      return task == null ? null : (task.detail ?? task.name)
+    }
+    assert.strictEqual(run(['water_bucket'], true), 'on fire')
+    assert.strictEqual(run(['water_bucket'], false), null)
+    assert.strictEqual(run(['bucket'], true), null)
+    assert.strictEqual(run([], true), null)
+    assert.strictEqual(run(['water_bucket'], true, { inWater: true }), null)
+    // in the lava: the escape (its water poured there once it's had 2 ticks)
+    assert.strictEqual(run(['water_bucket'], true, { inLava: true }), 'hazard')
+  })
+}
 
 test('putOutFireOnBot: the fire in the body\'s cells broken, none elsewhere', async () => {
   const { putOutFireOnBot } = await import('../../src/nether/blazeFight')
