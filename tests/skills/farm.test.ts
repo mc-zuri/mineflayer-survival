@@ -27,7 +27,7 @@ function world (water: Vec3[], crops: Array<{ at: Vec3, name: string, age: numbe
   }
 }
 
-test('a farm site: the water, and the plot ground in a block of 5 by 5 round it, open above, the nearest first, FARM_PLOTS (12) at most', () => {
+test('a farm site: the water, and the plot ground of the crop rows of the block of 5 by 5 round it (its z or 2 off), open above, the nearest first, FARM_PLOTS at most; the rows between bare', () => {
   const water = [new Vec3(10, 63, 10)]
   assert.equal(findFarmSite(world(water), new Vec3(0, 64, 0), 24)?.cells.length, FARM_PLOTS)
   const site = findFarmSite(world(water), new Vec3(0, 64, 0), 24, 8)
@@ -36,14 +36,19 @@ test('a farm site: the water, and the plot ground in a block of 5 by 5 round it,
   assert.equal(site.cells.length, 8)
   for (const c of site.cells) {
     assert.equal(c.y, 63)
-    // the 3 by 3 ring first, all in reach of the water for FarmBlock.isNearWater
-    assert.ok(Math.max(Math.abs(c.x - 10), Math.abs(c.z - 10)) <= 1)
+    // in the crop rows (the water's z, or 2 off), all in reach of the water for FarmBlock.isNearWater, the nearest first
+    assert.equal(Math.abs(c.z - 10) % 2, 0)
+    assert.ok(Math.max(Math.abs(c.x - 10), Math.abs(c.z - 10)) <= FARM_REACH)
     assert.ok(!c.equals(water[0]))
   }
-  // the whole block: 24 plots by one water
+  assert.ok(site.cells.slice(0, 2).every(c => c.distanceTo(water[0]) === 1))
+  // the whole block's rows: 14 plots by one water, the 10 between them bare
   const all = findFarmSite(world(water), new Vec3(0, 64, 0), 24, 30) as { cells: Vec3[] }
-  assert.equal(all.cells.length, 24)
-  assert.ok(all.cells.every(c => Math.max(Math.abs(c.x - 10), Math.abs(c.z - 10)) <= FARM_REACH))
+  assert.equal(all.cells.length, 14)
+  const { spacerCells } = require('../../src/skills/farm')
+  const bare: Vec3[] = spacerCells(water[0])
+  assert.equal(bare.length, 10)
+  assert.ok(bare.every(b => Math.abs(b.z - 10) === 1 && !all.cells.some(c => c.equals(b))))
   // a stone floor round the water: nothing to till
   const stone: Record<string, string> = {}
   for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) stone[`${10 + dx},63,${10 + dz}`] = 'stone'
@@ -62,9 +67,9 @@ test('plot ground: grass, dirt and its path, coarse and rooted dirt (tilled twic
   for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) ground[`${10 + dx},63,${10 + dz}`] = dx > 0 ? 'coarse_dirt' : 'podzol'
   delete ground['10,63,10']
   const site = findFarmSite(world(water, [], ground), new Vec3(10, 64, 10), 4, 24) as { cells: Vec3[] }
-  assert.equal(site.cells.length, 10)
+  assert.equal(site.cells.length, 6)
   assert.ok(site.cells.every(c => c.x > 10))
-  assert.equal(findFarmSite(world(water, [], ground), new Vec3(10, 64, 10), 4, 24, 12), null)
+  assert.equal(findFarmSite(world(water, [], ground), new Vec3(10, 64, 10), 4, 24, 8), null)
 })
 
 /** an old growth pine taiga's floor at y 63: podzol, a patch of grass from x 8 to 16, the base's cobblestone at home */
@@ -84,7 +89,7 @@ test('farmHoleSite: the hole dug where the most plot ground is about it, in the 
   assert.equal(hole.y, 63)
   // in the grass, with the whole block of it about it
   assert.ok(hole.x >= 10 && hole.x <= 14 && Math.abs(hole.z) <= 4, hole.toString())
-  assert.equal(plotCells(taiga(), hole).length, 24)
+  assert.equal(plotCells(taiga(), hole).length, 14)
   // the cane farm's hole would be in the podzol by home: no plot by it
   const cane = waterHoleSite(taiga(), home) as Vec3
   assert.equal(plotCells(taiga([cane]), cane).length, 0)
@@ -312,15 +317,15 @@ test('nearlyGrownPlots: the grown plots and the ones a stage short; a farm with 
   assert.equal(harvested, true)
 })
 
-test('growFarms: a farm of 12 by its water sown further from the seeds of its harvest, up to FARM_TARGET_PLOTS (18), its record grown; none past it, none far off', async () => {
+test('growFarms: a farm of 10 by its water sown further from the seeds of its harvest, up to FARM_TARGET_PLOTS (14), its record grown; none past it, none far off', async () => {
   const { growFarms, FARM_TARGET_PLOTS } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const farmModule = require('../../src/skills/farm')
   const water = new Vec3(10, 63, 10)
   const memory = new WorldMemory()
-  const first = plotCells(world([water]), water, 12)
+  const first = plotCells(world([water]), water, 10)
   rememberFarm(memory, { water, cells: first, crop: 'wheat' }, 1000)
-  // the first 12 sown (wheat on them), the rest of the block bare grass
+  // the first 10 sown (wheat on them), the rest of the block bare grass
   const lookup = (p: Vec3): any => first.some(c => c.equals(p.offset(0, -1, 0))) ? { name: 'wheat', getProperties: () => ({ age: 0 }) } : first.some(c => c.equals(p)) ? { name: 'farmland' } : world([water])(p)
   const bot = fakeBot({ position: new Vec3(12.5, 64, 12.5), items: [item('wooden_hoe', 1), item('wheat_seeds', 9)] })
   bot.blockAt = (p: Vec3) => ({ ...lookup(p.floored()), position: p.floored() })
@@ -331,15 +336,15 @@ test('growFarms: a farm of 12 by its water sown further from the seeds of its ha
   const real = farmModule.plantFarm
   farmModule.plantFarm = async (_b: any, args: any) => { asked.push(args); return { water: args.water, cells: plotCells(lookup, args.water, args.plots), crop: 'wheat' } }
   try {
-    assert.equal(await growFarms(bot, executor, new AbortController().signal, () => {}), FARM_TARGET_PLOTS - 12)
+    assert.equal(await growFarms(bot, executor, new AbortController().signal, () => {}), FARM_TARGET_PLOTS - 10)
     assert.equal(asked.length, 1)
     assert.ok(asked[0].water.equals(water))
-    assert.equal(asked[0].plots, 6)
+    assert.equal(asked[0].plots, 4)
     const rec = knownFarms(memory)[0]
     assert.equal(rec.cells.length, FARM_TARGET_PLOTS)
     // sown when it was first (its growing goes on)
     assert.equal(rec.sown, 1000)
-    // at its 18: no more
+    // at its 14: no more
     assert.equal(await growFarms(bot, executor, new AbortController().signal, () => {}), 0)
     assert.equal(asked.length, 1)
     // a farm 40 off: not from here
@@ -357,7 +362,7 @@ test('harvestGrownFarms: a farm harvested is sown further from the seeds it gave
   const farmModule = require('../../src/skills/farm')
   const water = new Vec3(10, 63, 10)
   const memory = new WorldMemory()
-  rememberFarm(memory, { water, cells: plotCells(world([water]), water, 12), crop: 'wheat' }, 0)
+  rememberFarm(memory, { water, cells: plotCells(world([water]), water, 10), crop: 'wheat' }, 0)
   const bot = fakeBot({ position: new Vec3(12.5, 64, 12.5), items: [item('wooden_hoe', 1)] })
   bot.blockAt = (p: Vec3) => ({ ...world([water])(p.floored()), position: p.floored() })
   bot.game.dimension = 'overworld'
@@ -368,21 +373,21 @@ test('harvestGrownFarms: a farm harvested is sown further from the seeds it gave
     farmCost: () => 0,
     plan: () => ({ ok: true, cost: 100 }),
     obtain: async () => {},
-    // (the harvest: 12 wheat and 20 seeds, 12 of them sown again)
+    // (the harvest: 10 wheat and 18 seeds, 10 of them sown again)
     runStep: async (step: any) => { steps.push(step); bot.inventory.slots[20] = item('wheat_seeds', 8); return { gained: 12 } },
     task: async (_n: string, fn: any, s: AbortSignal) => await fn(s)
   }
   const real = farmModule.plantFarm
   let grown = 0
-  farmModule.plantFarm = async (_b: any, args: any) => { grown = args.plots; return { water: args.water, cells: plotCells(world([water]), args.water, 24).slice(12, 12 + args.plots), crop: 'wheat' } }
+  farmModule.plantFarm = async (_b: any, args: any) => { grown = args.plots; return { water: args.water, cells: plotCells(world([water]), args.water).slice(10, 10 + args.plots), crop: 'wheat' } }
   try {
     await harvestGrownFarms(bot, executor, new AbortController().signal, () => {}, false)
   } finally {
     farmModule.plantFarm = real
   }
   assert.equal(steps.length, 1)
-  assert.equal(grown, 6)
-  assert.equal(knownFarms(memory)[0].cells.length, 18)
+  assert.equal(grown, 4)
+  assert.equal(knownFarms(memory)[0].cells.length, 14)
 })
 
 test('keepFarm between trips: no farm, its start tried by home, again only after FARM_RETRY_TICKS; a farm grown, harvested and its wheat baked (f5-1.21.11: no farm all game once the food milestone had none)', async () => {
@@ -462,3 +467,4 @@ test('farmCensus: the crops by age, the bare plots, the ones trampled to dirt, t
   }
   assert.equal(farmCensus(lookup, cells, 'wheat'), '1 at age 7, 2 at age 2, 1 bare, 1 no farmland, light 6 at the least')
 })
+

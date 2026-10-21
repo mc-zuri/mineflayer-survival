@@ -33,15 +33,16 @@ export function growsAny (names: readonly string[]): boolean {
 }
 
 /**
- * Average ticks for a crop sown on hydrated farmland in a row to grow up: CropBlock.randomTick grows a stage with
- * chance 1 / (floor(25 / speed) + 1), speed about 5.5 in a single row by water (getGrowthSpeed), a block's random tick
- * coming every 4096 / 3 ticks on average (randomTickSpeed 3); 7 stages. The random ticks come only within the
- * simulation distance of a player (ServerChunkCache.tickChunks): a farm left far behind doesn't grow meanwhile.
+ * Average ticks for a crop sown on hydrated farmland in a farm's row to grow up: CropBlock.randomTick grows a stage with
+ * chance 1 / (floor(25 / speed) + 1), speed 7.75 to 10 for a row between bare farmland by water (getGrowthSpeed: the
+ * moist farmland under and about it, not halved: no crop beside it both ways nor on a diagonal), 1 in 3 or 4, a block's
+ * random tick coming every 4096 / 3 ticks on average (randomTickSpeed 3); 7 stages. The random ticks come only within
+ * the simulation distance of a player (ServerChunkCache.tickChunks): a farm left far behind doesn't grow meanwhile.
  */
-export const GROW_TICKS = 48000
+export const GROW_TICKS = 36000
 
 /** plots a farm is sown with at its start (the harvests' seeds grow it on: FARM_TARGET_PLOTS) */
-export const FARM_PLOTS = 12
+export const FARM_PLOTS = 10
 
 /** a farm the bot sowed, as its memory keeps it (a 'farm' point of interest at the water, this as the note) */
 export interface FarmRecord {

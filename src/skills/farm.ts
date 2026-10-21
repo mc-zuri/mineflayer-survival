@@ -42,9 +42,8 @@ export function plotGround (name: string | undefined): boolean {
 export const HYDRATION_RANGE = 4
 
 /**
- * how far across from its water a farm's plots go (a block of 5 by 5 round it): a block of crops grows as fast as a
- * row (CropBlock.getGrowthSpeed: the moist farmland round a plot adds to its speed what the same crop beside it on
- * both sides halves), and every plot is within HYDRATION_RANGE of the one water
+ * how far across from its water a farm's plots go (a block of 5 by 5 round it, every cell within HYDRATION_RANGE of
+ * the one water)
  */
 export const FARM_REACH = 2
 
@@ -55,18 +54,34 @@ export type Lookup = (pos: Vec3) => { name: string, boundingBox?: string, getPro
 
 const OPEN_ABOVE = new Set(['air', 'cave_air', 'short_grass', 'tall_grass', 'fern', 'dandelion', 'poppy', 'snow'])
 
-/** the cells about a farm's water a plot may go in, the nearest first (FARM_REACH across, at its level) */
+/**
+ * The cells about a farm's water its crops go in, the nearest first: the rows along x of the block round it (FARM_REACH
+ * across) whose z is the water's or 2 off it, the rows between them tilled and left bare (spacerCells). CropBlock.
+ * getGrowthSpeed adds the moist farmland under and about a crop to its speed and halves it when the same crop stands
+ * beside it both along x and along z, or on a diagonal: a crop in a row between bare farmland grows a stage at 1 in 3
+ * or 4 of its random ticks, one in a solid block at 1 in 6 to 9 (a 1.21.11 farm of 12 in a block had none grown 65000
+ * ticks after its sowing, f5-1.21.11)
+ */
 export function farmBlockCells (water: Vec3): Vec3[] {
   const out: Vec3[] = []
   for (let dx = -FARM_REACH; dx <= FARM_REACH; dx++) {
-    for (let dz = -FARM_REACH; dz <= FARM_REACH; dz++) {
+    for (let dz = -FARM_REACH; dz <= FARM_REACH; dz += 2) {
       if (dx !== 0 || dz !== 0) out.push(water.offset(dx, 0, dz))
     }
   }
   return out.sort((a, b) => a.distanceSquared(water) - b.distanceSquared(water))
 }
 
-/** the cells about a water a plot can be made on now: plot ground, open above (a plant there is broken first) */
+/** the bare farmland rows between a farm's crop rows (farmBlockCells), the nearest first */
+export function spacerCells (water: Vec3): Vec3[] {
+  const out: Vec3[] = []
+  for (let dx = -FARM_REACH; dx <= FARM_REACH; dx++) {
+    for (const dz of [-1, 1]) out.push(water.offset(dx, 0, dz))
+  }
+  return out.sort((a, b) => a.distanceSquared(water) - b.distanceSquared(water))
+}
+
+/** the cells about a water a plot can be made on now (farmBlockCells): plot ground, open above (a plant there is broken first) */
 export function plotCells (lookup: Lookup, water: Vec3, plots = Infinity): Vec3[] {
   const cells: Vec3[] = []
   for (const cell of farmBlockCells(water)) {
@@ -310,6 +325,19 @@ export async function plantFarm (bot: Bot, args: { seed: string, center?: Vec3, 
     }
   }
   if (sown.length === 0) throw new SkillError('VERIFY_FAILED', `nothing sown by the water at ${site.water.toString()}`)
+  // the bare rows between the crops' tilled (moist farmland about a crop speeds it, the same crop beside it on two
+  // sides slows it: CropBlock.getGrowthSpeed); a near-water farmland with nothing on it stays (FarmBlock.randomTick)
+  for (const cell of spacerCells(site.water)) {
+    const name = bot.blockAt(cell)?.name
+    if (!TILLABLE.has(name ?? '') && !TILLED_TWICE.has(name ?? '')) continue
+    if (!OPEN_ABOVE.has(bot.blockAt(cell.offset(0, 1, 0))?.name ?? 'stone')) continue
+    try {
+      await till(bot, cell, signal)
+    } catch (err) {
+      if (isAbort(err)) throw err
+      trace('plantFarm: a bare row cell at', cell.toString(), 'failed:', (err as Error).message)
+    }
+  }
   return { water: site.water, cells: sown, crop }
 }
 

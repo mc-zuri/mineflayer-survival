@@ -1,7 +1,7 @@
 // The home's food against a real server (SURVIVAL_VERSION, default 1.21.11), on a superflat's grass with no water
 // and no animal by home: the farm started (startFarm: a water hole dug where the grass is, from the water bucket held,
 // 12 plots tilled and sown), its wheat grown with the random ticks sped up (the scenario's only: random_tick_speed),
-// harvested, sown again and grown from its seeds, and baked (keepFarm); then two cows seen 60 blocks off (noteAnimals,
+// harvested, sown again and grown from its seeds (its rows with bare farmland between), and baked (keepFarm); then two cows seen 60 blocks off (noteAnimals,
 // the bot gone by them) fetched and led home into a pen built there (startHerd's fetchHerd), and bred.
 import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert'
@@ -13,7 +13,7 @@ import { countItems, waitUntil } from '../../src/skills/gather'
 import { inPen, penFromMemory } from '../../src/skills/pen'
 import { herdFromMemory, rememberedAnimals } from '../../src/skills/herd'
 import { breedAnimals } from '../../src/skills/husbandry'
-import { farmCells, grownPlots, knownFarms } from '../../src/skills/farm'
+import { farmCells, grownPlots, knownFarms, spacerCells } from '../../src/skills/farm'
 import { WorldMemory } from '../../src/core/memory'
 import { Executor } from '../../src/executor/executor'
 import { keepFarm, startFarm, startHerd } from '../../src/milestones'
@@ -78,6 +78,9 @@ describe(`the home's food on a ${DEFAULT_VERSION} server`, { timeout: 30 * 60 * 
     const cells = farmCells(farm)
     assert.ok(cells.length >= 10, `${cells.length} sown`)
     for (const c of cells) assert.strictEqual(bot.blockAt(c.offset(0, 1, 0))?.name, 'wheat', `nothing sown on ${c.toString()}`)
+    // the rows between the crops tilled and bare
+    const bare = spacerCells(farm.water)
+    assert.ok(bare.every(c => bot.blockAt(c)?.name === 'farmland' && bot.blockAt(c.offset(0, 1, 0))?.name === 'air'), bare.map(c => `${c.toString()} ${bot.blockAt(c)?.name ?? '?'}`).join(', '))
     // the wheat grown (the random ticks a hundred times over, this scenario's only), with the bot by it
     await run('gamerule random_tick_speed 300')
     try {

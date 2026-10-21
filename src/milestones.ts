@@ -2548,11 +2548,12 @@ export async function startFarm (bot: Bot, executor: Executor, signal: AbortSign
 export const FARM_RANGE = 96
 
 /**
- * the plots a farm is grown to from its own harvests' seeds, in the block round its water (plotCells): a grown plot
- * drops its wheat and 0 to 3 seeds (the wheat loot table's binomial 3 at 0.5714), one sowing it again, so 12 plots
- * are 18 after a harvest. Bread is 5 food points and 6 of saturation: 18 plots are 6 bread a growing (GROW_TICKS)
+ * the plots a farm is grown to from its own harvests' seeds: its rows' cells round its water (farmBlockCells, 14). A
+ * grown plot drops its wheat and 0 to 3 seeds (the wheat loot table's binomial 3 at 0.5714), one sowing it again, so a
+ * farm of 10 is 14 after a harvest. Bread is 5 food points and 6 of saturation: 14 plots are 4 or 5 bread a growing
+ * (GROW_TICKS)
  */
-export const FARM_TARGET_PLOTS = 18
+export const FARM_TARGET_PLOTS = 14
 /** how far off the bot a farm is sown further from the seeds it holds */
 export const FARM_GROW_RANGE = 16
 
