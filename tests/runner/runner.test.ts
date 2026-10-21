@@ -1486,3 +1486,28 @@ test('a spare kit for the base gives way to a meal when hungry, and is held to S
     }
   }
 })
+
+test('the spare kit after a recovery is its tools alone, within SPARE_KIT_RECOVERY_TICKS, and no spare kit asks for food from a bot short of its own (f5-1.21.11, t312126, t385877, t1206281: a starving bot back from a death explored for animals for the base\'s spare food, and died again)', async () => {
+  const { SPARE_KIT_RECOVERY_TICKS } = await import('../../src/runner')
+  assert.ok(SPARE_KIT_RECOVERY_TICKS > 0)
+  // back with a stone pickaxe and sword, no food; the base's chest empty
+  const bot = fakeBot({ stone_pickaxe: 1, stone_sword: 1 })
+  const runner = new Runner(bot, { log: () => {} })
+  const memory = (runner as any).memory as WorldMemory
+  memory.setBase({ x: 0, y: 64, z: 0 })
+  memory.rememberChest({ x: 1, y: 64, z: 0 }, {})
+  const asked: any[] = []
+  ;(runner as any).executor.obtain = async (goals: any[]) => { asked.push(...goals) }
+  ;(runner as any).executor.storeExact = async () => {}
+  await (runner as any).spareKitAfterRecovery()
+  assert.ok(asked.length > 0, 'the tools asked for')
+  assert.ok(asked.every(g => g.unit !== 'nutrition'), JSON.stringify(asked))
+  // the afterTrip's stash with the bot's own food short: no food asked for either; with its food in the bag, it is
+  asked.length = 0
+  await runner.stashSpareKit()
+  assert.ok(asked.every(g => g.unit !== 'nutrition'), JSON.stringify(asked))
+  bot.give('cooked_beef', 10)
+  asked.length = 0
+  await runner.stashSpareKit()
+  assert.ok(asked.some(g => g.unit === 'nutrition'), JSON.stringify(asked))
+})

@@ -284,6 +284,9 @@ export function bareForWork (bot: Bot, reached: readonly string[]): boolean {
   return !bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))
 }
 
+/** ticks the spare kit put back after a recovery may take (its tools: the base's iron and wood) */
+export const SPARE_KIT_RECOVERY_TICKS = 6000
+
 /** how far the first wood survey goes from home, doubled each survey to WOOD_SURVEY_MAX (woodSurvey) */
 export const WOOD_SURVEY_RADIUS = 96
 export const WOOD_SURVEY_MAX = 384
@@ -1278,7 +1281,7 @@ export class Runner {
    * A spare kit in the base's chests before the next trip out (spareKitGoals: a second pickaxe, sword and axe of the
    * tier carried, and food), made when they lack one and stored, for rekit to take after a death
    */
-  async stashSpareKit (signal?: AbortSignal): Promise<void> {
+  async stashSpareKit (signal?: AbortSignal, opts: { food?: boolean } = {}): Promise<void> {
     const base = baseRecord(this.memory)
     if (base == null || base.chests.length === 0) return
     const dimension = this.memory.base?.dimension ?? 'overworld'
@@ -1287,7 +1290,9 @@ export class Runner {
       for (const [name, n] of Object.entries(this.memory.chestAt(c, dimension)?.items ?? {})) stored[name] = (stored[name] ?? 0) + n
     }
     const carried = ownedInventory(this.bot)
-    const goals = spareKitGoals(carried, stored)
+    // (the spare food only from a bag with its own food in it, FOOD_RESTOCK points at least, nor at all with `food`
+    // false: the bot's own meals first, play's restock)
+    const goals = spareKitGoals(carried, stored).filter(g => g.unit !== 'nutrition' || (opts.food !== false && carried.foodPoints() >= FOOD_RESTOCK))
     if (goals.length === 0) return
     this.log('a spare kit for the base')
     // within SPARE_KIT_TICKS, given up for a meal when hungry (the hunger watch) or for the night's mine: a 1.21.11
@@ -2040,10 +2045,15 @@ export class Runner {
     if (normalizeDimension(this.bot.game?.dimension) !== (this.memory.base?.dimension ?? 'overworld')) return
     const p = this.bot.entity.position
     if (Math.hypot(p.x - base.origin.x, p.y - base.origin.y, p.z - base.origin.z) > 96) return
+    // (its tools only, within SPARE_KIT_RECOVERY_TICKS: the recovery's own spare kit's food goal sent a starving bot
+    // back from a death out exploring for animals for 15000 to 40000 ticks, at 0.3 to 4 health, and it was shot by a
+    // skeleton twice and poked to death by a berry bush, 'died again recovering', f5-1.21.11, t312126, t385877,
+    // t1206281)
+    const outer = signal ?? new AbortController().signal
     try {
-      await this.stashSpareKit(signal)
+      await this.withBudget(SPARE_KIT_RECOVERY_TICKS, outer, async (s) => await this.stashSpareKit(s, { food: false }))
     } catch (err) {
-      if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+      if (TaskError.is(err, 'DIED') || signal?.aborted === true) throw err
       this.log(`no spare kit after the recovery: ${(err as Error).message}`)
     }
   }
