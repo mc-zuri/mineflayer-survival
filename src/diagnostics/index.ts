@@ -45,6 +45,17 @@ export interface DiagnosticsOptions {
   log?: ((line: string) => void) | null
 }
 
+/** what the runner and the executor told the diagnostics, as it was told (onTrace: a recorder's) */
+export type TraceEvent =
+  | { type: 'milestoneStarted', id: string, title: string, goals: string[] }
+  | { type: 'milestoneReached', id: string }
+  | { type: 'milestoneFailed', id: string, error: unknown }
+  | { type: 'planMade', n: number, requests: string[], steps: string[] }
+  | { type: 'noPlan', requests: string[], error: unknown }
+  | { type: 'stepStarted', desc: string, index: number }
+  | { type: 'stepDone', key: string, gained: number }
+  | { type: 'stepFailed', desc: string, error: unknown, n: number }
+
 export interface ReportRecord {
   report: DiagnosticReport
   /** the file it was written to, if it was */
@@ -69,6 +80,7 @@ export class Diagnostics {
   private readonly keep: number
   private readonly records: ReportRecord[] = []
   private readonly listeners = new Set<(report: DiagnosticReport, file: string | null) => void>()
+  private readonly tracers = new Set<(event: TraceEvent) => void>()
   private readonly moveFailedEvery: number
   private lastMoveFailedTick = -Infinity
   private written = 0
@@ -149,6 +161,18 @@ export class Diagnostics {
   onReport (cb: (report: DiagnosticReport, file: string | null) => void): () => void {
     this.listeners.add(cb)
     return () => { this.listeners.delete(cb) }
+  }
+
+  /** calls `cb` with each thing the runner and the executor tell (milestones, plans, steps); returns the call to stop */
+  onTrace (cb: (event: TraceEvent) => void): () => void {
+    this.tracers.add(cb)
+    return () => { this.tracers.delete(cb) }
+  }
+
+  private trace (event: TraceEvent): void {
+    for (const cb of this.tracers) {
+      try { cb(event) } catch {}
+    }
   }
 
   /** a movement report of the bot as it is now, kept, written and handed to the listeners */
@@ -451,17 +475,20 @@ export class Diagnostics {
   // --- what the runner tells ---
 
   milestoneStarted (id: string, title: string, goals: string[]): void {
+    this.trace({ type: 'milestoneStarted', id, title, goals })
     if (this.milestone?.id !== id) this.milestone = { id, title, goals, since: this.now(), failures: 0 }
     else this.milestone.goals = goals
   }
 
   milestoneReached (id: string): void {
+    this.trace({ type: 'milestoneReached', id })
     if (this.milestone?.id === id) this.milestone = null
     this.progress(`milestone ${id}`)
   }
 
   /** a try at the milestone failed: counted as a re-plan */
   milestoneFailed (id: string, err: unknown): void {
+    this.trace({ type: 'milestoneFailed', id, error: err })
     if (this.milestone?.id === id) this.milestone.failures++
     this.noteError(errorEntry(this.now(), `milestone ${id}`, err))
     const trigger = this.watchdog.replanned(this.now(), `milestone ${id}`)
@@ -471,6 +498,7 @@ export class Diagnostics {
   // --- what the executor tells ---
 
   planMade (n: number, requests: string[], steps: Array<{ desc: string, blocks?: readonly string[] }>): void {
+    this.trace({ type: 'planMade', n, requests, steps: steps.map(s => s.desc) })
     const blocks = [...new Set(steps.flatMap(s => s.blocks ?? []))]
     this.plan = { n, requests, steps: steps.map(s => s.desc), index: -1, blocks, since: this.now() }
     const trigger = this.watchdog.replanned(this.now(), this.milestone != null ? `milestone ${this.milestone.id}` : 'plan')
@@ -478,23 +506,27 @@ export class Diagnostics {
   }
 
   noPlan (requests: string[], err: unknown): void {
+    this.trace({ type: 'noPlan', requests, error: err })
     this.plan = null
     this.noteError(errorEntry(this.now(), `plan for ${requests.join(', ')}`, err))
   }
 
   stepStarted (step: PlanStep, desc: string, index: number, state?: unknown): void {
+    this.trace({ type: 'stepStarted', desc, index })
     const p = this.bot.entity?.position
     this.step = { ...stepFacts(step, desc), index, since: this.now(), start: xyzOf(p), distance: 0, state }
     if (this.plan != null) this.plan.index = index
   }
 
   stepDone (step: PlanStep, gained: number): void {
+    this.trace({ type: 'stepDone', key: `${step.kind}:${step.item}`, gained })
     this.watchdog.stepDone(this.now(), `${step.kind}:${step.item}`, gained)
     if (this.step?.key === `${step.kind}:${step.item}`) this.step = null
   }
 
   /** a step threw: in the history, and a stall when it failed maxRepeats times in a row */
   stepFailed (step: PlanStep, desc: string, err: unknown, n: number): void {
+    this.trace({ type: 'stepFailed', desc, error: err, n })
     const facts = stepFacts(step, desc)
     const entry = errorEntry(this.now(), desc, err, facts, n)
     this.noteError(entry)

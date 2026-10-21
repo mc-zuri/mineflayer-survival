@@ -366,3 +366,25 @@ test('botState has the air left once it is under 20, none at full (a death under
   assert.equal(botState(fakeBot({ oxygen: 20 })).air, undefined)
   assert.equal(botState(fakeBot({ oxygen: 3 })).air, 3)
 })
+
+test('onTrace tells what the runner and the executor told, as they told it', () => {
+  const bot: any = new EventEmitter()
+  const diagnostics = new Diagnostics(bot, { dir: null, log: null })
+  const seen: any[] = []
+  const off = diagnostics.onTrace(e => seen.push(e))
+  const step: any = { kind: 'mine', item: 'cobblestone', count: 3, blocks: ['stone'] }
+  diagnostics.milestoneStarted('stone', 'a stone pickaxe', ['stone_pickaxe x1'])
+  diagnostics.planMade(1, ['stone_pickaxe x1'], [{ desc: 'mine cobblestone x3' }])
+  diagnostics.stepStarted(step, 'mine cobblestone x3', 0)
+  diagnostics.stepFailed(step, 'mine cobblestone x3', new Error('no path'), 1)
+  diagnostics.stepDone(step, 3)
+  diagnostics.noPlan(['diamond x1'], new Error('no source'))
+  diagnostics.milestoneFailed('stone', new Error('boom'))
+  diagnostics.milestoneReached('stone')
+  off()
+  diagnostics.milestoneStarted('iron', 'iron', [])
+  assert.deepEqual(seen.map(e => e.type), ['milestoneStarted', 'planMade', 'stepStarted', 'stepFailed', 'stepDone', 'noPlan', 'milestoneFailed', 'milestoneReached'])
+  assert.deepEqual(seen[1].steps, ['mine cobblestone x3'])
+  assert.equal(seen[3].n, 1)
+  assert.equal(seen[4].key, 'mine:cobblestone')
+})
