@@ -16,7 +16,7 @@ import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, MILESTONES, foodGoals, meal
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { carriesWeapon, comeUp, dayPhase, nightAction, nightGeared, nightGoals, topUpPlaces } from './planner/schedule'
 import { describeLevel, markAt, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
-import { inWater, onSurface, SURFACE_MIN_Y, toShore } from './executor/explore'
+import { exploreForBlocks, inWater, onSurface, SURFACE_MIN_Y, toShore } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
 import { bedIfNear, buildBase, keepBaseUnbroken, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
@@ -271,6 +271,35 @@ export function progressState (bot: Bot, memory: WorldMemory): ProgressState {
  * world's spawn at night, bare, walked 600 blocks into skeletons and a creeper and was blown up)
  */
 export const NIGHT_WALK_DISTANCE = 64
+
+/**
+ * Whether the bot is bare for the milestones' work: the wood's milestone done (it had a pickaxe once) and no pickaxe
+ * carried now (a re-equip after a death that failed). The work's mines and caves with the fists are none to go on with.
+ */
+export function bareForWork (bot: Bot, reached: readonly string[]): boolean {
+  if (!reached.includes('wood')) return false
+  return !bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))
+}
+
+/** how far the first wood survey goes from home, doubled each survey to WOOD_SURVEY_MAX (woodSurvey) */
+export const WOOD_SURVEY_RADIUS = 96
+export const WOOD_SURVEY_MAX = 384
+
+/** how far wood survey `n` + 1 goes */
+export function woodSurveyRadius (n: number): number {
+  return Math.min(WOOD_SURVEY_MAX, WOOD_SURVEY_RADIUS * 2 ** Math.max(0, n))
+}
+
+/** the bare gate's first wait between its re-equips, doubled each try to BARE_BACKOFF_MAX */
+export const BARE_BACKOFF_TICKS = 1200
+export const BARE_BACKOFF_MAX = 9600
+/** the most a bare bot waits in one go (the loop's night, food and herd looked at between) */
+export const BARE_WAIT_TICKS = 600
+
+/** the wait before the bare gate's re-equip try `tries` + 1 */
+export function bareBackoffTicks (tries: number): number {
+  return Math.min(BARE_BACKOFF_MAX, BARE_BACKOFF_TICKS * 2 ** Math.max(0, tries))
+}
 
 /** whether to wait the night out (a bed by, else a hole dug: shelter) before the walk to the trip kit */
 export function waitOutNightFirst (timeOfDay: number, distance: number, armor: number): boolean {
@@ -917,6 +946,40 @@ export class Runner {
         }
         continue
       }
+      // bare (the wood's milestone done and no pickaxe left: a re-equip after a death that failed): no milestone's work
+      // in that state, its mines and its caves with the fists; the kit taken and the basics made again first, tried
+      // again after a backoff (bareBackoffTicks) while they don't come. A 26.3 bot back from its second death with
+      // nothing, its re-equip failing 'no oak_log found exploring', went on with the enchanting's work 165000 ticks
+      // with dirt and gravel, down to y -53 (f4-26.3, seed -6080033689226204554, t107263 on)
+      if (bareForWork(this.bot, reachedIds)) {
+        const now = this.bot.survival.tasks.tick
+        if (now >= this.bareRetryAt) {
+          this.log(`bare (no pickaxe): re-equipping before the work${this.bareTries > 0 ? ` (try ${this.bareTries + 1})` : ''}`)
+          try {
+            if (baseRecord(this.memory) != null) await this.rekit(signal)
+            await this.reequip(signal)
+          } catch (err) {
+            if (stopped()) return this.stop(null, 'aborted', err)
+            if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+              this.log(`died re-equipping: ${(err as Error).message}`)
+              await this.recover(signal)
+              continue
+            }
+            this.log(`re-equipping: ${(err as Error).message}`)
+          }
+          if (bareForWork(this.bot, reachedIds)) {
+            const wait = bareBackoffTicks(this.bareTries++)
+            this.bareRetryAt = this.bot.survival.tasks.tick + wait
+            this.log(`still bare: the work waits, re-equipping again in ${wait} ticks`)
+          }
+        }
+        if (bareForWork(this.bot, reachedIds)) {
+          await this.waitTicksOrAbort(Math.max(1, Math.min(BARE_WAIT_TICKS, this.bareRetryAt - this.bot.survival.tasks.tick)), signal)
+          continue
+        }
+      }
+      this.bareTries = 0
+      this.bareRetryAt = 0
       // the epochs once the milestones are done (the dragon dead), when play's options ask for them
       const m = nextToWork(state, reachedIds, skip) ?? (this.options.epochs === true ? nextEpoch(state, reachedIds, skip) : null)
       if (m == null) return this.stop(null, 'finished')
@@ -1737,6 +1800,12 @@ export class Runner {
 
   /** death spots the bot died again going back to */
   readonly deadlySpots: Vec3[] = []
+  /** the wood surveys so far (woodSurveyRadius) and their spiral's legs */
+  private woodSurveys = 0
+  private readonly woodSurveyProgress = { leg: 0 }
+  /** the bare gate's next re-equip (bareForWork), and its tries so far (bareBackoffTicks) */
+  private bareRetryAt = 0
+  private bareTries = 0
 
   /** after a death: respawned, then back for the items, or to the base for a kit (the death report told how it went) */
   /**
@@ -1879,6 +1948,52 @@ export class Runner {
     // what neither a trip kit nor the base gave back: made again from scratch (a 26.3 bot back from a death with dirt
     // and seeds went on to the nether's portal, every try failing for want of a bucket and a pickaxe)
     await this.reequip(signal)
+    // and a spare kit in the base's chests again before the work goes on (the one taken was its only one: a 26.3 bot's
+    // second death, 14000 ticks after its first, found the chests with none, f4-26.3, t106041)
+    await this.spareKitAfterRecovery(signal)
+  }
+
+  /**
+   * The trees surveyed for a re-equip with none found near (a mine step's exploring for logs, NOT_FOUND): out over the
+   * surface from home to woodSurveyRadius (wider at each survey, WOOD_SURVEY_RADIUS doubled to WOOD_SURVEY_MAX, the
+   * spiral's legs kept across them), the logs seen remembered for the plans; whether some were found. A 26.3 bot's
+   * re-equips after its second death each explored a few legs for oak logs and failed, and it went on without a pickaxe
+   * (f4-26.3, t106821 to t107263)
+   */
+  async woodSurvey (signal?: AbortSignal): Promise<boolean> {
+    const logs = [...itemTags(this.bot.registry as any).resolve('#logs_that_burn')]
+    const radius = woodSurveyRadius(this.woodSurveys++)
+    this.log(`wood: surveying for trees out to ${radius} blocks`)
+    const home = this.memory.base ?? null
+    try {
+      return await this.executor.task('survey for trees', async (s) => await exploreForBlocks(this.bot, {
+        names: logs,
+        memory: this.memory,
+        center: home != null ? new Vec3(home.x, home.y, home.z) : undefined,
+        maxRadius: radius,
+        progress: this.woodSurveyProgress,
+        remember: logs
+      }, s), signal)
+    } catch (err) {
+      if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+      this.log(`wood: survey: ${(err as Error).message}`)
+      return false
+    }
+  }
+
+  /** stashSpareKit by the base after a recovery, a failure logged */
+  private async spareKitAfterRecovery (signal?: AbortSignal): Promise<void> {
+    const base = baseRecord(this.memory)
+    if (base == null || base.chests.length === 0) return
+    if (normalizeDimension(this.bot.game?.dimension) !== (this.memory.base?.dimension ?? 'overworld')) return
+    const p = this.bot.entity.position
+    if (Math.hypot(p.x - base.origin.x, p.y - base.origin.y, p.z - base.origin.z) > 96) return
+    try {
+      await this.stashSpareKit(signal)
+    } catch (err) {
+      if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+      this.log(`no spare kit after the recovery: ${(err as Error).message}`)
+    }
   }
 
   /**
@@ -1900,6 +2015,16 @@ export class Runner {
       } catch (err) {
         if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
         this.log(`re-equipping: no ${goal.item}: ${(err as Error).message}`)
+        // no wood found for it: a survey further out for trees (woodSurvey: wider each time, the logs seen remembered
+        // for the plan), and the goal again once
+        if (TaskError.is(err, 'NOT_FOUND') && /_log|_stem/.test((err as Error).message) && await this.woodSurvey(signal)) {
+          try {
+            await this.executor.obtain([goal], signal)
+          } catch (again) {
+            if (TaskError.is(again, 'DIED') || isAbort(again)) throw again
+            this.log(`re-equipping: no ${goal.item} after the survey: ${(again as Error).message}`)
+          }
+        }
       }
     }
   }

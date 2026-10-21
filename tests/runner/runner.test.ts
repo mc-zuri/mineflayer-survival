@@ -1344,3 +1344,54 @@ test('bedLater: a base built without its bed (no wool near then) gets it once th
   await runner.bedLater()
   assert.equal(planned, 2)
 })
+
+test('bare after the wood (no pickaxe: a re-equip that failed), no milestone work: the kit and the basics tried again, with a backoff, the work waiting (f4-26.3, t107263: 165000 ticks of the enchanting\'s work with dirt and gravel)', async () => {
+  const { bareForWork, bareBackoffTicks, BARE_BACKOFF_TICKS, BARE_BACKOFF_MAX, woodSurveyRadius, WOOD_SURVEY_RADIUS, WOOD_SURVEY_MAX } = await import('../../src/runner')
+  assert.equal(bareBackoffTicks(0), BARE_BACKOFF_TICKS)
+  assert.equal(bareBackoffTicks(1), 2 * BARE_BACKOFF_TICKS)
+  assert.equal(bareBackoffTicks(10), BARE_BACKOFF_MAX)
+  assert.equal(woodSurveyRadius(0), WOOD_SURVEY_RADIUS)
+  assert.equal(woodSurveyRadius(5), WOOD_SURVEY_MAX)
+  const bot = fakeBot({ wooden_pickaxe: 1, crafting_table: 1 })
+  assert.equal(bareForWork(bot, []), false)
+  assert.equal(bareForWork(bot, ['wood']), false)
+  let stoneWork = 0
+  const runner = new Runner(bot, {
+    maxTicks: 3000,
+    log: () => {},
+    handlers: {
+      // the stone's work loses the pickaxe (a death's drops left)
+      stone: async () => { stoneWork++; bot.give('wooden_pickaxe', -1) }
+    }
+  })
+  let reequips = 0
+  ;(runner as any).rekit = async () => null
+  ;(runner as any).reequip = async () => { reequips++ }
+  const result = runner.play()
+  for (let i = 0; i < 3100; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+  const r = await result
+  assert.equal(r.reason, 'budget')
+  assert.equal(stoneWork, 1)
+  // at once, then after 1200 (the next at 3600, past the budget)
+  assert.equal(reequips, 2)
+})
+
+test('a re-equip with no wood found surveys for trees further out, and tries the goal again once (f4-26.3, t106821: no oak_log found exploring, each re-equip)', async () => {
+  const bot = fakeBot()
+  const logs: string[] = []
+  const runner = new Runner(bot, { log: (l: string) => logs.push(l) })
+  let tries = 0
+  ;(runner as any).executor.obtain = async (goals: any[]) => {
+    if (goals[0].item !== 'stone_pickaxe') return
+    tries++
+    if (tries === 1) throw new TaskError('NOT_FOUND', 'NOT_FOUND: no oak_log found exploring')
+    bot.give('stone_pickaxe', 1)
+  }
+  let surveys = 0
+  ;(runner as any).woodSurvey = async () => { surveys++; return true }
+  ;(runner as any).nightOutFirst = async () => {}
+  await runner.reequip()
+  assert.equal(surveys, 1)
+  assert.equal(tries, 2)
+  assert.ok(logs.some(l => /no stone_pickaxe: NOT_FOUND/.test(l)), logs.join('\n'))
+})
