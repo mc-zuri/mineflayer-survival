@@ -213,6 +213,17 @@ export function inSpawnVolume (spawner: Vec3, stand: Vec3, margin = 0): boolean 
   return Math.abs(stand.x - S.x) <= SPAWN_RANGE + margin && Math.abs(stand.z - S.z) <= SPAWN_RANGE + margin && dy >= -2 && dy <= 2
 }
 
+/**
+ * whether the nether's paths may not step on the cell (netherMoveSettings' step: lava in it, over or under it, lava
+ * beside it at its feet or head, a corner's too, or a magma block under it)
+ */
+export function netherStepForbidden (lookup: NookLookup, p: Vec3): boolean {
+  const lava = (q: Vec3): boolean => lookup(q)?.name === 'lava'
+  if (lava(p) || lava(p.offset(0, 1, 0)) || lava(p.offset(0, -1, 0)) || lookup(p.offset(0, -1, 0))?.name === 'magma_block') return true
+  for (let dy = 0; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) if ((dx !== 0 || dz !== 0) && lava(p.offset(dx, dy, dz))) return true
+  return false
+}
+
 /** the share of the spawns whose x (or z) is in the cell `k` off the spawner's: the triangle over (k - 0.5, k + 0.5) */
 export function spawnWeight (k: number): number {
   const f = (u: number): number => Math.max(0, SPAWN_RANGE - Math.abs(u))
@@ -285,12 +296,17 @@ export function planBlazeNooks (lookup: NookLookup, spawner: Vec3, opts: NookOpt
         if (stand.offset(0.5, 0, 0.5).distanceTo(S.offset(0.5, 0.5, 0.5)) >= SPAWNER_ACTIVATION - 1) continue
         if (inSpawnVolume(S, stand)) continue
         if (!isOpen(lookup(stand)) || !isOpen(lookup(stand.plus(UP))) || !isFloor(lookup(stand.offset(0, -1, 0)))) continue
+        // no stand the nether's paths may not step on (netherMoveSettings: lava in or by it, a magma block under it):
+        // the way into one by a basalt delta's lava ended 'goal inside excluded area' 13 times over 21000 ticks, the
+        // fight going back to it each time, till a blaze killed the bot there (ls3-1.21.11, t263400 to t284498)
+        if (netherStepForbidden(lookup, stand)) continue
         // facing the spawner: the cardinal way nearest it
         const to = new Vec3(-dx, 0, -dz).scaled(1 / h)
         const facing = SIDES.reduce((a, b) => (b.dot(to) > a.dot(to) ? b : a))
         if (facing.dot(to) < Math.cos(Math.PI / 6)) continue
         const front = [stand.plus(facing), stand.plus(facing).plus(UP)]
         if (!front.every(p => isOpen(lookup(p))) || !isFloor(lookup(front[0].offset(0, -1, 0)))) continue
+        if (netherStepForbidden(lookup, front[0])) continue
         const eye = stand.offset(0.5, 1.62, 0.5)
         if (!clearLine(lookup, eye, over, p => p.equals(S))) continue
         const nook = nookAround(lookup, stand, facing, maxBlocks)

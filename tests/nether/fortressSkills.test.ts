@@ -744,3 +744,88 @@ test('collectBlazeRods: fire resistant (a potion of it held), the walled throne\
     potionModule.drinkPotion = real.drink
   }
 })
+
+test('planBlazeNooks plans no stand the nether paths may not step on (lava by it, a corner\'s too, or under it; netherStepForbidden): ls3-1.21.11\'s bow nook by a basalt delta\'s lava, 21000 ticks of goal inside excluded area', async () => {
+  const { planBlazeNooks, netherStepForbidden } = await import('../../src/nether/blazeFight')
+  const spawner = new Vec3(0, 64, 0)
+  let lava: Vec3[] = []
+  const lookup = (p: Vec3): any => {
+    if (p.equals(spawner)) return { name: 'spawner', boundingBox: 'block' }
+    if (lava.some(l => l.equals(p))) return { name: 'lava', boundingBox: 'empty' }
+    return p.y < 64 ? { name: 'nether_bricks', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  }
+  const first = planBlazeNooks(lookup, spawner, { from: new Vec3(0.5, 64, 12.5) })[0]
+  assert.ok(first != null)
+  assert.equal(netherStepForbidden(lookup, first.stand), false)
+  // lava at a corner of the stand, as at (-57, 78, 243) by (-56, 78, 242)
+  lava = [first.stand.offset(-1, 0, 1)]
+  assert.equal(netherStepForbidden(lookup, first.stand), true)
+  const again = planBlazeNooks(lookup, spawner, { from: new Vec3(0.5, 64, 12.5) })
+  assert.ok(again.length > 0)
+  assert.ok(!again.some(n => n.stand.equals(first.stand)), again.map(n => n.stand.toString()).join(' '))
+  // a magma block under it too
+  lava = []
+  const magma = (p: Vec3): any => p.equals(first.stand.offset(0, -1, 0)) ? { name: 'magma_block', boundingBox: 'block' } : lookup(p)
+  assert.equal(netherStepForbidden(magma, first.stand), true)
+})
+
+test('collectBlazeRods: a nook there\'s no way into (NO_PATH) is not tried again on the next try of the fight (the task begun again after each reflex went back to it for 21000 ticks, ls3-1.21.11)', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const { SkillError } = await import('../../src/skills/errors')
+  const fightModule = require('../../src/nether/blazeFight')
+  const { item } = await import('../reflexes/fakeBot')
+  const real = { build: fightModule.buildNook, fight: fightModule.fightFromNook }
+  const tried: string[] = []
+  fightModule.buildNook = async (_b: unknown, nook: any) => { tried.push(nook.stand.toString()); throw new SkillError('NO_PATH', 'goal inside excluded area') }
+  fightModule.fightFromNook = async () => ({ kills: 0, shots: 0, blocked: 0, ticks: 1 })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('cobblestone', 64), item('bow'), item('arrow', 64)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 20, safety: false }).catch(() => {})
+    const first = tried.slice()
+    assert.ok(first.length > 0)
+    tried.length = 0
+    await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 20, safety: false }).catch(() => {})
+    assert.ok(!tried.some(t => first.includes(t)), `${first.join(' ')} | ${tried.join(' ')}`)
+  } finally {
+    clearInterval(ticking)
+    fightModule.buildNook = real.build
+    fightModule.fightFromNook = real.fight
+  }
+})
+
+test('campSpots leaves out a spot by lava (netherStepForbidden), and a camp spot there was no way to twice is not gone for again over the fight\'s tries (ls3-1.21.11: (-56, 78, 242) by the lava walked to for 21000 ticks)', async () => {
+  const { campSpots, collectBlazeRods, CAMP_SPOT_TRIES } = await import('../../src/nether/fortressSkills')
+  const { SkillError } = await import('../../src/skills/errors')
+  const gridModule = require('../../src/skills/gridWalk')
+  let lava: Vec3[] = []
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), world: (p: any) => lava.some(l => l.equals(p.floored())) ? 'lava' : p.y < 64 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  const spawner = new Vec3(0, 64, 0)
+  const spots = campSpots(bot, spawner, 9)
+  assert.ok(spots.length > 3)
+  lava = [spots[0].offset(1, 0, 1)]
+  const after = campSpots(bot, spawner, 9)
+  assert.ok(!after.some(s => s.equals(spots[0])))
+  lava = []
+  const tries = new Map<string, number>()
+  const real = gridModule.moveNear
+  gridModule.moveNear = async (_b: unknown, to: Vec3, range: number) => {
+    if (range === 0) tries.set(to.toString(), (tries.get(to.toString()) ?? 0) + 1)
+    throw new SkillError('NO_PATH', 'goal inside excluded area')
+  }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    for (let i = 0; i < 4; i++) await collectBlazeRods(bot, { count: 1, spawner, maxTicks: 30, safety: false, nook: false }).catch(() => {})
+  } finally {
+    clearInterval(ticking)
+    gridModule.moveNear = real
+  }
+  assert.ok(tries.size > 0)
+  for (const [spot, n] of tries) assert.ok(n <= CAMP_SPOT_TRIES, `${spot} ${n}`)
+})

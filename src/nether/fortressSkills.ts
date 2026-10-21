@@ -28,7 +28,7 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, nookAround, nookBlocks, openNook, planBlazeNooks, putOutFireOnBot, sealAndHeal, withBlocksKept } from './blazeFight'
+import { SPAWN_RANGE, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, netherStepForbidden, nookAround, nookBlocks, openNook, planBlazeNooks, putOutFireOnBot, sealAndHeal, withBlocksKept } from './blazeFight'
 import { handleFire } from '../skills/escape'
 import { walkTo } from '../skills/navigate'
 
@@ -196,6 +196,16 @@ export function seesFrom (bot: Bot, eye: Vec3, point: Vec3, through?: Vec3): boo
  * Where to stand by a spawner: a cell on the floor 3 to `standOff` + 2 blocks from it, within 2 of its height, that
  * sees it (the blazes come out within 4 of it: SpawnData's spawn range) - nearest the bot first.
  */
+/** a camp spot the bot found no way to this many times isn't gone for again */
+export const CAMP_SPOT_TRIES = 2
+const campFailureMaps = new WeakMap<Bot, Map<string, number>>()
+/** the camp spots the bot found no way to, and how often, per bot (kept over the fight's tries) */
+export function campFailures (bot: Bot): Map<string, number> {
+  let m = campFailureMaps.get(bot)
+  if (m == null) campFailureMaps.set(bot, m = new Map())
+  return m
+}
+
 export function campSpots (bot: Bot, spawner: Vec3, standOff = 5): Vec3[] {
   const out: Array<{ cell: Vec3, d: number }> = []
   const free = (p: Vec3): boolean => { const b = bot.blockAt(p); return b != null && b.boundingBox === 'empty' && b.name !== 'lava' && b.name !== 'fire' }
@@ -207,6 +217,8 @@ export function campSpots (bot: Bot, spawner: Vec3, standOff = 5): Vec3[] {
         const h = Math.hypot(dx, dz)
         if (h < 3 || h > r) continue
         if (!free(cell) || !free(cell.offset(0, 1, 0)) || bot.blockAt(cell.offset(0, -1, 0))?.boundingBox !== 'block') continue
+        // (none the nether's paths may not step on: netherStepForbidden, lava by it or a magma block under it)
+        if (netherStepForbidden(p => bot.blockAt(p) as any, cell)) continue
         if (!seesFrom(bot, cell.offset(0.5, 1.62, 0.5), spawner.offset(0.5, 0.5, 0.5), spawner)) continue
         out.push({ cell, d: cell.distanceTo(bot.entity.position) + Math.abs(h - standOff) * 2 })
       }
@@ -594,6 +606,12 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       } catch (err) {
         if (isAbort(err)) throw err
         trace('collectBlazeRods: the nook not built:', (err as Error).message)
+        // no way to it: not planned nor kept again this game (the fight came back to one by a lava pocket each time its
+        // task began again, 21000 ticks of 'goal inside excluded area', ls3-1.21.11)
+        if (isSkillError(err, 'NO_PATH') || isSkillError(err, 'STUCK')) {
+          bad.push(c.stand)
+          if (kept != null && kept.stand.equals(c.stand)) nooks.get(bot)?.delete(nookKey(spawner, melee))
+        }
       }
     }
     // short of NOOK_ARROWS for the bow's nook, and no melee nook by this spawner (a throne walled in): back to the bow's
@@ -693,13 +711,15 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
           trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
         })
       }
-      for (const spot of spots.slice(0, 3)) {
+      // (a spot there was no way to twice is passed over, the fight's tries after a reflex too: campFailures)
+      for (const spot of spots.filter(s => (campFailures(bot).get(s.toString()) ?? 0) < CAMP_SPOT_TRIES).slice(0, 3)) {
         try {
           await moveNear(bot, spot, 0, signal)
           return true
         } catch (err) {
           if (isAbort(err)) throw err
           trace('collectBlazeRods: no way to', spot.toString(), (err as Error).message)
+          campFailures(bot).set(spot.toString(), (campFailures(bot).get(spot.toString()) ?? 0) + 1)
         }
       }
       try {

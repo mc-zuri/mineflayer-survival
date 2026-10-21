@@ -44,7 +44,11 @@ const PLACES: Record<string, { seed: string, spawner: Vec3, start: Vec3 }> = {
   s2fortress: { seed: '2', spawner: new Vec3(-277, 77, -159), start: new Vec3(-270.5, 61, -164.5) },
   // that fortress's other spawner, where full-26.3-fresh-k burned to death among the blazes 4 off it, alight from 10
   // health (the bot put where q3 came in, 50 off)
-  s2fortress2: { seed: '2', spawner: new Vec3(-290, 77, -209), start: new Vec3(-270.5, 61, -164.5) }
+  s2fortress2: { seed: '2', spawner: new Vec3(-290, 77, -209), start: new Vec3(-270.5, 61, -164.5) },
+  // ls3-1.21.11's (seed -3348798922721507200): a basalt delta's lava by the spawner at (-56, 76, 250), its bow nook planned
+  // at (-56, 78, 242) by the lava and walked to for 21000 ticks ('goal inside excluded area') till a blaze killed the bot;
+  // the bot put where its trail came by
+  ls3: { seed: '-3348798922721507200', spawner: new Vec3(-56, 76, 250), start: new Vec3(-33.5, 85, 195.5) }
 }
 const PLACE = PLACES[process.env.BLAZE_AT ?? 's2']
 assert.ok(PLACE != null, `BLAZE_AT is one of ${Object.keys(PLACES).join(', ')}`)
