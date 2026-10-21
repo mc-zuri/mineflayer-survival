@@ -248,3 +248,28 @@ test('drowning reflex: a bot in a flooded gap a block high (the swimming pose, i
   assert.equal(airFalling(dry, 200), false)
   e2.stop()
 })
+
+test('drowning reflex: its way to the shore after a surfacing is given up once the head is under with the air low again, so the reflex goes again (f3-26.3)', async () => {
+  const { shoreWhileBreathing, SHORE_AFTER_SURFACE_TICKS } = await import('../../src/reflexes/rules')
+  let under = false
+  const bot = fakeBot({ position: new Vec3(0.5, 47, 0.5), oxygen: 20, world: (p: Vec3) => p.y <= 48 && (under || p.y <= 47) ? 'water' : 'air' })
+  // a walk that never ends of itself (toShore's walks under the water)
+  let stopped = false
+  const walk = async (s: AbortSignal): Promise<void> => { await new Promise<void>(resolve => s.addEventListener('abort', () => { stopped = true; resolve() })) }
+  const done = shoreWhileBreathing(bot, 6, new AbortController().signal, walk)
+  for (let i = 0; i < 10; i++) bot.emit('physicsTick')
+  assert.equal(stopped, false)
+  // sunk again, the air down to 5: given up at once
+  under = true
+  bot.oxygenLevel = 5
+  bot.emit('physicsTick')
+  await done
+  assert.equal(stopped, true)
+  // and bounded: SHORE_AFTER_SURFACE_TICKS at most
+  stopped = false
+  const dry = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  const d2 = shoreWhileBreathing(dry, 6, new AbortController().signal, walk)
+  for (let i = 0; i < SHORE_AFTER_SURFACE_TICKS; i++) dry.emit('physicsTick')
+  await d2
+  assert.equal(stopped, true)
+})

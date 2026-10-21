@@ -205,6 +205,36 @@ function drowningNow (ctx: ReflexContext): boolean {
   return headInWater(ctx.bot) || falling
 }
 
+/** ticks the drowning reflex's way to the shore takes at most (its task holds the reflex from going again meanwhile) */
+export const SHORE_AFTER_SURFACE_TICKS = 400
+
+/**
+ * The drowning reflex's way to the shore after its surfacing, given up as soon as the head is under water with the air
+ * at `air` or under again, or after SHORE_AFTER_SURFACE_TICKS: the reflex's task done, it goes again (surface) at
+ * once. A 26.3 bot surfaced once in a flooded cave at y 47, and its toShore's walks of up to 2600 ticks failed under
+ * the water, the reflex's own task the whole while, and it drowned 1170 ticks on with no reflex again (f3-26.3,
+ * t68857 to t70031; the reflex went again 2 ticks after the death)
+ */
+export async function shoreWhileBreathing (bot: Bot, air: number, signal: AbortSignal, walk: (s: AbortSignal) => Promise<unknown>): Promise<void> {
+  const ctrl = new AbortController()
+  const onOuter = (): void => ctrl.abort(signal.reason)
+  signal.addEventListener('abort', onOuter, { once: true })
+  let ticks = 0
+  const watch = (): void => {
+    ticks++
+    if (ticks >= SHORE_AFTER_SURFACE_TICKS || (Number(bot.oxygenLevel ?? 20) <= air && headInWater(bot))) ctrl.abort(new Error('under again'))
+  }
+  bot.on('physicsTick', watch)
+  try {
+    await walk(ctrl.signal)
+  } catch (err) {
+    if (signal.aborted) throw err
+  } finally {
+    bot.off('physicsTick', watch)
+    signal.removeEventListener('abort', onOuter)
+  }
+}
+
 export const drowningReflex: Reflex = {
   name: 'drowning',
   priority: 85,
@@ -236,7 +266,7 @@ export const drowningReflex: Reflex = {
           // t85228); not with the head still under (a surfacing that found no air: toShore's walk of up to 1200 ticks
           // under the water, the reflex not going again meanwhile)
           const { inWater, toShore } = await import('../executor/explore')
-          if (!signal.aborted && bot.health > 0 && inWater(bot) && !headInWater(bot)) await toShore(bot, signal).catch(err => { if (signal.aborted) throw err })
+          if (!signal.aborted && bot.health > 0 && inWater(bot) && !headInWater(bot)) await shoreWhileBreathing(bot, config.drowning.air, signal, async (s) => await toShore(bot, s))
         }
       }
     }
