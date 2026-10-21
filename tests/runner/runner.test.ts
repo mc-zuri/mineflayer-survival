@@ -1812,3 +1812,17 @@ test('back by home after a trip: the farm 60 off with 3 plots ripe harvested fir
   await runner.afterTrip(new AbortController().signal)
   assert.deepEqual(calls, ['upkeep'])
 })
+
+test('each line of play\'s log is told as survivalLog too, after the log option has it (a recorder\'s)', async () => {
+  const bot = fakeBot()
+  const order: string[] = []
+  bot.on('survivalLog', (line: string) => order.push(`event: ${line}`))
+  const handlers = { wood: async () => { bot.give('wooden_pickaxe', 1); bot.give('crafting_table', 1) } }
+  await new Runner(bot, { handlers, until: 'wood', log: line => order.push(`log: ${line}`) }).play()
+  assert.ok(order.length >= 4, String(order))
+  for (let i = 0; i < order.length; i += 2) {
+    assert.match(order[i], /^log: /)
+    assert.equal(order[i + 1], `event: ${order[i].slice('log: '.length)}`)
+  }
+  assert.ok(order.some(l => /^event: working on wood/.test(l)))
+})

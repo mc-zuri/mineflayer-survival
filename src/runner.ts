@@ -676,7 +676,12 @@ export class Runner {
   private readonly stockRetryAt = new Map<string, number>()
 
   constructor (readonly bot: Bot, readonly options: PlayOptions = {}) {
-    this.log = options.log ?? (line => console.log(tickLine(this.tick, line)))
+    // (each line told as survivalLog too: a recorder's)
+    const log = options.log ?? (line => console.log(tickLine(this.tick, line)))
+    this.log = (line) => {
+      log(line)
+      bot.emit('survivalLog' as any, line)
+    }
     this.store = options.saveStore ?? (options.saveFile != null ? fileSaveStore(options.saveFile) : null)
     // (the night reflex's: below the surface without the gear its progress had, no night's work there)
     if ((bot as any).survival != null) (bot as any).survival.nightGeared = (): boolean => this.nightGeared()
