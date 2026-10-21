@@ -112,6 +112,16 @@ export interface CaneShoresArgs {
   openSeed?: (seed: Seed, version: string) => Promise<SeedBiomes | null>
 }
 
+/** times a trip to a shore may be cut off (a reflex's abort) before the shore is noted as looked at all the same */
+export const CANE_SHORE_CUTOFFS = 3
+/** each memory's shores whose trips were cut off, and how many times */
+const cutoffs = new WeakMap<WorldMemory, Map<string, number>>()
+function cutoffsOf (memory: WorldMemory): Map<string, number> {
+  let m = cutoffs.get(memory)
+  if (m == null) cutoffs.set(memory, m = new Map())
+  return m
+}
+
 /**
  * Explores the shores for cane: to the nearest shore not looked at (nextCaneShore; the seed's read for some when the
  * survey has none), the canes in sight noted there, and to the nearest one noted; CANE_SHORE_VISITS shores at most.
@@ -162,9 +172,23 @@ export async function exploreCaneShores (bot: Bot, args: CaneShoresArgs, signal?
       return false
     }
     log(`sugar cane: to the ${shore.what === 'water' ? 'shore by the water' : shore.what} at ${shore.x} ${shore.z} (${Math.round(Math.hypot(shore.x - bot.entity.position.x, shore.z - bot.entity.position.z))} blocks)`)
-    // (noted before the trip: one cut off goes to the next shore, not the same one again)
+    // (noted once the trip ended, there or failed: one cut off by a reflex, its abort, is the same shore's again next
+    // time, up to CANE_SHORE_CUTOFFS times: a polar bear's fight cut a 1.21.11 bot's trips off every 50 ticks, each
+    // shore noted before its trip, and the next went to shores out to 449 blocks, f6-1.21.11, t178981 to t179158)
+    const key = `${shore.x},${shore.z}`
+    const cut = cutoffsOf(memory)
+    try {
+      await go(new Vec3(shore.x, shore.y, shore.z))
+    } catch (err) {
+      if (isAbort(err)) {
+        const n = (cut.get(key) ?? 0) + 1
+        cut.set(key, n)
+        if (n >= CANE_SHORE_CUTOFFS) memory.addPoi(CANE_LOOKED_POI, { x: shore.x, y: shore.y, z: shore.z }, 'overworld')
+      }
+      throw err
+    }
+    cut.delete(key)
     memory.addPoi(CANE_LOOKED_POI, { x: shore.x, y: shore.y, z: shore.z }, 'overworld')
-    await go(new Vec3(shore.x, shore.y, shore.z))
     if (await look()) return true
   }
   return false

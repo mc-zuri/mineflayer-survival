@@ -125,3 +125,29 @@ test('readShoresFromSeed: a lake on the ring by a point of land, that land noted
   assert.ok(shores.length >= 1 && shores.every(p => p.note === 'water' && p.x < 0), shores.map(p => `${p.x},${p.z}`).join(' '))
   assert.equal(nextCaneShore(memory, { x: 0, z: 0 }, { x: 0, z: 0 })?.what, 'water')
 })
+
+test('exploreCaneShores: a trip cut off by a reflex (its abort) leaves the shore not looked at, the same one next time; noted after CANE_SHORE_CUTOFFS cut-offs, or once reached (f6-1.21.11, t178981 to t179158: a bear\'s fight cut the trips off, each shore noted before it, out to 449 blocks)', async () => {
+  const { CANE_SHORE_CUTOFFS } = await import('../../src/executor/caneShores')
+  const memory = new WorldMemory()
+  const survey = surveyOf(memory, [[150, 0, 'river'], [0, -300, 'swamp']])
+  const { bot } = walker(null)
+  const home = new Vec3(0, 64, 0)
+  const abort = (): Error => Object.assign(new Error('preempted'), { name: 'AbortError', code: 'ABORTED' })
+  let trips = 0
+  const cutOff = async (): Promise<void> => { trips++; throw abort() }
+  for (let i = 1; i < CANE_SHORE_CUTOFFS; i++) {
+    await assert.rejects(exploreCaneShores(bot, { survey, memory, home, found: () => false, travel: cutOff }))
+    // still the river next
+    assert.equal(nextCaneShore(memory, home, bot.entity.position)?.what, 'river', `after ${i} cut-offs`)
+  }
+  await assert.rejects(exploreCaneShores(bot, { survey, memory, home, found: () => false, travel: cutOff }))
+  assert.equal(nextCaneShore(memory, home, bot.entity.position)?.what, 'swamp')
+  assert.equal(trips, CANE_SHORE_CUTOFFS)
+  // a trip that gets there: noted, the next shore after it
+  const m2 = new WorldMemory()
+  const s2 = surveyOf(m2, [[150, 0, 'river'], [0, -300, 'swamp']])
+  const w2 = walker(null)
+  const seen: string[] = []
+  await exploreCaneShores(w2.bot, { survey: s2, memory: m2, home, found: () => false, travel: async (to: Vec3) => { seen.push(`${to.x},${to.z}`); w2.bot.entity.position = to.offset(0.5, 1, 0.5) } })
+  assert.deepEqual(seen, ['150,0', '0,-300'])
+})
