@@ -271,3 +271,26 @@ test('lookFaces: a look within 45 degrees of a cardinal way faces it (Direction.
   assert.strictEqual(lookFaces(yawFor(new Vec3(1, 0, 0)), north), false)
   assert.strictEqual(lookFaces(yawFor(new Vec3(1, 0, 0)), new Vec3(1, 0, 0)), true)
 })
+
+test('placeBlock with no face in sight from where it stood: the item in hand again after the way to one (its scaffolding left tuff held, and tuff went down for cobbled_deepslate, 26.3)', async () => {
+  const { placeBlock } = await import('../../src/skills/placeBlock')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 2.5), items: [item('cobbled_deepslate', 4), item('tuff', 8)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+  bot._client = new (require('events').EventEmitter)()
+  bot.equip = async (it: any) => { bot.heldItem = it }
+  // (no look: no face is in sight, aimAtFace finds none)
+  bot.lookAt = undefined
+  // the way to the cell: the pathfinder's place of a block under the bot, its scaffolding left in hand
+  let went = false
+  bot.pathfinder = { goto: async () => { went = true; bot.heldItem = bot.inventory.items().find((i: any) => i.name === 'tuff') }, cancel: async () => {}, isPathing: false, setGoal () {} }
+  const placed: string[] = []
+  bot.placeBlock = async () => { placed.push(bot.heldItem?.name); throw new Error('No block has been placed : the block is still air') }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(placeBlock(bot, { pos: new Vec3(0, 64, 0), item: 'cobbled_deepslate' }), /still air/)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.ok(went, 'the way to a face in sight was gone')
+  assert.deepStrictEqual(placed, ['cobbled_deepslate'])
+})

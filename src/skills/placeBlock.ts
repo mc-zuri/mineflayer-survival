@@ -112,6 +112,14 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
   const item = findInventoryItem(bot, args.item)
   if (item == null) throw new SkillError('MISSING_ITEMS', `no ${args.item} in the inventory`)
   await bot.equip(item, 'hand')
+  // the item in hand again before each place: the way to a face in sight (navigateNear) can put down a block of its own
+  // and leave it held (the pathfinder's scaffolding: tuff placed for cobbled_deepslate, 26.3; andesite for cobblestone)
+  const hold = async (): Promise<void> => {
+    if (bot.heldItem?.name === args.item) return
+    const again = findInventoryItem(bot, args.item)
+    if (again == null) throw new SkillError('MISSING_ITEMS', `no ${args.item} in the inventory`)
+    await bot.equip(again, 'hand')
+  }
   // against a block that does something when clicked (a chest, a table): sneaking, as a player places on one
   // (Player.isSecondaryUseActive: the block's own use is passed over), the sneak sent with a tick first
   const sneak = isInteractive(against.name)
@@ -157,6 +165,7 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
         // cell, off it
         await navigateNear(bot, pos, 2, signal).catch(err => { if (isAbort(err)) throw err })
         if (shape != null && shape !== 'empty') await stepOff(bot, pos, signal)
+        await hold()
         placedInSight = await placeInSight()
       }
       if (!placedInSight) {
