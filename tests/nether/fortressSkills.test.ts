@@ -128,7 +128,7 @@ test('the blaze fight camps 9 off the spawner by default, out of its swarm', asy
   assert.ok(Math.hypot(spots[0].x, spots[0].z) >= BLAZE_STAND_OFF - 1, spots[0].toString())
 })
 
-test('collectBlazeRods leaves the blazes and the meals to itself: the hostiles reflex sees no blaze and the eat reflex waits, till it ends', async () => {
+test('collectBlazeRods leaves the blazes, the magma cubes and the meals to itself: the hostiles reflex sees no blaze nor cube and the eat reflex waits, till it ends', async () => {
   const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
   const { ReflexEngine } = await import('../../src/reflexes/engine')
   const gridModule = require('../../src/skills/gridWalk')
@@ -153,6 +153,8 @@ test('collectBlazeRods leaves the blazes and the meals to itself: the hostiles r
     engine.stop()
   }
   assert.ok(held.some(h => h.includes('blaze') && h.includes('eat')), JSON.stringify(held.slice(0, 3)))
+  // the magma cubes too (the bunker's sword meets them at its slit; on the way in the reflex chased one out of reach)
+  assert.ok(held.some(h => h.includes('magma_cube')), JSON.stringify(held.slice(0, 3)))
   assert.deepStrictEqual(engine.leftAloneNames, [])
   assert.deepStrictEqual(engine.inhibitedNames, [])
 })

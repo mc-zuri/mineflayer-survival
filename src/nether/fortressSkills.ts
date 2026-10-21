@@ -615,7 +615,10 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     // them in melee about the spawner: every blaze death of 26.3 runs as to av was in it), and its meals (the eat
     // reflex, the blazes out of its sight, would eat in the open with the shield down)
     const engine = bot.survival?.reflexes
-    const leave = engine?.leaveAlone(['blaze'])
+    // (and the magma cubes: the bunker's sword meets the ones at its slit; on the way in, the hostiles reflex went
+    // after one under a 1.21.11 bot out of its reach by seed 2's open throne at (-290, 77, -209), 86 fights with the
+    // blazes shooting it, and it died there)
+    const leave = engine?.leaveAlone(['blaze', 'magma_cube'])
     const noEat = engine?.inhibit(['eat'])
     // and the fire's cells it puts out and steps off itself (putOutFireOnBot), the hazard reflex's for lava only
     const fire = handleFire(bot)
