@@ -11,7 +11,7 @@ import { normalizeDimension } from '../core/memory'
 import type { CraftStep, FarmStep, FillStep, FishStep, KillStep, LootStep, MineStep, PlanStep, SmeltStep } from '../planner/steps'
 import { fish, fishingSpotFor, iceHoleFor } from '../skills/fish'
 import { FISHING } from '../planner/sources'
-import { farmCells, grownPlots, harvestFarm, knownFarms, nearlyGrownPlots, plantFarm, rememberFarm, SEED_OF, sow } from '../skills/farm'
+import { farmCensus, farmCells, grownPlots, harvestFarm, knownFarms, nearlyGrownPlots, plantFarm, rememberFarm, SEED_OF, sow } from '../skills/farm'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { COLUMN_PLANTS, collectBlock, columnHarvestTarget, waterBeside } from '../skills/collectBlock'
 import { caveCells, caveRuleOn, inCaveWall } from '../skills/caves'
@@ -815,7 +815,8 @@ export const runFarm: StepRunner<FarmStep> = async (step, ctx) => {
     await waitUntil(bot, () => grownPlots(lookup, cells, farm.crop).length * 2 >= cells.length, FARM_WAIT_TICKS, signal)
   }
   const got = await harvestFarm(bot, { cells, crop: farm.crop }, signal)
-  ctx.log(`harvested the ${farm.crop}: ${Object.entries(got).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing grown'}`)
+  const gotten = Object.entries(got).filter(([, n]) => n > 0).map(([k, n]) => `${n} ${k}`).join(', ')
+  ctx.log(`harvested the ${farm.crop}: ${gotten !== '' ? gotten : `nothing grown (${farmCensus(lookup, cells, farm.crop)})`}`)
   // sown again: the farm grows from now
   rememberFarm(ctx.memory, { water: farm.water, cells, crop: farm.crop }, Number((bot.time as any)?.age ?? 0), dimension)
   return { gained: countItems(bot, item) - start, replan: true }

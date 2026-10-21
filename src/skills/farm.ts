@@ -175,6 +175,35 @@ export function growingLeft (lookup: Lookup, cells: readonly Vec3[], crop: strin
   return Math.round((grown - middle) * GROW_TICKS / grown)
 }
 
+/**
+ * A farm's plots as they are, for the log: the crops by age, the bare farmland, the plots that are farmland no more
+ * (trampled: FarmBlock.fallOn, or dried out to dirt), and the least light over a crop (CropBlock.randomTick grows one
+ * only at a brightness of 9 or more)
+ */
+export function farmCensus (lookup: (pos: Vec3) => any, cells: readonly Vec3[], crop: string): string {
+  const ages = new Map<number, number>()
+  let bare = 0
+  let lost = 0
+  let unknown = 0
+  let light = Infinity
+  for (const c of cells) {
+    const ground = lookup(c)
+    const above = lookup(c.offset(0, 1, 0))
+    if (ground == null || above == null) { unknown++; continue }
+    if (ground.name !== 'farmland') { lost++; continue }
+    if (above.name !== crop) { bare++; continue }
+    const age = Number(above.getProperties?.().age ?? 0)
+    ages.set(age, (ages.get(age) ?? 0) + 1)
+    if (typeof above.skyLight === 'number') light = Math.min(light, Math.max(above.skyLight, above.light ?? 0))
+  }
+  const parts = [...ages].sort((a, b) => b[0] - a[0]).map(([a, n]) => `${n} at age ${a}`)
+  if (bare > 0) parts.push(`${bare} bare`)
+  if (lost > 0) parts.push(`${lost} no farmland`)
+  if (unknown > 0) parts.push(`${unknown} not loaded`)
+  if (Number.isFinite(light)) parts.push(`light ${light} at the least`)
+  return parts.join(', ')
+}
+
 async function holdItem (bot: Bot, name: string): Promise<void> {
   const item = findInventoryItem(bot, name)
   if (item == null) throw new SkillError('MISSING_ITEMS', `no ${name} to hold`)

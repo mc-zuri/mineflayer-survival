@@ -46,7 +46,7 @@ import { CaveCells, caveCells, caveRuleOn, inCaveWall } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
-import { extendFarm, FARM_MIN_PLOTS, farmHoleSite, findFarmSite, knownFarms, plantFarm, plotCells, rememberFarm, SEED_OF } from './skills/farm'
+import { extendFarm, farmCells, farmCensus, FARM_MIN_PLOTS, farmHoleSite, findFarmSite, knownFarms, plantFarm, plotCells, rememberFarm, SEED_OF } from './skills/farm'
 import { describeRequest, ownedInventory, type Executor } from './executor/executor'
 import { NETHER_SCAFFOLD_KEEP } from './executor/keep'
 import { heldFor, type ObtainRequest } from './planner/obtain'
@@ -2642,8 +2642,15 @@ export async function keepFarm (bot: Bot, executor: Executor, signal: AbortSigna
   }
   const bread = await harvestGrownFarms(bot, executor, signal, log)
   await growFarms(bot, executor, signal, log)
+  // (the farms in the loaded chunks as they are, for the log)
+  for (const farm of knownFarms(executor.memory, dimension)) {
+    if (bot.entity.position.distanceTo(farm.water) <= FARM_CENSUS_RANGE) log(`farm: the ${farm.crop} at ${farm.water.toString()}: ${farmCensus(pos => bot.blockAt(pos), farmCells(farm), farm.crop)}`)
+  }
   return bread
 }
+
+/** how near a farm the upkeep logs its plots (farmCensus) */
+export const FARM_CENSUS_RANGE = 64
 
 /** ticks the herd's start may take (its pen built, the animals led in), at most */
 export const HERD_START_TICKS = 8000

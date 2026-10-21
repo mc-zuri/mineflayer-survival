@@ -451,3 +451,14 @@ test('growingLeft and the farm\'s cost: what is left of the growing read off its
   self.bot.blockAt = () => null
   assert.ok((Executor.prototype.farmCost.call(self, 'wheat') as number) < 10)
 })
+
+test('farmCensus: the crops by age, the bare plots, the ones trampled to dirt, the least light', async () => {
+  const { farmCensus } = await import('../../src/skills/farm')
+  const cells = [new Vec3(0, 63, 0), new Vec3(1, 63, 0), new Vec3(2, 63, 0), new Vec3(3, 63, 0), new Vec3(4, 63, 0)]
+  const lookup = (p: Vec3): any => {
+    if (p.y === 63) return { name: p.x === 3 ? 'dirt' : 'farmland' }
+    if (p.x === 2) return { name: 'air' }
+    return { name: 'wheat', skyLight: p.x === 4 ? 6 : 15, light: 0, getProperties: () => ({ age: p.x === 0 ? 7 : 2 }) }
+  }
+  assert.equal(farmCensus(lookup, cells, 'wheat'), '1 at age 7, 2 at age 2, 1 bare, 1 no farmland, light 6 at the least')
+})
