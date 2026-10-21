@@ -67,3 +67,17 @@ test('scoopByTunnel: no stand (lava over the source), NO_PATH and no digging', a
   const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('bucket', 1)], world: p => cells[key(p)] ?? (p.y < 64 ? 'stone' : 'air') })
   await assert.rejects(scoopByTunnel(bot, new Vec3(6, 40, 0)), (err: any) => err.reason === 'NO_PATH')
 })
+
+test('scoopStands with a cave by the source (a bot not fit for the caves): only the stands sealed in the rock, none opening onto the cave', () => {
+  const source = new Vec3(6, 40, 0)
+  // a cave's cells east of the source, x 8 to 12 (the source's side against x 7's rock)
+  const isCave = (p: Vec3): boolean => p.x >= 8 && p.x <= 12 && p.y >= 39 && p.y <= 43 && Math.abs(p.z) <= 3
+  const get = lookup({ '6,40,0': 'lava' })
+  const stands = scoopStands(get, source, isCave).map(s => s.stand.toArray()).sort()
+  // (7, 41, 0) is against the cave's (8, 41, 0): left out
+  assert.deepEqual(stands, [[5, 41, 0], [6, 41, -1], [6, 41, 1]].sort())
+  // the cave over the source: the opening the cave's, none
+  assert.deepEqual(scoopStands(get, source, p => p.equals(new Vec3(6, 42, 0))), [])
+  // a cave against the source itself only (under it): the stands as without
+  assert.equal(scoopStands(get, source, p => p.equals(new Vec3(6, 39, 0))).length, 4)
+})

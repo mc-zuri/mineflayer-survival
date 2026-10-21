@@ -59,7 +59,7 @@ import { NetherBiomeSource } from './worldgen/netherBiomes'
 import { blazeRodsWithBrew, resetBrewTries } from './nether/brewing'
 import { waterBottles } from './skills/brew'
 import { fillBottles, fillBucket } from './skills/bucket'
-import { scoopByTunnel } from './skills/lavaScoop'
+import { scoopByTunnel, scoopStands } from './skills/lavaScoop'
 import { ruinedPortalCandidates } from './worldgen/placement'
 import { openSeedBiomes, type SeedBiomes } from './worldgen/seedBiomes'
 import type { Seed } from './worldgen/random'
@@ -1463,6 +1463,7 @@ export function homeLavaSources (bot: Bot, bound: ObsidianBound): Vec3[] {
   if (id == null) return []
   const rule = caveRuleOn(bot)
   const cells = caveCells(bot)
+  const get = (p: Vec3): any => bot.blockAt(p)
   const points = [bot.entity.position.floored()]
   if (bound.home != null) for (const y of HOME_LAVA_SCAN_YS) points.push(new Vec3(Math.floor(bound.home.x), y, Math.floor(bound.home.z)))
   const seen = new Set<string>()
@@ -1476,7 +1477,8 @@ export function homeLavaSources (bot: Bot, bound: ObsidianBound): Vec3[] {
   }
   return found
     .filter(p => isLavaSource({ name: 'lava', properties: (bot.blockAt(p) as any)?.getProperties?.() } as any))
-    .filter(p => withinBound(bound, p) && !deepDarkNear(bot, p) && !(rule && cells.beside([p]).length > 0))
+    // (one by a cave kept when a scoop sealed in the rock reaches it: scoopStands with the cave's cells)
+    .filter(p => withinBound(bound, p) && !deepDarkNear(bot, p) && !(rule && cells.beside([p]).length > 0 && scoopStands(get, p, q => cells.isCave(q)).length === 0))
     .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
 }
 
@@ -1528,18 +1530,23 @@ export async function obsidianAtHome (bot: Bot, executor: Executor, count: numbe
       for (const source of sources) {
         tried.add(source.toString())
         const before = countItems(bot, 'lava_bucket')
-        try {
-          await executor.task('lava for a cast at home', async (s) => await fillBucket(bot, { fluid: 'lava', pos: source }, s), signal)
-          filled = countItems(bot, 'lava_bucket') > before
-          if (filled) break
-        } catch (err) {
-          quiet(err)
-          log(`obsidian: the lava at ${source.toString()}: ${(err as Error).message}`)
+        // (one by a cave, for a bot not fit for the caves: the scoop sealed in the rock only, no walk to it)
+        const cells = caveRuleOn(bot) ? caveCells(bot) : null
+        const caveSide = cells != null && cells.beside([source]).length > 0
+        if (!caveSide) {
+          try {
+            await executor.task('lava for a cast at home', async (s) => await fillBucket(bot, { fluid: 'lava', pos: source }, s), signal)
+            filled = countItems(bot, 'lava_bucket') > before
+            if (filled) break
+          } catch (err) {
+            quiet(err)
+            log(`obsidian: the lava at ${source.toString()}: ${(err as Error).message}`)
+          }
         }
         // no spot near sees it (a source in the rock, under a ledge): a tunnel to a stand by it, the bucket filled
         // through its top (scoopByTunnel)
         try {
-          await executor.task('lava for a cast at home, by a tunnel', async (s) => await scoopByTunnel(bot, source, s), signal)
+          await executor.task('lava for a cast at home, by a tunnel', async (s) => await scoopByTunnel(bot, source, s, caveSide ? q => cells.isCave(q) : undefined), signal)
           filled = countItems(bot, 'lava_bucket') > before
           if (filled) break
         } catch (err) {

@@ -32,9 +32,11 @@ export interface ScoopStand {
  * solid floor (the block beside the source, no fluid), the stand, its head's cell and the opening with no fluid in or
  * against them but the source under the opening. From there the bot's look down through the opening reaches the
  * source's top, and with the opening dug the lava has nowhere to go (it doesn't flow up); a stand by the source's side
- * would open it to the tunnel. A source with lava over it has none.
+ * would open it to the tunnel. A source with lava over it has none. With `isCave` (a source by a cave, for a bot not fit
+ * for the caves) the scoop is sealed in the rock: the opening, the stand and its head no cave's cells and none against
+ * them, so the bot's dig never opens onto the cave (the cave rule's: the lava taken from the rock round it).
  */
-export function scoopStands (get: Lookup, source: Vec3): ScoopStand[] {
+export function scoopStands (get: Lookup, source: Vec3, isCave?: (p: Vec3) => boolean): ScoopStand[] {
   const name = (p: Vec3): string => get(p)?.name ?? 'unknown'
   const wet = (p: Vec3): boolean => LIQUID.has(name(p))
   const opening = source.offset(0, 1, 0)
@@ -42,6 +44,8 @@ export function scoopStands (get: Lookup, source: Vec3): ScoopStand[] {
   // nothing wet against the opening but the source under it
   const around = (p: Vec3): Vec3[] => [p.offset(0, 1, 0), p.offset(0, -1, 0), ...CARDINALS.map(d => p.plus(d))]
   if (around(opening).some(p => !p.equals(source) && wet(p))) return []
+  const caveBy = (p: Vec3): boolean => isCave != null && (isCave(p) || around(p).some(q => !q.equals(source) && isCave(q)))
+  if (caveBy(opening)) return []
   const out: ScoopStand[] = []
   for (const d of CARDINALS) {
     const stand = opening.plus(d)
@@ -49,6 +53,7 @@ export function scoopStands (get: Lookup, source: Vec3): ScoopStand[] {
     const floor = source.plus(d)
     if (get(floor)?.boundingBox !== 'block' || wet(floor)) continue
     if ([stand, head].some(p => wet(p) || around(p).some(q => wet(q)))) continue
+    if (caveBy(stand) || caveBy(head)) continue
     out.push({ stand, opening })
   }
   return out
@@ -62,12 +67,12 @@ export function scoopStands (get: Lookup, source: Vec3): ScoopStand[] {
  * see' either from, and its portal frame went on to the pools far off and never got its obsidian (f3-1.21.11, t86275
  * to t268827).
  */
-export async function scoopByTunnel (bot: Bot, source: Vec3, signal?: AbortSignal): Promise<void> {
+export async function scoopByTunnel (bot: Bot, source: Vec3, signal?: AbortSignal, isCave?: (p: Vec3) => boolean): Promise<void> {
   throwIfAborted(signal)
   if (countItems(bot, 'bucket') === 0) throw new SkillError('MISSING_ITEMS', 'no empty bucket in the inventory')
   const get: Lookup = p => bot.blockAt(p) as any
   const at = bot.entity.position
-  const stands = scoopStands(get, source).sort((a, b) => a.stand.distanceTo(at) - b.stand.distanceTo(at))
+  const stands = scoopStands(get, source, isCave).sort((a, b) => a.stand.distanceTo(at) - b.stand.distanceTo(at))
   if (stands.length === 0) throw new SkillError('NO_PATH', `no stand to scoop the lava at ${source.toString()} from`)
   let lastErr: unknown = null
   for (const { stand, opening } of stands.slice(0, 2)) {
@@ -79,7 +84,7 @@ export async function scoopByTunnel (bot: Bot, source: Vec3, signal?: AbortSigna
       }
       if (!bot.entity.position.floored().equals(stand)) throw new SkillError('NO_PATH', `not at the stand ${stand.toString()}`)
       // the scoop's own checks again, the world as it is now (a flow since)
-      if (!scoopStands(get, source).some(s => s.stand.equals(stand))) throw new SkillError('NO_PATH', `the stand ${stand.toString()} is no longer safe`)
+      if (!scoopStands(get, source, isCave).some(s => s.stand.equals(stand))) throw new SkillError('NO_PATH', `the stand ${stand.toString()} is no longer safe`)
       const cover = bot.blockAt(opening)
       if (cover != null && cover.boundingBox === 'block') {
         bot.pathingUtil?.refresh?.()
