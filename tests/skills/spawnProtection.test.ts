@@ -373,3 +373,57 @@ test('refusedGroundNear and leaveRefusedGround: the square (its radius known) or
     nav.navigate = real
   }
 })
+
+test('a crop dug grown and sown again in its cell (a farm\'s harvest: the same block at its first age, another state) is no refusal; the very state put back is (tests/integration/homeFood: the farm made a protected region)', () => {
+  const bot = spawnBot()
+  installSpawnProtection(bot, 'auto')
+  const WHEAT7 = { type: 300, stateId: 5007, name: 'wheat' }
+  const WHEAT0 = { type: 300, stateId: 5000, name: 'wheat' }
+  for (let x = 0; x < 4; x++) {
+    const pos = new Vec3(300 + x, 64, -200)
+    bot.targetDigBlock = at(WHEAT7, pos)
+    bot.emit('blockUpdate', at(WHEAT7, pos), at(AIR, pos))
+    bot.targetDigBlock = null
+    bot.emit('blockUpdate', at(AIR, pos), at(WHEAT0, pos))
+    assert.strictEqual(breakRefused(bot, pos), false)
+  }
+  assert.strictEqual(inRefusedRegion(bot, new Vec3(301, 64, -200)), false)
+  // the grown crop put back as it was: refused
+  const back = new Vec3(320, 64, -200)
+  refusedDig(bot, back, WHEAT7)
+  assert.strictEqual(breakRefused(bot, back), true)
+})
+
+test('a block the bot dug and puts down again within REFUSAL_TICKS, held as it goes down (a crafting table taken up after a craft, put down for the next), is no refusal', () => {
+  const bot = spawnBot()
+  installSpawnProtection(bot, 'auto')
+  const TABLE = { type: 200, stateId: 4300, name: 'crafting_table' }
+  const pos = new Vec3(300, 64, -200)
+  bot.targetDigBlock = at(TABLE, pos)
+  bot.emit('blockUpdate', at(TABLE, pos), at(AIR, pos))
+  bot.targetDigBlock = null
+  bot.heldItem = { name: 'crafting_table' }
+  bot.emit('blockUpdate', at(AIR, pos), at(TABLE, pos))
+  assert.strictEqual(breakRefused(bot, pos), false)
+  // held something else: the server's put-back
+  const other = new Vec3(330, 64, -200)
+  bot.heldItem = { name: 'iron_pickaxe' }
+  refusedDig(bot, other, TABLE)
+  assert.strictEqual(breakRefused(bot, other), true)
+})
+
+test('the bot\'s own place (its _genericPlace) of a block it dug, its held stack gone (the last crafting table put down), is no refusal', async () => {
+  const bot = spawnBot()
+  const TABLE = { type: 200, stateId: 4300, name: 'crafting_table' }
+  const pos = new Vec3(300, 64, -200)
+  bot._genericPlace = async () => {
+    bot.heldItem = null
+    bot.emit('blockUpdate', at(AIR, pos), at(TABLE, pos))
+  }
+  installSpawnProtection(bot, 'auto')
+  bot.targetDigBlock = at(TABLE, pos)
+  bot.emit('blockUpdate', at(TABLE, pos), at(AIR, pos))
+  bot.targetDigBlock = null
+  await bot._genericPlace({ position: pos.offset(0, -1, 0) }, new Vec3(0, 1, 0), {})
+  assert.strictEqual(breakRefused(bot, pos), false)
+})

@@ -63,6 +63,8 @@ export interface SpawnProtectionState {
   digs: Map<string, Pending>
   /** the places the client predicted, by cell: the block that was there before */
   places: Map<string, Pending>
+  /** the cells the bot itself is placing a block in (its _genericPlace's), by cell: the tick it began */
+  placing?: Map<string, number>
   /** cells (by dimension and cell) whose dig or place the server refused lately: not tried again till `until` */
   refused: Map<string, { until: number, dig: boolean, place: boolean }>
   /** the refusals of the last REGION_WINDOW ticks */
@@ -320,6 +322,7 @@ export function installSpawnProtection (bot: Bot, option: SpawnProtectionOption 
     opLevel: 0,
     digs: new Map(),
     places: new Map(),
+    placing: new Map(),
     refused: new Map(),
     recent: [],
     regions: [],
@@ -347,6 +350,7 @@ export function installSpawnProtection (bot: Bot, option: SpawnProtectionOption 
     for (const map of [state.digs, state.places]) {
       for (const [key, p] of map) if (state.tick - p.tick > REFUSAL_TICKS) map.delete(key)
     }
+    for (const [key, t] of state.placing ?? []) if (state.tick - t > REFUSAL_TICKS) state.placing?.delete(key)
     if (state.tick % 200 === 0) for (const [key, m] of state.refused) if (m.until <= state.tick) state.refused.delete(key)
   })
   // the server's putting a predicted block back: the dug block back in its cell, the placed one gone to what was there;
@@ -356,7 +360,15 @@ export function installSpawnProtection (bot: Bot, option: SpawnProtectionOption 
     if (newBlock?.position == null) return
     const key = keyOf(newBlock.position)
     const dug = state.digs.get(key)
-    if (dug != null && newBlock.type === dug.type) {
+    // (put back: the very state dug, the server's own; a crop of the kind sown again in the cell at its first age is
+    // the bot's sowing, no refusal: a farm's harvest, its plots each sown again just after, made a 'protected region'
+    // of the farm, its ripe plots and its water's cells refused, tests/integration/homeFood)
+    // (nor the block dug placed again by the bot, its own place under way or held as it goes down: a crafting table
+    // taken up after a craft and put down again for the next within REFUSAL_TICKS was a 'refusal', and its next take
+    // 'not broken', REFUSED)
+    const placingAt = state.placing?.get(key)
+    const ownPlace = (placingAt != null && state.tick - placingAt <= REFUSAL_TICKS) || (bot.heldItem?.name != null && bot.heldItem.name === newBlock.name)
+    if (dug != null && !ownPlace && newBlock.type === dug.type && (newBlock.stateId === dug.stateId || dug.stateId == null)) {
       state.digs.delete(key)
       noteRefusal(bot, newBlock.position, 'dig')
       return
@@ -370,6 +382,18 @@ export function installSpawnProtection (bot: Bot, option: SpawnProtectionOption 
     }
     if (digging && newBlock.type === 0 && oldBlock != null && oldBlock.type !== 0 && !FALLING.test(String(oldBlock.name))) {
       state.digs.set(key, { tick: state.tick, type: oldBlock.type, stateId: oldBlock.stateId })
+    }
+  }
+  // (the bot's own places noted as they start, before their prediction's update: its held stack may be gone by then,
+  // the last crafting table put down)
+  const genericPlace = (bot as any)._genericPlace
+  if (typeof genericPlace === 'function') {
+    (bot as any)._genericPlace = async function (this: unknown, referenceBlock: any, faceVector: any, ...rest: unknown[]) {
+      try {
+        const dest = referenceBlock?.position?.plus?.(faceVector)
+        if (dest != null) state.placing?.set(keyOf(dest), state.tick)
+      } catch {}
+      return await genericPlace.call(this, referenceBlock, faceVector, ...rest)
     }
   }
   if (typeof (bot as any).prependListener === 'function') (bot as any).prependListener('blockUpdate', onUpdate)
