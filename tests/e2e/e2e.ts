@@ -9,17 +9,21 @@
 //
 //   pnpm e2e [--seed 2] [--max-ticks 3000000] [--until <milestone>] [--resume <checkpoint dir>] [--stage dragon]
 //            [--checkpoints <dir>] [--version 1.21.11] [--username player] [--server-log <file>] [--realtime] [--grim]
-//            [--food-every <ticks>] [--save-world <dir>]
+//            [--food-every <ticks>] [--save-world <dir>] [--record [file]] [--no-record] [--record-packets <mode>]
 //
 // --seed random: a seed of its own (logged). --realtime: no lockstep mod, the server and the bot each on their 50 ms.
 // --grim: a server with GrimAC, each of its flags counted by check and logged, the bot's actions at the start of its
 // ticks (actionsInTick); under lockstep the local Grim build (tests/harness grimModJar: its clock the server's ticks),
 // with --realtime the pinned Modrinth one (GRIM_MODS).
+//
+// The run is recorded (src/recorder: the packets, the heavy ones as a summary, the decisions and the bot's state; read
+// with `node tools/rec.cjs <file>`) to <checkpoints>.rec next to the checkpoints, or to --record's file; --no-record
+// for none, --record-packets full to keep the chunks too.
 import { randomBytes } from 'node:crypto'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import type { Bot } from 'mineflayer'
-import { createPlugin } from '../../src'
+import { createPlugin, Recorder } from '../../src'
 import type { MilestoneEvent, PlayResult } from '../../src/runner'
 import type { MilestoneId } from '../../src/planner/progression'
 import { connectLockstepBot, copyWorld, grimLockstepMods, grimMods, modJars, parseGrimAlert, parseLogLine, quitBot, startServer, DEFAULT_VERSION, GRIM_CONFIG, type TestServer } from '../harness'
@@ -46,6 +50,15 @@ export interface E2EOptions {
   foodEvery: number
   /** a directory the world is copied into at the end of the run (save-all flush first), to look at after */
   saveWorld?: string
+  /** the recording's file (default <checkpoints>.rec), null for none (--no-record) */
+  record: string | null
+  /** its packets: the heavy ones as a summary (the default), all of them in full, or none */
+  recordPackets: 'summary' | 'full' | 'none'
+}
+
+/** the recording's file by default: <checkpoints>.rec, next to the checkpoints' directory */
+export function defaultRecordFile (checkpoints: string): string {
+  return path.join(path.dirname(checkpoints), `${path.basename(checkpoints)}.rec`)
 }
 
 /** a random world seed: a signed 64-bit number, as level-seed takes it (WorldOptions.parseSeed) */
@@ -63,8 +76,12 @@ export function parseArgs (argv: string[]): E2EOptions {
     statusMs: 60000,
     realtime: false,
     grim: false,
-    foodEvery: 0
+    foodEvery: 0,
+    record: null,
+    recordPackets: 'summary'
   }
+  // (on unless --no-record; --record's file, else the default once the checkpoints are known)
+  let record: string | boolean = true
   for (let i = 0; i < argv.length; i++) {
     const [flag, inline] = argv[i].split('=', 2)
     const value = (): string => {
@@ -87,6 +104,19 @@ export function parseArgs (argv: string[]): E2EOptions {
       case '--grim': opts.grim = true; break
       case '--food-every': opts.foodEvery = Number(value()); break
       case '--save-world': opts.saveWorld = value(); break
+      case '--record': {
+        // (its file is optional: the next argument unless it's an option)
+        const next = inline ?? argv[i + 1]
+        if (next != null && !next.startsWith('--')) { record = next; if (inline == null) i++ } else record = true
+        break
+      }
+      case '--no-record': record = false; break
+      case '--record-packets': {
+        const v = value()
+        if (v !== 'summary' && v !== 'full' && v !== 'none') throw new Error('--record-packets is summary, full or none')
+        opts.recordPackets = v
+        break
+      }
       default: throw new Error(`unknown option ${argv[i]}`)
     }
   }
@@ -95,6 +125,7 @@ export function parseArgs (argv: string[]): E2EOptions {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
     opts.checkpoints = path.join(__dirname, '..', '.e2e', `${opts.seed}-${stamp}`)
   }
+  opts.record = record === false ? null : record === true ? defaultRecordFile(opts.checkpoints) : record
   return opts
 }
 
@@ -263,10 +294,20 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
   let status: NodeJS.Timeout | null = null
   let noTicks: NodeJS.Timeout | null = null
   let blocked: NodeJS.Timeout | null = null
+  let stopRecording = async (): Promise<void> => {}
   try {
     // (Grim's Post check: the actions at the start of a tick, as the client's keys go)
     bot = await connectLockstepBot(server, { username: opts.username, op: false, timeoutMs: 120000, realtime: opts.realtime, ...(opts.grim ? { actionsInTick: true } : {}) })
     const b = bot
+    // the recording from here (the spawn's chunks too), bot.survival.recorder once the plugin is in
+    const recorder = opts.record != null ? new Recorder(b, { file: opts.record, packets: opts.recordPackets }) : null
+    if (recorder != null) log(`recording to ${opts.record}`)
+    stopRecording = async () => {
+      if (recorder == null || !recorder.recording) return
+      await recorder.stop()
+      const s = recorder.stats
+      log(`recording ${String(opts.record)}: ${s.bytes} bytes (${s.rawBytes} raw), ${s.ticks} ticks, ${Math.round(s.bytes / Math.max(1, s.ticks) * 1000)} bytes per 1000 ticks, ${s.busyMs} ms in its hooks`)
+    }
     await b.waitForChunksToLoad()
     if (opts.stage != null && opts.resume == null) {
       const stage = STAGES[opts.stage]
@@ -276,7 +317,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
       fs.writeFileSync(saveFile, stageSave(stage.from))
     }
     // (the harness servers keep no spawn protection: spawn-protection=0, no square about the spawn kept)
-    b.loadPlugin(createPlugin({ spawnProtection: 0 }))
+    b.loadPlugin(createPlugin({ spawnProtection: 0, recorder: recorder ?? false }))
     log(`the advancement check at the start: ${(await server.command(`execute if entity @a[name=${opts.username},advancements={minecraft:end/kill_dragon=true}]`)).join(' | ')}`)
     const k0 = b.lockstep.ticks
     let lastK = k0
@@ -318,6 +359,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
       log(`milestone ${event.id} at tick ${event.tick}, ${formatWall(event.wallMs)} wall (${(event.tick / Math.max(1, (Date.now() - wall0) / 1000)).toFixed(1)} ticks/s so far); ${where(b)}`)
       // the world as it is now and play's save with this milestone in it
       const dir = path.join(opts.checkpoints, `${String(++checkpointSeq).padStart(2, '0')}-${event.id}`)
+      b.survival.recorder?.note('checkpoint', { dir, milestone: event.id })
       checkpointing = checkpointing.then(async () => {
         const saved = fs.existsSync(saveFile) ? JSON.parse(fs.readFileSync(saveFile, 'utf8')) : null
         await server.command('save-all flush')
@@ -375,6 +417,7 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
     if (status != null) clearInterval(status)
     if (noTicks != null) clearInterval(noTicks)
     if (blocked != null) clearInterval(blocked)
+    await stopRecording().catch(err => log(`recording: ${(err as Error).message}`))
     if (bot != null) {
       bot.survival?.reflexes?.stop()
       await quitBot(bot)

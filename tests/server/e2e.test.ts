@@ -6,7 +6,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { EventEmitter } from 'node:events'
-import { disconnection, foodLine, formatWall, parseArgs, summary, testPassed } from '../e2e/e2e'
+import { defaultRecordFile, disconnection, foodLine, formatWall, parseArgs, summary, testPassed } from '../e2e/e2e'
 import { copyWorld } from '../harness/server'
 
 describe('pnpm e2e', () => {
@@ -28,6 +28,21 @@ describe('pnpm e2e', () => {
     assert.strictEqual(parseArgs(['--food-every', '500']).foodEvery, 500)
     assert.strictEqual(parseArgs(['--save-world', 'w']).saveWorld, 'w')
     assert.strictEqual(d.saveWorld, undefined)
+  })
+
+  test('--record: on by default, next to the checkpoints (<checkpoints>.rec); a file of its own; --no-record; its packets', () => {
+    const d = parseArgs(['--checkpoints', path.join('tests', '.e2e', 'rec-1')])
+    assert.strictEqual(d.record, path.join('tests', '.e2e', 'rec-1.rec'))
+    assert.strictEqual(d.recordPackets, 'summary')
+    assert.strictEqual(defaultRecordFile(path.join('a', 'b')), path.join('a', 'b.rec'))
+    assert.strictEqual(parseArgs(['--record', '--seed', '3', '--checkpoints', 'cp']).record, 'cp.rec')
+    assert.strictEqual(parseArgs(['--record', 'x/run.rec', '--seed', '3']).record, 'x/run.rec')
+    assert.strictEqual(parseArgs(['--seed', '3', '--record=y.rec']).record, 'y.rec')
+    assert.strictEqual(parseArgs(['--checkpoints', 'cp', '--record']).record, 'cp.rec')
+    assert.strictEqual(parseArgs(['--no-record']).record, null)
+    assert.strictEqual(parseArgs(['--record-packets', 'full']).recordPackets, 'full')
+    assert.throws(() => parseArgs(['--record-packets', 'some']), /summary, full or none/)
+    assert.match(parseArgs([]).record ?? '', /[\\/]\.e2e[\\/]2-\d{4}-.*\.rec$/)
   })
 
   test('the food line: the bar, its saturation, the health and the food points carried at a tick', () => {
