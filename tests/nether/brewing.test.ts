@@ -96,8 +96,9 @@ test('blazeRodsWithBrew: with the wart and cream held, the rods a rod at a time 
   // spawner (open ground about it here: planBlazeBunkers has one), no nook nor camp after it; the decisions logged
   assert.deepEqual(await run([water(), water(), water()], false, true), ['rods 8 from a bunker only'])
   assert.deepEqual(lines, ['fire resistance: no magma cream or slime ball: the cubes about looked for', 'fire resistance: a bunker to be had by the spawner: the rods from it, no brew', 'fire resistance: no bow and none of it: the sword from a bunker only'])
-  // none to be had there: no fight with the sword alone
-  assert.deepEqual(await run([water(), water(), water()], false), ['threw MISSING_ITEMS: no bow and no fire resistance for the blazes (no magma cream or slime ball to brew it) (noFireResistance)'])
+  // none seen to be had from here (the spawner's chunks too far): the bunker's fight all the same, which gives the
+  // spawner up itself when there's none by it (collectBlazeRods bunkerOnly)
+  assert.deepEqual(await run([water(), water(), water()], false), ['rods 8 from a bunker only'])
   // the makings held and a bunker to be had: the rods from it, no brew
   assert.deepEqual(await run([water(), water(), water(), item('nether_wart'), item('magma_cream')], true, true), ['rods 8'])
   // no bow, the makings held: the brew, then the rest with the potions

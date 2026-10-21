@@ -456,15 +456,14 @@ export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count
       say(`not brewed: ${(err as Error).message}`)
     }
   }
-  // no bow and no fire resistance: no fight (the blazes' throne fought with a sword alone burned the bots), but from a
-  // bunker by the spawner (its sword meets the blazes at its slit; no nook nor camp after it: bunkerOnly)
+  // no bow and no fire resistance: no fight in the open (the blazes' throne fought with a sword alone burned the bots),
+  // but from a bunker by the spawner (its sword meets the blazes at its slit; no nook nor camp after it: bunkerOnly,
+  // which throws the noFireResistance MISSING_ITEMS itself when none can be had there). Judged here only from where
+  // the bot came in, the spawner's chunks too far to see, a 1.21.11 game's bot with a sword alone gave its fortress up
+  // for the overworld's slime ball (ls3-1.21.11 resumed from its enchanting, t675854)
   if (countItems(bot, 'blaze_rod') < args.count && !bowAndArrows(bot) && findPotion(bot, 'fire_resistance') == null && !hasEffect(bot, 'fire_resistance')) {
-    if (args.spawner != null && planBlazeBunkers(p => bot.blockAt(p) as any, new Vec3(args.spawner.x, args.spawner.y, args.spawner.z)).length > 0) {
-      say('no bow and none of it: the sword from a bunker only')
-      return await collectBlazeRods(bot, { ...args, bunkerOnly: true }, signal)
-    }
-    say('no bow and none of it: no fight')
-    throw Object.assign(new SkillError('MISSING_ITEMS', 'no bow and no fire resistance for the blazes (no magma cream or slime ball to brew it)', { rods: countItems(bot, 'blaze_rod') }), { noFireResistance: true })
+    say('no bow and none of it: the sword from a bunker only')
+    return await collectBlazeRods(bot, { ...args, bunkerOnly: true }, signal)
   }
   return await collectBlazeRods(bot, args, signal)
 }
