@@ -1186,3 +1186,25 @@ test('nookBlock: the stone\'s last STONE_RESERVE kept while there are other bloc
   assert.equal(nookBlock(fakeBot({ items: [item('cobblestone', STONE_RESERVE), item('netherrack', 30)] })), 'netherrack')
   assert.equal(nookBlock(fakeBot({ items: [item('cobblestone', 3)] })), 'cobblestone')
 })
+
+test('sealAndHeal: a fire in the bot\'s cell, shut in, is put out, not healed in (a bunker\'s bot burned to death so)', async () => {
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { nookAround, sealAndHeal } = await import('../../src/nether/blazeFight')
+  const stand = new Vec3(0, 64, 10)
+  const walls = new Set(['(0, 64, 11)', '(0, 65, 11)', '(1, 64, 10)', '(1, 65, 10)', '(-1, 64, 10)', '(-1, 65, 10)', '(0, 66, 10)', '(0, 64, 9)', '(0, 65, 9)'])
+  const fires = new Set(['(0, 64, 10)'])
+  const name = (p: Vec3): string => walls.has(p.floored().toString()) ? 'cobblestone' : fires.has(p.floored().toString()) ? 'fire' : p.y < 64 ? 'stone' : 'air'
+  const nook = nookAround((p: Vec3) => ({ name: name(p) === 'fire' ? 'air' : name(p), boundingBox: walls.has(p.floored().toString()) || p.y < 64 ? 'block' : 'empty' }), stand, new Vec3(0, 0, -1))
+  assert.ok(nook != null)
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 10.5), health: 10, items: [item('cobblestone', 8)], world: name })
+  bot.entity.effects = {}
+  const dug: string[] = []
+  bot.dig = async (b: any) => { dug.push(b.position.toString()); fires.delete(b.position.toString()) }
+  const ticking = setInterval(() => { for (let k = 0; k < 50; k++) bot.emit('physicsTick') }, 1)
+  try {
+    assert.equal(await sealAndHeal(bot, nook, 18), true)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.deepEqual(dug, ['(0, 64, 10)'])
+})

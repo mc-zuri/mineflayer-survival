@@ -1667,6 +1667,9 @@ export async function sealAndHeal (bot: Bot, nook: BlazeNook, healTo: number, si
   for (let t = 0; t < 1200 && bot.health < healTo; t += 10) {
     throwIfAborted(signal)
     if (bot.health <= 0 || !shut()) return true
+    // the fire in its cells put out (a fireball's, in at the front before it was shut): shut in with it at its feet, a
+    // 1.21.11 bot in its bunker by seed 2's throne at (-277, 77, -159) burned from 14.6 health to nothing healing
+    if (!fireProof(bot) && await putOutFireOnBot(bot, signal) > 0) continue
     const apple = bot.health <= 8 && bot.inventory.items().some(i => i.name === 'golden_apple') ? 'golden_apple' : undefined
     // (a meal that fits the bar, or one the health needs: dueMeal; at 18 and 19 the bar heals, a meal's mostly lost)
     const meal = apple ?? dueMeal(bot, { hurtAt: healTo })
