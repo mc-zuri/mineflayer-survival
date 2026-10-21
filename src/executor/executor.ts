@@ -37,7 +37,7 @@ import { herdSpares, herdSupply, homeFoodKeeps, noteAnimals } from '../skills/he
 import { noteVillage } from '../skills/village'
 import { digDepotNook, dumpPit, lavaThrow, pitThrow, rememberAround } from './explore'
 import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
-import { farmCells, grownPlots, growingLeft, knownFarms } from '../skills/farm'
+import { farmCells, grownPlots, growingLeft, knownFarms, ownFarmCrop } from '../skills/farm'
 import { GROW_TICKS } from '../core/crops'
 import type { Diagnostics } from '../diagnostics'
 import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
@@ -322,7 +322,7 @@ export class Executor {
     this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos), () => herdSpares(bot, this.memory), () => {
       const at = bot.entity?.position
       return at != null && this.memory.getPois('village', { dimension: normalizeDimension(bot.game?.dimension) }).some(p => Math.hypot(p.x - at.x, p.z - at.z) <= VILLAGE_RANGE)
-    }, () => this.oceanNear(), mob => this.mobLand(mob))
+    }, () => this.oceanNear(), mob => this.mobLand(mob), pos => ownFarmCrop(this.memory, pos, normalizeDimension(bot.game?.dimension)))
     // the animals in sight noted every second (an exploring for berries that saw none is a land without them too)
     let looks = 0
     bot.on('physicsTick', () => { if (++looks % 20 === 0) this.sightings.look() })

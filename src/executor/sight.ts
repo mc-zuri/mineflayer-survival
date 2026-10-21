@@ -52,12 +52,14 @@ export const VILLAGE_CROPS = ['carrots', 'potatoes', 'wheat', 'beetroots', 'hay_
 /** how far off a village noted counts as near for its crops */
 export const VILLAGE_RANGE = 512
 /**
- * how many times dearer a village's crops are with no village noted within VILLAGE_RANGE: a 26.3 bot on seed 31337's
- * peaks, the cows not near, planned 'mine 14 carrot' and explored 96 blocks for a village's carrots twice, 9000 ticks
- * at food 0 to 6 (full-26.3-s31337-h, t115742 and t126906), and at the taiga after its trip there 8000 ticks more
- * (hunt2-f, t206766)
+ * how many times dearer a village's crops are with no village noted within VILLAGE_RANGE: crops and hay grow wild in a
+ * village's farms only, so with none known they're the last resort (GIVE_UP_FACTOR's): a 26.3 bot on seed 31337's peaks,
+ * the cows not near, planned 'mine 14 carrot' and explored 96 blocks for a village's carrots twice, 9000 ticks at food 0
+ * to 6 (full-26.3-s31337-h, t115742 and t126906), and at the taiga after its trip there 8000 ticks more (hunt2-f,
+ * t206766); a 1.21.11 bot in a pine taiga with no village planned 'mine 9 wheat' and explored for it 6000 ticks, its own
+ * farm growing by home (f5-1.21.11 resumed from its base, t146449 to t152231)
  */
-export const NO_VILLAGE_FACTOR = 4
+export const NO_VILLAGE_FACTOR = 64
 
 /**
  * the sea's kelp (BLOCK_SOURCES' 1000 to find: the sea near), had only where an ocean that grows it is (foodLand's
@@ -126,8 +128,9 @@ export class Sightings {
    * @param oceanNear whether an ocean that grows kelp (or kelp remembered) is known within OCEAN_RANGE (kelp is the
    * plans' to count on only then)
    * @param mobLand a spawner of a mob noted near, and whether the biomes it spawns in are about (MobLand)
+   * @param ownCrop whether a crop block is one of the bot's own farm's (its plots' crops: no wild crop in sight)
    */
-  constructor (private readonly bot: Bot, private readonly now: () => number, private readonly outOfTheWay: (pos: Vec3) => boolean = () => false, private readonly spared: () => ReadonlySet<number> = () => new Set(), private readonly villageNear: () => boolean = () => true, private readonly oceanNear: () => boolean = () => true, private readonly mobLand: (mob: string) => MobLand = () => ({})) {}
+  constructor (private readonly bot: Bot, private readonly now: () => number, private readonly outOfTheWay: (pos: Vec3) => boolean = () => false, private readonly spared: () => ReadonlySet<number> = () => new Set(), private readonly villageNear: () => boolean = () => true, private readonly oceanNear: () => boolean = () => true, private readonly mobLand: (mob: string) => MobLand = () => ({}), private readonly ownCrop: (pos: Vec3) => boolean = () => false) {}
 
   /** the names a step looked for and didn't find */
   missing (names: readonly string[]): void {
@@ -241,7 +244,8 @@ export class Sightings {
       return w == null ? null : w.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position)
     }
     if (!SIGHTED_BLOCKS.includes(t.name) || typeof bot.findBlocks !== 'function') return null
-    const pos = findNear(bot, [t.name], SIGHT_RADIUS, p => !isGrown(bot.blockAt(p) as any))
+    // (not the crops of the bot's own farm: its harvest is the planner's farm step, which sows them again)
+    const pos = findNear(bot, [t.name], SIGHT_RADIUS, p => !isGrown(bot.blockAt(p) as any) || this.ownCrop(p))
     return pos == null ? null : pos.offset(0.5, 0.5, 0.5).distanceTo(bot.entity.position)
   }
 }

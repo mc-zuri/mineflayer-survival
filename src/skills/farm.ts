@@ -379,6 +379,14 @@ export function knownFarms (memory: WorldMemory, dimension = 'overworld'): Array
   return out
 }
 
+/** whether a crop block at `pos` stands on a plot of one of the bot's farms (knownFarms: the cell under it) */
+export function ownFarmCrop (memory: WorldMemory, pos: { x: number, y: number, z: number }, dimension = 'overworld'): boolean {
+  const x = Math.floor(pos.x)
+  const y = Math.floor(pos.y) - 1
+  const z = Math.floor(pos.z)
+  return knownFarms(memory, dimension).some(f => f.cells.some(([cx, cy, cz]) => cx === x && cy === y && cz === z))
+}
+
 /** notes a farm sown at the world's age `age` */
 export function rememberFarm (memory: WorldMemory, farm: FarmResult, age: number, dimension = 'overworld'): void {
   const rec: FarmRecord = { crop: farm.crop, cells: farm.cells.map(c => [c.x, c.y, c.z]), sown: age }

@@ -230,3 +230,27 @@ test('the wool\'s sources by what\'s about: a night monster by day is dear but b
   bot.time.timeOfDay = 15000
   assert.deepEqual(plan(), ['spider'])
 })
+
+test('the bot\'s own farm\'s grown wheat is no wild wheat in sight (ownFarmCrop), and with no village wild wheat is the last resort: the meal plans the farm\'s harvest, not a mine of wheat (f5-1.21.11: \'mine 9 wheat\' explored for by its own farm)', async () => {
+  const { NO_VILLAGE_FACTOR } = await import('../../src/executor/sight')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { ownFarmCrop, rememberFarm } = await import('../../src/skills/farm')
+  const { obtainAll } = await import('../../src/planner/obtain')
+  const memory = new WorldMemory()
+  const plots = [new Vec3(5, 63, 0), new Vec3(6, 63, 0), new Vec3(7, 63, 0)]
+  rememberFarm(memory, { water: new Vec3(5, 63, 1), cells: plots, crop: 'wheat' }, 0)
+  assert.equal(ownFarmCrop(memory, new Vec3(5, 64, 0)), true)
+  assert.equal(ownFarmCrop(memory, new Vec3(5, 65, 0)), false)
+  const bot = fakeBot([], plots.map(p => ({ name: 'wheat', at: p.offset(0, 1, 0), age: 7 })))
+  const wheat = { name: 'wheat', kind: 'block' as const, dimension: 'overworld' as const, find: 5000 }
+  // without the farm known: the grown wheat in sight is a walk away
+  assert.ok((new Sightings(bot, () => 0, () => false, () => new Set(), () => false).cost(wheat) ?? Infinity) < 100)
+  const s = new Sightings(bot, () => 0, () => false, () => new Set(), () => false, () => true, () => ({}), p => ownFarmCrop(memory, p))
+  assert.equal(s.cost(wheat), 5000 * NO_VILLAGE_FACTOR)
+  // the meal's plan: the farm's harvest (its growing nearly done) and bread, no mine of wheat
+  const kit = { crafting_table: 1, stone_pickaxe: 1, wooden_hoe: 1 }
+  const plan = obtainAll(registry, [{ item: ['bread'], count: 5, unit: 'nutrition' }], { inventory: kit, findCost: t => s.cost(t), farmCost: crop => crop === 'wheat' ? 3000 : undefined, unseenFactor: 8 })
+  assert.equal(plan.ok, true)
+  assert.ok(plan.steps.some(st => st.kind === 'farm'), plan.steps.map(st => `${st.kind} ${st.item}`).join(', '))
+  assert.ok(!plan.steps.some(st => st.kind === 'mine' && st.item === 'wheat'), plan.steps.map(st => `${st.kind} ${st.item}`).join(', '))
+})
