@@ -802,7 +802,14 @@ export const runFarm: StepRunner<FarmStep> = async (step, ctx) => {
   const dimension = dimensionOf(bot)
   const item = step.item
   const start = startCount(ctx, 'start', () => countItems(bot, item))
-  const farm = knownFarms(ctx.memory, dimension).find(f => f.crop === step.crop)
+  // (the step's own farm; else, of several of its crop, the one with the most plots grown, the nearest of those)
+  const lookupNow = (p: Vec3): any => bot.blockAt(p)
+  const farms = knownFarms(ctx.memory, dimension).filter(f => f.crop === step.crop)
+  const at = step.water
+  const ripe = (f: typeof farms[number]): number => typeof bot.blockAt === 'function' ? grownPlots(lookupNow, farmCells(f), f.crop).length : 0
+  const away = (f: typeof farms[number]): number => bot.entity == null ? 0 : bot.entity.position.distanceTo(f.water)
+  const farm = (at != null ? farms.find(f => f.water.x === at[0] && f.water.y === at[1] && f.water.z === at[2]) : undefined) ??
+    farms.sort((a, b) => ripe(b) - ripe(a) || away(a) - away(b))[0]
   if (farm == null) {
     const res = await plantFarm(bot, { seed: step.seed, center: ctx.home ?? undefined, plots: step.plots }, signal)
     rememberFarm(ctx.memory, res, Number((bot.time as any)?.age ?? 0), dimension)

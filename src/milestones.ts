@@ -46,7 +46,7 @@ import { CaveCells, caveCells, caveRuleOn, inCaveWall } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
-import { extendFarm, farmCells, farmCensus, FARM_MIN_PLOTS, farmHoleSite, findFarmSite, grownPlots, knownFarms, plantFarm, plotCells, rememberFarm, SEED_OF } from './skills/farm'
+import { extendFarm, farmCells, farmCensus, FARM_MIN_PLOTS, FARM_REACH, farmHoleSite, findFarmSite, grownPlots, knownFarms, plantFarm, plotCells, rememberFarm, SEED_OF } from './skills/farm'
 import { describeRequest, ownedInventory, type Executor } from './executor/executor'
 import { NETHER_SCAFFOLD_KEEP } from './executor/keep'
 import { heldFor, type ObtainRequest } from './planner/obtain'
@@ -2673,7 +2673,63 @@ export async function growFarms (bot: Bot, executor: Executor, signal: AbortSign
     sown += res.cells.length
     log(`farm: ${res.cells.length} more wheat sown by the water at ${water.toString()} (${rec.cells.length} plots)`)
   }
-  return sown
+  return sown + await anotherFarm(bot, executor, signal, log)
+}
+
+/** the plots the wheat farms make together at the most: a second water and its rows once the first is full */
+export const FARM_TOTAL_PLOTS = 28
+
+/**
+ * A farm by the farms near (FARM_GROW_RANGE) once each is full (FARM_TARGET_PLOTS) and they make fewer than
+ * FARM_TOTAL_PLOTS together, sown from the seeds held (FARM_MIN_PLOTS at the least): by another water near with plot
+ * ground about it, else a water hole dug for it (farmHoleSite, 6 blocks across from a farm's water at the least so the
+ * blocks don't meet) from the water bucket held, or one got when it's cheap. A farm of 14 plots gave 25 to 29 wheat in
+ * 150000 ticks, some 9 bread, and its bot's meals were hunted for all the while (f5-1.21.11 resumed from its base,
+ * new8 and new9). Resolves the plots sown.
+ */
+export async function anotherFarm (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const dimension = normalizeDimension(bot.game?.dimension)
+  if (dimension !== 'overworld') return 0
+  const farms = knownFarms(executor.memory, dimension).filter(f => f.crop === 'wheat')
+  const near = farms.filter(f => bot.entity.position.distanceTo(f.water) <= FARM_GROW_RANGE)
+  if (near.length === 0 || near.some(f => f.cells.length < FARM_TARGET_PLOTS)) return 0
+  const total = farms.reduce((n, f) => n + f.cells.length, 0)
+  const plots = Math.min(FARM_TARGET_PLOTS, FARM_TOTAL_PLOTS - total, countItems(bot, 'wheat_seeds'))
+  if (plots < FARM_MIN_PLOTS) return 0
+  const fail = (err: unknown): null => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`farm: no second farm: ${(err as Error).message}`)
+    return null
+  }
+  if (!bot.inventory.items().some(i => i.name.endsWith('_hoe'))) {
+    const plan = executor.plan([{ item: '#hoes', count: 1 }])
+    if (!plan.ok || plan.cost > FARM_START_TICKS) return 0
+    if (await executor.obtain([{ item: '#hoes', count: 1 }], signal).catch(fail) == null) return 0
+  }
+  const lookup = (pos: Vec3): any => bot.blockAt(pos)
+  const by = near[0].water
+  const ours = (p: Vec3): boolean => farms.some(f => Math.max(Math.abs(f.water.x - p.x), Math.abs(f.water.z - p.z)) <= 2 * FARM_REACH + 1 && Math.abs(f.water.y - p.y) <= 2)
+  let site = findFarmSite(lookup, by, 12, plots, FARM_MIN_PLOTS)
+  if (site != null && ours(site.water)) site = null
+  if (site == null) {
+    if (countItems(bot, 'water_bucket') === 0 && countItems(bot, 'bucket') > 0) await refillWater(bot, signal).catch(fail)
+    if (countItems(bot, 'water_bucket') === 0) {
+      const plan = executor.plan([{ item: 'water_bucket', count: 1 }])
+      if (plan.ok && plan.cost <= FARM_START_TICKS) await executor.obtain([{ item: 'water_bucket', count: 1 }], signal).catch(fail)
+    }
+    if (countItems(bot, 'water_bucket') === 0) { log('farm: no water bucket for the hole of a second farm'); return 0 }
+    const hole = farmHoleSite(lookup, by, WATER_HOLE_SITE_RADIUS, FARM_MIN_PLOTS, ours)
+    if (hole == null) { log('farm: no ground near the farm for a second one'); return 0 }
+    await executor.task('a water hole for the second farm', async (s) => await makeWaterHole(bot, by, s, hole), signal).catch(fail)
+    site = findFarmSite(lookup, hole, 0, plots)
+  }
+  if (site == null) return 0
+  const water = site.water
+  const res = await executor.task('sow a second farm', async (s) => await plantFarm(bot, { seed: 'wheat_seeds', water, plots }, s), signal).catch(fail)
+  if (res == null) return 0
+  rememberFarm(executor.memory, res, Number((bot.time as any)?.age ?? 0), dimension)
+  log(`farm: a second farm of ${res.cells.length} wheat sown by the water at ${res.water.toString()} (${total + res.cells.length} plots in all)`)
+  return res.cells.length
 }
 
 /** the grown plots of a farm a meal harvests it for (harvestGrownFarms' least): a bread's 3 wheat */
@@ -2690,14 +2746,14 @@ export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: A
   let harvested = 0
   for (const farm of knownFarms(executor.memory, dimension)) {
     const walk = bot.entity.position.distanceTo(farm.water)
-    const cost = executor.farmCost(farm.crop)
+    const cost = executor.farmCost(farm.crop, farm.water)
     if (walk > FARM_RANGE || cost == null) continue
     // (half grown; or, with `least` asked, that many plots grown: a meal's)
     const grown = least != null ? grownPlots(pos => bot.blockAt(pos) as any, farmCells(farm), farm.crop).length : 0
     if (cost > walk * 5 + 1 && (least == null || grown < least)) continue
     const item = farm.crop === 'wheat' ? 'wheat' : farm.crop === 'beetroots' ? 'beetroot' : SEED_OF[farm.crop]
     log(`the ${farm.crop} at ${farm.water.toString()} has grown${cost > walk * 5 + 1 ? ` (${grown} plots)` : ''}: harvesting it`)
-    await executor.runStep({ kind: 'farm', item, count: farm.cells.length, crop: farm.crop, seed: SEED_OF[farm.crop], plots: 0, cycles: 1, cost }, signal)
+    await executor.runStep({ kind: 'farm', item, count: farm.cells.length, crop: farm.crop, seed: SEED_OF[farm.crop], plots: 0, cycles: 1, cost, water: [farm.water.x, farm.water.y, farm.water.z] }, signal)
     harvested++
   }
   // the harvest's seeds beyond the plots' own sown about the water (the farm grows to FARM_TARGET_PLOTS)

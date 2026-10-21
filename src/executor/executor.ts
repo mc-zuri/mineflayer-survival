@@ -635,9 +635,15 @@ export class Executor {
    * Ticks until the farm of a crop the bot sowed can be harvested, and the walk there: none left once half its plots
    * have grown (as seen), else what's left of GROW_TICKS since the sowing; undefined with no such farm
    */
-  farmCost (crop: string): number | undefined {
-    const farm = knownFarms(this.memory, normalizeDimension(this.bot.game?.dimension)).find(f => f.crop === crop)
-    if (farm == null) return undefined
+  farmCost (crop: string, water?: Vec3): number | undefined {
+    const farms = knownFarms(this.memory, normalizeDimension(this.bot.game?.dimension)).filter(f => f.crop === crop && (water == null || f.water.equals(water)))
+    if (farms.length === 0) return undefined
+    return Math.min(...farms.map(f => this.oneFarmCost(f)))
+  }
+
+  /** a farm's cost (farmCost): the walk, and what's left of its growing */
+  private oneFarmCost (farm: ReturnType<typeof knownFarms>[number]): number {
+    const crop = farm.crop
     const walk = Math.ceil(this.bot.entity.position.distanceTo(farm.water) * WALK_TICKS_PER_BLOCK)
     const cells = farmCells(farm)
     if (typeof this.bot.blockAt === 'function') {

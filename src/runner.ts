@@ -1910,7 +1910,7 @@ export class Runner {
     // (or a bread's worth of its plots grown, MEAL_FARM_PLOTS, as seen: its rows ripen a plot at a time)
     const farm = knownFarms(this.memory, 'overworld').some(f => {
       const walk = bot.entity.position.distanceTo(f.water)
-      const cost = this.executor.farmCost(f.crop)
+      const cost = this.executor.farmCost(f.crop, f.water)
       if (walk > FARM_RANGE || cost == null) return false
       return cost <= walk * 5 + 1 || (typeof bot.blockAt === 'function' && grownPlots(p => bot.blockAt(p) as any, farmCells(f), f.crop).length >= MEAL_FARM_PLOTS)
     })

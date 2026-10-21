@@ -446,7 +446,7 @@ test('growingLeft and the farm\'s cost: what is left of the growing read off its
   // the farm's cost: sown long ago, but its crops young
   const memory = new WorldMemory()
   rememberFarm(memory, { water: new Vec3(0, 63, 1), cells, crop: 'wheat' }, 0)
-  const self: any = { memory, bot: { entity: { position: new Vec3(0, 64, 1) }, game: { dimension: 'overworld' }, time: { age: 100000 }, blockAt: lookup } }
+  const self: any = Object.assign(Object.create(Executor.prototype), { memory, bot: { entity: { position: new Vec3(0, 64, 1) }, game: { dimension: 'overworld' }, time: { age: 100000 }, blockAt: lookup } })
   const cost = Executor.prototype.farmCost.call(self, 'wheat') as number
   assert.ok(cost >= Math.round(4 * GROW_TICKS / 7), String(cost))
   // half grown: the walk
@@ -532,4 +532,71 @@ test('harvestGrownFarms keepWheat: a meal\'s harvest bakes all its wheat (keepWh
   assert.ok(HERD_WHEAT_KEPT >= 3)
   await harvestGrownFarms(bot, executor, new AbortController().signal, () => {}, true, 3, 0)
   assert.deepEqual(asked, [{ item: 'bread', count: 1 }])
+})
+
+test('anotherFarm: the farm by the bot full (14), the seeds held: a second water hole dug 6 or more across from it and a farm sown there, up to FARM_TOTAL_PLOTS; none while the first has room, nor past 28', async () => {
+  const { anotherFarm, FARM_TOTAL_PLOTS, FARM_TARGET_PLOTS } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const farmModule = require('../../src/skills/farm')
+  const caneModule = require('../../src/skills/caneFarm')
+  const first = new Vec3(10, 63, 10)
+  const holes: Vec3[] = []
+  const lookup = (p: Vec3): any => world([first, ...holes])(p)
+  const memory = new WorldMemory()
+  rememberFarm(memory, { water: first, cells: plotCells(lookup, first).slice(0, FARM_TARGET_PLOTS - 2), crop: 'wheat' }, 0)
+  const bot = fakeBot({ position: new Vec3(12.5, 64, 12.5), items: [item('wooden_hoe', 1), item('wheat_seeds', 20), item('water_bucket', 1)] })
+  bot.blockAt = (p: Vec3) => ({ ...lookup(p.floored()), position: p.floored() })
+  bot.game.dimension = 'overworld'
+  bot.time = { age: 5000 }
+  const tasks: string[] = []
+  const executor: any = { memory, plan: () => ({ ok: true, cost: 100 }), obtain: async () => {}, task: async (name: string, fn: any, s: AbortSignal) => { tasks.push(name); return await fn(s) } }
+  const real = { plant: farmModule.plantFarm, hole: caneModule.makeWaterHole }
+  caneModule.makeWaterHole = async (_b: any, _c: any, _s: any, at: Vec3) => { holes.push(at); return at }
+  farmModule.plantFarm = async (_b: any, args: any) => ({ water: args.water, cells: plotCells(lookup, args.water, args.plots), crop: 'wheat' })
+  try {
+    // the first with room: none
+    assert.equal(await anotherFarm(bot, executor, new AbortController().signal, () => {}), 0)
+    rememberFarm(memory, { water: first, cells: plotCells(lookup, first), crop: 'wheat' }, 0)
+    const sown = await anotherFarm(bot, executor, new AbortController().signal, () => {})
+    assert.equal(sown, FARM_TOTAL_PLOTS - FARM_TARGET_PLOTS)
+    assert.deepEqual(tasks, ['a water hole for the second farm', 'sow a second farm'])
+    assert.ok(Math.max(Math.abs(holes[0].x - first.x), Math.abs(holes[0].z - first.z)) >= 6, holes[0].toString())
+    assert.equal(knownFarms(memory).length, 2)
+    // 28 in all: no third
+    assert.equal(await anotherFarm(bot, executor, new AbortController().signal, () => {}), 0)
+  } finally {
+    farmModule.plantFarm = real.plant
+    caneModule.makeWaterHole = real.hole
+  }
+})
+
+test('two farms: each its own cost (farmCost by its water), the farm step of one harvests that one (its water), else the one with the most grown', async () => {
+  const { Executor } = await import('../../src/executor/executor')
+  const { runFarm } = await import('../../src/executor/steps')
+  const a = new Vec3(0, 63, 0)
+  const b = new Vec3(20, 63, 0)
+  const memory = new WorldMemory()
+  rememberFarm(memory, { water: a, cells: [new Vec3(1, 63, 0), new Vec3(-1, 63, 0)], crop: 'wheat' }, 0)
+  rememberFarm(memory, { water: b, cells: [new Vec3(21, 63, 0), new Vec3(19, 63, 0)], crop: 'wheat' }, 0)
+  const lookup = (p: Vec3): any => p.y === 64 && Math.abs(p.z) === 0 && (p.x === 1 || p.x === -1 || p.x === 21 || p.x === 19) ? { name: 'wheat', getProperties: () => ({ age: p.x > 10 ? 7 : 1 }) } : { name: p.y <= 63 ? 'farmland' : 'air' }
+  const bot: any = { entity: { position: new Vec3(0, 64, 1) }, game: { dimension: 'overworld' }, time: { age: 0 }, blockAt: lookup, inventory: { items: () => [], slots: [] }, on () {}, off () {}, removeListener () {} }
+  const self: any = Object.assign(Object.create(Executor.prototype), { memory, bot })
+  const costA = Executor.prototype.farmCost.call(self, 'wheat', a) as number
+  const costB = Executor.prototype.farmCost.call(self, 'wheat', b) as number
+  assert.ok(costA > 10000 && costB < 1000, `${costA} ${costB}`)
+  assert.equal(Executor.prototype.farmCost.call(self, 'wheat'), costB)
+  const farmModule = require('../../src/skills/farm')
+  const navModule = require('../../src/skills/navigate')
+  const real = { harvest: farmModule.harvestFarm, nav: navModule.navigateNear }
+  const went: string[] = []
+  navModule.navigateNear = async (_b: any, to: Vec3) => { went.push(to.toString()) }
+  farmModule.harvestFarm = async () => ({})
+  try {
+    await runFarm({ kind: 'farm', item: 'wheat', count: 2, crop: 'wheat', seed: 'wheat_seeds', plots: 0, cycles: 1, cost: 0, water: [0, 63, 0] } as any, { bot, memory, signal: new AbortController().signal, log: () => {}, home: null, state: {} } as any)
+    await runFarm({ kind: 'farm', item: 'wheat', count: 2, crop: 'wheat', seed: 'wheat_seeds', plots: 0, cycles: 1, cost: 0 } as any, { bot, memory, signal: new AbortController().signal, log: () => {}, home: null, state: {} } as any)
+  } finally {
+    farmModule.harvestFarm = real.harvest
+    navModule.navigateNear = real.nav
+  }
+  assert.deepEqual(went, ['(0, 63, 0)', '(20, 63, 0)'])
 })

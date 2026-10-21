@@ -130,7 +130,7 @@ const HOLE_GROUND = new Set(['grass_block', 'dirt', 'coarse_dirt', 'rooted_dirt'
  * (waterHoleSite) takes podzol as ground, which no hoe tills: a 1.21.11 bot's hole by its home in an old growth pine
  * taiga had no plot by it and its farm was never sown, all game (f5-1.21.11, seed 671229120248951486, t76740).
  */
-export function farmHoleSite (lookup: Lookup, center: Vec3, radius = 12, least = FARM_MIN_PLOTS): Vec3 | null {
+export function farmHoleSite (lookup: Lookup, center: Vec3, radius = 12, least = FARM_MIN_PLOTS, avoid: (pos: Vec3) => boolean = () => false): Vec3 | null {
   const c = center.floored()
   let best: { p: Vec3, cells: number, d: number } | null = null
   for (let dy = -3; dy <= 2; dy++) {
@@ -138,7 +138,7 @@ export function farmHoleSite (lookup: Lookup, center: Vec3, radius = 12, least =
       for (let dz = -radius; dz <= radius; dz++) {
         if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1 && dy >= -2) continue
         const p = c.offset(dx, dy, dz)
-        if (!HOLE_GROUND.has(lookup(p)?.name ?? '') || !OPEN_ABOVE.has(lookup(p.offset(0, 1, 0))?.name ?? 'stone')) continue
+        if (avoid(p) || !HOLE_GROUND.has(lookup(p)?.name ?? '') || !OPEN_ABOVE.has(lookup(p.offset(0, 1, 0))?.name ?? 'stone')) continue
         if (!HOLDS_WATER(lookup(p.offset(0, -1, 0))?.name)) continue
         if (![[1, 0], [-1, 0], [0, 1], [0, -1]].every(([x, z]) => HOLDS_WATER(lookup(p.offset(x, 0, z))?.name))) continue
         const cells = plotCells(lookup, p).length

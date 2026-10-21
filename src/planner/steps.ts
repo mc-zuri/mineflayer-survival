@@ -96,6 +96,8 @@ export interface FarmStep extends StepBase {
   plots: number
   /** harvests to make */
   cycles: number
+  /** the farm's water when the step is for one farm of several (harvestGrownFarms'); else the cheapest */
+  water?: [number, number, number]
 }
 
 /** fish with a rod in water (the fish skill): a frozen one's ice broken open first */
