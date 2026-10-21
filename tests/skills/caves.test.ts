@@ -572,3 +572,19 @@ test('exploreSurface: a bot under the cave rule underground with no way up but t
   assert.deepEqual(shut, [true])
   assert.equal(err?.reason, 'NO_PATH', String(err))
 })
+
+test('caveStepCost: a bot at a cave has its way out through the cave\'s cells within CAVE_ESCAPE_RADIUS only, none on through the cave further (f6-26.3: up through a lush cave to the base, shot dead at y -7)', async () => {
+  const { CAVE_ESCAPE_RADIUS } = await import('../../src/skills/caves')
+  // a long cave of air from x 2 to 40 (y 20 to 23); the bot in it at x 3
+  const bot = fakeBot({ position: new Vec3(3.5, 20, 0.5) })
+  bot.game.dimension = 'overworld'
+  bot.blockAt = (p: Vec3) => {
+    const cave = p.y >= 20 && p.y <= 23 && p.x >= 2 && p.x <= 40 && Math.abs(p.z) <= 3
+    const name = cave ? 'air' : p.y > 70 ? 'air' : 'stone'
+    return { name, position: p, boundingBox: name === 'stone' ? 'block' : 'empty' }
+  }
+  caveCells(bot)
+  const step = caveStepCost(bot)
+  assert.equal(step({ position: { x: 6, y: 20, z: 0 } }), CAVE_STEP_COST)
+  assert.equal(step({ position: { x: 3 + CAVE_ESCAPE_RADIUS + 4, y: 20, z: 0 } }), CAVE_FORBID)
+})

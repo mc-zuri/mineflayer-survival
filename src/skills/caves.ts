@@ -382,6 +382,14 @@ export function atCave (bot: Bot): boolean {
   return !dugByBot(bot, feet) && cells.beside([feet, head]).length > 0
 }
 
+/**
+ * how far from a bot in a cave or at one (atCave) its way out may go through the cave's cells; beyond, the rule's
+ * CAVE_FORBID as from the rock. With the whole cave open a 26.3 bot's trip from y 3 to the base's chest at y 101 for a
+ * diamond went up through a lush cave, into it 10 times in 5000 ticks, and skeletons shot it dead there at y -7
+ * (f6-26.3, t260096 to t265041)
+ */
+export const CAVE_ESCAPE_RADIUS = 8
+
 /** the bots whose ways keep out of every cave's cell for now, in a cave or not (withCavesShut), by how many holds */
 const cavesShut = new WeakMap<Bot, number>()
 
@@ -420,7 +428,12 @@ export function caveStepCost (bot: Bot): (block: { position: { x: number, y: num
     const tick = ticks.get(bot)?.n ?? 0
     if (cavesShutFor(bot)) return CAVE_FORBID
     if (at.tick !== tick) at = { tick, value: atCave(bot) }
-    return at.value ? CAVE_STEP_COST : CAVE_FORBID
+    if (!at.value) return CAVE_FORBID
+    // (the way out only: the cave's cells near the bot, none further on through the cave)
+    const p = bot.entity?.position
+    if (p == null) return CAVE_STEP_COST
+    const b = block.position
+    return Math.hypot(b.x + 0.5 - p.x, b.y - p.y, b.z + 0.5 - p.z) <= CAVE_ESCAPE_RADIUS ? CAVE_STEP_COST : CAVE_FORBID
   }
 }
 
