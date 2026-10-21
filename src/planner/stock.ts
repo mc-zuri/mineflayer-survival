@@ -45,9 +45,12 @@ export interface StockMark {
 const STACK = 64
 
 /**
- * The default marks. The basics (cobblestone or cobbled deepslate, which are the building blocks too, and torches): a
- * top-up below 3 stacks, to 5. Wood: a stack of logs, the planks and sticks made from it as needed, topped up below
- * half a stack. The rest from what the later phases take:
+ * The default marks. Wood: 2 stacks of logs carried to spend (the planks and sticks made from them as needed, the
+ * smelts' fuel), topped up below a stack, to 3 (the third at the base); stone (cobblestone or cobbled deepslate, the
+ * building blocks too): a stack carried, topped up below a stack, to 2. Their mine steps take the working set while at
+ * the trees or the stone face (StockPolicy.bulk). With a stack of logs and a top-up below half of it, the work's own
+ * steps went for a log at a time once it was spent ('mine 1 oak_log' for a bucket's smelt, f2-1.21.11 t49300 on).
+ * Torches: a top-up below 3 stacks, to 5. The rest from what the later phases take:
  * - coal: the smelting (an iron run's 33 ores are 5 coal, the food, glass) beside the torches' own stock;
  * - iron: the iron milestone's 33 and after it a spare pickaxe and sword (5), buckets for water and lava (6), shears
  *   (2), flint and steel (1), rails and an anvil (31);
@@ -70,8 +73,8 @@ const STACK = 64
  *   the cream itself are in the basalt deltas' pits and lava, where a 26.3 bot hunting them burned to death twice.
  */
 export const STOCK_MARKS: readonly StockMark[] = [
-  { id: 'wood', counts: { '#logs_that_burn': 1, '#planks': 1 / 4, stick: 1 / 8 }, gather: '#logs_that_burn', low: 32, high: 64, keep: { '#logs_that_burn': 64 }, where: 'surface', ticksPerUnit: 60 },
-  { id: 'stone', counts: { '#stone_crafting_materials': 1 }, gather: ['cobblestone', 'cobbled_deepslate'], low: 3 * STACK, high: 5 * STACK, keep: { cobblestone: STACK }, from: 'wood', where: 'underground', ticksPerUnit: 25 },
+  { id: 'wood', counts: { '#logs_that_burn': 1, '#planks': 1 / 4, stick: 1 / 8 }, gather: '#logs_that_burn', low: STACK, high: 3 * STACK, keep: { '#logs_that_burn': 2 * STACK }, where: 'surface', ticksPerUnit: 60 },
+  { id: 'stone', counts: { '#stone_crafting_materials': 1 }, gather: ['cobblestone', 'cobbled_deepslate'], low: STACK, high: 2 * STACK, keep: { cobblestone: STACK }, from: 'wood', where: 'underground', ticksPerUnit: 25 },
   { id: 'torch', counts: { torch: 1 }, gather: 'torch', low: 3 * STACK, high: 5 * STACK, keep: { torch: STACK }, from: 'stone', where: 'underground', ticksPerUnit: 20 },
   { id: 'coal', counts: { coal: 1, charcoal: 1, coal_block: 9 }, gather: ['coal', 'charcoal'], low: 32, high: 96, keep: { coal: 32, charcoal: 32 }, from: 'wood', where: 'underground', ticksPerUnit: 80 },
   { id: 'iron', counts: { iron_ingot: 1, raw_iron: 1, iron_block: 9, raw_iron_block: 9 }, gather: ['raw_iron', 'iron_ingot'], low: 32, high: 64, from: 'stone', where: 'underground', ticksPerUnit: 100 },

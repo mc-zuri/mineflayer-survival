@@ -47,7 +47,7 @@ function giving (bot: any, log: string[]): any {
 
 const at = (ids: string[]): any[] => ids.map(id => ({ id, title: '', tick: 0, wallMs: 0 }))
 
-test('a milestone ends with its stock topped up when that is cheap: the stack of logs waits for the stone axe, and each event has the levels', async () => {
+test('a milestone ends with its stock topped up when that is cheap: the 2 stacks of logs wait for the stone axe, and each event has the levels', async () => {
   const bot = fakeBot()
   const steps: string[] = []
   const lines: string[] = []
@@ -66,12 +66,13 @@ test('a milestone ends with its stock topped up when that is cheap: the stack of
   const result = await runner.play()
   assert.equal(result.reason, 'until')
   // by hand a log is dearer than the wood's 60 ticks: none cut after the wood milestone, the stack after the stone's
-  assert.ok(lines.some(l => /stock: wood 8\/32-64: not now/.test(l)), lines.join('\n'))
-  assert.deepEqual(steps, ['mine 56 oak_log'], lines.join('\n'))
-  assert.deepEqual(result.reached.map(r => r.stock?.wood), [{ carried: 8, stored: 0, low: 32, high: 64 }, { carried: 64, stored: 0, low: 32, high: 64 }])
-  assert.ok(lines.some(l => /stock at stone: wood 64\/32-64/.test(l)), lines.join('\n'))
-  // the working set is the executor's keep rule: a stack of logs carried
-  assert.equal(runner.executor.options.keep('oak_log', registry), 64)
+  assert.ok(lines.some(l => /stock: wood 8\/64-192: not now/.test(l)), lines.join('\n'))
+  // (no base's chests yet: the working set's 2 stacks, not the high mark's 3)
+  assert.deepEqual(steps, ['mine 120 oak_log'], lines.join('\n'))
+  assert.deepEqual(result.reached.map(r => r.stock?.wood), [{ carried: 8, stored: 0, low: 64, high: 192 }, { carried: 128, stored: 0, low: 64, high: 192 }])
+  assert.ok(lines.some(l => /stock at stone: wood 128\/64-192/.test(l)), lines.join('\n'))
+  // the working set is the executor's keep rule: 2 stacks of logs carried
+  assert.equal(runner.executor.options.keep('oak_log', registry), 128)
 })
 
 test('the base\'s chests count: logs stored there are stock, not cut again, and a top-up never loots them', async () => {
@@ -82,13 +83,13 @@ test('the base\'s chests count: logs stored there are stock, not cut again, and 
   const runner = new Runner(bot, { log: () => {}, executor: { runners: giving(bot, steps), log: () => {} } })
   assert.deepEqual(runner.stockStored(), { oak_log: 60 })
   assert.equal(runner.dueTopUps(['surface']).length, 0)
-  // 20 stored: under the low mark, so to 64 with the 28 carried and stored: 36 more cut, none taken from the chest
+  // 20 stored: under the low mark, so to 192 with the 28 carried and stored: 164 more cut, none taken from the chest
   bot.survival.memory.rememberChest({ x: 1, y: 40, z: 0 }, { oak_log: 20 })
   let planned: any = null
   const plan = runner.executor.plan.bind(runner.executor)
   runner.executor.plan = (req: any, inv?: any, extra?: any) => { planned = extra; return plan(req, inv, extra) }
   await runner.topUp(['surface'], new AbortController().signal)
-  assert.deepEqual(steps, ['mine 36 oak_log'])
+  assert.deepEqual(steps, ['mine 164 oak_log'])
   assert.deepEqual(planned.exclude, ['loot'])
 })
 
@@ -101,18 +102,18 @@ test('a top-up waits when its plan is dearer than its budget, and stops when its
   runner.executor.obtain = async () => { obtained++; return { plans: 1, steps: 0 } }
   await runner.topUp(['surface'], new AbortController().signal)
   assert.equal(obtained, 0)
-  assert.ok(lines.some(l => /stock: wood 0\/32-64: not now \(1000000 ticks for 64, over its 3840\)/.test(l)), lines.join('\n'))
+  assert.ok(lines.some(l => /stock: wood 0\/64-192: not now \(1000000 ticks for 128, over its 7680\)/.test(l)), lines.join('\n'))
   // waiting STOCK_WAIT_TICKS before the next look
   assert.equal(runner.dueTopUps(['surface']).length, 0)
   bot.survival.tasks.tick += STOCK_WAIT_TICKS
   assert.equal(runner.dueTopUps(['surface']).length, 1)
-  // a cheap plan whose work runs on: cut off once its 3840 ticks are up
+  // a cheap plan whose work runs on: cut off once its 7680 ticks are up
   runner.executor.plan = () => ({ ok: true, steps: [], cost: 100, inventory: null as any, unresolved: [] })
   runner.executor.obtain = async (_req: any, signal?: AbortSignal) => await new Promise((resolve, reject) => signal?.addEventListener('abort', () => reject(signal.reason)))
   const run = runner.topUp(['surface'], new AbortController().signal)
-  for (let i = 0; i < 3840; i++) { bot.emit('physicsTick'); if (i % 500 === 0) await new Promise(resolve => setImmediate(resolve)) }
+  for (let i = 0; i < 7680; i++) { bot.emit('physicsTick'); if (i % 500 === 0) await new Promise(resolve => setImmediate(resolve)) }
   await run
-  assert.ok(lines.some(l => /stock: wood stopped after 3840 ticks: its 3840 ticks are up/.test(l)), lines.join('\n'))
+  assert.ok(lines.some(l => /stock: wood stopped after 7680 ticks: its 7680 ticks are up/.test(l)), lines.join('\n'))
 })
 
 test('at night the stock\'s mine top-ups are the night\'s work: with no milestone goal down there, the bot mines for them', async () => {
@@ -157,8 +158,8 @@ test('a top-up that gathers tells the stall watchdog (bot.survival.diagnostics.p
   // the diagnostics' other hooks (arm, planMade, stepStarted...) left as no-ops
   bot.survival.diagnostics = new Proxy({}, { get: (_t, k) => k === 'progress' ? (what: string) => progress.push(what) : k === 'step' ? undefined : () => () => {} })
   await runner.topUp(['surface'], new AbortController().signal)
-  assert.deepEqual(steps, ['mine 64 oak_log'])
-  assert.ok(progress.includes('stock wood 64'), progress.join(', '))
+  assert.deepEqual(steps, ['mine 128 oak_log'])
+  assert.ok(progress.includes('stock wood 128'), progress.join(', '))
 })
 
 test('with no base the stock over its working set may go when room is wanted; with the base\'s chests it is stored', () => {

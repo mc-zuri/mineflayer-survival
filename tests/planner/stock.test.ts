@@ -36,26 +36,26 @@ for (const version of VERSIONS) {
 
   test(`${version}: below the low mark a top-up is due, to the high mark; between the marks only one under way goes on`, () => {
     const policy = new StockPolicy()
-    // 20 logs: under 32
+    // 20 logs: under a stack
     let ups = policy.topUps(inv({ oak_log: 20 }), {}, [], ['surface'])
     assert.deepEqual(ups.map(u => u.mark.id), ['wood'])
-    assert.equal(ups[0].units, 64 - 20)
-    assert.deepEqual(ups[0].request, { item: '#logs_that_burn', count: 64 })
-    assert.equal(ups[0].budget, (64 - 20) * 60)
-    // part of the way (40): still under way
-    ups = policy.topUps(inv({ oak_log: 40 }), {}, [], ['surface'])
-    assert.equal(ups[0]?.units, 24)
-    // at the high mark it's over, and 40 again (over the low mark) starts none
-    assert.equal(policy.topUps(inv({ oak_log: 64 }), {}, [], ['surface']).length, 0)
-    assert.equal(policy.topUps(inv({ oak_log: 40 }), {}, [], ['surface']).length, 0)
+    assert.equal(ups[0].units, 192 - 20)
+    assert.deepEqual(ups[0].request, { item: '#logs_that_burn', count: 192 })
+    assert.equal(ups[0].budget, (192 - 20) * 60)
+    // part of the way (100): still under way
+    ups = policy.topUps(inv({ oak_log: 100 }), {}, [], ['surface'])
+    assert.equal(ups[0]?.units, 92)
+    // at the high mark (3 stacks) it's over, and 100 again (over the low mark) starts none
+    assert.equal(policy.topUps(inv({ oak_log: 192 }), {}, [], ['surface']).length, 0)
+    assert.equal(policy.topUps(inv({ oak_log: 100 }), {}, [], ['surface']).length, 0)
     // under the low mark again: due again
-    assert.equal(policy.topUps(inv({ oak_log: 30 }), {}, [], ['surface']).length, 1)
+    assert.equal(policy.topUps(inv({ oak_log: 60 }), {}, [], ['surface']).length, 1)
   })
 
   test(`${version}: the wood's top-up mines logs: no log crafted into bark blocks (oak_wood) or other members of #logs_that_burn`, () => {
     // f2-grim t8543: 60 oak_log, 4 short of the 64, planned 'craft 33 oak_wood' (4 logs make 3) and the next plan
-    // 'mine 20 oak_log, craft 15 oak_wood'
-    const policy = new StockPolicy()
+    // 'mine 20 oak_log, craft 15 oak_wood' (the high mark a stack then)
+    const policy = new StockPolicy({ overrides: { wood: { low: 32, high: 64 } } })
     policy.topUps(inv({ oak_log: 20 }), {}, [], ['surface'])
     const [up] = policy.topUps(inv({ oak_log: 60 }), {}, [], ['surface'])
     assert.deepEqual(up.request, { item: '#logs_that_burn', count: 64 })
@@ -76,8 +76,8 @@ for (const version of VERSIONS) {
   test(`${version}: what the base's chests hold counts: no top-up when the stock is at the base`, () => {
     const policy = new StockPolicy()
     const reached = [...ALL]
-    const carried = { iron_pickaxe: 1, cobblestone: 64, raw_iron: 5 }
-    // 64 carried: under 3 stacks, and 30 iron, under 32
+    const carried = { iron_pickaxe: 1, cobblestone: 40, raw_iron: 5 }
+    // 40 carried: under a stack, and 5 iron, under 32
     assert.deepEqual(policy.topUps(inv(carried), {}, reached, ['underground']).map(u => u.mark.id).filter(id => id === 'stone' || id === 'iron').sort(), ['iron', 'stone'])
     const fresh = new StockPolicy()
     const stored = storedAtBase([{ items: { cobblestone: 200 } }, { items: { iron_ingot: 30, cobblestone: 60 } }, undefined])
@@ -85,9 +85,9 @@ for (const version of VERSIONS) {
     const ups = fresh.topUps(inv(carried), stored, reached, ['underground'])
     assert.ok(!ups.some(u => u.mark.id === 'stone' || u.mark.id === 'iron'), ups.map(u => describeLevel(u.level)).join(', '))
     // and what a top-up gathers is the high mark less what's stored too
-    const low = new StockPolicy().topUps(inv({ cobblestone: 64 }), { cobblestone: 100 }, ['wood', 'stone'], ['underground']).find(u => u.mark.id === 'stone')
-    assert.equal(low?.units, 320 - 164)
-    assert.equal(low?.request.count, 64 + 320 - 164)
+    const low = new StockPolicy().topUps(inv({ cobblestone: 30 }), { cobblestone: 20 }, ['wood', 'stone'], ['underground']).find(u => u.mark.id === 'stone')
+    assert.equal(low?.units, 128 - 50)
+    assert.equal(low?.request.count, 30 + 128 - 50)
   })
 
   test(`${version}: a mark applies from its milestone, and only at its place (the surface's by day, the mine's by night)`, () => {
@@ -96,7 +96,7 @@ for (const version of VERSIONS) {
     assert.ok(!policy.topUps(inv({}), {}, ['wood', 'stone'], ['surface']).some(u => u.mark.id === 'iron'))
     assert.ok(policy.topUps(inv({}), {}, ['wood', 'stone'], ['underground']).some(u => u.mark.id === 'iron'))
     // the lowest first
-    const ups = policy.topUps(inv({ cobblestone: 150, coal: 30 }), {}, ['wood', 'stone'], ['underground'])
+    const ups = policy.topUps(inv({ cobblestone: 50, coal: 30 }), {}, ['wood', 'stone'], ['underground'])
     assert.deepEqual(ups.map(u => u.mark.id), ['torch', 'iron', 'stone', 'coal'])
   })
 
@@ -122,11 +122,11 @@ for (const version of VERSIONS) {
     const keep = stockKeepRule(policy)
     const rec = (l: Array<{ name: string, count: number }>): Record<string, number> => Object.fromEntries(l.map(i => [i.name, i.count]))
     const { keep: kept, store } = splitInventory([
-      { name: 'oak_log', count: 64 }, { name: 'oak_log', count: 40 }, { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 64 },
+      { name: 'oak_log', count: 64 }, { name: 'oak_log', count: 64 }, { name: 'oak_log', count: 40 }, { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 64 },
       { name: 'cobblestone', count: 64 }, { name: 'torch', count: 100 }, { name: 'raw_iron', count: 20 }, { name: 'diamond', count: 9 },
       { name: 'iron_pickaxe', count: 1 }, { name: 'cooked_beef', count: 12 }
     ], { keep, registry })
-    assert.deepEqual(rec(kept), { oak_log: 64, cobblestone: 64, torch: 64, raw_iron: 8, iron_pickaxe: 1, cooked_beef: 12 })
+    assert.deepEqual(rec(kept), { oak_log: 128, cobblestone: 64, torch: 64, raw_iron: 8, iron_pickaxe: 1, cooked_beef: 12 })
     assert.deepEqual(rec(store), { oak_log: 40, cobblestone: 128, torch: 36, raw_iron: 12, diamond: 9 })
   })
 
@@ -212,10 +212,10 @@ test('stockedItem: an item is stocked when each mark counting it is at its high 
   const registry = minecraftData('1.21.11')
   const reached = ['wood', 'stone', 'food', 'iron'] as any
   const inv = (items: Record<string, number>): Inventory => new Inventory(registry as any, Object.entries(items).map(([name, count]) => ({ name, count })))
-  // the stone mark: 3 stacks low, 5 high, cobblestone and cobbled deepslate counted
-  assert.equal(stockedItem(STOCK_MARKS, 'cobblestone', inv({ cobblestone: 256 }), {}, reached), false)
-  assert.equal(stockedItem(STOCK_MARKS, 'cobblestone', inv({ cobblestone: 64 }), { cobblestone: 200, cobbled_deepslate: 56 }, reached), true)
-  assert.equal(stockedItem(STOCK_MARKS, 'cobbled_deepslate', inv({ cobblestone: 320 }), {}, reached), true)
+  // the stone mark: a stack low, 2 high, cobblestone and cobbled deepslate counted
+  assert.equal(stockedItem(STOCK_MARKS, 'cobblestone', inv({ cobblestone: 100 }), {}, reached), false)
+  assert.equal(stockedItem(STOCK_MARKS, 'cobblestone', inv({ cobblestone: 64 }), { cobblestone: 40, cobbled_deepslate: 24 }, reached), true)
+  assert.equal(stockedItem(STOCK_MARKS, 'cobbled_deepslate', inv({ cobblestone: 128 }), {}, reached), true)
   // andesite no mark counts
   assert.equal(stockedItem(STOCK_MARKS, 'andesite', inv({}), {}, reached), true)
   // before the wood milestone the stone mark doesn't apply
