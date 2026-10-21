@@ -17,7 +17,7 @@ import { headInWater, surface } from '../skills/escape'
 import { placeBlock } from '../skills/placeBlock'
 import { AIR_BLOCKS, CARDINALS, countItems, trace, waitUntil } from '../skills/util'
 import { DIGGING_PICKAXE, wantsDiggingPickaxe } from '../skills/digTool'
-import { caveStep, sealCaveOpenings } from '../skills/caves'
+import { atCave, caveRuleOn, caveStep, sealCaveOpenings, withCavesShut } from '../skills/caves'
 
 export type Lookup = (pos: Vec3) => { name: string, boundingBox: string } | null
 
@@ -803,7 +803,8 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
     for (const d of turns) {
       const step = staircaseUpStep(feet, d)
       // the step stands on the block ahead: it has to be there (or be put there)
-      const why = climbHazard(unsafeStep(lookup, { open: step.open, floor: step.floor }), inWater(bot))
+      // (nor into a cave's cells or against them for a bot under the cave rule, once out of the cave it began in)
+      const why = climbHazard(unsafeStep(lookup, { open: step.open, floor: step.floor }), inWater(bot)) ?? (atCave(bot) ? null : caveStep(bot, step))
       if (why != null) { trace('explore: climb turns from', d.toString(), why); continue }
       // (nor through a block the pathfinder is kept from breaking: a 1.21.11 bot shut in its house dug its staircase up
       // through the roof the base's protection kept, onto its crafting table, ls-1.21.11 t102592)
@@ -835,8 +836,12 @@ export async function ensureSurface (bot: Bot, signal?: AbortSignal): Promise<bo
   const overworld = inOverworld(bot)
   if (onSurface(lookup, feetOf(bot), overworld)) return true
   trace('explore: underground at', feetOf(bot).toString(), ': up to the surface first')
+  // (for a bot under the cave rule, by the rock only: its own tunnel back, or a way dug, never up through a cave,
+  // withCavesShut; f5-26.3, cave spiders at y 27)
+  const up = async (): Promise<void> => { await navigate(bot, { goal: new GoalSurface(lookup, overworld) }, signal) }
   try {
-    await navigate(bot, { goal: new GoalSurface(lookup, overworld) }, signal)
+    if (caveRuleOn(bot)) await withCavesShut(bot, up)
+    else await up()
   } catch (err) {
     if (isAbort(err)) throw err
     trace('explore: no way up', (err as Error).message)
@@ -1036,7 +1041,12 @@ export function legPassesSpot (from: Vec3, to: { x: number, z: number }, spots: 
  */
 export async function exploreSurface (bot: Bot, args: ExploreArgs, signal?: AbortSignal): Promise<boolean> {
   if (args.found()) return true
-  await ensureSurface(bot, signal)
+  // the surface's things (animals, trees, sand, cane) explored for from under the open sky only: a bot under the cave
+  // rule with no way up but through a cave doesn't explore from down there (a 26.3 bot's hunt for a meal began at
+  // y 33 by a cave and went down it to y 27, where cave spiders killed it, f5-26.3 t58998 to t59474)
+  if (!(await ensureSurface(bot, signal)) && caveRuleOn(bot)) {
+    throw new SkillError('NO_PATH', `underground at ${feetOf(bot).toString()} with no way up out of the rock but through a cave: no exploring from here`)
+  }
   if (args.found()) return true
   const center = args.center ?? bot.entity.position.clone()
   const waypoints = spiralWaypoints(center, args.step ?? 16, args.maxRadius ?? 192)

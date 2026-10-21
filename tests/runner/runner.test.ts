@@ -1430,3 +1430,29 @@ test('a re-equip with no wood found surveys for trees further out, and tries the
   assert.equal(tries, 2)
   assert.ok(logs.some(l => /no stone_pickaxe: NOT_FOUND/.test(l)), logs.join('\n'))
 })
+
+test('a meal under the cave rule begins under the open sky: up by the rock first (ensureSurface), no meal from underground with no way up but a cave; none on the surface (f5-26.3: cave spiders at y 27)', async () => {
+  const explore = require('../../src/executor/explore')
+  const real = explore.ensureSurface
+  const asked: number[] = []
+  let way = false
+  explore.ensureSurface = async (b: any) => { asked.push(Math.floor(b.entity.position.y)); return way }
+  try {
+    const bot = fakeBot()
+    bot.entity.position = new Vec3(0.5, 30, 0.5)
+    bot.blockAt = (p: Vec3) => ({ name: p.y < 64 ? 'stone' : 'air', position: p, boundingBox: p.y < 64 ? 'block' : 'empty' })
+    bot.game.dimension = 'overworld'
+    const runner: any = new Runner(bot, { log: () => {} })
+    const signal = new AbortController().signal
+    await assert.rejects(runner.upForFood(signal), /no way up but through a cave/)
+    way = true
+    await runner.upForFood(signal)
+    assert.deepEqual(asked, [30, 30])
+    // on the surface: nothing to do
+    bot.entity.position = new Vec3(0.5, 70, 0.5)
+    await runner.upForFood(signal)
+    assert.equal(asked.length, 2)
+  } finally {
+    explore.ensureSurface = real
+  }
+})

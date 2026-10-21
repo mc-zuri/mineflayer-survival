@@ -382,9 +382,34 @@ export function atCave (bot: Bot): boolean {
   return !dugByBot(bot, feet) && cells.beside([feet, head]).length > 0
 }
 
+/** the bots whose ways keep out of every cave's cell for now, in a cave or not (withCavesShut), by how many holds */
+const cavesShut = new WeakMap<Bot, number>()
+
+/**
+ * Runs `fn` with no move into a cave's cell for a bot under the cave rule even from one (caveStepCost's atCave way out
+ * left out): its ways keep to the rock, the open sky's surface reached by the bot's own tunnel or a way dug. A 26.3 bot
+ * at y 33 by a cave, in its water, went for the surface to hunt a meal with the cave's cells open to it at
+ * CAVE_STEP_COST, walked down the cave to y 27 and cave spiders killed it (f5-26.3, t58998 to t59474).
+ */
+export async function withCavesShut<T> (bot: Bot, fn: () => Promise<T>): Promise<T> {
+  cavesShut.set(bot, (cavesShut.get(bot) ?? 0) + 1)
+  try {
+    return await fn()
+  } finally {
+    const n = (cavesShut.get(bot) ?? 1) - 1
+    if (n <= 0) cavesShut.delete(bot)
+    else cavesShut.set(bot, n)
+  }
+}
+
+/** whether the bot's ways keep out of every cave's cell for now (withCavesShut) */
+export function cavesShutFor (bot: Bot): boolean {
+  return (cavesShut.get(bot) ?? 0) > 0
+}
+
 /**
  * the pathfinder's step rule of the cave rule: no move into a cave's cell (CAVE_FORBID), but for a bot in a cave or at
- * one already (atCave: its way out, CAVE_STEP_COST a cell)
+ * one already (atCave: its way out, CAVE_STEP_COST a cell), unless its caves are shut (withCavesShut)
  */
 export function caveStepCost (bot: Bot): (block: { position: { x: number, y: number, z: number } }) => number {
   const cells = caveCells(bot)
@@ -393,6 +418,7 @@ export function caveStepCost (bot: Bot): (block: { position: { x: number, y: num
   return (block) => {
     if (!caveRuleOn(bot) || !cells.isCave(block.position)) return 0
     const tick = ticks.get(bot)?.n ?? 0
+    if (cavesShutFor(bot)) return CAVE_FORBID
     if (at.tick !== tick) at = { tick, value: atCave(bot) }
     return at.value ? CAVE_STEP_COST : CAVE_FORBID
   }

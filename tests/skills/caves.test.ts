@@ -525,3 +525,50 @@ test('navigate: after WET_FAILS failed walks from the water in a row, out of it 
     explore.toShore = real
   }
 })
+
+test('withCavesShut: a bot in a cave\'s water has no way through the cave while its caves are shut (the way up to the surface: f5-26.3, cave spiders at y 27)', async () => {
+  const { withCavesShut, cavesShutFor } = await import('../../src/skills/caves')
+  const bot = fakeBot({ position: new Vec3(1.5, 20, 0.5) })
+  bot.game.dimension = 'overworld'
+  bot.blockAt = (p: Vec3) => {
+    const cave = p.y >= 20 && p.y <= 23 && p.x >= 2 && p.x <= 8 && Math.abs(p.z) <= 3
+    const name = cave ? 'air' : p.x === 1 && p.z === 0 && (p.y === 20 || p.y === 21) ? 'water' : p.y > 70 ? 'air' : 'stone'
+    return { name, position: p, boundingBox: name === 'stone' ? 'block' : 'empty' }
+  }
+  caveCells(bot)
+  const step = caveStepCost(bot)
+  assert.equal(step({ position: { x: 3, y: 20, z: 0 } }), CAVE_STEP_COST)
+  const inside = await withCavesShut(bot, async () => {
+    assert.equal(cavesShutFor(bot), true)
+    return step({ position: { x: 3, y: 20, z: 0 } })
+  })
+  assert.equal(inside, CAVE_FORBID)
+  assert.equal(cavesShutFor(bot), false)
+  bot.emit('physicsTick')
+  assert.equal(step({ position: { x: 3, y: 20, z: 0 } }), CAVE_STEP_COST)
+})
+
+test('exploreSurface: a bot under the cave rule underground with no way up but through a cave explores nothing from there (NO_PATH); its way up asked with the caves shut (f5-26.3)', async () => {
+  const { exploreSurface } = await import('../../src/executor/explore')
+  const { cavesShutFor } = await import('../../src/skills/caves')
+  const nav = require('../../src/skills/navigate')
+  // the bot at y 30 in a cave pocket, lava all round it in the rock: no step of a staircase up
+  const bot = fakeBot({ position: new Vec3(0.5, 30, 0.5), items: [item('diamond_pickaxe', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.blockAt = (p: Vec3) => {
+    const pocket = Math.abs(p.x) <= 1 && Math.abs(p.z) <= 1 && (p.y === 30 || p.y === 31)
+    const name = pocket ? 'cave_air' : p.y === 29 ? 'stone' : p.y > 70 ? 'air' : 'lava'
+    return { name, position: p, boundingBox: name === 'stone' ? 'block' : 'empty', getProperties: () => ({ level: 0 }) }
+  }
+  const real = nav.navigate
+  const shut: boolean[] = []
+  nav.navigate = async () => { shut.push(cavesShutFor(bot)); throw new Error('no path') }
+  let err: any = null
+  try {
+    await exploreSurface(bot, { found: () => false }).catch(e => { err = e })
+  } finally {
+    nav.navigate = real
+  }
+  assert.deepEqual(shut, [true])
+  assert.equal(err?.reason, 'NO_PATH', String(err))
+})

@@ -16,7 +16,7 @@ import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, MILESTONES, foodGoals, meal
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { carriesWeapon, comeUp, dayPhase, nightAction, nightGeared, nightGoals, topUpPlaces } from './planner/schedule'
 import { describeLevel, markAt, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
-import { exploreForBlocks, inWater, onSurface, SURFACE_MIN_Y, toShore } from './executor/explore'
+import { ensureSurface, exploreForBlocks, inWater, onSurface, SURFACE_MIN_Y, toShore } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
 import { bedIfNear, buildBase, keepBaseUnbroken, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
@@ -901,6 +901,7 @@ export class Runner {
         this.log(`hungry (food ${this.bot.food ?? 0}, ${ownedInventory(this.bot).foodPoints()} points carried): a meal first`)
         try {
           await this.foodWorking(async () => await this.untilDusk(signal, async (s) => {
+            await this.upForFood(s)
             await this.toFoodLand(s)
             await this.withinTicks(MEAL_TICKS, s, async (t) => {
               await this.executor.obtain(meal, t, { unseenFactor: HUNGRY_FIND_FACTOR })
@@ -1616,6 +1617,20 @@ export class Runner {
    * To food land when home's land has none (seekFoodLand: no food biome about it, or its animals hunted for and none
    * found), within FOOD_TRIP_TICKS; the food work goes on from wherever the bot got to
    */
+  /**
+   * Up to the open sky before a meal's hunt (the food's land, its animals, its bushes) for a bot under the cave rule
+   * underground: by the rock (its own tunnel back, or a staircase dug: ensureSurface, the caves shut), never through a
+   * cave; with no way up but through one, no meal from down there (FAILED). A 26.3 bot's meal began at y 33 by a cave,
+   * its hunt went down the cave to y 27 and cave spiders killed it (f5-26.3, t58998 to t59474).
+   */
+  private async upForFood (signal: AbortSignal): Promise<void> {
+    if (!caveRuleOn(this.bot)) return
+    const p = this.bot.entity.position
+    if (onSurface(p2 => this.bot.blockAt(p2) as any, new Vec3(Math.floor(p.x), Math.floor(p.y + 1e-6), Math.floor(p.z)), true)) return
+    const up = await this.executor.task('up for food', async (s) => await ensureSurface(this.bot, s), signal)
+    if (!up && caveRuleOn(this.bot)) throw new TaskError('FAILED', 'underground with no way up but through a cave: no meal from down here')
+  }
+
   private async toFoodLand (signal: AbortSignal): Promise<void> {
     const name = 'to food land'
     try {
