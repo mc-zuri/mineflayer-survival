@@ -94,6 +94,36 @@ describe(`off a magma block on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 
     assert.ok(hits <= 2, `${hits} hits`)
   })
 
+  it('on a patch of magma on the sea floor, its bubble columns over it: swims off it', async () => {
+    const o = new Vec3(Math.floor(bot.entity.position.x) + 30, -60, Math.floor(bot.entity.position.z))
+    const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
+    // a basin of stone 13 across, water 8 deep in it, magma 3 across in the middle of its floor
+    await run(`fill ${xyz(-7, -1, -7)} ${xyz(7, 9, 7)} stone`)
+    await run(`fill ${xyz(-6, 0, -6)} ${xyz(6, 7, 6)} water`)
+    await run(`fill ${xyz(-1, -1, -1)} ${xyz(1, -1, 1)} magma_block`)
+    await run(`fill ${xyz(-6, 8, -6)} ${xyz(6, 9, 6)} air`)
+    await run(`clear ${USERNAME}`)
+    await run(`effect clear ${USERNAME}`)
+    await run(`tp ${USERNAME} ${o.x + 0.5} ${o.y} ${o.z + 0.5}`)
+    assert.ok(await waitUntil(bot, () => bot.entity.position.distanceTo(o.offset(0.5, 0, 0.5)) < 1.5 && bot.entity.onGround, 100), `not on the sea floor at ${bot.entity.position.toString()}`)
+    let hits = 0
+    const onHurt = (e: any): void => { if (e === bot.entity) hits++ }
+    bot.on('entityHurt', onHurt)
+    let n = 0
+    const onTick = (): void => { if ((process.env.MAGMA_TRACE ?? '') !== '' && n++ % 10 === 0) console.log(`[magma] t${n} ${bot.entity.position.toString()} ${bot.blockAt(bot.entity.position.floored())?.name ?? '?'} ground ${String(bot.entity.onGround)} ${JSON.stringify(bot.controlState)}`) }
+    bot.on('physicsTick', onTick)
+    try {
+      await escapeHazard(bot, { maxTicks: 200, waterRadius: 0 })
+    } finally {
+      bot.off('entityHurt', onHurt)
+      bot.off('physicsTick', onTick)
+    }
+    const under = bot.blockAt(bot.entity.position.offset(0, -0.2, 0).floored())?.name
+    console.log(`[magma] sea floor: ${hits} hits, at ${bot.entity.position.toString()} over ${under ?? '?'}`)
+    assert.ok(under !== 'magma_block', `still on the magma at ${bot.entity.position.toString()}`)
+    assert.ok(hits <= 3, `${hits} hits`)
+  })
+
   it('with ground beside it, steps off, no block put', async () => {
     const o = bot.entity.position.floored().offset(20, 0, 0)
     const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`

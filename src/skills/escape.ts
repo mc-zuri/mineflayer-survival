@@ -303,6 +303,34 @@ export function hotFloorDigStep (bot: Bot): { dig: Vec3[], stand: Vec3 } | null 
 /** how many columns out hotFloorDigStep digs for a floor that isn't magma (a ruined portal's patch is 3 or 4 across) */
 export const HOT_FLOOR_DIG_REACH = 4
 
+/** how far across the hazard reflex looks for the sea's floor off a magma block under water (hotFloorSwimStep) */
+export const HOT_FLOOR_SWIM_RADIUS = 4
+
+/**
+ * Off a magma block under water (a ruined portal's on the sea's floor, an ocean's magma: its bubble column drags the
+ * bot down onto it, BubbleColumnBlock, and a sneak in water only sinks it): the nearest cell within
+ * HOT_FLOOR_SWIM_RADIUS across and a block up or down whose floor is a full block that isn't magma nor a danger, the
+ * cell and the one over it water or open but no bubble column. Null when there's none.
+ */
+export function hotFloorSwimStep (bot: Bot): Vec3 | null {
+  const feet = bot.entity.position.floored()
+  let best: { cell: Vec3, d: number } | null = null
+  for (let dx = -HOT_FLOOR_SWIM_RADIUS; dx <= HOT_FLOOR_SWIM_RADIUS; dx++) {
+    for (let dz = -HOT_FLOOR_SWIM_RADIUS; dz <= HOT_FLOOR_SWIM_RADIUS; dz++) {
+      if (dx === 0 && dz === 0) continue
+      for (const dy of [0, 1, -1]) {
+        const cell = feet.offset(dx, dy, dz)
+        const under = bot.blockAt(cell.offset(0, -1, 0))
+        if (under == null || under.boundingBox !== 'block' || under.name === 'magma_block' || isDangerBlock(under.name)) continue
+        if (![cell, cell.offset(0, 1, 0)].every(c => passable(bot, c, true) && nameAt(bot, c) !== 'bubble_column')) continue
+        const d = Math.hypot(dx, dz) + Math.abs(dy)
+        if (best == null || d < best.d) best = { cell, d }
+      }
+    }
+  }
+  return best?.cell ?? null
+}
+
 /**
  * Whether the hazard reflex sneaks on the magma under the bot as it makes for `step` (MagmaBlock.stepOn spares a player
  * stepping carefully, Entity.isSteppingCarefully): always, but for a step down (a sneak keeps a player from walking off
@@ -342,6 +370,11 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
       // the magma block's cell is kept out of by the walks for a while (hazardCells): the walk handed back to took the
       // bot straight back onto it
       if (onHotFloor(bot)) noteHazardLeft(bot, hotFloorCell(bot))
+      // (swum off a magma block under water: out of its bubble column with no magma under, the water's to the drowning
+      // reflex; a swimmer is never on the ground, and the escape swam on at the sea's top till its ticks ran out)
+      const swimmingOff = !bot.entity.onGround && (nameAt(bot, here) === 'water' || nameAt(bot, here.offset(0, 1, 0)) === 'water') &&
+        ![0, -1, -2, -3].some(dy => /^(magma_block|bubble_column)$/.test(nameAt(bot, here.offset(0, dy, 0)) ?? ''))
+      if (!inHazard(bot) && swimmingOff && hotTicks > 0) return { ticks: t }
       if (!inHazard(bot) && bot.entity.onGround && isSafeStand(bot, here)) {
         // out; still burning with water close: put it out (Entity.updateInWaterStateAndDoFluidPushing clears the fire)
         const waterRadius = opts.waterRadius ?? 6
@@ -381,6 +414,20 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
       // steering at a stand it couldn't climb to, the floor hurting it every 12 and the magma cubes about, till it died
       if ((onHotFloor(bot) || (bot.entity.onGround && nameAt(bot, bot.entity.position.offset(0, -0.2, 0).floored()) === 'magma_block')) && !inLava(bot)) {
         hotTicks++
+        // under water (the sea's floor, its bubble column dragging the bot down): swum off to the floor beside it, the
+        // jump held (a sneak in water sinks), not sneaked in place; the resumed ls4-26.3 game's bot on its ruined
+        // portal's magma at y 46 was held there by the column through 9 hazard reflexes and burned
+        const wet = nameAt(bot, here) === 'water' || nameAt(bot, here) === 'bubble_column' || nameAt(bot, here.offset(0, 1, 0)) === 'water' || nameAt(bot, here.offset(0, 1, 0)) === 'bubble_column'
+        if (wet) {
+          const swim = hotFloorSwimStep(bot)
+          if (swim != null) {
+            steerToward(bot, swim.offset(0.5, 0, 0.5), { sprint: false })
+            bot.setControlState('sneak', false)
+            bot.setControlState('jump', true)
+            await waitTicks(bot, 1, opts.signal)
+            continue
+          }
+        }
         // sneaking at once, the floor hurting no more while the way off is worked out (MagmaBlock.stepOn spares a
         // player stepping carefully): a 26.3 bot on a ruined portal's magma among netherrack at y 46 was hurt every 10
         // ticks through 12 hazard reflexes, its step a jump with no room over its head, and it burned (ls4-26.3)

@@ -86,3 +86,21 @@ test('lavaEdgeStepCost: a stand with lava against the feet, the head, over it or
   bot.game.dimension = 'the_nether'
   assert.equal(cost({ position: { x: 3, y: 64, z: 0 } }), 0)
 })
+
+test('hotFloorSwimStep: off a patch of magma on the sea\'s floor (its bubble columns over it), the nearest floor that isn\'t magma', async () => {
+  const { hotFloorSwimStep } = await import('../../src/skills/escape')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // the sea from y 46 up to 55 over a stone floor at 45; magma at 45 for x and z -1 to 1, bubble columns over it
+  const world = (p: Vec3): string => {
+    const patch = Math.abs(p.x) <= 1 && Math.abs(p.z) <= 1
+    if (p.y === 45) return patch ? 'magma_block' : 'stone'
+    if (p.y < 45) return 'stone'
+    if (p.y <= 55) return patch ? 'bubble_column' : 'water'
+    return 'air'
+  }
+  const bot = fakeBot({ position: new Vec3(0.5, 46, 0.5), world })
+  const step = hotFloorSwimStep(bot)
+  assert.ok(step != null)
+  assert.equal(step.y, 46)
+  assert.equal(Math.max(Math.abs(step.x), Math.abs(step.z)), 2)
+})
