@@ -23,7 +23,7 @@ import { placeBlock } from '../skills/placeBlock'
 import { breakRefused } from '../skills/spawnProtection'
 import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
-import { tossAway } from '../skills/pickupDrops'
+import { thrownCameBack, tossAway } from '../skills/pickupDrops'
 import { navigate } from '../skills/navigate'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { bagThreat, bagUnsafe, holdBag, type BagKeeper } from '../skills/bag'
@@ -303,6 +303,10 @@ export class Executor {
   private roomLoopUntil = -Infinity
   /** a tight bag's store at the base took none of the route's stone (the chests full): none tried again till this tick */
   private tightStoreUntil = -Infinity
+  /** the route's stone a tight bag's throw made no room with: not thrown by it again till the tick */
+  private readonly tightHeld = new Map<string, number>()
+  /** the stone a tight bag keeps for its throws that came back, logged: not again till the tick */
+  private readonly tightHeldLogged = new Map<string, number>()
   /** worn tools (kind:material) whose replacement failed: the tick until which no task is stopped for them */
   private readonly wearMuted = new Map<string, number>()
   /** the crafts' results the craft skill made none of from some of their recipes' ingredients (noteUncraftable) */
@@ -1038,13 +1042,27 @@ export class Executor {
       // (the chests full: thrown from now on a while, not a chest opened each step)
       if (!Object.keys(stored).some(name => ROUTE_STONE.has(name))) this.tightStoreUntil = this.tasks.tick + THROW_LOOP_TICKS
     }
-    const toss = this.tightStone()
+    // (none of a stone whose thrown stack came back, picked up again as the bot came by it, nor one whose throw made no
+    // room: kept THROW_LOOP_TICKS, the bag's room made by the junk's throws once it's short; the tight bag's throws by
+    // the deep lava threw 64 cobbled_deepslate 7 times in 600 ticks and 128 cobblestone 5 times in 800, f9-26.3, t331486
+    // and t378400)
+    const all = this.tightStone()
+    const back = all.filter(t => thrownCameBack(this.bot, t.name, THROW_LOOP_TICKS) || (this.tightHeld.get(t.name) ?? -Infinity) > this.tasks.tick)
+    const fresh = back.filter(t => (this.tightHeldLogged.get(t.name) ?? -Infinity) <= this.tasks.tick)
+    if (fresh.length > 0) {
+      for (const t of fresh) this.tightHeldLogged.set(t.name, this.tasks.tick + THROW_LOOP_TICKS)
+      this.log(`the bag tight: ${[...new Set(fresh.map(t => t.name))].join(', ')} thrown came back or made no room: kept a while`)
+    }
+    const toss = all.filter(t => !back.includes(t))
     if (toss.length === 0) return
     this.makingRoom = true
     try {
       this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')} (the bag tight: ${emptySlots(this.bot)} slots free)`)
       const run: RoomRunner = inTask != null ? async (_name, fn) => await fn(inTask) : async (name, fn) => await this.task(name, fn, signal, { room: false })
+      const before = new Map(toss.map(t => [t.name, countItems(this.bot, t.name)]))
       await this.throwStacks(toss, run, toward)
+      // (a throw that made no room: thrown no more a while)
+      for (const [name, had] of before) if (countItems(this.bot, name) >= had) this.tightHeld.set(name, this.tasks.tick + THROW_LOOP_TICKS)
     } finally {
       this.makingRoom = false
     }

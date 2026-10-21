@@ -103,6 +103,25 @@ export function isThrownDrop (bot: Bot, drop: Entity, name: string | null = drop
   return false
 }
 
+/** per bot, the tick (its tick count) a stack it threw away was last picked up again, by the item's name */
+const thrownBack = new WeakMap<Bot, Map<string, number>>()
+
+function noteThrownBack (bot: Bot, name: string): void {
+  let back = thrownBack.get(bot)
+  if (back == null) thrownBack.set(bot, back = new Map())
+  back.set(name, tickCount(bot))
+}
+
+/**
+ * Whether a stack of `name` the bot threw away (markThrown) was picked up again within the last `ticks`: the server's
+ * pickup as the bot came by it (Player.aiStep touches the items its box, inflated by 1 across and 0.5 up and down,
+ * meets once their 40 ticks are up), no pickup of the bot's own going back for it (isThrownDrop)
+ */
+export function thrownCameBack (bot: Bot, name: string, ticks: number): boolean {
+  const at = thrownBack.get(bot)?.get(name)
+  return at != null && tickCount(bot) - at < ticks
+}
+
 /**
  * Remembers an item entity the bot threw away (isThrownDrop); `untilGone`: only while its entity is there (a stack
  * thrown into lava burns, and the drops of the blocks dug there after are no thrown ones)
@@ -112,8 +131,13 @@ export function markThrown (bot: Bot, drop: Entity, name: string, untilGone = fa
   if (thrown == null) {
     const map = new Map<number, Thrown>()
     thrownDrops.set(bot, thrown = map)
-    // one the bot picked up (walking over it) lies there no more
-    bot.on('playerCollect', (collector: Entity, collected: Entity) => { if (collector === bot.entity) map.delete(collected.id) })
+    // one the bot picked up (walking over it) lies there no more: it came back (thrownCameBack)
+    bot.on('playerCollect', (collector: Entity, collected: Entity) => {
+      if (collector !== bot.entity) return
+      const t = map.get(collected.id)
+      if (t != null) noteThrownBack(bot, t.name)
+      map.delete(collected.id)
+    })
     bot.on('entityGone', (gone: Entity) => {
       const t = map.get(gone.id)
       if (t == null) return

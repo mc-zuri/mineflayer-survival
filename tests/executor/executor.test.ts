@@ -1331,3 +1331,80 @@ for (const version of ['1.21.11', '26.3']) {
     assert.equal(count(home, 'cobblestone'), 64)
   })
 }
+
+for (const version of ['1.21.11', '26.3']) {
+  test(`${version}: a tight bag's thrown stone that came back (picked up again as the bot came by it) or whose throw made no room is not thrown again a while (f9-26.3: 64 cobbled_deepslate thrown 7 times in 600 ticks by the deep lava, t331486)`, async () => {
+    const { THROW_LOOP_TICKS } = await import('../../src/executor/keep')
+    const reg = require('minecraft-data')(version)
+    const others = ['raw_iron', 'iron_pickaxe', 'stone_sword', 'bread', 'torch', 'coal', 'spruce_log', 'spruce_planks', 'stick', 'bucket',
+      'crafting_table', 'furnace', 'wooden_pickaxe', 'stone_axe', 'spruce_sapling', 'black_wool', 'rabbit_hide', 'rabbit_foot', 'leather',
+      'bone', 'beef', 'arrow', 'blue_egg', 'iron_sword', 'gravel', 'dirt']
+    // 2 stacks of cobbled deepslate past the stack kept and 26 others: 7 slots free, tight
+    const fill = (opts: { drops: boolean }): any => {
+      const bot = fakeBot()
+      bot.registry = reg
+      const stacks = [64, 64, 64].map(count => ({ name: 'cobbled_deepslate', count })).concat(others.map(name => ({ name, count: 1 })))
+      const slots = (): any[] => {
+        const out: any[] = new Array(46).fill(null)
+        stacks.forEach((st, i) => { if (st.count > 0) out[9 + i] = { name: st.name, count: st.count, type: reg.itemsByName[st.name].id, slot: 9 + i } })
+        return out
+      }
+      bot.inventory = { get slots () { return slots() }, inventoryStart: 9, inventoryEnd: 45, items: () => slots().slice(9, 45).filter(x => x != null) }
+      bot.tossed = []
+      bot.thrown = []
+      bot.entities = {}
+      let id = 1000
+      // a throw's item entity beside the bot (tossAway marks it thrown); `drops` false: the throw does nothing
+      bot.toss = async (type: number, _meta: unknown, n: number) => {
+        const name = reg.items[type].name
+        bot.tossed.push(`${n} ${name}`)
+        if (!opts.drops) return
+        const e = { id: id++, name: 'item', position: bot.entity.position.offset(1, 0, 0), getDroppedItem: () => ({ name, count: n }) }
+        bot.entities[e.id] = e
+        bot.thrown.push({ e, name, n })
+        for (const st of stacks) { if (st.name !== name || n <= 0) continue; const k = Math.min(n, st.count); st.count -= k; n -= k }
+      }
+      // the server's pickup of the stacks thrown: back in the bag
+      bot.pickUpThrown = () => {
+        for (const { e, name, n } of bot.thrown.splice(0)) {
+          delete bot.entities[e.id]
+          bot.emit('playerCollect', bot.entity, e)
+          const empty = stacks.find(st => st.name === name && st.count === 0)
+          if (empty != null) empty.count = n
+        }
+      }
+      bot.blockAt = () => null
+      bot._client = new EventEmitter()
+      bot.entity.yaw = 0
+      bot.look = async () => {}
+      return bot
+    }
+    const run = async (bot: any, ex: Executor): Promise<void> => {
+      const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+      try { await ex.task('a tunnel', async (s) => await ex.makeRoomDuringStep(s)) } finally { clearInterval(ticking) }
+    }
+    // thrown, picked up again: not thrown again till THROW_LOOP_TICKS on
+    const bot = fill({ drops: true })
+    bot.time = { age: 1000 }
+    const lines: string[] = []
+    const ex = new Executor(bot, { runners: {}, log: l => lines.push(l) })
+    assert.equal(36 - bot.inventory.items().length, 7)
+    await run(bot, ex)
+    assert.deepEqual(bot.tossed, ['64 cobbled_deepslate', '64 cobbled_deepslate'])
+    bot.pickUpThrown()
+    assert.equal(count(bot, 'cobbled_deepslate'), 192)
+    await run(bot, ex)
+    assert.equal(bot.tossed.length, 2)
+    assert.ok(lines.some(l => /the bag tight: cobbled_deepslate thrown came back or made no room: kept a while/.test(l)), lines.join('\n'))
+    // its time up, thrown again
+    bot.time.age += THROW_LOOP_TICKS
+    await run(bot, ex)
+    assert.equal(bot.tossed.length, 4)
+    // a throw that made no room: not again
+    const stuck = fill({ drops: false })
+    const ex2 = new Executor(stuck, { runners: {}, log: () => {} })
+    await run(stuck, ex2)
+    await run(stuck, ex2)
+    assert.deepEqual(stuck.tossed, ['64 cobbled_deepslate', '64 cobbled_deepslate'])
+  })
+}
