@@ -730,3 +730,35 @@ test('makeFarmSpring breaks a crop not grown on the cells it takes by hand (coll
   }
   assert.deepEqual(dug, [`wheat ${key(east.offset(0, 1, 0))}`, `collect ${key(east)}`, `collect ${key(south)}`])
 })
+
+test('makeWaterHole: no room made for the hole (nothing picked up), and a hole cell opened however it came to be (a full bag\'s dump pit took it: \'broke 0 of 1 blocks: no more blocks found\') still gets its water', async () => {
+  const { makeWaterHole } = await import('../../src/skills/caneFarm')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const collect = require('../../src/skills/collectBlock')
+  const nav = require('../../src/skills/navigate')
+  const hole = new Vec3(14, 63, 10)
+  let cell = 'grass_block'
+  const bot = fakeBot({ position: new Vec3(12.5, 64, 10.5), items: [item('water_bucket', 1)] })
+  const real = bot.blockAt.bind(bot)
+  bot.blockAt = (p: Vec3) => p.floored().equals(hole) ? { name: cell, position: hole, getProperties: () => ({ level: 0 }) } : real(p)
+  bot.equip = async () => {}
+  bot.lookAt = async () => {}
+  bot.activateItem = () => { cell = 'water' }
+  const asked: any[] = []
+  const realCollect = collect.collectBlock
+  const realNav = nav.navigateNear
+  // (the pit dug into the cell as the block's collected, which then finds it gone)
+  collect.collectBlock = async (_b: any, args: any) => { asked.push(args); cell = 'air'; throw new Error('NOT_FOUND: broke 0 of 1 blocks: no more blocks found') }
+  nav.navigateNear = async () => {}
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    assert.ok((await makeWaterHole(bot, hole, undefined, hole))?.equals(hole))
+  } finally {
+    clearInterval(ticking)
+    collect.collectBlock = realCollect
+    nav.navigateNear = realNav
+  }
+  assert.equal(asked[0].pickup, false)
+  assert.equal(typeof asked[0].room, 'function')
+  assert.equal(cell, 'water')
+})

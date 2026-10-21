@@ -212,7 +212,15 @@ export async function makeWaterHole (bot: Bot, center: Vec3, signal?: AbortSigna
   const hole = at !== undefined ? at : waterHoleSite(lookup, center)
   if (hole == null || countItems(bot, 'water_bucket') === 0) return null
   trace('makeWaterHole: at', hole.toString())
-  await collectBlock(bot, { positions: [hole], pickup: false }, signal)
+  // (no room made for it: nothing's picked up, and a full bag's dump pit dug toward the block took the hole's own cell,
+  // 'broke 0 of 1 blocks: no more blocks found', a 1.21.11 bot's second farm with 498 cobblestone carried, f5-1.21.11
+  // t192618; the cell open however it came to be is the hole)
+  const open = (): boolean => { const b = bot.blockAt(hole); return b != null && (b.name === 'air' || b.name === 'cave_air') }
+  if (!open()) {
+    await collectBlock(bot, { positions: [hole], pickup: false, room: async () => {} }, signal).catch(err => {
+      if (isAbort(err) || !open()) throw err
+    })
+  }
   if (findInventoryItem(bot, 'water_bucket') == null) return null
   if (!await pourInto(bot, hole, signal)) throw new SkillError('VERIFY_FAILED', `no water in the hole at ${hole.toString()}`)
   return hole

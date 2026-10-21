@@ -499,7 +499,7 @@ export async function makeFarmSpring (bot: Bot, water: Vec3, signal?: AbortSigna
       await navigateToReach(bot, cell.offset(0, 1, 0), signal)
       await dig(bot, bot.blockAt(cell.offset(0, 1, 0)) as Block, { signal })
     }
-    if (lookup(cell) != null && lookup(cell).name !== 'water') await collectBlock(bot, { positions: [cell], anyTool: true }, signal)
+    if (lookup(cell) != null && lookup(cell).name !== 'water') await collectBlock(bot, { positions: [cell], anyTool: true, pickup: false, room: async () => {} }, signal)
   }
   await waitUntil(bot, () => isSpring(lookup, water), 60, signal)
   return isSpring(lookup, water)
