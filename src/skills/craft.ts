@@ -11,18 +11,30 @@ import { placeBlock } from './placeBlock'
 import { findPlacementNear } from './placement'
 import { countItems, inventoryItems, itemId, resyncInventory, settleInventory, waitTicks, type Block } from './util'
 import { findBlock } from '../core/findBlocks'
+import { rawRecipes } from '../planner/recipes'
 
 type CraftingFunc = Awaited<ReturnType<typeof buildStatic>>
 export type CraftingPlan = ReturnType<CraftingFunc>
 
 const planners = new WeakMap<object, Promise<CraftingFunc>>()
 
+/**
+ * prismarine-recipe's Recipe.find over the planner's table of recipes (rawRecipes), not minecraft-data's: the planks of
+ * every member of their wood's log tag (oak_wood, the stripped logs and wood), as the planner plans them and vanilla
+ * crafts them, and the registry's own (prismarine-recipe's find reads the recipes of the last registry it was loaded
+ * with, whatever the registry its Recipe was got for)
+ */
+export function recipeFinder (registry: any): { find: (id: number, metadata?: number | null) => any[] } {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const { Recipe } = require('prismarine-recipe')(registry)
+  const table = rawRecipes(registry)
+  return { find: (id: number) => (table.get(id) ?? []).map(raw => new Recipe(raw)) }
+}
+
 async function plannerFor (registry: any): Promise<CraftingFunc> {
   let planner = planners.get(registry)
   if (planner == null) {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { Recipe } = require('prismarine-recipe')(registry)
-    planner = buildStatic(Recipe)
+    planner = buildStatic(recipeFinder(registry) as any)
     planners.set(registry, planner)
   }
   return await planner

@@ -19,9 +19,9 @@ export interface CraftRecipe {
   remainders: ItemCount[]
 }
 
-type RawItem = number | null | [number | null, number?] | { id: number | null, count?: number }
+export type RawItem = number | null | [number | null, number?] | { id: number | null, count?: number }
 
-interface RawRecipe {
+export interface RawRecipe {
   result: RawItem
   inShape?: RawItem[][]
   outShape?: RawItem[][]
@@ -29,10 +29,10 @@ interface RawRecipe {
 }
 
 /**
- * vanilla tags that minecraft-data writes out as one recipe per member; recipes of the
+ * vanilla tags that minecraft-data (or rawRecipes, for the planks) writes out as one recipe per member; recipes of the
  * same result that differ only by members of one of these merge into one with alternatives
  */
-const MERGE_TAGS = ['planks', 'logs', 'stone_crafting_materials', 'coals', 'wool', 'wooden_slabs', 'smelts_to_glass']
+const MERGE_TAGS = ['planks', 'logs', 'bamboo_blocks', 'stone_crafting_materials', 'coals', 'wool', 'wooden_slabs', 'smelts_to_glass']
 
 function rawId (item: RawItem): number | null {
   if (item == null) return null
@@ -98,28 +98,60 @@ function groupKey (tags: ItemTags, item: string): string {
 }
 
 /**
- * planks are made from any member of their wood's log tag (#oak_logs, #crimson_stems,
- * #bamboo_blocks); minecraft-data only names the first member
+ * The wood tag a planks recipe's log is of (#oak_logs, #crimson_stems, #bamboo_blocks: vanilla's planksFromLogs and
+ * planksFromLog take the tag, any of the wood's log, wood, stripped log and stripped wood), null for any other item
  */
-function widen (tags: ItemTags, result: string, item: string): string[] {
-  if (!result.endsWith('_planks')) return [item]
+function plankLogTag (tags: ItemTags, item: string): string | null {
   for (const tag of tags.tagsOf(item)) {
-    if (tag.endsWith('_logs') || tag.endsWith('_stems') || tag === 'bamboo_blocks') {
-      if (tag === 'logs' || tag === 'logs_that_burn') continue
-      return [...tags.members(`#${tag}`)]
-    }
+    if (tag === 'logs' || tag === 'logs_that_burn') continue
+    if (tag.endsWith('_logs') || tag.endsWith('_stems') || tag === 'bamboo_blocks') return tag
   }
-  return [item]
+  return null
 }
 
-function merge (tags: ItemTags, group: Normalized[]): CraftRecipe {
+function withId (item: RawItem, id: number): RawItem {
+  if (item == null || typeof item === 'number') return id
+  if (Array.isArray(item)) return [id, ...item.slice(1)] as RawItem
+  return { ...item, id }
+}
+
+/**
+ * The crafting recipes of the registry as minecraft-data stores them (result item id → its recipes), with what it
+ * leaves out: a planks recipe names the first member of its wood's log tag only (oak_planks from oak_log), where
+ * vanilla's takes the whole tag (RecipeProvider.planksFromLogs: #oak_logs, oak_wood and the stripped ones too, 1.21.11
+ * and 26.3), so each other member gets a recipe of its own. The planner (craftingRecipes) and the craft skill
+ * (mineflayer-crafting-util's plans, bot.craft) both read this one table: a 1.21.11 bot with 32 oak_wood was planned
+ * 'craft 8 oak_planks' by the planner, the skill found no recipe for it ('short of 8 oak_planks'), five times over.
+ */
+export const rawRecipes = cachedPerRegistry((registry): Map<number, RawRecipe[]> => {
+  const tags = itemTags(registry)
+  const out = new Map<number, RawRecipe[]>()
+  for (const [key, list] of Object.entries(registry.recipes)) {
+    if (!Array.isArray(list)) continue
+    const id = Number(key)
+    const recipes = [...list as RawRecipe[]]
+    if (registry.items[id]?.name.endsWith('_planks') === true) {
+      for (const raw of list as RawRecipe[]) {
+        const log = raw.ingredients?.length === 1 ? rawId(raw.ingredients[0]) : null
+        const tag = log == null ? null : plankLogTag(tags, registry.items[log]?.name ?? '')
+        if (log == null || tag == null) continue
+        for (const member of tags.members(`#${tag}`)) {
+          const memberId = registry.itemsByName[member]?.id
+          if (memberId == null || memberId === log) continue
+          if (recipes.some(r => r.ingredients?.length === 1 && rawId(r.ingredients[0]) === memberId)) continue
+          recipes.push({ ...raw, ingredients: [withId((raw.ingredients as RawItem[])[0], memberId)] })
+        }
+      }
+    }
+    out.set(id, recipes)
+  }
+  return out
+})
+
+function merge (group: Normalized[]): CraftRecipe {
   const first = group[0]
   // per cell: every item seen in that cell across the merged recipes
-  const cellItems = first.cells.map((_, i) => {
-    const seen = new Set<string>()
-    for (const r of group) for (const it of widen(tags, r.result, r.cells[i])) seen.add(it)
-    return [...seen]
-  })
+  const cellItems = first.cells.map((_, i) => [...new Set(group.map(r => r.cells[i]))])
   const byAlternatives = new Map<string, Ingredient>()
   for (const items of cellItems) {
     const key = [...items].sort().join(',')
@@ -131,16 +163,15 @@ function merge (tags: ItemTags, group: Normalized[]): CraftRecipe {
 }
 
 /**
- * Every crafting recipe of the registry, by result item name, with minecraft-data's
- * one-recipe-per-tag-member entries merged back into vanilla's tag ingredients.
+ * Every crafting recipe of the registry (rawRecipes: the planks of each member of their log tag), by result item name,
+ * with minecraft-data's one-recipe-per-tag-member entries merged back into vanilla's tag ingredients.
  */
 export const craftingRecipes = cachedPerRegistry((registry): Map<string, CraftRecipe[]> => {
   const tags = itemTags(registry)
   const out = new Map<string, CraftRecipe[]>()
-  for (const [, list] of Object.entries(registry.recipes)) {
-    if (!Array.isArray(list)) continue
+  for (const list of rawRecipes(registry).values()) {
     const groups = new Map<string, Normalized[]>()
-    for (const raw of list as RawRecipe[]) {
+    for (const raw of list) {
       const n = normalize(registry, tags, raw)
       if (n == null) continue
       let g = groups.get(n.skeleton)
@@ -148,7 +179,7 @@ export const craftingRecipes = cachedPerRegistry((registry): Map<string, CraftRe
       g.push(n)
     }
     for (const g of groups.values()) {
-      const recipe = merge(tags, g)
+      const recipe = merge(g)
       let forResult = out.get(recipe.result)
       if (forResult == null) out.set(recipe.result, forResult = [])
       forResult.push(recipe)

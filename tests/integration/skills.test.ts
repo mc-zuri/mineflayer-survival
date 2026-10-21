@@ -171,6 +171,19 @@ describe(`gathering skills on a ${DEFAULT_VERSION} server`, { timeout: 15 * 60 *
     assert.strictEqual(resyncs, 1)
   })
 
+  it('crafts planks of oak_wood and of the stripped logs and wood (vanilla\'s #<wood>_logs)', async () => {
+    // (f2-grim, 1.21.11: 32 oak_wood held, "craft 8 oak_planks: MISSING_ITEMS: short of 8 oak_planks" five times over:
+    // minecraft-data's planks recipe names the log only)
+    await give('oak_wood', 2)
+    await give('stripped_spruce_wood', 1)
+    const oak = await craft(bot, { item: 'oak_planks', count: 8 })
+    assert.strictEqual(oak.crafted, 8)
+    assert.strictEqual(countItems(bot, 'oak_wood'), 0)
+    const spruce = await craft(bot, { item: 'spruce_planks', count: 4 })
+    assert.strictEqual(spruce.crafted, 4)
+    assert.strictEqual(countItems(bot, 'stripped_spruce_wood'), 0)
+  })
+
   it('crafts 64 planks while items come into the bag between its clicks', async () => {
     // (26.3 enchant run u: "crafting oak_planks x18 failed: Error: missing ingredient" holding 61 logs: an item picked
     // up as the clicks went made them behind the menu's state id, the server answered each with the whole menu, and the

@@ -1,6 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { planCraft } from '../../src/skills/craft'
+import { planCraft, recipeFinder } from '../../src/skills/craft'
+import { craftingRecipes, recipesFor } from '../../src/planner/recipes'
+import { itemTags } from '../../src/core/tags'
+import { VERSIONS } from '../versions'
 import { countsDelta } from '../../src/skills/util'
 
 const registry = require('minecraft-data')('1.21.11')
@@ -146,4 +149,88 @@ test('craft: a result the bag shows only ticks after the steps (the menu closed 
   } finally {
     clearInterval(ticking)
   }
+})
+
+for (const version of VERSIONS) {
+  const reg = require('minecraft-data')(version)
+  const stacks = (list: Array<[string, number]>): Array<{ id: number, count: number }> => list.map(([name, count]) => ({ id: reg.itemsByName[name].id, count }))
+  const madeFrom = (plan: any): string[] => plan.recipesToDo.flatMap((s: any) => s.recipe.delta.filter((d: any) => d.count < 0).map((d: any) => reg.items[d.id].name))
+
+  test(`${version}: planCraft makes planks of any member of the wood's log tag (the log, the wood, the stripped log and wood), as vanilla's #<wood>_logs`, async () => {
+    const tags = itemTags(reg)
+    for (const planks of tags.members('#planks')) {
+      const recipe = recipesFor(reg, planks)[0]
+      const members = recipe.ingredients[0].items
+      assert.ok(members.length === (planks === 'bamboo_planks' ? 2 : 4), `${planks}: ${members.join(', ')}`)
+      for (const member of members) {
+        const plan = await planCraft(reg, stacks([[member, 1]]), planks, recipe.count)
+        assert.strictEqual(plan.status, 'complete', `${planks} from ${member}`)
+        assert.deepStrictEqual(madeFrom(plan), [member])
+      }
+    }
+    // f2-grim's: 32 oak_wood and 1 oak_planks held, 8 oak_planks wanted
+    const plan = await planCraft(reg, stacks([['oak_wood', 32], ['oak_planks', 1]]), 'oak_planks', 8)
+    assert.strictEqual(plan.status, 'complete')
+    assert.deepStrictEqual(plan.recipesToDo.map((s: any) => [madeFrom({ recipesToDo: [s] })[0], s.recipeApplications]), [['oak_wood', 2]])
+    // and from a mix: 2 logs and 2 wood make 16
+    const mixed = await planCraft(reg, stacks([['oak_log', 2], ['oak_wood', 2]]), 'oak_planks', 16)
+    assert.strictEqual(mixed.status, 'complete')
+    assert.deepStrictEqual(mixed.recipesToDo.map((s: any) => s.recipeApplications).reduce((a: number, b: number) => a + b, 0), 4)
+  })
+
+  test(`${version}: the craft skill can make every recipe the planner plans, of each of its ingredients' alternatives`, async () => {
+    // The planner's recipes and the skill's are one table (rawRecipes): a plan's craft the skill can't make fails the
+    // same way at every plan (f2-grim: 'craft 8 oak_planks' of 32 oak_wood, short of 8 oak_planks, 5 times over). Left
+    // out: what minecraft-data has fewer of than vanilla's tags make (a barrel and a chiseled bookshelf of planks and
+    // slabs of two woods; a campfire of charcoal and any log but dark_oak_wood, of coal and dark_oak_wood), and the
+    // smithing templates' copies, which take the template itself
+    const known = (result: string): boolean => ['barrel', 'chiseled_bookshelf', 'campfire'].includes(result) || result.endsWith('_smithing_template')
+    const bad: string[] = []
+    for (const [result, list] of craftingRecipes(reg)) {
+      for (const recipe of list) {
+        for (let k = 0; k < recipe.ingredients.length; k++) {
+          for (const alt of recipe.ingredients[k].items) {
+            const held = new Map<string, number>()
+            recipe.ingredients.forEach((ing, j) => { const it = j === k ? alt : ing.items[0]; held.set(it, (held.get(it) ?? 0) + ing.count) })
+            const plan = await planCraft(reg, stacks([...held]), result, recipe.count)
+            if (plan.status !== 'complete' && !known(result)) bad.push(`${result} of ${[...held].map(([n, c]) => `${c} ${n}`).join(', ')}`)
+          }
+        }
+      }
+    }
+    assert.deepStrictEqual(bad, [])
+  })
+}
+
+test('recipeFinder: the recipes of its own registry, whatever registry prismarine-recipe was loaded with last', () => {
+  const [a, b] = VERSIONS.map(v => require('minecraft-data')(v))
+  const findA = recipeFinder(a)
+  recipeFinder(b)
+  require('prismarine-recipe')(b)
+  const planksA = a.itemsByName.oak_planks.id
+  assert.notStrictEqual(planksA, b.itemsByName.oak_planks.id)
+  const found = findA.find(planksA, null)
+  assert.strictEqual(found.length, 4)
+  assert.deepStrictEqual(found.map((r: any) => a.items[r.ingredients[0].id].name).sort(), ['oak_log', 'oak_wood', 'stripped_oak_log', 'stripped_oak_wood'])
+  assert.ok(found.every((r: any) => r.result.id === planksA && r.result.count === 4 && r.requiresTable === false))
+})
+
+test('craft: planks of oak_wood go to bot.craft as a recipe of oak_wood (f2-grim\'s 32 oak_wood, short of 8 oak_planks)', async () => {
+  const { craft } = require('../../src/skills/craft')
+  const bot = fakeCraftBot({ oak_wood: 32, oak_planks: 1 })
+  const used: string[] = []
+  bot.craft = async (recipe: any, count: number) => {
+    const input = registry.items[recipe.ingredients[0].id].name
+    used.push(`${count} ${input}`)
+    bot.counts.set(input, (bot.counts.get(input) ?? 0) - count)
+    bot.counts.set('oak_planks', (bot.counts.get('oak_planks') ?? 0) + 4 * count)
+  }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 5)
+  try {
+    const res = await craft(bot, { item: 'oak_planks', count: 8 })
+    assert.strictEqual(res.crafted, 8)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.deepStrictEqual(used, ['2 oak_wood'])
 })
