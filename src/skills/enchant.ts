@@ -20,6 +20,7 @@ import { experience, gainLevels, type GainLevelsArgs } from './xp'
 import { REPLACEABLE_BLOCKS, countItems, inventoryItems, resyncInventory, settleInventory, trace, waitTicks, waitUntil, type Block } from './util'
 import { findBlock } from '../core/findBlocks'
 import { JUNK } from '../executor/keep'
+import { homeFoodKeeps } from './herd'
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The bookshelves
@@ -585,12 +586,17 @@ export async function enchant (bot: Bot, args: EnchantArgs, signal?: AbortSignal
 
 /**
  * A slot made free in a full bag for a worn piece to come off into (Inventory.add: none free, bot.unequip leaves it on):
- * a stack of junk (JUNK) thrown. The enchanting's room dug round the table filled a 26.3 bot's bag, and its iron armor,
+ * a stack of junk (JUNK) thrown, never what the home's food keeps (homeFoodKeeps: a farm's seeds). The enchanting's room dug round the table filled a 26.3 bot's bag, and its iron armor,
  * worn, was left plain, 'no unenchanted iron_chestplate' (full-26.3-fresh-e)
  */
 export async function roomForOne (bot: Bot, signal?: AbortSignal): Promise<void> {
   if ((bot.inventory.emptySlotCount?.() ?? 1) > 0) return
-  const junk = inventoryItems(bot).filter(i => JUNK.has(i.name)).sort((a, b) => a.count - b.count)[0]
+  // (never what the home's food keeps: a farm's seeds, the herd's breeding food, homeFoodKeeps)
+  const memory = (bot as any).survival?.memory
+  const kept = memory != null ? homeFoodKeeps(memory, normalizeDimension(bot.game?.dimension)) : {}
+  const items = inventoryItems(bot)
+  const total = (name: string): number => items.filter(i => i.name === name).reduce((n, i) => n + i.count, 0)
+  const junk = items.filter(i => JUNK.has(i.name) && total(i.name) - i.count >= (kept[i.name] ?? 0)).sort((a, b) => a.count - b.count)[0]
   if (junk == null) return
   trace('enchant: a full bag: tossing', junk.count, junk.name)
   await bot.tossStack(junk)

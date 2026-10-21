@@ -429,3 +429,29 @@ test('armorLeftPlain: the iron helmet, chestplate and leggings held or worn with
   assert.deepStrictEqual(armorLeftPlain(bot), ['helmet', 'leggings'])
   assert.deepStrictEqual(armorLeftPlain(fakeBot({ items: [item('diamond_pickaxe')] })), [])
 })
+
+test('roomForOne keeps the home\'s food: a farm\'s wheat seeds, the smallest junk stack, not thrown (homeFoodKeeps); the dirt goes', async () => {
+  const { roomForOne } = await import('../../src/skills/enchant')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { rememberFarm } = await import('../../src/skills/farm')
+  const { Vec3 } = await import('vec3')
+  const { EventEmitter } = await import('node:events')
+  const items = [item('dirt', 40), item('wheat_seeds', 12)]
+  while (items.length < 36) items.push(item('cobblestone', 64))
+  const bot = fakeBot({ items })
+  const memory = new WorldMemory()
+  rememberFarm(memory, { water: new Vec3(0, 63, 0), cells: [new Vec3(1, 63, 0)], crop: 'wheat' }, 0)
+  bot.survival = { memory }
+  bot._client = new EventEmitter()
+  bot.inventory.emptySlotCount = () => bot.inventory.slots.slice(9, 45).filter((s: unknown) => s == null).length
+  const tossed: string[] = []
+  bot.tossStack = async (it: any) => { tossed.push(`${String(it.count)} ${String(it.name)}`); bot.inventory.slots[it.slot] = null }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await roomForOne(bot)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.deepStrictEqual(tossed, ['40 dirt'])
+})
