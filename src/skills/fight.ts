@@ -51,7 +51,8 @@ export interface FightOptions extends SkillOptions {
   /**
    * given up (returned, not killed) while another melee mob is in its reach of the bot and the target out of the
    * sword's: the caller fights the one at the bot (the hostiles reflex, nearest first). The fight closed in on one
-   * wither skeleton with the shield down while the other hit the bot from its side (full-26.3-fresh-u)
+   * wither skeleton with the shield down while the other hit the bot from its side (full-26.3-fresh-u). And while
+   * another mob that hit the bot within YIELD_HIT_TICKS is within YIELD_HIT_RANGE, whatever the target
    */
   yieldToNearer?: boolean
   /**
@@ -60,6 +61,10 @@ export interface FightOptions extends SkillOptions {
    */
   dry?: boolean
 }
+
+/** ticks and blocks another mob's hit ends a fight whose target is out of reach (FightOptions.yieldToNearer) */
+export const YIELD_HIT_TICKS = 20
+export const YIELD_HIT_RANGE = 4.5
 
 /** the most ticks ahead a chase leads its target by, and the most blocks */
 export const LEAD_TICKS = 12
@@ -438,6 +443,13 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
   let died = false
   const onDead = (e: Entity): void => { if (e.id === target.id) died = true }
   bot.on('entityDead', onDead)
+  // the other mobs that hit the bot during the fight, and when (yieldToNearer's: one hitting it while the target is
+  // out of reach ends the fight, whatever the target)
+  const hitBy = new Map<number, number>()
+  const onHurt = (e: Entity, source?: Entity): void => {
+    if (e === bot.entity && source != null && source !== bot.entity && source.id !== target.id) hitBy.set(source.id, ticks)
+  }
+  bot.on('entityHurt' as any, onHurt)
   const hasShield = (): boolean => useShield && (bot.inventory.slots[45]?.name === 'shield' || findItem(bot, 'shield') != null)
   // a melee mob's swings taken on the shield (meleeGuard), the bot's own between them (MeleeCycle: each melee mob about's)
   const guarded = MELEE_MOBS.has(name) && !isCrossbowMob(bot, target)
@@ -482,6 +494,12 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       const box = entityBox(target)
       const distance = distanceToBox(eye, box)
       if (bot.entity.position.distanceTo(target.position) > maxDistance) throw new TaskError('NO_PATH', `${name} got away`)
+      // another mob at the bot (in its reach, or one that hit it within YIELD_HIT_TICKS within YIELD_HIT_RANGE) while
+      // the target is out of the sword's: the fight given up, the caller's reflex fights the nearest next. A 26.3 bot in
+      // iron fought a skeleton out of its reach 424 ticks while a zombie hit it 11 times from 0.7 off, and died
+      // (f6-26.3, t174644): the yield was for a melee target's fight alone
+      if (opts.yieldToNearer === true && distance > reach && (meleeInReach(0).some(m => m.id !== target.id) ||
+        [...hitBy].some(([id, at]) => ticks - at <= YIELD_HIT_TICKS && bot.entities[id] != null && isAlive(bot, bot.entities[id]) && bot.entities[id].position.distanceTo(bot.entity.position) <= YIELD_HIT_RANGE))) break
       const center = target.position.offset(0, (target.height ?? 1.8) * (opts.aimHeight ?? 0.85), 0)
 
       // the crossbows about: the nearest loaded one in sight (CrossbowGuard)
@@ -522,8 +540,6 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
       } else if (name === 'blaze' && blazeCharged(bot, target) && distance > reach && hasShield()) {
         // its three small fireballs: the shield takes them (Player.isDamageSourceBlocked)
         wantBlock = true
-      } else if (guarded && opts.yieldToNearer === true && distance > reach && meleeInReach(0).some(m => m.id !== target.id)) {
-        break
       } else if (guarded && hasShield()) {
         // a melee mob: its swings on the shield, the sword's between them (meleeGuard). A 26.3 bot in iron with a
         // shield traded blows with a wither skeleton in a fortress's corridor, its shield never up, and was hit to
@@ -642,6 +658,7 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
   } finally {
     tracker?.untrack(target)
     bot.off('entityDead', onDead)
+    bot.off('entityHurt' as any, onHurt)
     bot.off('entitySpawn', onSpawn)
     bot.off('entitySwingArm', onSwing)
     if (blocking) lowerShield(bot)

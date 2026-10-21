@@ -425,3 +425,21 @@ test('FIGHT_REACH: the fight swings from 2.75 of the eye, under the 3 the server
   const { FIGHT_REACH } = await import('../../src/skills/fight')
   assert.ok(FIGHT_REACH <= 2.75 && FIGHT_REACH > 2.5, String(FIGHT_REACH))
 })
+
+test('fight with yieldToNearer: a skeleton out of reach, a zombie hitting the bot, the fight ends within a few ticks whatever the target (f6-26.3, t174644: a skeleton\'s fight 424 ticks, a zombie hitting the bot 11 times from 0.7 off)', async () => {
+  const { fight } = await import('../../src/skills/fight')
+  const skeleton = entity({ id: 8, name: 'skeleton', position: new Vec3(9.5, 64, 0.5) })
+  const zombie = entity({ id: 9, name: 'zombie', position: new Vec3(0.5, 64, 1.2) })
+  const bot = fightBot([skeleton, zombie])
+  let t = 0
+  bot.on('physicsTick', () => { if (++t === 3) bot.emit('entityHurt', bot.entity, zombie) })
+  const r = await fight(bot, skeleton as any, { maxTicks: 60, yieldToNearer: true })
+  assert.equal(r.killed, false)
+  assert.ok(r.ticks <= 6, `${r.ticks} ticks`)
+  // the zombie off at 8 that hit it once: no yield (it's not at the bot)
+  const bot2 = fightBot([entity({ id: 8, name: 'skeleton', position: new Vec3(9.5, 64, 0.5) }), entity({ id: 9, name: 'zombie', position: new Vec3(-7.5, 64, 0.5) })])
+  let t2 = 0
+  bot2.on('physicsTick', () => { if (++t2 === 3) bot2.emit('entityHurt', bot2.entity, bot2.entities[9]) })
+  const r2 = await fight(bot2, bot2.entities[8], { maxTicks: 30, yieldToNearer: true }).catch(err => err)
+  assert.ok(r2 instanceof Error && /still alive/.test(r2.message), String(r2?.message ?? JSON.stringify(r2)))
+})
