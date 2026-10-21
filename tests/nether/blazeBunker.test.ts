@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import * as path from 'node:path'
 import { Vec3 } from 'vec3'
 import {
-  BLAZE_EYE_HEIGHT, BUNKER, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, BUNKER_MIN_VIEW, blazesAbout, bunkerAround, bunkerClear, bunkerDrops, bunkerFetchDue, clearLine, inPickupReach,
+  BLAZE_EYE_HEIGHT, BUNKER, BUNKER_FETCH_HEALTH, BUNKER_MIN_VIEW, blazesAbout, bunkerAround, bunkerClear, bunkerDrops, bunkerFetchDue, clearLine, inPickupReach,
   inSpawnVolume, netherStepForbidden, openNook, planBlazeBunkers, shellAgain, sillDrops, sillPickupDue, spawnView, bunkerTurnWay, turnBunker,
   type NookLookup
 } from '../../src/nether/blazeFight'
@@ -176,8 +176,8 @@ test('inPickupReach (Player.aiStep: the box inflated 1 across, 0.5 up and down):
   assert.ok(!inPickupReach(feet, new Vec3(0.5, 66.4, 5.5)))
 })
 
-test('bunkerDrops and bunkerFetchDue: the rods by the bunker out of its reach (to 12 off) are fetched healed, with BUNKER_FETCH_BLAZES blazes about at most, none that sees the bot about to shoot, no fireball near', async () => {
-  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+test('bunkerDrops: the rods by the bunker out of its reach, to 12 off, nearest first; not one on the sill, nor a bone', async () => {
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
   const w = world()
   const b = bunkerAround(w.lookup, new Vec3(0, 64, 5), new Vec3(0, 0, -1))
   assert.ok(b != null)
@@ -186,25 +186,42 @@ test('bunkerDrops and bunkerFetchDue: the rods by the bunker out of its reach (t
   const throne = { id: 73, name: 'item', position: new Vec3(1.5, 65, -3.5), getDroppedItem: () => item('blaze_rod') }
   const far = { id: 75, name: 'item', position: new Vec3(0.5, 64, -9.5), getDroppedItem: () => item('blaze_rod') }
   const bones = { id: 74, name: 'item', position: new Vec3(1.5, 64, 2.5), getDroppedItem: () => item('bone') }
-  const blazes = [0, 1, 2].map(i => entity({ name: 'blaze', position: new Vec3(i, 66, -8), meta: { health: 20 } }))
-  const bot = fakeBot({ position: new Vec3(0.5, 64, 5.5), entities: blazes })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 5.5) })
   for (const e of [onSill, past, throne, far, bones]) bot.entities[e.id] = e
   assert.deepEqual(bunkerDrops(bot, b).map(e => e.id), [72, 73])
-  // three blazes 14 off: no fetch; two: the fetch, healed, quiet
-  assert.equal(blazesAbout(bot), BUNKER_FETCH_BLAZES + 1)
-  assert.equal(bunkerFetchDue(bot, b, 20), false)
-  blazes[2].position = new Vec3(0.5, 66, -12)
-  assert.equal(bunkerFetchDue(bot, b, 20), true)
-  assert.equal(bunkerFetchDue(bot, b, 20, () => false), false)
-  assert.equal(bunkerFetchDue(bot, b, BUNKER_FETCH_HEALTH - 0.5), false)
-  assert.equal(bunkerClear(bot), false)
-  // a fireball near
-  bot.entities[90] = { id: 90, name: 'small_fireball', position: new Vec3(0.5, 65, -5), velocity: new Vec3(0, 0, 0.5) }
-  assert.equal(bunkerFetchDue(bot, b, 20), false)
-  // none about: clear
-  delete bot.entities[90]
-  for (const z of blazes) z.position = new Vec3(0.5, 66, -20)
-  assert.equal(bunkerClear(bot), true)
+})
+
+test('bunkerFetchDue (fetchThreats): the blazes behind the walls of the bunker, seeing neither the bot nor the drop, let a fetch go; more than BUNKER_FETCH_SEEN in sight, one by the drop, a fireball near, or low, not', async () => {
+  const { entity } = await import('../reflexes/fakeBot')
+  const { fetchThreats, BUNKER_FETCH_SEEN } = await import('../../src/nether/blazeFight')
+  const behind = [0.2, 0.5, 0.8].map(x => entity({ name: 'blaze', position: new Vec3(x, 64, 9.5), meta: { health: 20 } }))
+  const ahead = entity({ name: 'blaze', position: new Vec3(0.5, 64, -6.5), meta: { health: 20 } })
+  const { bot, b, restore } = await bunkerBot([...behind, ahead])
+  try {
+    const drop = new Vec3(0.5, 64, 2.5)
+    assert.deepEqual(fetchThreats(bot, [drop.offset(0, 1.62, 0)]).map(e => e.id), [ahead.id])
+    assert.equal(BUNKER_FETCH_SEEN, 1)
+    assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, drop), true)
+    assert.equal(bunkerFetchDue(bot, b, BUNKER_FETCH_HEALTH - 0.5, () => true, false, drop), false)
+    assert.equal(bunkerFetchDue(bot, b, 20, () => false, false, drop), false)
+    // a second in sight
+    behind[0].position = new Vec3(3.5, 64, -5.5)
+    assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, drop), false)
+    behind[0].position = new Vec3(0.2, 64, 9.5)
+    // one by the drop
+    ahead.position = new Vec3(0.5, 64, -0.5)
+    assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, drop), false)
+    ahead.position = new Vec3(0.5, 64, -6.5)
+    // a fireball near
+    bot.entities[90] = { id: 90, name: 'small_fireball', position: new Vec3(0.5, 65, -5), velocity: new Vec3(0, 0, 0.5) }
+    assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, drop), false)
+    delete bot.entities[90]
+    for (const z of [...behind, ahead]) z.position = new Vec3(0.5, 66, -40)
+    assert.equal(bunkerClear(bot), true)
+    assert.equal(blazesAbout(bot), 0)
+  } finally {
+    restore()
+  }
 })
 
 test('openNook on a bunker shut in to heal opens the slit only, never the sill', async () => {
@@ -287,20 +304,20 @@ test('turnBunker: the head wall that way dug for the new slit, the old slit wall
 })
 
 /** a fake bot in a built bunker at (0, 64, 5) facing -z, its blocks a set the placements and digs change */
-async function bunkerBot (entities: any[], extra: any[] = []): Promise<{ bot: any, b: any, filled: Set<string>, placed: string[], restore: () => void }> {
+async function bunkerBot (entities: any[], extra: any[] = [], blocks: Record<string, string> = {}): Promise<{ bot: any, b: any, filled: Set<string>, placed: string[], restore: () => void }> {
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const placeModule = require('../../src/skills/placeBlock')
   const w = world()
   const b = bunkerAround(w.lookup, new Vec3(0, 64, 5), new Vec3(0, 0, -1))
   assert.ok(b != null)
   const filled = new Set(b.build.map(String))
-  const name = (p: Vec3): string => filled.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'netherrack' : 'air'
+  const name = (p: Vec3): string => blocks[p.floored().toString()] ?? (filled.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'netherrack' : 'air')
   const bot = fakeBot({ position: new Vec3(0.5, 64, 5.5), items: [item('diamond_sword'), item('cobblestone', 32), item('cooked_beef', 16), ...extra], offhand: item('shield'), entities, world: name })
   bot.world = {
     raycast: (from: Vec3, dir: Vec3, range: number) => {
       for (let t = 0; t <= range; t += 0.02) {
         const p = from.plus(dir.scaled(t))
-        if (name(p) !== 'air') return { position: p.floored(), intersect: p, boundingBox: 'block', name: name(p) }
+        if (name(p) !== 'air' && name(p) !== 'fire') return { position: p.floored(), intersect: p, boundingBox: 'block', name: name(p) }
       }
       return null
     }

@@ -843,7 +843,6 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         const b = bot.blockAt(p)
         if (b != null && (b.name === 'fire' || b.name === 'soul_fire')) await bot.dig(b as any, true).catch(() => {})
       }
-
       // one come close (in the front, hitting: BlazeAttackGoal within 2 blocks): the sword, the shield up between the
       // swings (a blaze in the front cell keeps the front from being shut: a 26.3 bot at 9 health tried to shut it
       // for 1200 ticks, the blaze punching it the while, and died). The swing goes while the others charge, as long as
@@ -989,7 +988,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // for 20000 ticks with their rods left on the throne (26.3 runs mag-b and mag-d: 0 rods)
       // (a bunker's: with few blazes about, healed, out of it by the sill: bunkerFetchDue)
       const drop = nook.bunker != null
-        ? (drawn === 0 && bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof) ? bunkerDrops(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES) : undefined)
+        ? (drawn === 0 ? bunkerDrops(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES && bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof, e.position)) : undefined)
         : drawn === 0 && fetchWanted(fightHealth(bot), sealAt, proof, () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)))
           ? dropsNear(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES)
           : undefined
@@ -1401,18 +1400,48 @@ export function bunkerKept (nook: BlazeNook): Vec3[] {
   return [...nook.walls.filter(w => sill == null || !w.equals(sill)), ...nook.floor]
 }
 
+/** the most blazes that would see the bot at a drop (fetchThreats) for a bunker's fetch to go to it */
+export const BUNKER_FETCH_SEEN = 1
+/** and the most about at all (hidden ones come round), and none this near the drop (BlazeAttackGoal hits within 2) */
+export const BUNKER_FETCH_CROWD = 8
+export const DROP_CLEAR = 4
+
+/** whether nothing solid is on the line between two points (the world's raycast) */
+function rayClear (bot: Bot, from: Vec3, to: Vec3): boolean {
+  const d = to.minus(from)
+  const len = d.norm()
+  if (len < 1e-6) return true
+  const hit: any = (bot.world as any).raycast?.(from, d.scaled(1 / len), len)
+  return hit == null || (hit.intersect != null && hit.intersect.distanceTo(from) >= len - 1e-3)
+}
+
 /**
- * Whether the bunker's fetch goes now: at BUNKER_FETCH_HEALTH, BUNKER_FETCH_BLAZES or fewer blazes about
- * (blazesAbout), no small fireball near, and the ones that see the bot `quiet` (none about to shoot for FETCH_QUIET).
- * The bunker's sword and bow kill a throne's blazes about as fast as the spawner makes them while it's quiet (seed 2's
- * two throne spawners, 26.3: 10 to 14 kills in the first 3000 ticks), but rarely all of them: with none to be about a
- * fetch never went, and 5 rods of 6 dropped were left lying
+ * The living blazes within 24 whose eyes see one of `points` (Sensing.hasLineOfSight, the eyes to the eyes): the ones
+ * that would shoot at the bot there. Those about it behind walls, a floor or a rise see nothing of a fetch, and a count
+ * of all within 16 (BUNKER_FETCH_BLAZES) kept the bunkers by seed 2's throne spawners in with their rods lying out, 14
+ * to 19 kills a run for 0 to 4 rods (26.3)
  */
-export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true, proof = false): boolean {
-  if (nook.bunker == null || health < BUNKER_FETCH_HEALTH) return false
-  // (fire resistant, the fireballs are nothing: only their punches, BUNKER_FETCH_PROOF_BLAZES of them about at the most)
-  if (proof) return blazesAbout(bot) <= BUNKER_FETCH_PROOF_BLAZES
-  return blazesAbout(bot) <= BUNKER_FETCH_BLAZES && !fireballNear(bot) && quiet()
+export function fetchThreats (bot: Bot, points: readonly Vec3[]): Entity[] {
+  const me = bot.entity.position
+  return Object.values(bot.entities).filter(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(me) <= 24 &&
+    points.some(p => rayClear(bot, blazeEye(e), p)))
+}
+
+/**
+ * Whether the bunker's fetch goes now, to the drop at `drop` (the cell by it when none is given: the sill's): at
+ * BUNKER_FETCH_HEALTH, no small fireball near, the blazes that see the bot `quiet`, and no more than BUNKER_FETCH_SEEN
+ * blazes that see the bot or the drop (fetchThreats), none within DROP_CLEAR of the drop, BUNKER_FETCH_CROWD about at
+ * the most. Fire resistant, BUNKER_FETCH_PROOF_BLAZES that see it (only their punches hurt then).
+ */
+export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true, proof = false, drop?: Vec3): boolean {
+  const b = nook.bunker
+  if (b == null || health < BUNKER_FETCH_HEALTH) return false
+  const at = drop ?? b.sill.offset(0.5, 0, 0.5)
+  const seen = fetchThreats(bot, [eyePosition(bot), at.offset(0, 1.62, 0), b.sill.offset(0.5, 1.62, 0.5)]).length
+  const close = Object.values(bot.entities).some(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(at) <= DROP_CLEAR)
+  if (close || blazesAbout(bot) > BUNKER_FETCH_CROWD) return false
+  if (proof) return seen <= BUNKER_FETCH_PROOF_BLAZES
+  return seen <= BUNKER_FETCH_SEEN && !fireballNear(bot) && quiet()
 }
 
 /**
@@ -1425,7 +1454,8 @@ export async function fetchFromBunker (bot: Bot, nook: BlazeNook, item: Entity, 
   if (nook.bunker == null) return await fetchDrops(bot, nook, item, watch, signal)
   trace('fightFromNook: out of the bunker for the drops at', item.position.toString())
   await openSill(bot, nook, signal)
-  const bunkerWatch: FetchWatch = { ...watch, sealAt: Math.max(watch.sealAt, BUNKER_FETCH_LEAVE), abort: () => blazesAbout(bot) > (fireProof(bot) ? BUNKER_FETCH_PROOF_BLAZES : BUNKER_FETCH_BLAZES) + 1 }
+  // (given up once more see the bot than the fetch went with, one more)
+  const bunkerWatch: FetchWatch = { ...watch, sealAt: Math.max(watch.sealAt, BUNKER_FETCH_LEAVE), abort: () => fetchThreats(bot, [eyePosition(bot)]).length > (fireProof(bot) ? BUNKER_FETCH_PROOF_BLAZES : BUNKER_FETCH_SEEN) + 1 }
   await withBlocksKept(bot, bunkerKept(nook), async () => await fetchDrops(bot, nook, item, bunkerWatch, signal))
 }
 
