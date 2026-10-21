@@ -8,6 +8,7 @@ import { placeBlock } from './placeBlock'
 import { findBedPlacement } from './placement'
 import { findInventoryItem, waitUntil, type Block } from './util'
 import { isBed } from '../core/items'
+import { SPAWN_LEAVE_MARGIN, leaveRefusedGround, useRefused } from './spawnProtection'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
 
 export interface SleepArgs {
@@ -64,14 +65,18 @@ async function getBed (bot: Bot, args: SleepArgs, signal?: AbortSignal): Promise
     if (block == null || !bot.isABed(block)) throw new SkillError('NOT_FOUND', `no bed at ${args.bed.toString()}`)
     return { bed: block, placed: false }
   }
-  // a bed standing nearby, not one taken (a villager's: BedBlock.OCCUPIED, "This bed is occupied")
+  // a bed standing nearby, not one taken (a villager's: BedBlock.OCCUPIED, "This bed is occupied"), nor one the server
+  // refuses the use of (the spawn's square, a protected region: handleUseItemOn's mayInteract)
   const found = args.nearby === false
     ? null
-    : bot.findBlock({ matching: (block: any) => isBedName(block.name) && !bedOccupied(bot, block), useExtraInfo: true, maxDistance: args.bedDistance ?? 32 })
+    : bot.findBlock({ matching: (block: any) => isBedName(block.name) && !bedOccupied(bot, block) && (block.position == null || !useRefused(bot, block.position)), useExtraInfo: true, maxDistance: args.bedDistance ?? 32 })
   if (found != null) return { bed: found, placed: false }
 
   const item = findInventoryItem(bot, item => isBedName(item.name))
   if (item == null) throw new SkillError('NOT_FOUND', 'no bed nearby and none in the inventory')
+  // out of the ground the server refuses the bed on (the spawn's square, a protected region) first, SPAWN_LEAVE_MARGIN
+  // past it: a bed put down there is put back, and the night's sleep failed for a hole (skills/shelter)
+  await leaveRefusedGround(bot, SPAWN_LEAVE_MARGIN, signal)
   const placement = findBedPlacement(pos => bot.blockAt(pos), bot.entity.position)
   if (placement == null) throw new SkillError('CANNOT_PLACE', 'no room next to the bot for a bed')
   // BedItem places the foot where clicked and the head the way the player faces: look along the bed first
