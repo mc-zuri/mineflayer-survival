@@ -371,6 +371,15 @@ export async function useGate (bot: Bot, gate: Vec3, open: boolean, signal?: Abo
   return isOpen() === open
 }
 
+/**
+ * The legs a lead to the pen takes at the most from `distance` off its gate: LEAD_LEG blocks each and 8 more (a detour,
+ * a leg cut short), 16 at the least. A lead's 16 legs went 80 blocks at the most, and a herd fetched from farther off
+ * stopped short of its pen (f5-1.21.11: its animals 200 blocks and more from home)
+ */
+export function leadLegs (distance: number): number {
+  return Math.max(16, Math.ceil(distance / LEAD_LEG) + 8)
+}
+
 export interface LeadIntoPenArgs {
   /** the animal (default cow) */
   mob?: string
@@ -436,7 +445,9 @@ export async function leadIntoPen (bot: Bot, pen: PenPlan, args: LeadIntoPenArgs
     const front = pen.outside.plus(SIDE_DIRS[pen.side].scaled(LEAD_FRONT))
     let returns = 0
     let lost = false
-    for (let leg = 0; leg < 16 && Math.hypot(bot.entity.position.x - front.x - 0.5, bot.entity.position.z - front.z - 0.5) > 1.5; leg++) {
+    // (as many legs as the way home takes and some: a herd fetched from 200 blocks off, leadLegs)
+    const legs = leadLegs(Math.hypot(bot.entity.position.x - front.x, bot.entity.position.z - front.z))
+    for (let leg = 0; leg < legs && Math.hypot(bot.entity.position.x - front.x - 0.5, bot.entity.position.z - front.z - 0.5) > 1.5; leg++) {
       throwIfAborted(signal)
       const p = bot.entity.position
       const d = new Vec3(front.x + 0.5 - p.x, 0, front.z + 0.5 - p.z)

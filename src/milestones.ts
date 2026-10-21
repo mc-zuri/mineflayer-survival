@@ -2758,7 +2758,7 @@ export const HERD_HOME_RANGE = 48
 /** ticks before a herd's start that found nothing to start with is tried again */
 export const HERD_RETRY_TICKS = 6000
 /** how far off the herd is gone back to for its chores (a herd fetched is penned up to HERD_FETCH_RANGE from home) */
-export const HERD_TRIP = 176
+export const HERD_TRIP = 272
 /** how near the herd the bot is for its upkeep without a chore due by its remembered counts (strays, the pen mended) */
 export const HERD_NEAR = 48
 /** the wheat kept from the baking for the herd: leading it in and two pairs bred */
@@ -2858,10 +2858,16 @@ export async function herdFoodFirst (bot: Bot, executor: Executor, signal: Abort
   return held()
 }
 
-/** how far from home a group of animals seen (noteAnimals) is fetched for a herd when none live near it */
-export const HERD_FETCH_RANGE = 160
-/** a group fetched within this of home is led home with its food (leadIntoPen); farther, it's penned where it is */
-export const HERD_LEAD_RANGE = 64
+/**
+ * how far from home a group of animals seen (noteAnimals) is fetched for a herd when none live near it: a pine taiga's
+ * home had its nearest pair of sheep 225 blocks off, its animals hunted out within 200 (f5-1.21.11 resumed from its base)
+ */
+export const HERD_FETCH_RANGE = 256
+/**
+ * a group fetched within this of home is led home with its food (leadIntoPen, leadLegs); farther, it's penned where it
+ * is (a herd 200 blocks from home is gone to only for its chores: HERD_NEAR)
+ */
+export const HERD_LEAD_RANGE = 256
 /** ticks a herd's fetch may take (the pen, the walk, the lead) */
 export const HERD_FETCH_TICKS = 12000
 
@@ -2900,7 +2906,7 @@ export async function fetchHerd (bot: Bot, executor: Executor, home: Vec3, signa
     penned = null
   }
   const herd = penned != null ? { pos: penned.pen.center.clone(), mob, adults: 0, calves: 0, bred: null } : null
-  const census = herd != null && penned != null ? (herdCensus(bot, herd, penned.pen)?.adults.length ?? penned.inside) : 0
+  const census = herd != null && penned != null ? Number(herdCensus(bot, herd, penned.pen)?.adults.length ?? penned.inside ?? 0) : 0
   if (herd == null || census < 2) {
     // (not there any more, or not led: the group forgotten, the next one's)
     memory.removePoi(ANIMALS_POI, group.pos, 'overworld')

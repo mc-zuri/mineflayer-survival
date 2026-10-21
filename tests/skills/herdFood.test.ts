@@ -262,22 +262,32 @@ test('startHerd with no animal near home: the two cows seen 50 off fetched, a pe
   assert.deepEqual(herdOf(memory), { pos: CENTER, mob: 'cow', adults: 2, calves: 0, bred: null })
 })
 
-test('startHerd with no animal near home: the cows seen 120 off are penned where they are; a group not found there forgotten, no herd', async () => {
-  const { startHerd, HERD_RETRY_TICKS } = await import('../../src/milestones')
+test('startHerd with no animal near home: the sheep seen 225 off (as far as the nearest pair of f5-1.21.11) led home into a pen there, the legs of the lead enough for the way (leadLegs); a group not found there forgotten, no herd; one past HERD_FETCH_RANGE not gone to', async () => {
+  const { startHerd, HERD_RETRY_TICKS, HERD_FETCH_RANGE } = await import('../../src/milestones')
   const { herdFromMemory: herdOf, ANIMALS_POI } = await import('../../src/skills/herd')
-  const { bot, memory, cows } = homeWithCowsOff(120)
-  const there = new Vec3(130, 64, 0)
-  const pen = planPen(() => ({ name: 'air', boundingBox: 'empty' }), there, 9, 'west')
+  const { leadLegs, LEAD_LEG } = await import('../../src/skills/pen')
+  assert.equal(leadLegs(40), 16)
+  assert.ok(leadLegs(225) * LEAD_LEG >= 225 + 5 * LEAD_LEG)
+  const { bot, memory, cows } = homeWithCowsOff(225)
+  const pen = planPen(() => ({ name: 'air', boundingBox: 'empty' }), CENTER, 9, 'west')
   const asked: Vec3[] = []
+  let radius = 0
   const { executor, tasks } = fakeExecutor(bot, memory, async (name, fn) => {
-    if (name === 'to the cows') { for (const c of cows) bot.entities[c.id] = c; bot.entity.position = new Vec3(118.5, 64, 0.5) }
-    if (name === 'the herd pen') { asked.push(bot.entity.position.clone()); rememberPen(memory, pen); for (const c of cows) c.position = there.offset(0.5, 0, 0.5); return { pen, inside: 2, built: true } }
+    if (name === 'the herd pen') { asked.push(bot.entity.position.clone()); rememberPen(memory, pen); return { pen, inside: 0, built: true } }
+    if (name === 'to the cows') { for (const c of cows) bot.entities[c.id] = c; bot.entity.position = new Vec3(223.5, 64, 0.5) }
+    if (name === 'lead the cows home') {
+      const penModule = require('../../src/skills/pen')
+      const real = penModule.leadIntoPen
+      penModule.leadIntoPen = async (_b: any, _p: any, args: any) => { radius = args.radius; for (const c of cows) c.position = CENTER.offset(0.5, 0, 0.5); bot.entity.position = CENTER.offset(-6, 0, 0); return 2 }
+      try { return await fn(signal()) } finally { penModule.leadIntoPen = real }
+    }
   })
   const lines: string[] = []
   assert.equal(await startHerd(bot, executor, signal(), l => lines.push(l)), true, lines.join(' | '))
-  assert.deepEqual(tasks, ['to the cows', 'the herd pen'])
-  assert.ok(asked[0].x > 100)
-  assert.ok(herdOf(memory)?.pos.equals(there))
+  assert.deepEqual(tasks, ['the herd pen', 'to the cows', 'lead the cows home'])
+  assert.ok(asked[0].x < 50)
+  assert.ok(radius >= 225, String(radius))
+  assert.ok(herdOf(memory)?.pos.equals(CENTER))
   // another game: the cows not there any more
   const gone = homeWithCowsOff(120)
   const g = fakeExecutor(gone.bot, gone.memory, async (name) => {
@@ -288,6 +298,11 @@ test('startHerd with no animal near home: the cows seen 120 off are penned where
   assert.equal(await startHerd(gone.bot, g.executor, signal(), () => {}), false)
   assert.equal(herdOf(gone.memory), null)
   assert.equal(gone.memory.getPois(ANIMALS_POI).length, 0)
+  // past the fetch's range: nothing gone to
+  const far = homeWithCowsOff(HERD_FETCH_RANGE + 20)
+  const h = fakeExecutor(far.bot, far.memory)
+  assert.equal(await startHerd(far.bot, h.executor, signal(), () => {}), false)
+  assert.deepEqual(h.tasks, [])
 })
 
 test('tendHerd: a herd 100 off (fetched and penned where it was) is gone to only with a chore due by its remembered counts', async () => {
