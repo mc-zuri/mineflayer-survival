@@ -1160,3 +1160,30 @@ test('mobLand: a spawner of the mob noted within SIGHT_RADIUS; the sheep\'s biom
   ex.biomes.note({ x: 0, z: 96, y: 70, biome: 'plains' })
   assert.equal(ex.mobLand('sheep').land, true)
 })
+
+test('a hunt stopped by its owner after STOPPED_HUNT_TICKS with none got is a miss of its mob, as a NOT_FOUND\'s; a short one, or one that got some, is not (f3-run1: \'kill 6 spider for 6 string\' stopped after 3600 ticks, and spiders planned again)', async () => {
+  const { STOPPED_HUNT_TICKS } = await import('../../src/executor/executor')
+  const run = async (ticks: number, gets: number): Promise<{ ex: Executor, lines: string[] }> => {
+    const bot = fakeBot({ stone_sword: 1 })
+    const lines: string[] = []
+    const owner = new AbortController()
+    const ex = new Executor(bot, {
+      runners: {
+        kill: async () => {
+          for (let i = 0; i < ticks; i++) bot.survival.tasks.tick++
+          if (gets > 0) bot.give('string', gets)
+          owner.abort(new TaskError('TIMEOUT', 'its 3600 ticks are up'))
+          throw new TaskError('ABORTED', 'stopped')
+        }
+      },
+      log: line => lines.push(line)
+    })
+    await assert.rejects(ex.obtain([{ item: 'string', count: 6 }], owner.signal))
+    return { ex, lines }
+  }
+  const long = await run(STOPPED_HUNT_TICKS, 0)
+  assert.equal(long.ex.sightings.isScarce('spider'), true)
+  assert.ok(long.lines.some(l => l.startsWith(`none of spider found in the ${STOPPED_HUNT_TICKS} ticks of kill`)), long.lines.join('\n'))
+  assert.equal((await run(STOPPED_HUNT_TICKS - 100, 0)).ex.sightings.isScarce('spider'), false)
+  assert.equal((await run(STOPPED_HUNT_TICKS, 2)).ex.sightings.isScarce('spider'), false)
+})

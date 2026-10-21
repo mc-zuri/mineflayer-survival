@@ -30,7 +30,7 @@ import { countItems, emptySlots, trace, waitTicks } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
-import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, UnreachableBlocks, VILLAGE_RANGE, WATER_MOBS, type MobLand } from './sight'
+import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, UnreachableBlocks, VILLAGE_RANGE, WATCHED_MOBS, WATER_MOBS, type MobLand } from './sight'
 import { BiomeSurvey, KELP_BIOMES, LAND_FOODS, MIN_SURVEYED, MOB_BIOMES, MOB_LAND_RANGE } from './foodLand'
 import { fishableWaterNear } from '../skills/fish'
 import { herdSpares, herdSupply } from '../skills/herd'
@@ -234,6 +234,9 @@ export function requestsMet (inv: Inventory, requests: readonly ObtainRequest[])
     return heldFor(inv, alts, r) >= r.count
   })
 }
+
+/** ticks a kill step stopped by its owner has to have run for the none it found to count as a miss (noteStoppedHunt) */
+export const STOPPED_HUNT_TICKS = 2400
 
 /** ticks a room forced (a step's INVENTORY_FULL) waits for the hostiles about to go (bagUnsafe) */
 export const ROOM_COMBAT_WAIT = 400
@@ -500,12 +503,16 @@ export class Executor {
         let outcome: StepOutcome
         diag?.stepStarted(step, describeStep(step), i)
         const began = this.tasks.tick
+        const had = countItems(this.bot, step.item)
         try {
           outcome = await this.runStep(step, signal)
           steps++
           diag?.stepDone(step, outcome.gained)
         } catch (err) {
-          if (isAbort(err) && signal?.aborted === true) throw err
+          if (isAbort(err) && signal?.aborted === true) {
+            this.noteStoppedHunt(step, began, had)
+            throw err
+          }
           if (TaskError.is(err, 'DIED', 'ABORTED')) throw err
           lastError = err
           const n = (failures.get(key) ?? 0) + 1
@@ -537,6 +544,22 @@ export class Executor {
         if (outcome.gained < step.count) { this.log(`replan: ${describeStep(step)} gained ${outcome.gained}`); break }
       }
     }
+  }
+
+  /**
+   * A kill step stopped by its owner (a stock top-up's budget run out, the dusk sending the bot down the mine) after
+   * STOPPED_HUNT_TICKS with none of its item got and none of its mob seen since it began (Sightings.unseenSince, for
+   * the watched animals): the mob is missed as a NOT_FOUND's would be (noteMissing), and the next plans go for another
+   * source a while. A 26.3 stock's 'kill 6 spider for 6 string' explored 3600 ticks for none, stopped, and the next
+   * plans went for spiders again (f3-run1, t76504 to t80104 and t86221), and a base's sheep from t7458 to the dusk
+   * (f3-26.3)
+   */
+  private noteStoppedHunt (step: PlanStep, began: number, had: number): void {
+    if (step.kind !== 'kill' || this.tasks.tick - began < STOPPED_HUNT_TICKS) return
+    if (countItems(this.bot, step.item) > had) return
+    if (WATCHED_MOBS.includes(step.mob) && !this.sightings.unseenSince(began).includes(step.mob)) return
+    this.sightings.missing([step.mob])
+    this.log(`none of ${step.mob} found in the ${this.tasks.tick - began} ticks of ${describeStep(step)}: the plans go for another source for a while`)
   }
 
   /**
