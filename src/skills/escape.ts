@@ -1029,7 +1029,7 @@ async function bucketPocket (bot: Bot, helm: Helm, signal?: AbortSignal): Promis
 export interface EvadeCreeperOptions extends SkillOptions {
   /** run until this far and it's stopped swelling (default 7.5) */
   safeDistance?: number
-  /** raise the shield when its fuse is this far along and it's this close (default 24, 5) */
+  /** raise the shield when its fuse is this far along and it's this close (default CREEPER_BLOCK_SWELL 20, and 5) */
   blockAtSwell?: number
   blockDistance?: number
   maxTicks?: number
@@ -1210,6 +1210,14 @@ export async function wallOffShooter (bot: Bot, shooter: Entity, signal?: AbortS
   return put
 }
 
+/**
+ * the swell (of the fuse's 30, Creeper.maxSwell) at which a creeper within the evade's blockDistance is met with the
+ * shield rather than run from: its 10 ticks left take the raise's trip to the server and the shield's delay before it
+ * blocks (the shield's BlocksAttacks blockDelaySeconds 0.25, 5 ticks; LivingEntity.isDamageSourceBlocked, an explosion
+ * from the front). At 24 the 6 ticks left were as good as none
+ */
+export const CREEPER_BLOCK_SWELL = 20
+
 /** times a cell that took no block (sightCells) is tried in an evade */
 export const SIGHT_CELL_TRIES = 2
 
@@ -1220,9 +1228,15 @@ export const SIGHT_CELL_TRIES = 2
  */
 export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreeperOptions = {}): Promise<EvadeResult> {
   const safe = opts.safeDistance ?? 7.5
-  const blockAtSwell = opts.blockAtSwell ?? 24
+  const blockAtSwell = opts.blockAtSwell ?? CREEPER_BLOCK_SWELL
   const blockDistance = opts.blockDistance ?? 5
   const maxTicks = opts.maxTicks ?? 200
+  // a use in hand stopped first (a bow drawn, a meal, a shield another skill raised): with one on, the run goes at a
+  // fifth of its speed (LocalPlayer.aiStep's isUsingItem) and the shield can't come up (LivingEntity.startUsingItem
+  // starts none while one is on); the evade raises its own when it's due. A 1.21.11 bot whose shot at the creeper was
+  // cut off ran 0.3 blocks in 18 ticks with its bow drawn, its raise of the shield a no-op, and was blown up 2.9 off
+  // (f9-1.21.11, t305885)
+  if ((bot as any).usingHeldItem === true && typeof bot.deactivateItem === 'function') bot.deactivateItem()
   const counter = new SwellCounter()
   counter.swell = opts.swell ?? 0
   const run = new RunHeadway()

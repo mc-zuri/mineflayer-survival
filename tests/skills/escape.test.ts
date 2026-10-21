@@ -429,3 +429,43 @@ for (const version of VERSIONS) {
     }
   })
 }
+
+test('evadeCreeper: a use in hand (a bow drawn by a shot it cut off) is stopped before the run, which goes at full speed; cornered at the fuse\'s CREEPER_BLOCK_SWELL, the shield up facing it (f9-1.21.11, t305885)', async () => {
+  const { evadeCreeper, CREEPER_BLOCK_SWELL } = await import('../../src/skills/escape')
+  const { entity, item } = await import('../reflexes/fakeBot')
+  assert.ok(30 - CREEPER_BLOCK_SWELL >= 5 + 3, 'the raise, its trip and the shield\'s 5-tick delay before the blast')
+  for (const version of ['1.21.11', '26.3']) {
+    const creeper = entity({ name: 'creeper', position: new Vec3(2.6, 64, 0.5), meta: { swell_dir: 1 }, version })
+    const bot = fakeBot({ items: [item('bow', 1, undefined, version), item('arrow', 8, undefined, version)], offhand: item('shield', 1, undefined, version), entities: [creeper], usingHeldItem: true, version })
+    bot.heldItem = bot.inventory.slots[9]
+    bot.equip = async () => {}
+    const events: string[] = []
+    bot.deactivateItem = () => { events.push('release'); bot.usingHeldItem = false }
+    bot.activateItem = (off: boolean) => { events.push(off ? 'shield' : 'main'); bot.usingHeldItem = true }
+    let ran = 0
+    bot.waitForTicks = async () => {
+      // the run's speed as the use leaves it: a fifth while in use (LocalPlayer.aiStep)
+      if (bot.controls.forward === true) { bot.entity.position = bot.entity.position.offset(bot.usingHeldItem === true ? -0.056 : -0.28, 0, 0); ran++ }
+    }
+    await evadeCreeper(bot, creeper as any, { maxTicks: 60, swell: 0 }).catch(err => err)
+    assert.strictEqual(events[0], 'release', `${version}: ${events.join(' ')}`)
+    assert.ok(!events.includes('shield'), `${version}: ${events.join(' ')}`)
+    assert.ok(bot.entity.position.x < -4, `${version}: ${bot.entity.position.toString()}`)
+    // cornered (a nook open to the creeper alone), the fuse along: the shield up, the look on the creeper
+    const nook = (p: Vec3): string => p.y < 64 ? 'stone' : (p.z === 0 && p.x >= 0 && p.x <= 4 && p.y <= 65) ? 'air' : p.y <= 66 ? 'stone' : 'air'
+    const creeper2 = entity({ name: 'creeper', position: new Vec3(3.2, 64, 0.5), meta: { swell_dir: 1 }, version })
+    const cornered = fakeBot({ items: [item('bow', 1, undefined, version)], offhand: item('shield', 1, undefined, version), entities: [creeper2], usingHeldItem: true, world: nook, version })
+    cornered.heldItem = cornered.inventory.slots[9]
+    cornered.equip = async () => {}
+    const used: string[] = []
+    cornered.deactivateItem = () => { used.push('release'); cornered.usingHeldItem = false }
+    cornered.activateItem = (off: boolean) => { used.push(off ? 'shield' : 'main'); cornered.usingHeldItem = true }
+    const looks: number[] = []
+    cornered.look = async (yaw: number) => { looks.push(yaw) }
+    cornered.waitForTicks = async () => {}
+    await evadeCreeper(cornered, creeper2 as any, { maxTicks: 30, swell: CREEPER_BLOCK_SWELL }).catch(err => err)
+    assert.deepStrictEqual(used.slice(0, 2), ['release', 'shield'], `${version}: ${used.join(' ')}`)
+    // (facing +x, the creeper's way: yaw -pi/2 in mineflayer's)
+    assert.ok(looks.length > 0 && Math.abs(Math.abs(looks[looks.length - 1]) - Math.PI / 2) < 0.3, `${version}: ${looks.join(' ')}`)
+  }
+})

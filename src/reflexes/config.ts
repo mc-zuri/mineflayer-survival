@@ -83,7 +83,7 @@ export interface ReflexConfig {
     triggerDistance: number
     /** run until this far (default 7.5: SwellGoal stops past 7 blocks, and the blast's reach) */
     safeDistance: number
-    /** block with the shield when the fuse is this far along and the creeper still this close (default 24, 5) */
+    /** block with the shield when the fuse is this far along and the creeper still this close (default 20: CREEPER_BLOCK_SWELL, and 5) */
     blockAtSwell: number
     blockDistance: number
     /** ticks to give up evading after (default 200) */
@@ -224,7 +224,7 @@ export const DEFAULT_REFLEX_CONFIG: ReflexConfig = {
     indoorsTicks: 2400,
     priority: 60
   },
-  creeper: { enabled: true, triggerDistance: 3, safeDistance: 7.5, blockAtSwell: 24, blockDistance: 5, maxTicks: 200, priority: 80 },
+  creeper: { enabled: true, triggerDistance: 3, safeDistance: 7.5, blockAtSwell: 20, blockDistance: 5, maxTicks: 200, priority: 80 },
   warden: { enabled: true, range: 40, maxTicks: 1200, priority: 89 },
   hazard: { enabled: true, searchRadius: 6, waterRadius: 6, maxTicks: 200, priority: 90 },
   drowning: { enabled: true, air: 6, recoverTo: 18, searchRadius: 8, maxTicks: 300, priority: 85 },

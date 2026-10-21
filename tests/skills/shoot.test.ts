@@ -120,3 +120,42 @@ test('aim: a blaze whose middle and top are out of the shooter\'s sight (a bunke
   assert.ok(solution.aimPoint.y < 64.3, String(solution.aimPoint.y))
   assert.ok(arrowHits(arrowStart(bot), solution.yaw, solution.pitch, entityBox(blaze), { world }).hit != null)
 })
+
+test('shoot: a draw cut off (the creeper reflex over the shot, an abort) is put away unloosed, the bow not left drawn; so too at cutDraw (f9-1.21.11, t305885)', async () => {
+  const { shoot } = await import('../../src/skills/shoot')
+  for (const version of ['1.21.11', '26.3']) {
+    const creeper = entity({ id: 8, name: 'creeper', position: new Vec3(7.5, 64, 0.5), version })
+    const bot: any = fakeBot({ position: new Vec3(0.5, 64, 0.5), entities: [creeper], items: [item('bow', 1, undefined, version), item('arrow', 16, undefined, version)], version })
+    bot.heldItem = bot.inventory.items()[0]
+    bot.quickBarSlot = 0
+    const events: string[] = []
+    bot.activateItem = () => { events.push('draw'); bot.usingHeldItem = true }
+    bot.deactivateItem = () => { events.push('release'); bot.usingHeldItem = false }
+    bot.setQuickBarSlot = (n: number) => { events.push(`slot ${n}`) }
+    bot.world = { ...(bot.world ?? {}), raycast: () => null }
+    bot.waitForTicks = async (n: number) => await new Promise<void>(resolve => { let k = 0; const f = (): void => { if (++k >= n) { bot.off('physicsTick', f); resolve() } }; bot.on('physicsTick', f) })
+    const ctrl = new AbortController()
+    const shot = shoot(bot, creeper as any, { signal: ctrl.signal, maxShots: 3 }).catch(err => err)
+    for (let t = 0; t < 10; t++) { await new Promise(resolve => setImmediate(resolve)); bot.emit('physicsTick') }
+    assert.strictEqual(bot.usingHeldItem, true, version)
+    ctrl.abort(new Error('preempted'))
+    await shot
+    assert.strictEqual(bot.usingHeldItem, false, version)
+    // (the slot changed and back: no arrow loosed after the draw)
+    assert.deepStrictEqual(events.slice(-2), ['slot 1', 'slot 0'], `${version}: ${events.join(' ')}`)
+    assert.ok(events.lastIndexOf('release') < events.lastIndexOf('draw'), events.join(' '))
+    // cutDraw: put away in the draw, the shooting over
+    events.length = 0
+    let near = false
+    const cut = shoot(bot, creeper as any, { maxShots: 3, cutDraw: () => near })
+    for (let t = 0; t < 30; t++) {
+      await new Promise(resolve => setImmediate(resolve))
+      if (t === 6) near = true
+      bot.emit('physicsTick')
+    }
+    const r = await cut
+    assert.strictEqual(r.shots, 0, version)
+    assert.strictEqual(bot.usingHeldItem, false, version)
+    assert.deepStrictEqual(events.slice(-2), ['slot 1', 'slot 0'], `${version}: ${events.join(' ')}`)
+  }
+})

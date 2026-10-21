@@ -18,6 +18,11 @@ export interface ShootOptions extends SkillOptions {
   aimOffset?: Vec3
   /** looked at before each draw and while an arrow flies: once true the shooting stops (a draw goes on to its shot) */
   until?: () => boolean
+  /**
+   * looked at each tick of a draw: once true the draw is put away unloosed and the shooting stops (a creeper come too
+   * near for the shot: the bot free to run, a drawn bow slowing it to a fifth)
+   */
+  cutDraw?: () => boolean
 }
 
 export interface ShootResult {
@@ -98,6 +103,8 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
   const world = opts.checkBlocks !== false ? arrowWorld(bot) : undefined
   let solution: AimSolution | null = null
   let shots = 0
+  // a draw on (the bow in use): put away unloosed when the shot is cut off (finally)
+  let drawn = false
   try {
     while (shots < maxShots) {
       throwIfAborted(signal)
@@ -111,30 +118,35 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
       bot.clearControlStates()
       bot.deactivateItem()
       bot.activateItem()
+      drawn = true
       for (let t = 0; t < drawTicks; t++) {
         // the arrow leaves after the rest of the draw and the release's trip to the server
         solution = aim(bot, target, { leadTicks: drawTicks - t + 1, highArc: opts.highArc, world, offset: opts.aimOffset })
         if (solution != null) await bot.look(solution.yaw, solution.pitch, true)
         await waitTicks(bot, 1, signal)
         if (isEntity && !isAlive(bot, target)) break
+        // (the caller's reason to put the draw away come up: put away there, not held drawn to its end)
+        if (opts.cutDraw?.() === true) { drawn = false; cancelDraw(bot); return { shots, hit: false, solution } }
       }
       // (the target dead: the draw put away, not loosed off at nothing)
-      if (isEntity && !isAlive(bot, target)) { cancelDraw(bot); return { shots, hit: true, solution } }
+      if (isEntity && !isAlive(bot, target)) { drawn = false; cancelDraw(bot); return { shots, hit: true, solution } }
       // a calm mob in the way (sparedInLine): the bow held drawn till it's out of it, else put away unloosed
       for (let t = 0; t < SPARED_HOLD_TICKS && sparedInLine(bot, target) != null; t++) {
         solution = aim(bot, target, { leadTicks: 1, highArc: opts.highArc, world, offset: opts.aimOffset })
         if (solution != null) await bot.look(solution.yaw, solution.pitch, true)
         await waitTicks(bot, 1, signal)
       }
-      if (sparedInLine(bot, target) != null) { cancelDraw(bot); return { shots, hit: false, solution } }
+      if (sparedInLine(bot, target) != null) { drawn = false; cancelDraw(bot); return { shots, hit: false, solution } }
       solution = aim(bot, target, { leadTicks: 1, highArc: opts.highArc, world, offset: opts.aimOffset })
       if (solution == null) {
+        drawn = false
         bot.deactivateItem()
         throw new TaskError('NO_PATH', 'no arc reaches the target')
       }
       await bot.look(solution.yaw, solution.pitch, true)
       // the look goes out with this tick's move packet; the release follows it
       await waitTicks(bot, 1, signal)
+      drawn = false
       bot.deactivateItem()
       shots++
       const flight = Math.ceil(solution.ticks) + 10
@@ -148,6 +160,12 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
     }
     return { shots, hit: false, solution }
   } finally {
+    // cut off in the draw (a reflex over it, an abort): the bow put away, not held drawn after. Held so, a use goes on
+    // that slows the player's move to a fifth (LocalPlayer.aiStep's isUsingItem) and keeps the shield down
+    // (LivingEntity.startUsingItem starts none while one is on): a 1.21.11 bot in iron whose shot at a creeper the
+    // creeper reflex cut off ran 0.3 blocks in 18 ticks with its bow drawn, its shield's raise a no-op, and was blown
+    // up 2.9 off (f9-1.21.11, t305885)
+    if (drawn) cancelDraw(bot)
     if (isEntity) tracker.untrack(target)
   }
 }
