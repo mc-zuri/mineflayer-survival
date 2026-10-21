@@ -71,6 +71,29 @@ describe(`off a magma block on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 
     assert.ok(hits <= 2, `${hits} hits`)
   })
 
+  it('shut in netherrack on the magma of a ruined portal, no block to put on it: sneaks at once and digs its way off', async () => {
+    // (on the superflat's ground, its feet at -60, 20 along z from where the bot is)
+    const o = new Vec3(Math.floor(bot.entity.position.x), -60, Math.floor(bot.entity.position.z) + 20)
+    const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`
+    // netherrack all round the bot's two cells, a roof right over its head, magma under it and under the cells about
+    await run(`fill ${xyz(-4, -2, -4)} ${xyz(4, 3, 4)} netherrack`)
+    await run(`fill ${xyz(-1, -1, -1)} ${xyz(1, -1, 1)} magma_block`)
+    await run(`fill ${xyz(0, 0, 0)} ${xyz(0, 1, 0)} air`)
+    const hits = await onMagma(o, async () => {
+      console.log(`[magma] netherrack pocket: from ${bot.entity.position.toString()} on ${bot.blockAt(bot.entity.position.offset(0, -0.2, 0).floored())?.name ?? '?'}, the roof ${bot.blockAt(bot.entity.position.floored().offset(0, 2, 0))?.name ?? '?'}`)
+      // (its pickaxe given on the magma: onMagma's clear takes the bag's; and no block to put on the magma)
+      await run(`clear ${USERNAME} cobblestone`)
+      await run(`give ${USERNAME} iron_pickaxe 1`)
+      await waitUntil(bot, () => countItems(bot, 'iron_pickaxe') > 0 && countItems(bot, 'cobblestone') === 0, 40)
+      const r = await escapeHazard(bot, { maxTicks: 400, waterRadius: 0 })
+      console.log(`[magma] netherrack pocket: ${r.ticks} ticks, at ${bot.entity.position.toString()}, ${bot.getControlState('sneak') ? 'sneaking' : 'not sneaking'}`)
+    })
+    console.log(`[magma] netherrack pocket: ${hits} hits, on ${bot.blockAt(bot.entity.position.offset(0, -0.2, 0).floored())?.name ?? '?'}`)
+    const under = bot.blockAt(bot.entity.position.offset(0, -0.2, 0).floored())?.name
+    assert.ok(under !== 'magma_block', `still on the magma at ${bot.entity.position.toString()}`)
+    assert.ok(hits <= 2, `${hits} hits`)
+  })
+
   it('with ground beside it, steps off, no block put', async () => {
     const o = bot.entity.position.floored().offset(20, 0, 0)
     const xyz = (dx: number, dy: number, dz: number): string => `${o.x + dx} ${o.y + dy} ${o.z + dz}`

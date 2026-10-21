@@ -262,6 +262,56 @@ export async function coverHotFloor (bot: Bot, signal?: AbortSignal): Promise<bo
 /** pillar jumps coverHotFloor tries */
 export const COVER_TRIES = 3
 
+/** the blocks a way off the magma isn't dug through */
+const NO_DIG = /^(bedrock|barrier|obsidian|crying_obsidian|reinforced_deepslate|end_portal_frame|magma_block|spawner|chest|.*_bed|furnace|crafting_table)$/
+
+/**
+ * The cells to dig for a way off the magma block under the bot where none is open (hotFloorStep's null: netherrack all
+ * round a ruined portal's magma, a wall to jump onto with no room over the head): along one of the four sides, a tunnel
+ * at the feet's level up to HOT_FLOOR_DIG_REACH columns out, to the first whose floor is a full block that isn't magma
+ * nor a danger (the columns before it over magma or another full block: walked sneaking), each column's feet and head
+ * cells open or dug (no liquid against them, nothing NO_DIG); the way with the fewest to dig. Resolves the cells to dig
+ * (maybe none) and the stand they make, or null.
+ */
+export function hotFloorDigStep (bot: Bot): { dig: Vec3[], stand: Vec3 } | null {
+  const feet = bot.entity.position.floored()
+  let best: { dig: Vec3[], stand: Vec3 } | null = null
+  const liquid = (p: Vec3): boolean => [[0, 0, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]].some(([dx, dy, dz]) => /^(lava|water|bubble_column)$/.test(bot.blockAt(p.offset(dx, dy, dz))?.name ?? ''))
+  for (const d of [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1)]) {
+    const cells: Vec3[] = []
+    for (let i = 1; i <= HOT_FLOOR_DIG_REACH; i++) {
+      const stand = feet.plus(d.scaled(i))
+      const under = bot.blockAt(stand.offset(0, -1, 0))
+      if (under == null || under.boundingBox !== 'block' || (under.name !== 'magma_block' && isDangerBlock(under.name))) break
+      let ok = true
+      for (const c of [stand, stand.offset(0, 1, 0)]) {
+        const b = bot.blockAt(c)
+        if (b == null) { ok = false; break }
+        if (passable(bot, c, false)) continue
+        if (b.boundingBox !== 'block' || NO_DIG.test(b.name) || liquid(c)) { ok = false; break }
+        cells.push(c)
+      }
+      if (!ok) break
+      if (under.name === 'magma_block') continue
+      if (best == null || cells.length < best.dig.length) best = { dig: [...cells], stand }
+      break
+    }
+  }
+  return best
+}
+
+/** how many columns out hotFloorDigStep digs for a floor that isn't magma (a ruined portal's patch is 3 or 4 across) */
+export const HOT_FLOOR_DIG_REACH = 4
+
+/**
+ * Whether the hazard reflex sneaks on the magma under the bot as it makes for `step` (MagmaBlock.stepOn spares a player
+ * stepping carefully, Entity.isSteppingCarefully): always, but for a step down (a sneak keeps a player from walking off
+ * an edge, Player.maybeBackOffFromEdge)
+ */
+export function sneakOnMagma (feet: Vec3, step: Vec3 | null): boolean {
+  return step == null || step.y >= feet.y
+}
+
 export interface EscapeHazardOptions extends SkillOptions {
   searchRadius?: number
   /** how far ground is looked for when none is within searchRadius (default 16) */
@@ -282,6 +332,8 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
   let target: Vec3 | null = null
   let hotTicks = 0
   let covered = false
+  let dug = false
+  let dugStand: Vec3 | null = null
   let watered: Vec3 | null = null
   try {
     for (let t = 0; t < maxTicks; t++) {
@@ -329,14 +381,42 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
       // steering at a stand it couldn't climb to, the floor hurting it every 12 and the magma cubes about, till it died
       if ((onHotFloor(bot) || (bot.entity.onGround && nameAt(bot, bot.entity.position.offset(0, -0.2, 0).floored()) === 'magma_block')) && !inLava(bot)) {
         hotTicks++
-        const step = hotFloorStep(bot)
+        // sneaking at once, the floor hurting no more while the way off is worked out (MagmaBlock.stepOn spares a
+        // player stepping carefully): a 26.3 bot on a ruined portal's magma among netherrack at y 46 was hurt every 10
+        // ticks through 12 hazard reflexes, its step a jump with no room over its head, and it burned (ls4-26.3)
+        bot.setControlState('sneak', true)
+        // (or the stand a way dug off it leads to, over the magma between: walked sneaking)
+        let step = hotFloorStep(bot) ?? dugStand
         if ((step == null || hotTicks > HOT_FLOOR_STEP_TICKS) && !covered) {
           covered = true
           bot.clearControlStates()
           if (await (opts.cover ?? coverHotFloor)(bot, opts.signal)) continue
+          bot.setControlState('sneak', true)
+        }
+        // no step to take, or the one there doesn't get it off (a jump that bonks its head): a way dug through the wall
+        // beside it, sneaking the while
+        if ((step == null || hotTicks > 2 * HOT_FLOOR_STEP_TICKS) && !dug) {
+          dug = true
+          const way = hotFloorDigStep(bot)
+          if (way != null) {
+            bot.clearControlStates()
+            bot.setControlState('sneak', true)
+            for (const cell of way.dig) {
+              const block = bot.blockAt(cell)
+              if (block == null) continue
+              try {
+                await dig(bot, block as any, { signal: opts.signal })
+              } catch (err) {
+                if (isAbort(err)) throw err
+                trace('escapeHazard: no way dug off the magma at', cell.toString(), (err as Error).message)
+              }
+            }
+            if (passable(bot, way.stand, false) && passable(bot, way.stand.offset(0, 1, 0), false)) { step = dugStand = way.stand; hotTicks = 0 }
+          }
         }
         if (step != null) {
           steerToward(bot, step.offset(0.5, 0, 0.5), { sprint: false })
+          bot.setControlState('sneak', sneakOnMagma(here, step))
           await waitTicks(bot, 1, opts.signal)
           continue
         }

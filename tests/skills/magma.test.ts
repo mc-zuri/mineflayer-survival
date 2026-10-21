@@ -41,3 +41,33 @@ test('keepOffMagma: the way across a strip of magma goes round it, without the r
     }
   }
 })
+
+test('hotFloorDigStep: on magma walled in by netherrack (a ruined portal\'s underground), the side with the fewest blocks to dig over a floor that isn\'t magma; none through lava or obsidian', async () => {
+  const { hotFloorDigStep, sneakOnMagma } = await import('../../src/skills/escape')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // the bot at (0, 46, 0) on magma at y 45; netherrack about, the cell west open at the head only; magma under the east side
+  const world = (over: Record<string, string>) => (p: Vec3): string => over[`${p.x},${p.y},${p.z}`] ?? (p.x === 0 && p.z === 0 && (p.y === 46 || p.y === 47) ? 'air' : p.y === 45 && p.x === 0 && p.z === 0 ? 'magma_block' : 'netherrack')
+  const bot = fakeBot({ position: new Vec3(0.5, 46, 0.5), world: world({ '-1,47,0': 'air', '1,45,0': 'magma_block' }) })
+  // (the fake bot's solid blocks: netherrack and magma among them)
+  const way = hotFloorDigStep(bot)
+  assert.ok(way != null)
+  assert.deepEqual(way.stand.toArray(), [-1, 46, 0])
+  assert.deepEqual(way.dig.map(p => p.toArray()), [[-1, 46, 0]])
+  // a patch of magma 3 across under it: the way dug two columns out, over the magma between (walked sneaking)
+  const patch: Record<string, string> = {}
+  for (let x = -1; x <= 1; x++) for (let z = -1; z <= 1; z++) patch[`${x},45,${z}`] = 'magma_block'
+  const wide = hotFloorDigStep(fakeBot({ position: new Vec3(0.5, 46, 0.5), world: world(patch) }))
+  assert.ok(wide != null)
+  assert.equal(Math.abs(wide.stand.x) + Math.abs(wide.stand.z), 2)
+  assert.equal(wide.dig.length, 4)
+  // lava behind every wall, or obsidian: no way dug
+  const lava = fakeBot({ position: new Vec3(0.5, 46, 0.5), world: world({ '2,46,0': 'lava', '-2,46,0': 'lava', '0,46,2': 'lava', '0,46,-2': 'lava' }) })
+  assert.equal(hotFloorDigStep(lava), null)
+  const obsidian = fakeBot({ position: new Vec3(0.5, 46, 0.5), world: world({ '1,46,0': 'obsidian', '-1,46,0': 'obsidian', '0,46,1': 'obsidian', '0,46,-1': 'obsidian' }) })
+  assert.equal(hotFloorDigStep(obsidian), null)
+  // sneaking on the magma, but for a step down off it
+  assert.equal(sneakOnMagma(new Vec3(0, 46, 0), new Vec3(1, 46, 0)), true)
+  assert.equal(sneakOnMagma(new Vec3(0, 46, 0), new Vec3(1, 47, 0)), true)
+  assert.equal(sneakOnMagma(new Vec3(0, 46, 0), new Vec3(1, 45, 0)), false)
+  assert.equal(sneakOnMagma(new Vec3(0, 46, 0), null), true)
+})
