@@ -25,6 +25,7 @@ test('keepHeadAboveWater adds the cost to the pathfinder\'s step costs once', ()
   keepHeadAboveWater(bot)
   keepHeadAboveWater(bot)
   assert.equal(pf.defaultMoveSettings.exclusionAreasStep.length, 2)
+  assert.equal(pf.defaultMoveSettings.exclusionAreasBreak.length, 1)
 })
 
 test('underwaterStepCost is dear but no wall: a bot already in a flooded cave still has a way out', async () => {
@@ -104,4 +105,16 @@ test('noSneakInWater: a sneak held with the feet or the head in water let go of 
   bot.setControlState('sneak', true)
   bot.emit('physicsTick')
   assert.equal(bot.getControlState('sneak'), true)
+})
+
+test('waterUnderBreakCost: no block broken with water under it (a flooded cave\'s ceiling) by a bot out of the water; one in it digs its way out (f3-26.3)', async () => {
+  const { WATER_UNDER_FORBID, waterUnderBreakCost } = await import('../../src/skills/breath')
+  // a flooded cave at y 45 to 48 under a stone ceiling at 49; the bot on top at 50
+  const lookup = (p: Vec3): { name: string } => ({ name: p.y >= 45 && p.y <= 48 ? 'water' : p.y <= 49 ? 'stone' : 'air' })
+  const bot: any = { entity: { position: new Vec3(0.5, 50, 0.5) } }
+  const cost = waterUnderBreakCost(bot, lookup)
+  assert.equal(cost({ position: { x: 0, y: 49, z: 0 } }), WATER_UNDER_FORBID)
+  assert.equal(cost({ position: { x: 0, y: 44, z: 0 } }), 0)
+  bot.entity.position = new Vec3(0.5, 46, 0.5)
+  assert.equal(cost({ position: { x: 0, y: 49, z: 0 } }), 0)
 })

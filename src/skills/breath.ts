@@ -40,7 +40,29 @@ export function keepHeadAboveWater (bot: Bot): void {
   ;(cost as any).survivalBreath = true
   // (and not under again where the drowning reflex took it up from lately)
   const drowned = drownedStepCost(bot, pos => bot.blockAt(pos) as any)
-  pf.setMoveOptions({ ...settings, exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), cost, drowned] })
+  // (and no dig through a flooded cave's ceiling: waterUnderBreakCost)
+  const ceiling = waterUnderBreakCost(bot, pos => bot.blockAt(pos) as any)
+  pf.setMoveOptions({ ...settings, exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), cost, drowned], exclusionAreasBreak: [...(settings.exclusionAreasBreak ?? []), ceiling] })
+}
+
+/** the cost of a block broken with water under it for a bot out of the water: COST_INF */
+export const WATER_UNDER_FORBID = 1000000
+
+/**
+ * The pathfinder's break rule: no block broken with water under it (a flooded cave's or an aquifer's ceiling, a lake's
+ * floor seen from under it) by a bot out of the water: the pathfinder's dontCreateFlow looks at the block's sides and
+ * over it, not under it, and the bot standing on it, or walking on into its cell, goes down into the water. A 26.3
+ * bot's walk dug down from y 53 through a flooded cave's ceiling at y 49, fell in, and drowned in it (f3-26.3, t68008
+ * to t70031). A bot in the water digs its way out all the same.
+ */
+export function waterUnderBreakCost (bot: Bot, lookup: NameLookup): (block: { position: { x: number, y: number, z: number } }) => number {
+  return (block) => {
+    const p = block.position
+    if (!WATER.has(lookup(new Vec3(p.x, p.y - 1, p.z))?.name ?? '')) return 0
+    const at = (bot as any).entity?.position
+    const wet = at != null && [0, 1].some(dy => WATER.has(lookup(new Vec3(Math.floor(at.x), Math.floor(at.y) + dy, Math.floor(at.z)))?.name ?? ''))
+    return wet ? 0 : WATER_UNDER_FORBID
+  }
 }
 
 /** ticks a spot the drowning reflex took the bot up from stays off for the work (its targets, its ways under water) */
