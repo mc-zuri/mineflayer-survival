@@ -43,12 +43,15 @@ import type { Diagnostics } from '../diagnostics'
 import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
 import { withNetherSafety } from '../nether/safety'
 import { travel } from '../skills/travel'
+import { rememberCanes } from '../skills/caneFarm'
 
 /** ticks between the looks for a village about the bot */
 export const VILLAGE_CHECK_TICKS = 400
 /** how often, and how far round, the cobwebs about are noted (the string of a bow: planner/sources' cobweb) */
 export const COBWEB_CHECK_TICKS = 200
 export const COBWEB_CHECK_RADIUS = 32
+/** how often the cane columns in the loaded chunks are noted (rememberCanes: CANE_SIGHT_RADIUS round) */
+export const CANE_CHECK_TICKS = 400
 
 /** how far from the bot a failed mine step's remembered blocks are forgotten: all of them in the dimension */
 export const FORGET_RADIUS = Infinity
@@ -317,6 +320,13 @@ export class Executor {
       nextWebCheck = this.tasks.tick + COBWEB_CHECK_TICKS
       if (normalizeDimension(bot.game?.dimension) !== 'overworld') return
       rememberAround(bot, this.memory, ['cobweb'], COBWEB_CHECK_RADIUS, 16)
+    })
+    // and the cane columns in sight, for the paper's plans (the enchanting's books)
+    let nextCaneCheck = 0
+    bot.on('physicsTick', () => {
+      if (this.tasks.tick < nextCaneCheck || bot.entity == null || typeof bot.blockAt !== 'function') return
+      nextCaneCheck = this.tasks.tick + CANE_CHECK_TICKS
+      rememberCanes(bot, this.memory)
     })
     // a village passed by is noted, with its farms' crops and hay, for the food plans
     let nextVillageCheck = 0

@@ -5,8 +5,10 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import type { WorldMemory } from '../core/memory'
+import { normalizeDimension } from '../core/memory'
+import { findBlocks } from '../core/findBlocks'
 import { SkillError, isAbort, throwIfAborted } from './errors'
-import { collectBlock } from './collectBlock'
+import { collectBlock, columnHarvestTarget } from './collectBlock'
 import { navigateNear } from './navigate'
 import { placeBlock } from './placeBlock'
 import { countItems, findInventoryItem, trace, waitUntil } from './util'
@@ -90,6 +92,38 @@ export async function makeWaterHole (bot: Bot, center: Vec3, signal?: AbortSigna
   await waitUntil(bot, () => bot.blockAt(hole)?.name === 'water', 20, signal)
   if (bot.blockAt(hole)?.name !== 'water') throw new SkillError('VERIFY_FAILED', `no water in the hole at ${hole.toString()}`)
   return hole
+}
+
+/** how far about the bot the loaded chunks' canes are noted (rememberCanes): a river's in sight from its bank */
+export const CANE_SIGHT_RADIUS = 96
+
+/**
+ * The cane columns in the loaded chunks within `radius`, noted in the memory at their cuts (columnHarvestTarget: the
+ * block a mine step breaks, the bottom one left to grow back), and the canes remembered there with nothing to cut now
+ * (a column cut down to its bottom block, or gone) forgotten. The steps for paper walk to one noted, and the planner
+ * prices it a walk: the canes went unseen, a mine step's own look 64 blocks round and an exploring's 48 at each leg's
+ * end the only ones (f3-1.21.11: no cane remembered in all its game). Resolves the columns noted.
+ */
+export function rememberCanes (bot: Bot, memory: WorldMemory, radius = CANE_SIGHT_RADIUS): number {
+  const id = bot.registry.blocksByName.sugar_cane?.id
+  if (id == null || bot.entity == null) return 0
+  const dimension = normalizeDimension(bot.game?.dimension)
+  if (dimension !== 'overworld') return 0
+  const lookup: CaneLookup = p => bot.blockAt(p) as any
+  const at = bot.entity.position
+  for (const known of memory.findBlocks('sugar_cane', { dimension, near: at, maxDistance: radius })) {
+    const p = new Vec3(known.x, known.y, known.z)
+    // (a chunk not loaded: left as it was)
+    if (bot.blockAt(p) == null) continue
+    if (columnHarvestTarget(lookup, p)?.equals(p) !== true) memory.forgetBlock(p, dimension)
+  }
+  const cuts = new Map<string, Vec3>()
+  for (const pos of findBlocks(bot, { matching: id, maxDistance: radius, count: 1024 })) {
+    const cut = columnHarvestTarget(lookup, pos)
+    if (cut != null) cuts.set(`${cut.x},${cut.y},${cut.z}`, cut)
+  }
+  for (const cut of cuts.values()) memory.rememberBlock('sugar_cane', cut, dimension)
+  return cuts.size
 }
 
 export interface CaneFarmResult {
