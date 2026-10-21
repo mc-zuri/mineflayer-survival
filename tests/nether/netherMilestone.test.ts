@@ -312,6 +312,22 @@ test('netherKit: a sword (stone at least), a chestplate and a shield got when mi
   assert.deepStrictEqual(calls, ['obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])
 })
 
+test('netherKit: a worn shield (SHIELD_WORN or less left) has another got, the fresh one not', async () => {
+  const { netherKit } = await import('../../src/milestones')
+  const { SHIELD_WORN } = await import('../../src/skills/armor')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const shield = (left: number): any => ({ ...item('shield', 1), maxDurability: 336, durabilityUsed: 336 - left })
+  for (const [left, want] of [[SHIELD_WORN, 2], [SHIELD_WORN + 1, 0]] as Array<[number, number]>) {
+    const gear = NETHER_GEAR().filter((i: any) => i.name !== 'shield')
+    const bot = fakeBot({ items: [...gear, shield(left)] })
+    const asked: any[] = []
+    const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async (reqs: any[]) => { asked.push(...reqs) }, task: async () => {} }
+    await netherKit(bot, executor, new AbortController().signal, () => {})
+    const s = asked.find(r => r.item === 'shield')
+    assert.equal(s?.count ?? 0, want, `${left} left`)
+  }
+})
+
 test('netherKit: short of the food, the farm grown by the base is harvested and baked before the gate\'s gathering is planned', async () => {
   const { netherKit } = await import('../../src/milestones')
   const { rememberFarm } = await import('../../src/skills/farm')

@@ -52,6 +52,7 @@ import { NETHER_SCAFFOLD_KEEP } from './executor/keep'
 import { heldFor, type ObtainRequest } from './planner/obtain'
 import type { Inventory } from './core/inventory'
 import { Vec3 } from 'vec3'
+import { shieldWorn } from './skills/armor'
 import { findBlocks } from './core/findBlocks'
 import { nearestBiomeSpot, pearlLeg } from './nether/ground'
 import { endermenFromCover, forgetCover } from './nether/endermanCover'
@@ -941,7 +942,13 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   const want: Array<{ item: string | string[], count: number, optional?: boolean }> = []
   if (countItems(bot, ['diamond_sword', 'iron_sword', 'netherite_sword']) === 0) want.push({ item: 'iron_sword', count: 1, optional: true })
   if (!/(iron|diamond|netherite)_chestplate/.test(worn('torso') ?? '') && countItems(bot, ['iron_chestplate', 'diamond_chestplate', 'netherite_chestplate']) === 0) want.push({ item: 'iron_chestplate', count: 1, optional: true })
-  if (countItems(bot, 'shield') === 0 && bot.inventory.slots[45]?.name !== 'shield') want.push({ item: 'shield', count: 1, optional: true })
+  // a shield, and another when the ones carried are all worn (SHIELD_WORN of its 336 left: a blocked fireball takes 6),
+  // the shield reflex holding the fresher: a bunker's fight blocks a fireball every 100 to 300 ticks, and a 1.21.11 bot
+  // came out of 24000 ticks of one with no shield left, fireballs and punches through its slit unblocked (tests/
+  // integration/blaze BLAZE_AT=s2fortress2)
+  const shields = [...bot.inventory.items(), bot.inventory.slots[45]].filter((i): i is NonNullable<typeof i> => i?.name === 'shield')
+  if (shields.length === 0) want.push({ item: 'shield', count: 1, optional: true })
+  else if (shields.every(shieldWorn)) want.push({ item: 'shield', count: shields.length + 1, optional: true })
   if (want.length > 0) {
     await executor.obtain(want as any, signal).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err

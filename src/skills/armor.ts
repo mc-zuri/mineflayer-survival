@@ -195,6 +195,11 @@ export function shieldLeft (item: Item): number {
   return remainingDurability(item)
 }
 
+/** whether a shield is worn: SHIELD_WORN or less left (one whose durability isn't known, not) */
+export function shieldWorn (item: Item): boolean {
+  return ((item as any).maxDurability ?? 0) > 0 && shieldLeft(item) <= SHIELD_WORN
+}
+
 /**
  * The shield to put in the off hand now: the bag's freshest when the off hand is empty, or holds a worn shield
  * (SHIELD_WORN) and the bag a fresher one; null for none. A 1.21.11 bot carried its shield in the bag 100000 ticks, its
