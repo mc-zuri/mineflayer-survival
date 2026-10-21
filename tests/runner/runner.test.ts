@@ -639,18 +639,20 @@ test('rekit with nothing to make a pickaxe from gets one the way the game starts
   assert.deepEqual(calls.slice(0, 3), ['ensurePickaxe', 'obtain stone_pickaxe,wooden_pickaxe', 'navigate'])
 })
 
-test('after a death the basics lacking are made again in order: stone tools, a shield (f7-26.3: speared with none), iron ones, a bucket, a chestplate', async () => {
+test('after a death the basics lacking are made again in order: stone tools (an axe among them, for the wood), a shield (f7-26.3: speared with none), iron ones, a bucket, a chestplate', async () => {
   const { reequipGoals } = await import('../../src/runner')
   const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
-  assert.deepEqual(reequipGoals(inv({ dirt: 3 })).map(g => g.item), ['stone_pickaxe', 'stone_sword', 'shield', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
-  assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), [])
+  assert.deepEqual(reequipGoals(inv({ dirt: 3 })).map(g => g.item), ['stone_pickaxe', 'stone_sword', 'stone_axe', 'shield', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
+  assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), ['stone_axe'])
+  // any axe will do
+  for (const axe of ['wooden_axe', 'iron_axe', 'diamond_axe']) assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, [axe]: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), [], axe)
   const bot = fakeBot({ dirt: 3 })
   const runner = new Runner(bot, { log: () => {} })
   const asked: string[] = []
   runner.executor.obtain = (async (reqs: any[]) => { asked.push(reqs[0].item); bot.give(reqs[0].item, 1) }) as any
   await runner.reequip()
   // the stone ones, then the iron ones (the stone sword's need gone once iron came is still asked in order)
-  assert.deepEqual(asked, ['stone_pickaxe', 'stone_sword', 'shield', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
+  assert.deepEqual(asked, ['stone_pickaxe', 'stone_sword', 'stone_axe', 'shield', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
 })
 
 test('in the nether milestone the executor\'s stores keep what it and the eyes need: the goals, their plan, the kit (Runner.milestoneNeeds)', async () => {

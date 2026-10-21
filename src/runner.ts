@@ -139,6 +139,9 @@ export function reequipGoals (inv: { count: (name: string) => number, countAny?:
   const swords = ['netherite_sword', 'diamond_sword', 'iron_sword']
   if (any([...picks, 'stone_pickaxe', 'wooden_pickaxe']) === 0) out.push({ item: 'stone_pickaxe', count: 1 })
   if (any([...swords, 'stone_sword']) === 0) out.push({ item: 'stone_sword', count: 1 })
+  // (an axe: by hand a log is dearer than the wood's top-up takes, 'not now' at each, and a log step takes no bulk;
+  // a 26.3 bot back from a death with none had no wood stocked for 70000 ticks, f1-26.3 t49819 to t123552)
+  if (any(['wooden_axe', 'stone_axe', 'copper_axe', 'golden_axe', 'iron_axe', 'diamond_axe', 'netherite_axe']) === 0) out.push({ item: 'stone_axe', count: 1 })
   // (a shield early: 6 planks and an iron ingot, and a mounted spear's charge, an arrow, a creeper's blast taken on it;
   // a 26.3 bot re-kitting with no shield was speared from 12.4 to 2.1 in one charge, f7-26.3)
   if (any(['shield']) === 0) out.push({ item: 'shield', count: 1 })
@@ -2405,7 +2408,7 @@ export class Runner {
 
   /**
    * After a death, the basics the bot lacks made again in order (reequipGoals: a pickaxe and a sword of stone at
-   * least, then iron ones, a bucket, an iron chestplate), each as can be, within REEQUIP_TICKS in all
+   * least and an axe, then iron ones, a bucket, an iron chestplate), each as can be, within REEQUIP_TICKS in all
    */
   async reequip (signal?: AbortSignal): Promise<void> {
     // the iron's ore and the stone are down a mine: at night a bot short of the gear its progress had waits for the
