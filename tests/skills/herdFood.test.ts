@@ -359,3 +359,26 @@ test('startHerd holding no breeding food: the farm\'s grown wheat harvested firs
   assert.equal(await herdFoodFirst(pigs, g.executor, signal(), () => {}), true)
   assert.deepEqual(g.obtained, [])
 })
+
+test('a fetch whose home has no ground for a pen pens the animals where they are found (f5-1.21.11: \'no ground for a pen of 9 near (0, 71, 24)\', the sheep 227 off not penned)', async () => {
+  const { startHerd } = await import('../../src/milestones')
+  const { herdFromMemory: herdOf } = await import('../../src/skills/herd')
+  const { bot, memory, cows } = homeWithCowsOff(200)
+  const there = new Vec3(206, 64, 0)
+  const pen = planPen(() => ({ name: 'air', boundingBox: 'empty' }), there, 7, 'west')
+  const { executor, tasks } = fakeExecutor(bot, memory, async (name) => {
+    if (name === 'the herd pen') {
+      if (bot.entity.position.x < 100) throw new Error('NOT_FOUND: no ground for a pen near home')
+      rememberPen(memory, pen)
+      for (const c of cows) c.position = there.offset(0.5, 0, 0.5)
+      return { pen, inside: 2, built: true }
+    }
+    if (name === 'to the cows') { for (const c of cows) bot.entities[c.id] = c; bot.entity.position = new Vec3(198.5, 64, 0.5) }
+  })
+  const lines: string[] = []
+  assert.equal(await startHerd(bot, executor, signal(), l => lines.push(l)), true, lines.join(' | '))
+  assert.ok(lines.some(l => /no pen at home: the cows penned where they are/.test(l)), lines.join(' | '))
+  assert.equal(tasks[tasks.length - 1], 'the herd pen')
+  assert.ok(tasks.includes('to the cows') && !tasks.includes('lead the cows home'), tasks.join(', '))
+  assert.ok(herdOf(memory)?.pos.equals(there))
+})

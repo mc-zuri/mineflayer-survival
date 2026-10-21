@@ -2893,7 +2893,8 @@ export async function fetchHerd (bot: Bot, executor: Executor, home: Vec3, signa
     penned = await withTickBudget(bot, HERD_FETCH_TICKS, signal, async (s) => {
       // (the pen at home first: the herd led straight in)
       const atHome = leadHome ? await penForHerd(bot, executor, home, mob, s, log, HERD_PEN_TICKS) : null
-      if (leadHome && atHome == null) return null
+      // (no pen at home, the ground there taking none: they're penned where they are found)
+      if (leadHome && atHome == null) log(`herd: no pen at home: the ${mob}s penned where they are`)
       await executor.task(`to the ${mob}s`, async (t) => await overland(bot, { target: group.pos, range: 6 }, t), s)
       if (atHome == null) return await penForHerd(bot, executor, group.pos, mob, s, log, HERD_PEN_TICKS)
       const pen = atHome.pen

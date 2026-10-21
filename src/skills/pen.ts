@@ -587,6 +587,84 @@ export function choosePenSite (lookup: Lookup, home: Vec3, size: number): { cent
   return best == null ? null : { center: best.center, side: best.side }
 }
 
+/** how far from home a pen's ground is flattened when no flat ground is near (flatPenSite) */
+export const PEN_FLATTEN_RANGE = 24
+/** the cells a flattening digs and fills at the most */
+export const PEN_FLATTEN_MOST = 30
+/** the largest pen whose ground is flattened (an inside of 5 by 5): a bigger one is built on flat ground only */
+export const PEN_FLATTEN_SIZE = 7
+/** the natural blocks a flattening digs out of a pen's inside (never a block the bot put down: the base's) */
+const NATURAL = /^(grass_block|dirt|coarse_dirt|podzol|rooted_dirt|mycelium|moss_block|stone|granite|diorite|andesite|tuff|gravel|sand|red_sand|clay|mossy_cobblestone|snow|snow_block|.+_log|.+_leaves|short_grass|tall_grass|fern|large_fern|dead_bush|sweet_berry_bush|brown_mushroom|red_mushroom|dandelion|poppy|.+_tulip|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|allium|blue_orchid|azalea|flowering_azalea|pumpkin)$/
+
+export interface FlatPenSite {
+  center: Vec3
+  side: Side
+  /** the inside's cells to fill (a hole a block deep under one) */
+  fills: Vec3[]
+  /** the inside's cells and the ones over them to dig out (a boulder, a log, a bush) */
+  digs: Vec3[]
+}
+
+/**
+ * Where a pen of `size` goes near `home` when no flat ground is (choosePenSite's null): the middle within
+ * PEN_FLATTEN_RANGE whose inside takes the least work to flatten, a hole a block deep filled and a natural block in an
+ * inside cell or over it dug out (a deeper hole, water, lava or a block not the land's leaves it out), PEN_FLATTEN_MOST
+ * cells at the most, with the ring's own fillers and clearing counted. A pine taiga's home among its boulders and
+ * spruces had no ground for a pen of 9 nor of 7, and a herd fetched from 227 blocks off had no pen to go in ('no ground
+ * for a pen of 9 near (0, 71, 24)', f5-1.21.11 resumed from its base, t217225)
+ */
+export function flatPenSite (lookup: Lookup, home: Vec3, size: number, range = PEN_FLATTEN_RANGE): FlatPenSite | null {
+  const r = Math.floor(Math.max(MIN_PEN_SIZE, size) / 2)
+  const h = home.floored()
+  const solid = (p: Vec3): boolean => isSolid(lookup(p) as any)
+  const free = (p: Vec3): boolean => isFree(lookup(p) as any)
+  let best: (FlatPenSite & { score: number }) | null = null
+  for (let dx = -range; dx <= range; dx += 2) {
+    for (let dz = -range; dz <= range; dz += 2) {
+      const d = Math.max(Math.abs(dx), Math.abs(dz))
+      if (d < r + 3) continue
+      for (const dy of [0, 1, -1, 2, -2]) {
+        const center = h.offset(dx, dy, dz)
+        const fills: Vec3[] = []
+        const digs: Vec3[] = []
+        let ok = true
+        for (let ix = -r + 1; ix < r && ok; ix++) {
+          for (let iz = -r + 1; iz < r && ok; iz++) {
+            const cell = center.offset(ix, 0, iz)
+            const under = cell.offset(0, -1, 0)
+            if (!solid(under)) {
+              if (!free(under) || !solid(under.offset(0, -1, 0))) { ok = false; break }
+              fills.push(under)
+            }
+            for (const p of [cell, cell.offset(0, 1, 0)]) {
+              if (free(p)) continue
+              if (!NATURAL.test(lookup(p)?.name ?? '')) { ok = false; break }
+              digs.push(p)
+            }
+          }
+        }
+        if (!ok || fills.length + digs.length > PEN_FLATTEN_MOST) continue
+        const side = nearestSide(center, h)
+        const plan = planPen(lookup, center, size, side)
+        const score = fills.length * 2 + digs.length + plan.fillers.length * 3 + plan.clear.length * 2 + d * 0.1
+        if (best == null || score < best.score) best = { center, side, fills, digs, score }
+      }
+    }
+  }
+  return best == null ? null : { center: best.center, side: best.side, fills: best.fills, digs: best.digs }
+}
+
+/** a pen's ground flattened (flatPenSite's): its digs dug out, the top first, then its holes filled from what's held */
+export async function flattenPenGround (bot: Bot, site: FlatPenSite, signal?: AbortSignal): Promise<void> {
+  for (const pos of [...site.digs].sort((a, b) => b.y - a.y)) await clearCell(bot, pos, signal)
+  for (const pos of site.fills) {
+    if (isSolid(bot.blockAt(pos))) continue
+    const filler = PEN_FILLERS.find(n => countItems(bot, n) > 0)
+    if (filler == null) throw new SkillError('MISSING_ITEMS', 'no block to fill the ground of the pen with')
+    await placeWithRetry(bot, pos, filler, undefined, signal)
+  }
+}
+
 export interface HerdPenArgs {
   /** where the herd lives (the HERD point of interest): the pen is built near it */
   home: Vec3
@@ -617,7 +695,16 @@ export async function herdPen (bot: Bot, args: HerdPenArgs, signal?: AbortSignal
     protectPen(bot, pen)
   } else {
     const size = args.size ?? 9
-    const site = choosePenSite(p => bot.blockAt(p) as any, args.home, size)
+    let site: { center: Vec3, side: Side } | null = choosePenSite(p => bot.blockAt(p) as any, args.home, size)
+    // (no flat ground: a small pen's flattened, flatPenSite)
+    if (site == null && size <= PEN_FLATTEN_SIZE) {
+      const flat = flatPenSite(p => bot.blockAt(p) as any, args.home, size)
+      if (flat != null) {
+        trace('herdPen: the ground flattened at', flat.center.toString(), flat.digs.length, 'dug,', flat.fills.length, 'filled')
+        await flattenPenGround(bot, flat, signal)
+        site = flat
+      }
+    }
     if (site == null) throw new SkillError('NOT_FOUND', `no ground for a pen of ${size} near ${args.home.toString()}`)
     pen = await buildPen(bot, { center: site.center, size, side: site.side, obtain: args.obtain }, signal)
     rememberPen(args.memory, pen)

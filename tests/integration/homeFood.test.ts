@@ -119,4 +119,37 @@ describe(`the home's food on a ${DEFAULT_VERSION} server`, { timeout: 30 * 60 * 
     assert.strictEqual(bred.fed, 2)
     assert.ok(await waitUntil(bot, () => cows().length >= 3, 400), 'no calf')
   })
+  it('no flat ground near home (boulders every few blocks): a pen of 7 built on ground flattened for it', async () => {
+    await give('oak_log', 16)
+    await give('dirt', 32)
+    // a home 120 blocks off the farm's, its ground set with boulders and logs in a lattice (no inside of 5 by 5 free)
+    const home = origin.offset(0, 0, 120)
+    // (there first: the server sets blocks in loaded chunks only)
+    await run(`tp ${USERNAME} ${home.x + 0.5} ${home.y} ${home.z + 0.5}`)
+    assert.ok(await waitUntil(bot, () => bot.entity.position.distanceTo(home.offset(0.5, 0, 0.5)) < 1, 200))
+    await bot.waitForChunksToLoad()
+    await run(`fill ${xyz(home.offset(-30, 0, -30))} ${xyz(home.offset(30, 4, 30))} air`)
+    for (let dx = -28; dx <= 28; dx += 3) {
+      for (let dz = -28; dz <= 28; dz += 4) {
+        if (Math.abs(dx) <= 2 && Math.abs(dz) <= 2) continue
+        await run(`setblock ${xyz(home.offset(dx, 0, dz))} ${(dx + dz) % 2 === 0 ? 'mossy_cobblestone' : 'spruce_log'}`)
+      }
+    }
+    assert.ok(await waitUntil(bot, () => bot.blockAt(home.offset(26, 0, 24))?.name === 'mossy_cobblestone' || bot.blockAt(home.offset(26, 0, 24))?.name === 'spruce_log', 200))
+    assert.ok(await waitUntil(bot, () => bot.blockAt(home.offset(2, 0, 4))?.name === 'mossy_cobblestone' || bot.blockAt(home.offset(2, 0, 4))?.name === 'spruce_log', 200))
+    const { choosePenSite, herdPen, PEN_FLATTEN_SIZE } = await import('../../src/skills/pen')
+    assert.strictEqual(choosePenSite(p => bot.blockAt(p) as any, home, PEN_FLATTEN_SIZE), null)
+    const penMemory = new WorldMemory()
+    const res = await herdPen(bot, { home, memory: penMemory, obtain: async (reqs) => { await executor.obtain(reqs, new AbortController().signal) }, size: PEN_FLATTEN_SIZE })
+    console.log(`pen: ${res.pen.size} across at ${res.pen.center.toString()}, built ${String(res.built)}`)
+    assert.ok(res.built)
+    for (const p of res.pen.fences) assert.ok(bot.blockAt(p)?.name.endsWith('_fence'), `no fence at ${p.toString()}: ${bot.blockAt(p)?.name ?? '?'}`)
+    const r = Math.floor(res.pen.size / 2)
+    for (let dx = -r + 1; dx < r; dx++) {
+      for (let dz = -r + 1; dz < r; dz++) {
+        const cell = res.pen.center.offset(dx, 0, dz)
+        assert.strictEqual(bot.blockAt(cell)?.boundingBox, 'empty', `${bot.blockAt(cell)?.name ?? '?'} inside the pen at ${cell.toString()}`)
+      }
+    }
+  })
 })

@@ -150,3 +150,31 @@ test('leadIntoPen: a cow in the gate\'s cell is no stray to go out for (four tri
   }
   assert.deepEqual(trips, [])
 })
+
+test('flatPenSite: no flat ground near home (boulders and spruces everywhere): the inside of a pen of 7 whose flattening takes the least work, its boulders dug or its holes filled; none with only water about, nor past PEN_FLATTEN_MOST', async () => {
+  const { flatPenSite, choosePenSite, PEN_FLATTEN_MOST } = await import('../../src/skills/pen')
+  const { Vec3 } = await import('vec3')
+  // a taiga floor at y 63 with a mossy boulder or a log on every 3rd cell, one hole a block deep at (12, 63, 2)
+  const world = (p: any): any => {
+    if (p.y < 63) return { name: p.x === 12 && p.z === 2 && p.y === 62 ? 'air' : 'dirt', boundingBox: p.x === 12 && p.z === 2 && p.y === 62 ? 'empty' : 'block' }
+    if (p.y === 63) return { name: 'podzol', boundingBox: 'block' }
+    if (p.y === 64 && (p.x * 5 + p.z * 3) % 7 === 0) return { name: (p.x + p.z) % 2 === 0 ? 'mossy_cobblestone' : 'spruce_log', boundingBox: 'block' }
+    return { name: 'air', boundingBox: 'empty' }
+  }
+  const home = new Vec3(0, 64, 0)
+  assert.equal(choosePenSite(world, home, 7), null)
+  const site = flatPenSite(world, home, 7)
+  assert.ok(site != null)
+  assert.ok(site.digs.length + site.fills.length <= PEN_FLATTEN_MOST)
+  assert.ok(site.digs.length + site.fills.length > 0)
+  assert.ok(site.digs.every(p => /mossy_cobblestone|spruce_log/.test(world(p).name)))
+  assert.ok(site.fills.every(p => world(p).boundingBox === 'empty' && world(p.offset(0, -1, 0)).boundingBox === 'block'))
+  assert.ok(Math.max(Math.abs(site.center.x), Math.abs(site.center.z)) <= 24)
+  // all water: none
+  const wet = (p: any): any => p.y < 63 ? { name: 'dirt', boundingBox: 'block' } : p.y === 63 ? { name: 'water', boundingBox: 'empty' } : { name: 'air', boundingBox: 'empty' }
+  assert.equal(flatPenSite(wet, home, 7), null)
+  // the base's own blocks (cobblestone set about everywhere): never dug, the site over them filled up instead
+  const walls = (p: any): any => p.y < 64 ? { name: 'dirt', boundingBox: 'block' } : p.y === 64 && (p.x + p.z) % 2 === 0 ? { name: 'cobblestone', boundingBox: 'block' } : { name: 'air', boundingBox: 'empty' }
+  const over = flatPenSite(walls, home, 7)
+  assert.ok(over == null || over.digs.every(p => walls(p).name !== 'cobblestone'))
+})
