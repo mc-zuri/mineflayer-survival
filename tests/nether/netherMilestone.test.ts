@@ -1089,7 +1089,7 @@ test('brewKit: before the nether, 3 glass bottles, a crafting table and 3 cobble
   assert.match(lines.join(' | '), /no water bottles: no sand found/)
 })
 
-test('the blaze rods with no bow and no fire resistance to be had (blazeRodsWithBrew: noFireResistance): back to the overworld, the milestone not ready, no fight (full-1.21.11-fresh-e: the sword alone at a throne, burned)', async () => {
+test('the blaze rods with no bow and no fire resistance to be had: from a bunker only (bunkerOnly); none to be had by the spawner (noFireResistance): back to the overworld, the milestone not ready, no fight in the open (full-1.21.11-fresh-e: the sword alone at a throne, burned)', async () => {
   const { netherHandler } = await import('../../src/milestones')
   const fortressSkills = require('../../src/nether/fortressSkills')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
@@ -1103,7 +1103,11 @@ test('the blaze rods with no bow and no fire resistance to be had (blazeRodsWith
   const real = fortressSkills.collectBlazeRods
   const tasks: string[] = []
   const lines: string[] = []
-  fortressSkills.collectBlazeRods = async () => { tasks.push('fight'); return { rods: 0, kills: 0, ticks: 0 } }
+  const { SkillError } = await import('../../src/skills/errors')
+  fortressSkills.collectBlazeRods = async (_b: unknown, a: any) => {
+    tasks.push(a.bunkerOnly === true ? 'from a bunker only' : 'fight')
+    throw Object.assign(new SkillError('MISSING_ITEMS', 'no bunker to fight from by the spawner'), { noFireResistance: true })
+  }
   const executor: any = { memory, tasks: { tick: 0 }, obtain: async () => {}, task: async (name: string, fn: (s: AbortSignal) => Promise<unknown>) => { tasks.push(name); if (name === 'back to the overworld') return; return await fn(new AbortController().signal) } }
   let err: any = null
   try {
@@ -1112,8 +1116,8 @@ test('the blaze rods with no bow and no fire resistance to be had (blazeRodsWith
     fortressSkills.collectBlazeRods = real
   }
   assert.equal(err?.notReady, true, String(err))
-  assert.deepEqual(tasks, ['blaze rods', 'back to the overworld'])
-  assert.ok(lines.some(l => /fire resistance: no bow and none of it: no fight/.test(l)), lines.join(' | '))
+  assert.deepEqual(tasks, ['blaze rods', 'from a bunker only', 'back to the overworld'])
+  assert.ok(lines.some(l => /fire resistance: no bow and none of it: the sword from a bunker only/.test(l)), lines.join(' | '))
 })
 
 test('netherKit: no bow to be had, the water bottles held: ready with no slime ball nor magma cream (the cubes of the nether give the cream; asking for a ball kept full-1.21.11-fresh-g out for good), not ready without the bottles', async () => {
