@@ -1663,3 +1663,31 @@ test('starving (food 6 or under, nothing to eat carried) cuts any work under way
   assert.ok(!logs.some(l => /milestone wood failed/.test(l)), logs.join(' | '))
   assert.ok(logs.some(l => /the work stopped for food/.test(l)), logs.join(' | '))
 })
+
+test('the upkeep between trips tends the farm before the herd (keepFarm: started, harvested, baked, grown), by day once food is reached', async () => {
+  const milestones = require('../../src/milestones')
+  const realFarm = milestones.keepFarm
+  const realHerd = milestones.tendHerd
+  const order: string[] = []
+  milestones.keepFarm = async () => { order.push('farm'); return 0 }
+  milestones.tendHerd = async () => { order.push('herd'); return 0 }
+  try {
+    const bot = fakeBot()
+    const runner: any = new Runner(bot, { log: () => {}, handlers: {} })
+    // no food milestone yet: nothing
+    await runner.keepHerd()
+    assert.deepEqual(order, [])
+    runner.reached.push({ id: 'food', tick: 0, wallMs: 0 })
+    runner.herdTendedAt = -Infinity
+    await runner.keepHerd()
+    assert.deepEqual(order, ['farm', 'herd'])
+    // by night: none
+    runner.herdTendedAt = -Infinity
+    bot.time.timeOfDay = 18000
+    await runner.keepHerd()
+    assert.deepEqual(order, ['farm', 'herd'])
+  } finally {
+    milestones.keepFarm = realFarm
+    milestones.tendHerd = realHerd
+  }
+})

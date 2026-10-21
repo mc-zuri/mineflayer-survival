@@ -32,7 +32,7 @@ import { SPAWNER_POI } from './skills/spawnerFarm'
 import { keepWaterBucket, waterBucketEmpty } from './skills/bucket'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
-import { MILESTONE_HANDLERS, harvestGrownFarms, keepCaneFarm, tendHerd } from './milestones'
+import { MILESTONE_HANDLERS, harvestGrownFarms, keepCaneFarm, keepFarm, tendHerd } from './milestones'
 import { knownCaneFarm } from './skills/caneFarm'
 import { EPOCHS, EPOCH_HANDLERS, isEpoch, nextEpoch } from './epochs'
 import { TRIP_KIT, keepUnbroken, takeTripKit } from './skills/tripKit'
@@ -1370,8 +1370,9 @@ export class Runner {
   }
 
   /**
-   * The herd's upkeep between trips (tendHerd: started when there's none, bred, the surplus slaughtered for the food
-   * the stock is short of and cooked, the gate shut), from the food milestone on, by day, every HERD_TEND_TICKS at
+   * The farm's and the herd's upkeep between trips (keepFarm: the farm started when there's none, harvested, baked and
+   * grown; tendHerd: started when there's none, bred, the surplus slaughtered for the food the stock is short of and
+   * cooked, the gate shut), from the food milestone on, by day, every HERD_TEND_TICKS at
    * most, within HERD_UPKEEP_TICKS; what fails is logged and the game goes on
    */
   async keepHerd (signal?: AbortSignal): Promise<void> {
@@ -1387,6 +1388,12 @@ export class Runner {
     const ctrl = new AbortController()
     const outer = signal ?? ctrl.signal
     await this.withBudget(HERD_UPKEEP_TICKS, outer, async (s) => {
+      // the farm first (started when there's none, its grown wheat harvested, baked and sown further): the herd's
+      // wheat comes from it
+      await keepFarm(bot, this.executor, s, this.log).catch(err => {
+        if (TaskError.is(err, 'DIED') || s.aborted) throw err
+        this.log(`farm: upkeep: ${(err as Error).message}`)
+      })
       await this.tendHerdFor(want, s)
       // and the cane farm by home: its grown canes cut (the books' paper comes in so between the trips)
       if (knownCaneFarm(this.memory) != null) await keepCaneFarm(bot, this.executor, s, this.log)

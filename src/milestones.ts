@@ -2617,6 +2617,34 @@ export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: A
   return bread
 }
 
+/** ticks before the upkeep tries a farm's start again that came to nothing (keepFarm) */
+export const FARM_RETRY_TICKS = 6000
+/** the tick the upkeep last tried a farm's start at, by bot */
+const farmTriedAt = new WeakMap<Bot, number>()
+
+/**
+ * The farm's upkeep between trips (the runner's keepHerd, by home): with no farm, its start (startFarm, every
+ * FARM_RETRY_TICKS at most); with one, its grown plots harvested and sown again, the wheat baked and the farm grown
+ * from the harvest's seeds (harvestGrownFarms), and the seeds held sown at a farm near (growFarms). The farm was started
+ * by the food milestone alone: a 1.21.11 bot that had no water for one then never sowed one, its meals hunted for 500000
+ * ticks (f5-1.21.11, seed 671229120248951486). Resolves the bread baked.
+ */
+export async function keepFarm (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const dimension = normalizeDimension(bot.game?.dimension)
+  if (dimension !== 'overworld' || bot.entity == null) return 0
+  if (knownFarms(executor.memory, dimension).length === 0) {
+    const now = executor.tasks?.tick ?? 0
+    const last = farmTriedAt.get(bot)
+    if (last != null && now - last < FARM_RETRY_TICKS) return 0
+    farmTriedAt.set(bot, now)
+    await startFarm(bot, executor, signal, log)
+    return 0
+  }
+  const bread = await harvestGrownFarms(bot, executor, signal, log)
+  await growFarms(bot, executor, signal, log)
+  return bread
+}
+
 /** ticks the herd's start may take (its pen built, the animals led in), at most */
 export const HERD_START_TICKS = 8000
 /** ticks the pen's fences and gate may cost to get (the plan's estimate) for the herd's start: a smaller pen past it */

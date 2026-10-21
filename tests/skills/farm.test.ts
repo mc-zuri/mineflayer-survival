@@ -384,3 +384,41 @@ test('harvestGrownFarms: a farm harvested is sown further from the seeds it gave
   assert.equal(grown, 6)
   assert.equal(knownFarms(memory)[0].cells.length, 18)
 })
+
+test('keepFarm between trips: no farm, its start tried by home, again only after FARM_RETRY_TICKS; a farm grown, harvested and its wheat baked (f5-1.21.11: no farm all game once the food milestone had none)', async () => {
+  const { keepFarm, FARM_RETRY_TICKS } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const memory = new WorldMemory()
+  memory.setBase(new Vec3(0, 64, 0), 'overworld')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('water_bucket', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.time = { age: 0 }
+  const steps: any[] = []
+  const obtained: any[] = []
+  const executor: any = {
+    memory,
+    tasks: { tick: 100 },
+    farmCost: () => 0,
+    plan: () => ({ ok: true, cost: 100 }),
+    obtain: async (reqs: any[]) => { obtained.push(...reqs) },
+    runStep: async (step: any) => { steps.push(step); bot.inventory.slots[20] = item('wheat', 9); return { gained: 9 } },
+    task: async () => {}
+  }
+  const lines: string[] = []
+  await keepFarm(bot, executor, new AbortController().signal, l => lines.push(l))
+  // (a stone world: no ground for a hole) the start tried
+  assert.ok(lines.some(l => /no farm yet/.test(l)), lines.join(' | '))
+  const tried = lines.length
+  executor.tasks.tick += FARM_RETRY_TICKS - 1
+  await keepFarm(bot, executor, new AbortController().signal, l => lines.push(l))
+  assert.equal(lines.length, tried)
+  executor.tasks.tick += 1
+  await keepFarm(bot, executor, new AbortController().signal, l => lines.push(l))
+  assert.ok(lines.length > tried)
+  // a farm sown and grown: harvested, its wheat (beyond the herd's 6) baked
+  rememberFarm(memory, { water: new Vec3(10, 63, 10), cells: [new Vec3(11, 63, 10)], crop: 'wheat' }, 0)
+  await keepFarm(bot, executor, new AbortController().signal, () => {})
+  assert.equal(steps.length, 1)
+  assert.equal(steps[0].kind, 'farm')
+  assert.ok(obtained.some(r => r.item === 'bread' && r.count === 1), JSON.stringify(obtained))
+})
