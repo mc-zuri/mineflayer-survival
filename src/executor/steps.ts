@@ -181,6 +181,10 @@ async function findBlocks (bot: Bot, names: string[], ctx: StepContext, alternat
     ctx.memory.forgetBlock(known, dimension)
   }
   if (near(alternatives)) return alternatives
+  // obsidian isn't explored for: none lies about but by lava or water (a lake's lid, a ruined portal's, kept off:
+  // obsidianHazard), and its exploring was a surface spiral at night in plain iron, where a 26.3 bot was shot dead by
+  // the skeletons (ls4 resumed from its diamonds, t124059 to t124712); it's cast at the lava instead (obsidianFromPools)
+  if ([...names, ...alternatives].every(n => NOT_EXPLORED.includes(n))) throw new SkillError('NOT_FOUND', `no ${names.join(', ')} known near: not explored for`)
   ctx.log(`exploring for ${names.join(', ')}`)
   const all = [...names, ...alternatives]
   // the food that grows is looked for no further out than the animals: none there, the plan goes for another food
@@ -217,6 +221,9 @@ async function findBlocks (bot: Bot, names: string[], ctx: StepContext, alternat
  * time where it was, walked 166 blocks over 29000 ticks before its spiral ran out, the enchanting held up (rt-1)
  */
 export const FOOD_EXPLORE_TICKS = 6000
+
+/** the blocks a mine step doesn't explore for, only mines where known or in sight (findBlocks) */
+export const NOT_EXPLORED = ['obsidian', 'crying_obsidian']
 
 /**
  * A mine step's exploring progress for the food that grows: the executor's, kept across the plans (one cut off by its

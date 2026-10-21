@@ -123,3 +123,15 @@ test('a mine step for obsidian passes over the obsidian by lava (a pool\'s shore
   await stubbed('../../src/skills/collectBlock', 'collectBlock', collect, async () => await runMine(step, ctxOf(bot)))
   assert.deepEqual(seen, [true, false])
 })
+
+test('a mine step for obsidian with none known near is NOT_FOUND at once, not explored for (ls4 resumed: a night\'s surface spiral)', async () => {
+  const { runMine } = await import('../../src/executor/steps')
+  const step = { kind: 'mine', item: 'obsidian', count: 1, block: 'obsidian', blocks: ['obsidian'], blockCount: 1, tool: 'diamond_pickaxe', dimension: 'overworld', cost: 100 } as any
+  const bot = botAt(true, [])
+  let explored = 0
+  let err: any = null
+  await stubbed('../../src/executor/explore', 'exploreForBlocks', async () => { explored++; return false }, async () => await runMine(step, ctxOf(bot))).catch(e => { err = e })
+  assert.equal(err?.code ?? err?.reason, 'NOT_FOUND')
+  assert.match(String(err?.message), /not explored for/)
+  assert.equal(explored, 0)
+})
