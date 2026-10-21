@@ -1016,3 +1016,28 @@ test('hostiles reflex: a mob attacking the bot (hit it within ATTACK_HOLD_TICKS,
   const old = bear(2.5)
   assert.strictEqual(check(hostilesReflex, { ...kit, entities: [old] }, {}, (engine) => { (engine as any).attackers.set(old.id, -(ATTACK_HOLD_TICKS + 500)) }), null)
 })
+
+test('hostiles reflex: a trident drowned the keep-off can\'t get away from (cornered) is walled off with the blocks carried, a block on each open line from its eyes, before a shield\'s hold (f6-26.3, t232374: held off on the shore at 4.5 health, impaled at 9.5 and 16.7 off)', async () => {
+  const { barrierCells } = await import('../../src/skills/escape')
+  // the bot on a shore strip shut in by stone but toward the sea (water east of x 3)
+  const shore = (p: Vec3): string => {
+    if (p.x >= 3) return p.y <= 63 && p.y >= 58 ? 'water' : p.y < 58 ? 'stone' : 'air'
+    if (p.y < 64) return 'stone'
+    if (p.y <= 65 && (p.x <= -1 || p.z !== 0)) return 'stone'
+    return 'air'
+  }
+  const drowned = entity({ name: 'drowned', position: new Vec3(12.5, 62, 0.5) })
+  drowned.heldItem = item('trident')
+  const bot = fakeBot({ health: 6, items: [item('iron_sword'), item('cobblestone', 16)], offhand: item('shield'), entities: [drowned], world: shore })
+  bot.world = { raycast: () => null }
+  bot.waitForTicks = async () => {}
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const first = hostilesReflex.check(engine.context())
+  assert.strictEqual(first?.detail, 'keep off drowned')
+  await assert.rejects(first.run(new AbortController().signal), /cornered/)
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'wall off drowned')
+  assert.ok(barrierCells(bot, drowned.position.offset(0, 1.6, 0), drowned).length > 0)
+  // again at once: the shield's hold, not another wall-off
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'hold off drowned')
+  engine.stop()
+})

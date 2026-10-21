@@ -341,13 +341,16 @@ export function fleeRoute (lookup: SteerLookup, from: Vec3, threats: readonly Ve
     return d
   }
   const startDistance = threatDistance(start)
+  const startWet = water(start) || water(start.offset(0, -1, 0))
   const keepOff = opts.keepOff ?? Math.min(FLEE_ROUTE_KEEP_OFF, startDistance - 0.25)
   /** where a body stepping into the open column at `n` lands: its feet's cell (a drop of 3 at most), or null */
   const landing = (n: Vec3): { at: Vec3, extra: number } | null => {
     for (let d = 0; d <= 3; d++) {
       const feet = n.offset(0, -d, 0)
       if (d > 0 && !passable(feet)) return null
-      if (water(feet) || water(feet.offset(0, -1, 0))) return { at: feet, extra: FLEE_ROUTE_WATER_COST }
+      // (into the water only from it: a flee from a trident drowned on its pond's shore took the route into the pond, and
+      // was hit there, tests/integration/drownedPond 'nook')
+      if (water(feet) || water(feet.offset(0, -1, 0))) return startWet ? { at: feet, extra: FLEE_ROUTE_WATER_COST } : null
       const under = lookup(feet.offset(0, -1, 0))
       if (under != null && isDangerBlock(under.name)) return null
       if (solid(feet.offset(0, -1, 0))) return { at: feet, extra: d * 0.5 }

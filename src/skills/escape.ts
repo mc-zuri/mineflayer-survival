@@ -1077,15 +1077,23 @@ export const BLAST_BARRIER_REACH = 4.5
  */
 export function blastBarrierCells (bot: Bot, creeper: { position: Vec3, width?: number, height?: number }): Vec3[] {
   if (bot.entity.position.distanceTo(creeper.position) > BLAST_BARRIER_RANGE) return []
+  return barrierCells(bot, creeper.position.offset(0, 0.1, 0), creeper)
+}
+
+/**
+ * The cells to put a block in between `source` (a blast's middle, a shooter's eyes) and the bot's body: on each line
+ * from it to the body (0.5 and 1.5 up) that no block cuts yet, the first open cell 0.75 to 3 along with a full block
+ * beside it to put it against within BLAST_BARRIER_REACH of the eyes; none in the bot's box or `mob`'s
+ */
+export function barrierCells (bot: Bot, source: Vec3, mob?: { position: Vec3, width?: number, height?: number }): Vec3[] {
   const out = new Map<string, Vec3>()
   const eyes = eyePosition(bot)
   const solid = (p: Vec3): boolean => bot.blockAt(p)?.boundingBox === 'block'
-  const { min, max } = entityBox(creeper)
-  const inCreeper = (c: Vec3): boolean => min.x < c.x + 1 && max.x > c.x && min.y < c.y + 1 && max.y > c.y && min.z < c.z + 1 && max.z > c.z
+  const box = mob != null ? entityBox(mob) : null
+  const inMob = (c: Vec3): boolean => box != null && box.min.x < c.x + 1 && box.max.x > c.x && box.min.y < c.y + 1 && box.max.y > c.y && box.min.z < c.z + 1 && box.max.z > c.z
   for (const height of [0.5, 1.5]) {
     const body = bot.entity.position.offset(0, height, 0)
-    const blast = creeper.position.offset(0, 0.1, 0)
-    const segment = blast.minus(body)
+    const segment = source.minus(body)
     const length = segment.norm()
     if (length < 0.01) continue
     // (a block on the line already: none more)
@@ -1098,7 +1106,7 @@ export function blastBarrierCells (bot: Bot, creeper: { position: Vec3, width?: 
       if (out.has(key)) break
       const b = bot.blockAt(cell)
       if (b == null || b.boundingBox !== 'empty' || b.name === 'water' || b.name === 'lava') continue
-      if (boxInCell(bot.entity.position, cell) || inCreeper(cell)) continue
+      if (boxInCell(bot.entity.position, cell) || inMob(cell)) continue
       const support = [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]].find(([x, y, z]) => {
         const s = cell.offset(x, y, z)
         if (!solid(s)) return false
@@ -1111,6 +1119,41 @@ export function blastBarrierCells (bot: Bot, creeper: { position: Vec3, width?: 
     }
   }
   return [...out.values()]
+}
+
+/** the most blocks wallOffShooter puts */
+export const WALL_OFF_BLOCKS = 4
+
+/**
+ * A shooter the bot can't get away from (a trident drowned in the water, the bot cornered on its shore) walled off: a
+ * block on each open line from its eyes to the bot's body (barrierCells), again as it moves, WALL_OFF_BLOCKS at most;
+ * a trident or an arrow stops at a block, and out of sight it throws none (RangedAttackGoal: Sensing.hasLineOfSight).
+ * Resolves the blocks put.
+ */
+export async function wallOffShooter (bot: Bot, shooter: Entity, signal?: AbortSignal): Promise<number> {
+  const { sealItem } = await import('./shelter')
+  const { placeBlock } = await import('./placeBlock')
+  let put = 0
+  const failed = new Set<string>()
+  for (let tries = 0; tries < WALL_OFF_BLOCKS * 2 && put < WALL_OFF_BLOCKS; tries++) {
+    throwIfAborted(signal)
+    if (!isAlive(bot, shooter)) break
+    const item = sealItem(bot)
+    if (item == null) break
+    const eyes = shooter.position.offset(0, (shooter.height ?? 1.95) * 0.85, 0)
+    const cell = barrierCells(bot, eyes, shooter).find(c => !failed.has(c.toString()))
+    if (cell == null) break
+    bot.clearControlStates()
+    try {
+      await placeBlock(bot, { pos: cell, item }, signal)
+      put++
+    } catch (err) {
+      if (isAbort(err)) throw err
+      failed.add(cell.toString())
+      trace('wallOffShooter: no block at', cell.toString(), (err as Error).message)
+    }
+  }
+  return put
 }
 
 /** times a cell that took no block (sightCells) is tried in an evade */

@@ -1,7 +1,7 @@
 import type { Bot } from 'mineflayer'
 import { armorUpgrades, equipArmor, equipTotem } from '../skills/armor'
 import { eat, dueMeal, reserveAllows } from '../skills/eat'
-import { escapeHazard, evadeCreeper, fireHandled, fleeFrom, headInWater, inFireOnly, inHazard, surface } from '../skills/escape'
+import { barrierCells, escapeHazard, evadeCreeper, fireHandled, fleeFrom, headInWater, inFireOnly, inHazard, surface, wallOffShooter } from '../skills/escape'
 import { MELEE_GUARD_MARGIN, MELEE_MOBS, creeperSwelling, fight, inMobReach } from '../skills/fight'
 import { shoot, sparedInLine } from '../skills/shoot'
 import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterRunning, shelterToLeave, sleepThroughNight, ticksSinceRest, undergroundAtWork, type NightPlan } from '../skills/shelter'
@@ -438,6 +438,10 @@ export const SHORE_RETRY_TICKS = 200
 export function leftInWater (bot: Bot, e: Entity): boolean {
   return bodyInWater(bot, e.position) && !bodyInWater(bot, bot.entity.position) && distance(bot, e) > WATER_FIGHT_REACH
 }
+
+/** ticks between the hostiles reflex's walls off a trident drowned (wallOffShooter) */
+export const WALL_OFF_RETRY_TICKS = 100
+const wallOffs = new WeakMap<Bot, number>()
 
 /** a trident drowned in the water: kept off, not fought (TRIDENT_KEEP_OFF) */
 export function tridentInWater (bot: Bot, e: Entity): boolean {
@@ -911,6 +915,20 @@ export const hostilesReflex: Reflex = {
           priority: config.hostiles.priority,
           detail: 'keep off drowned',
           run: async (signal) => await fleeFrom(bot, () => tridentsInSight(bot), { signal, distance: TRIDENT_KEEP_OFF }).catch(err => noteCornered(bot, ctx.tick, err))
+        }
+      }
+      // cornered: walled off where it stands (wallOffShooter: a block on each open line from its eyes), once a while;
+      // held off with the shield in its sight a 26.3 bot at 4.5 health took a trident through it at 9.5 off, and the
+      // next one at 16.7 (f6-26.3, t232374 at (125, 62, -72))
+      const wallFrom = tridents[0]
+      if (sealItem(bot) != null && ctx.tick - (wallOffs.get(bot) ?? -Infinity) > WALL_OFF_RETRY_TICKS &&
+        barrierCells(bot, wallFrom.position.offset(0, (wallFrom.height ?? 1.95) * 0.85, 0), wallFrom).length > 0) {
+        wallOffs.set(bot, ctx.tick)
+        return {
+          name: 'hostiles',
+          priority: config.hostiles.priority,
+          detail: 'wall off drowned',
+          run: async (signal) => await wallOffShooter(bot, wallFrom, signal)
         }
       }
       if (hasShield(bot)) {

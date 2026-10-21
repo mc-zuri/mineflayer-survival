@@ -6,9 +6,10 @@
 // - 'shore': the bot 3 blocks off the pond's west edge, the drowned in its middle: never into the water after it, out
 //   of its reach or sight;
 // - 'swim': the bot in the pond's west half: out of the water first;
-// - 'far': the bot 18 off the drowned, its food bar drained to 12 (a meal due): kept off past the scan, no meal there.
+// - 'far': the bot 18 off the drowned, its food bar drained to 12 (a meal due): kept off past the scan, no meal there;
+// - 'nook': the bot on the pond's west edge in a nook of stone open to the pond only: walled off, not hit.
 // Each run is a pass when the bot is alive 400 ticks on and spent no tick with its head under the water after the
-// first 40 (the swim's way out). DROWNED_RUNS=n repeats each (default 2); DROWNED_CASES picks some (shore,swim,far);
+// first 40 (the swim's way out). DROWNED_RUNS=n repeats each (default 2); DROWNED_CASES picks some (shore,swim,far,nook);
 // DROWNED_HEALTH sets the bot's health at the start (default 20; the death's was 6.3).
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert'
@@ -21,7 +22,7 @@ import { NightLog, summary } from './nightLog'
 
 const USER = 'pondbot'
 const RUNS = Number(process.env.DROWNED_RUNS ?? 2)
-const CASES = (process.env.DROWNED_CASES ?? 'shore,swim,far').split(',')
+const CASES = (process.env.DROWNED_CASES ?? 'shore,swim,far,nook').split(',')
 const HEALTH = Number(process.env.DROWNED_HEALTH ?? 20)
 const GRASS = -61
 
@@ -47,11 +48,13 @@ async function clearAbove (x0: number, z0: number, x1: number, z1: number): Prom
   for (let y = GRASS + 1; y <= 120; y += layers) await run(`fill ${x0} ${y} ${z0} ${x1} ${Math.min(120, y + layers - 1)} ${z1} minecraft:air`)
 }
 
-interface Case { name: string, bot: Vec3, hungry?: boolean }
+interface Case { name: string, bot: Vec3, hungry?: boolean, walls?: Array<[number, number, number]> }
 // (in the pond's coordinates: its west edge at x 0, its middle at (4.5, 4.5))
 const CASES_ALL: Case[] = [
   { name: 'shore', bot: new Vec3(-2.5, GRASS + 1, 4.5) },
   { name: 'swim', bot: new Vec3(1.5, GRASS, 4.5) },
+  // (on the pond's west edge shut in by stone but toward the pond: no way off but the drowned's; f6-26.3, t232374)
+  { name: 'nook', bot: new Vec3(-0.5, GRASS + 1, 4.5), walls: [[-2, 0, 4], [-2, 1, 4], [-1, 0, 3], [-1, 1, 3], [-1, 0, 5], [-1, 1, 5], [-1, 2, 4]] },
   // (18 off the drowned in the pond's middle, hungry: past the reflexes' scan, in its tridents' reach; f2-26.3, t165443)
   { name: 'far', bot: new Vec3(-13.5, GRASS + 1, 4.5), hungry: true }
 ]
@@ -66,6 +69,7 @@ async function fresh (c: Case): Promise<Vec3> {
     `fill ${ox - 12} ${GRASS} ${oz - 12} ${ox + 20} ${GRASS} ${oz + 20} minecraft:grass_block`,
     `fill ${ox} ${GRASS - 2} ${oz} ${ox + 8} ${GRASS} ${oz + 8} minecraft:water`]) await run(cmd)
   await clearAbove(ox - 12, oz - 12, ox + 20, oz + 20)
+  for (const [x, y, z] of c.walls ?? []) await run(`setblock ${ox + x} ${GRASS + 1 + y} ${oz + z} minecraft:stone`)
   const at = c.bot.offset(ox, 0, oz)
   await run(`tp ${USER} ${at.x} ${at.y} ${at.z} -90 0`)
   await waitFor(() => bot.entity.position.distanceTo(at) < 1 && bot.inventory.items().length === 0, 200)
