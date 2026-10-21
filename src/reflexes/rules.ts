@@ -256,8 +256,9 @@ export const drowningReflex: Reflex = {
     const { bot, config } = ctx
     if (!config.drowning.enabled || bot.entity == null || !drowningNow(ctx)) return null
     const airLow = bot.oxygenLevel <= config.drowning.air
-    // (a fight that presses, air left: the creeper's and the hostiles' reflexes let by, combatPressing)
-    const pressing = bot.oxygenLevel > DROWNING_CRITICAL_AIR && combatPressing(bot, ctx.attackers, ctx.tick)
+    // (a fight that presses, air left: the creeper's and the hostiles' reflexes let by, combatPressing; a creeper's
+    // fuse at any air, creeperPressing)
+    const pressing = creeperPressing(bot) || (bot.oxygenLevel > DROWNING_CRITICAL_AIR && combatPressing(bot, ctx.attackers, ctx.tick))
     return {
       below: config.drowning.priority,
       except: (task) => (pressing && (task.name === 'creeper' || task.name === 'hostiles')) || (airLow ? task.name === 'hostiles' && lethalHostile(ctx) : !EATING_REFLEXES.has(task.name))
@@ -269,7 +270,9 @@ export const drowningReflex: Reflex = {
     if (bot.oxygenLevel > config.drowning.air || !drowningNow(ctx)) return null
     // air left over DROWNING_CRITICAL_AIR and a fight pressing (a creeper's fuse, a mob's hits): the fight's reflexes
     // first, the air after
-    if (bot.oxygenLevel > DROWNING_CRITICAL_AIR && combatPressing(bot, ctx.attackers, ctx.tick)) return null
+    // (and a creeper's fuse first at any air, creeperPressing: its blast at 2 is death at once, the water's 2 a second
+    // only once the air is out)
+    if (creeperPressing(bot) || (bot.oxygenLevel > DROWNING_CRITICAL_AIR && combatPressing(bot, ctx.attackers, ctx.tick))) return null
     return {
       name: 'drowning',
       priority: config.drowning.priority,
@@ -283,7 +286,7 @@ export const drowningReflex: Reflex = {
         let tick = ctx.tick
         const watch = (): void => {
           tick++
-          if (bot.oxygenLevel > DROWNING_CRITICAL_AIR && combatPressing(bot, ctx.attackers, tick)) yielded.abort(new SkillError('ABORTED', 'the fight presses: the air waits'))
+          if (creeperPressing(bot) || (bot.oxygenLevel > DROWNING_CRITICAL_AIR && combatPressing(bot, ctx.attackers, tick))) yielded.abort(new SkillError('ABORTED', 'the fight presses: the air waits'))
         }
         bot.on('physicsTick', watch)
         try {
@@ -311,6 +314,18 @@ export const DROWNING_CRITICAL_AIR = 2
 /** ticks a mob's hit counts as pressing (combatPressing), and how near it must be */
 export const PRESS_HIT_TICKS = 40
 export const PRESS_REACH = 3.5
+
+/**
+ * A creeper whose fuse runs within 7.5 of the bot (swelling), or one within 3 in sight (its fuse about to start): the
+ * creeper's reflex goes before the drowning one at any air. A 26.3 bot under water in full iron at 8.9 health had its
+ * evade cut off by the drowning reflex going again a tick after it gave way (its air, it seems, at the critical mark),
+ * and was blown up 2.1 off (f7-26.3, t598161 at (-46, 99, 339))
+ */
+export function creeperPressing (bot: Bot): boolean {
+  if (bot.entity == null) return false
+  return Object.values(bot.entities).some(e => e !== bot.entity && e.name === 'creeper' && isAlive(bot, e) &&
+    ((creeperSwelling(bot, e) && distance(bot, e) < 7.5) || (distance(bot, e) < 3 && hasLineOfSight(bot, e))))
+}
 
 /**
  * Whether a fight presses on the bot now: a creeper within 3 in sight or swelling within 7.5 (its fuse runs out in

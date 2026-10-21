@@ -359,3 +359,10 @@ test('the reports go next to play\'s save (a stuck folder) when nothing chose a 
     fs.rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('botState has the air left once it is under 20, none at full (a death under water tells it: f7-26.3, t598161)', async () => {
+  const { botState } = await import('../../src/diagnostics/survival')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  assert.equal(botState(fakeBot({ oxygen: 20 })).air, undefined)
+  assert.equal(botState(fakeBot({ oxygen: 3 })).air, 3)
+})

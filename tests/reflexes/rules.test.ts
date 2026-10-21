@@ -970,7 +970,7 @@ test('hostiles reflex: no pillar with a mob that shoots about, in sight within P
   assert.notStrictEqual(check(hostilesReflex, { health: 8, items: [item('iron_sword'), item('cobblestone', 3)], entities: four, world: cave }), 'wall in')
 })
 
-test('drowning reflex: with air over DROWNING_CRITICAL_AIR a fight that presses (a creeper close or swelling, a mob that just hit the bot in reach) goes first, the creeper and hostiles reflexes let by its hold; at critical air the drowning goes whatever (f5-1.21.11, t263143 and t663576)', async () => {
+test('drowning reflex: with air over DROWNING_CRITICAL_AIR a fight that presses (a creeper close or swelling, a mob that just hit the bot in reach) goes first, the creeper and hostiles reflexes let by its hold; at critical air the drowning goes but for a creeper fuse (f5-1.21.11, t263143 and t663576; f7-26.3, t598161)', async () => {
   const { DROWNING_CRITICAL_AIR, combatPressing } = await import('../../src/reflexes/rules')
   // the head under water at y 64
   const pond = (p: Vec3): string => p.y < 60 ? 'stone' : p.y <= 66 ? 'water' : 'air'
@@ -978,7 +978,12 @@ test('drowning reflex: with air over DROWNING_CRITICAL_AIR a fight that presses 
   const at = { position: new Vec3(0.5, 64, 0.5), world: pond, oxygen: 5 }
   assert.strictEqual(check(drowningReflex, { ...at }), 'drowning')
   assert.strictEqual(check(drowningReflex, { ...at, entities: [creeper] }), null)
-  assert.strictEqual(check(drowningReflex, { ...at, oxygen: DROWNING_CRITICAL_AIR, entities: [creeper] }), 'drowning')
+  // a creeper's fuse goes first at any air (f7-26.3, t598161); a zombie's hit at critical air doesn't
+  assert.strictEqual(check(drowningReflex, { ...at, oxygen: DROWNING_CRITICAL_AIR, entities: [creeper] }), null)
+  assert.strictEqual(check(drowningReflex, { ...at, oxygen: 1, entities: [creeper] }), null)
+  const biter = entity({ name: 'zombie', position: new Vec3(2, 64, 0.5) })
+  const onShore = (p: Vec3): string => p.x >= 2 ? (p.y < 64 ? 'stone' : 'air') : pond(p)
+  assert.strictEqual(check(drowningReflex, { ...at, world: onShore, oxygen: DROWNING_CRITICAL_AIR, entities: [biter] }, {}, (engine) => { (engine as any).attackers.set(biter.id, 0) }), 'drowning')
   // a zombie on the shore that hit it 10 ticks ago, 1.5 off: pressing; one 6 off, or that hit it 100 ticks ago, or a
   // drowned in the water with it: not
   const shore = (p: Vec3): string => p.x >= 2 ? (p.y < 64 ? 'stone' : 'air') : pond(p)

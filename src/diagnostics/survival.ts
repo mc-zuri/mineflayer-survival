@@ -129,6 +129,8 @@ export interface BotState {
   inventory: ItemCount[]
   equipment: { hand: string | null, offhand: string | null, head: string | null, chest: string | null, legs: string | null, feet: string | null }
   freeSlots: number | null
+  /** the air left (bot.oxygenLevel, 0 to 20: 15 ticks a point), when under 20 */
+  air?: number
 }
 
 export interface SurvivalReport {
@@ -296,7 +298,8 @@ export function botState (bot: Bot): BotState {
       legs: slot(ARMOR_SLOTS.legs),
       feet: slot(ARMOR_SLOTS.feet)
     },
-    freeSlots: free
+    freeSlots: free,
+    ...(typeof b.oxygenLevel === 'number' && b.oxygenLevel < 20 ? { air: b.oxygenLevel } : {})
   }
 }
 
