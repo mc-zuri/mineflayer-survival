@@ -254,3 +254,26 @@ test('findShelterSpot: no column with water within 2 of it, across or under its 
   const dry = findShelterSpot(world(plains), new Vec3(0.5, 64, 0.5), { avoid: p => Math.max(Math.abs(p.x), Math.abs(p.z)) <= 3 })
   assert.ok(dry != null && Math.max(Math.abs(dry.surface.x), Math.abs(dry.surface.z)) > 3)
 })
+
+test('shelter: a bot in the water goes ashore first (toShore), none dug from the water; no shore, NOT_FOUND; a dry bot not (f5-1.21.11: the drowning reflex after each shelter\'s start, 20 ticks apart)', async () => {
+  const { shelter } = await import('../../src/skills/shelter')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const explore = require('../../src/executor/explore')
+  const real = explore.toShore
+  let shore = 0
+  explore.toShore = async () => { shore++; return false }
+  try {
+    // night, a lake: water from y 60 to 63 round the bot
+    const wet = fakeBot({ position: new Vec3(0.5, 62, 0.5), world: (p: Vec3) => p.y >= 60 && p.y <= 63 ? 'water' : p.y < 60 ? 'stone' : 'air' })
+    wet.time = { timeOfDay: 18000, isDay: false }
+    await assert.rejects(shelter(wet), (err: any) => err.reason === 'NOT_FOUND' && /no shore/.test(err.message))
+    assert.equal(shore, 1)
+    // dry, on a bare floor of nothing to dig: no shore asked
+    const dry = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (p: Vec3) => p.y < 64 ? 'bedrock' : 'air' })
+    dry.time = { timeOfDay: 18000, isDay: false }
+    await shelter(dry).catch(() => {})
+    assert.equal(shore, 1)
+  } finally {
+    explore.toShore = real
+  }
+})

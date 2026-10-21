@@ -517,6 +517,14 @@ export async function shelter (bot: Bot, opts: ShelterOptions = {}): Promise<She
   }
 }
 
+/** whether the bot's feet or head are in water (its body in a lake, a river, a flooded hole) */
+function inWaterNow (bot: Bot): boolean {
+  if ((bot.entity as any)?.isInWater === true) return true
+  const p = bot.entity.position
+  const feet = new Vec3(Math.floor(p.x), Math.floor(p.y + 1e-6), Math.floor(p.z))
+  return [feet, feet.offset(0, 1, 0)].some(c => { const n = bot.blockAt(c)?.name; return n === 'water' || n === 'bubble_column' })
+}
+
 /** the shelter() calls running for each bot (a task's own way out isn't raced by the night reflex's) */
 const sheltering = new WeakMap<Bot, number>()
 
@@ -549,6 +557,15 @@ async function shelterOnce (bot: Bot, opts: ShelterOptions): Promise<ShelterResu
     return { feet, dug: false, ticks: 0, eaten: 0, left }
   }
   if (!isEnclosed(lookup, feet)) {
+    // in the water: out onto dry ground first (toShore), the shelter's column looked for from there, not a walk to it
+    // through the water that sinks the bot (a 1.21.11 bot in the water at night had the night reflex's shelter after
+    // each surfacing take it under again, the drowning reflex 422 times in a game, 129 of them just after a shelter's
+    // start, in turns 20 ticks apart: f5-1.21.11, t358863 to t359056)
+    if (inWaterNow(bot)) {
+      const { toShore } = await import('../executor/explore')
+      if (!(await toShore(bot, signal))) throw new SkillError('NOT_FOUND', 'in the water with no shore near to dig a shelter by')
+      feet = bot.entity.position.floored()
+    }
     const hasPickaxe = bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))
     const digCost = defaultDigCost(hasPickaxe)
     // the hole the bot is in already (cut off before the seal went on), else the best column about
