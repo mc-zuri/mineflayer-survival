@@ -5,9 +5,10 @@
 // The pond is 9 by 9 and 3 deep (water y -63 to -61), its shore the superflat's grass.
 // - 'shore': the bot 3 blocks off the pond's west edge, the drowned in its middle: never into the water after it, out
 //   of its reach or sight;
-// - 'swim': the bot in the pond's west half: out of the water first.
+// - 'swim': the bot in the pond's west half: out of the water first;
+// - 'far': the bot 18 off the drowned, its food bar drained to 12 (a meal due): kept off past the scan, no meal there.
 // Each run is a pass when the bot is alive 400 ticks on and spent no tick with its head under the water after the
-// first 40 (the swim's way out). DROWNED_RUNS=n repeats each (default 2); DROWNED_CASES picks some (shore,swim);
+// first 40 (the swim's way out). DROWNED_RUNS=n repeats each (default 2); DROWNED_CASES picks some (shore,swim,far);
 // DROWNED_HEALTH sets the bot's health at the start (default 20; the death's was 6.3).
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert'
@@ -20,7 +21,7 @@ import { NightLog, summary } from './nightLog'
 
 const USER = 'pondbot'
 const RUNS = Number(process.env.DROWNED_RUNS ?? 2)
-const CASES = (process.env.DROWNED_CASES ?? 'shore,swim').split(',')
+const CASES = (process.env.DROWNED_CASES ?? 'shore,swim,far').split(',')
 const HEALTH = Number(process.env.DROWNED_HEALTH ?? 20)
 const GRASS = -61
 
@@ -46,11 +47,13 @@ async function clearAbove (x0: number, z0: number, x1: number, z1: number): Prom
   for (let y = GRASS + 1; y <= 120; y += layers) await run(`fill ${x0} ${y} ${z0} ${x1} ${Math.min(120, y + layers - 1)} ${z1} minecraft:air`)
 }
 
-interface Case { name: string, bot: Vec3 }
+interface Case { name: string, bot: Vec3, hungry?: boolean }
 // (in the pond's coordinates: its west edge at x 0, its middle at (4.5, 4.5))
 const CASES_ALL: Case[] = [
   { name: 'shore', bot: new Vec3(-2.5, GRASS + 1, 4.5) },
-  { name: 'swim', bot: new Vec3(1.5, GRASS, 4.5) }
+  { name: 'swim', bot: new Vec3(1.5, GRASS, 4.5) },
+  // (18 off the drowned in the pond's middle, hungry: past the reflexes' scan, in its tridents' reach; f2-26.3, t165443)
+  { name: 'far', bot: new Vec3(-13.5, GRASS + 1, 4.5), hungry: true }
 ]
 
 async function fresh (c: Case): Promise<Vec3> {
@@ -76,6 +79,12 @@ async function fresh (c: Case): Promise<Vec3> {
   await run(`effect give ${USER} minecraft:saturation 1 20 true`)
   await waitFor(() => bot.inventory.items().some(i => i.name === 'cooked_beef'), 200)
   if (HEALTH < 20) await run(`damage ${USER} ${20 - HEALTH} minecraft:generic`)
+  // (a meal due: the food bar drained by hunger to 12 or under)
+  if (c.hungry === true) {
+    await run(`effect give ${USER} minecraft:hunger 30 250 true`)
+    await waitFor(() => bot.food <= 12, 600)
+    await run(`effect clear ${USER} minecraft:hunger`)
+  }
   await bot.waitForTicks(10)
   return new Vec3(ox + 4.5, GRASS - 1, oz + 4.5)
 }

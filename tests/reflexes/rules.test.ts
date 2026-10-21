@@ -901,3 +901,28 @@ test('hostiles reflex: hurt to sealHealth among melee mobs on an open floor (no 
   assert.notStrictEqual(hostilesReflex.check(engine.context())?.detail, 'pillar up')
   engine.stop()
 })
+
+test('a trident drowned in the water in sight up to TRIDENT_KEEP_OFF (past the scan\'s 16) is kept off, the bot in the water to shore; no meal with a mob that shoots in sight within EAT_RANGED_CLEAR, but at EAT_UNDER_FIRE_HEALTH (f2-26.3, t165443: impaled from 19 to 24 off, eating at 8.5 health)', async () => {
+  const { TRIDENT_KEEP_OFF, EAT_RANGED_CLEAR, EAT_UNDER_FIRE_HEALTH } = await import('../../src/reflexes/rules')
+  const sea = (p: Vec3): string => p.x >= 3 ? (p.y <= 63 && p.y >= 58 ? 'water' : p.y < 58 ? 'stone' : 'air') : (p.y < 64 ? 'stone' : 'air')
+  const drowned = (x: number): any => {
+    const e = entity({ name: 'drowned', position: new Vec3(0.5 + x, 62, 0.5) })
+    e.heldItem = item('trident')
+    return e
+  }
+  const sword = [item('iron_sword')]
+  assert.ok(TRIDENT_KEEP_OFF > 20)
+  // 20 off in the sea, past the reflexes' scan: kept off
+  assert.strictEqual(check(hostilesReflex, { items: sword, entities: [drowned(20)], world: sea }), 'keep off drowned')
+  // past TRIDENT_KEEP_OFF: let be
+  assert.strictEqual(check(hostilesReflex, { items: sword, entities: [drowned(TRIDENT_KEEP_OFF + 2)], world: sea }), null)
+  // the bot swimming, one 20 off: to dry ground
+  assert.strictEqual(check(hostilesReflex, { items: sword, position: new Vec3(4.5, 63, 0.5), entities: [drowned(24)], world: sea }), 'to shore')
+  // hungry with a trident drowned 18 off in sight, or a skeleton 15 off: no meal; at EAT_UNDER_FIRE_HEALTH, one
+  const food = [item('cooked_beef', 8)]
+  assert.strictEqual(check(eatReflex, { food: 10, items: food, entities: [drowned(18)], world: sea }), null)
+  assert.strictEqual(check(eatReflex, { food: 10, items: food, entities: [entity({ name: 'skeleton', position: new Vec3(-14.5, 64, 0.5) })] }), null)
+  assert.strictEqual(check(eatReflex, { food: 10, health: EAT_UNDER_FIRE_HEALTH, items: food, entities: [drowned(18)], world: sea }), 'eat')
+  // out of EAT_RANGED_CLEAR: eaten
+  assert.strictEqual(check(eatReflex, { food: 10, items: food, entities: [entity({ name: 'skeleton', position: new Vec3(-EAT_RANGED_CLEAR - 3.5, 64, 0.5) })] }), 'eat')
+})

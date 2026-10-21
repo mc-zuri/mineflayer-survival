@@ -334,8 +334,12 @@ export function bodyInWater (bot: Bot, pos: Vec3): boolean {
  * (ls3b-1.21.11, t401692 at (51, 63, -4))
  */
 export const WATER_FIGHT_REACH = 4
-/** blocks from a trident drowned in the water the hostiles reflex keeps (its RangedAttackGoal's 10, and a margin) */
-export const TRIDENT_KEEP_OFF = 14
+/**
+ * blocks from a trident drowned in the water the hostiles reflex keeps, in sight, past the reflexes' scan (16): a 26.3
+ * drowned's tridents hit a bot from 19 to 24 off, three of them, while its keep-off at 14 had let the work walk it
+ * back and the eat reflex eat there (f2-26.3, t165443 at (-185, 61, -716))
+ */
+export const TRIDENT_KEEP_OFF = 24
 /** ticks a way to dry ground that failed (toShore) waits before the hostiles reflex tries it again */
 export const SHORE_RETRY_TICKS = 200
 
@@ -347,6 +351,26 @@ export function leftInWater (bot: Bot, e: Entity): boolean {
 /** a trident drowned in the water: kept off, not fought (TRIDENT_KEEP_OFF) */
 export function tridentInWater (bot: Bot, e: Entity): boolean {
   return e.name === 'drowned' && holdsTrident(e) && bodyInWater(bot, e.position)
+}
+
+/** the trident drowned in the water within TRIDENT_KEEP_OFF that see the bot, nearest first (bot.entities: past the scan) */
+export function tridentsInSight (bot: Bot): Entity[] {
+  return Object.values(bot.entities)
+    .filter(e => e !== bot.entity && tridentInWater(bot, e) && isAlive(bot, e) && distance(bot, e) < TRIDENT_KEEP_OFF && hasLineOfSight(bot, e))
+    .sort((a, b) => distance(bot, a) - distance(bot, b))
+}
+
+/** how near a mob that shoots in sight keeps the eat reflex from a meal (rangedInSight), and the health it eats at all the same */
+export const EAT_RANGED_CLEAR = 20
+export const EAT_UNDER_FIRE_HEALTH = 4
+
+/**
+ * the mobs that shoot (RANGED_HOSTILES, a trident drowned) within `range` that see the bot: a meal's 32 ticks under
+ * them is three tridents' or arrows' time (f2-26.3, t165364: eaten at 8.5 health, a trident at 1.2)
+ */
+export function rangedInSight (bot: Bot, range = EAT_RANGED_CLEAR): Entity[] {
+  return Object.values(bot.entities).filter(e => e !== bot.entity && isHostile(bot, e) && isAlive(bot, e) &&
+    (RANGED_HOSTILES.has(e.name ?? '') || (e.name === 'drowned' && holdsTrident(e))) && distance(bot, e) <= range && hasLineOfSight(bot, e))
 }
 
 /**
@@ -649,11 +673,13 @@ export const hostilesReflex: Reflex = {
     const nether = inNether(bot)
     const near = hostilesInRange(ctx).filter(e => !nether || !letBeInNether(bot, e, ctx.tick))
     const wither = witherToShoot(ctx)
-    if (near.length === 0 && wither == null) return null
+    // (the trident drowned in sight within TRIDENT_KEEP_OFF, past the scan's 16 too)
+    const tridents = nether ? [] : tridentsInSight(bot)
+    if (near.length === 0 && wither == null && tridents.length === 0) return null
     const cornered = wasCornered(bot, ctx.tick) && bestMeleeWeapon(bot) != null
     // in the water with hostiles about: to dry ground first (toShore), the fight after: a 1.21.11 bot fought a drowned
     // off the shore into the sea, and drowned and was impaled there (ls3b-1.21.11, t401692)
-    if (!nether && near.length > 0 && bodyInWater(bot, bot.entity.position) && ctx.tick - (shoreFails.get(bot) ?? -Infinity) > SHORE_RETRY_TICKS) {
+    if (!nether && (near.length > 0 || tridents.length > 0) && bodyInWater(bot, bot.entity.position) && ctx.tick - (shoreFails.get(bot) ?? -Infinity) > SHORE_RETRY_TICKS) {
       return {
         name: 'hostiles',
         priority: config.hostiles.priority,
@@ -670,14 +696,13 @@ export const hostilesReflex: Reflex = {
     }
     // a trident drowned in the water, the bot on dry ground: kept off, out of its range or its sight (never fought
     // from the shore: it throws from 10 blocks every 40 ticks, 8 a hit on normal); cornered, the shield up to it
-    const tridents = nether ? [] : near.filter(e => tridentInWater(bot, e) && distance(bot, e) < TRIDENT_KEEP_OFF)
     if (tridents.length > 0 && !bodyInWater(bot, bot.entity.position)) {
       if (!wasCornered(bot, ctx.tick)) {
         return {
           name: 'hostiles',
           priority: config.hostiles.priority,
           detail: 'keep off drowned',
-          run: async (signal) => await fleeFrom(bot, () => hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e)) }).filter(e => tridentInWater(bot, e)), { signal, distance: TRIDENT_KEEP_OFF }).catch(err => noteCornered(bot, ctx.tick, err))
+          run: async (signal) => await fleeFrom(bot, () => tridentsInSight(bot), { signal, distance: TRIDENT_KEEP_OFF }).catch(err => noteCornered(bot, ctx.tick, err))
         }
       }
       if (hasShield(bot)) {
@@ -689,6 +714,7 @@ export const hostilesReflex: Reflex = {
         }
       }
     }
+    if (near.length === 0 && wither == null) return null
     if (sealDue(bot, near, config, ctx.tick)) {
       return {
         name: 'hostiles',
@@ -870,6 +896,9 @@ export const eatReflex: Reflex = {
     // starved to 1 health, at food 0, for 30000 ticks)
     const starving = bot.food <= config.eat.starving
     if (!hungry && !hurt && !regen && !starving) return null
+    // not under fire: a mob that shoots in sight within EAT_RANGED_CLEAR (the hostiles reflex keeps off it first), but
+    // at EAT_UNDER_FIRE_HEALTH or under
+    if (bot.health > EAT_UNDER_FIRE_HEALTH && rangedInSight(bot).length > 0) return null
     // a meal that doesn't fit the bar waits till it does, unless the health needs it (dueMeal)
     const food = dueMeal(bot, { hurtAt: config.eat.fitHealth, urgentAt: config.eat.health, starving: config.eat.starving })
     if (food == null) return null
