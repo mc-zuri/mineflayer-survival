@@ -38,6 +38,7 @@ import { foodInfo } from './core/items'
 import { TRIP_KIT, awayFromPortals, kitSpares, stashTripKit, type TripKitKeep } from './skills/tripKit'
 import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
+import { caveCells, caveRuleOn, inCaveWall } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
@@ -1238,6 +1239,27 @@ export const RUINED_PORTAL_TRIED = 'ruined_portal_tried'
  * portal's within RUINED_PORTAL_TRIP (ruinedPortalCandidates; its crying obsidian is another block, not taken),
  * within RUINED_PORTAL_TICKS. Up to `want` held in all.
  */
+/**
+ * Whether obsidian in sight is no place to mine for the bot: lava within 2 of it, magma within 1 (a ruined portal's
+ * floor: the bot stands on it or beside it to mine), or, for a bot not fit for the caves (skills/caves caveRuleOn),
+ * under the rock or in a cave's wall (a ruined portal underground is a cave's, its netherrack and magma round it). A
+ * 26.3 bot's 'obsidian: 1 in sight: mining 1' went for a ruined portal's underground at y 46, stood on its magma, and
+ * burned to death there through 12 hazard reflexes (ls4-26.3, t54809 to t57447).
+ */
+export function obsidianHazard (bot: Bot, p: Vec3): boolean {
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        const name = bot.blockAt(p.offset(dx, dy, dz))?.name
+        if (name === 'lava') return true
+        if (name === 'magma_block' && Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) <= 1) return true
+      }
+    }
+  }
+  if (!caveRuleOn(bot)) return false
+  return caveCells(bot).roofed(p.floored()) || inCaveWall(bot, p)
+}
+
 export async function naturalObsidian (bot: Bot, executor: Executor, want: number, signal: AbortSignal, log: (line: string) => void): Promise<void> {
   const have = (): number => countItems(bot, 'obsidian')
   if (have() >= want || countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) return
@@ -1248,7 +1270,7 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
   const mineInSight = async (range: number, within: AbortSignal): Promise<void> => {
     const id = bot.registry.blocksByName.obsidian?.id
     if (id == null) return
-    const found = (bot.findBlocks?.({ matching: id, maxDistance: range, count: 64 }) ?? []).filter(p => !fluidNext(p))
+    const found = (bot.findBlocks?.({ matching: id, maxDistance: range, count: 64 }) ?? []).filter(p => !fluidNext(p) && !obsidianHazard(bot, p))
     if (found.length === 0) return
     log(`obsidian: ${found.length} in sight: mining ${Math.min(found.length, want - have())}`)
     await executor.task('mine the obsidian', async (s) => await withNetherSafety(bot, async () => await collectBlock(bot, { positions: found.slice(0, want - have()), pickup: true, avoidLava: true }, s)), within, { uses: () => Math.max(0, want - have()) })
