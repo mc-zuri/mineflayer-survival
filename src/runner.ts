@@ -1159,7 +1159,13 @@ export class Runner {
           failures.delete(m.id)
           continue
         }
-        if (n >= maxFailures) return this.stop(m.id, 'failed', err)
+        // a milestone not ready (its kit still short) never ends play: its tries go on with its back-off, the kit's
+        // top-ups and its own gets between (two 1.21.11 games stopped at the nether's gate for its water bottles, five
+        // failures of ten tries each: f3k-run5, f4-run2)
+        if (n >= maxFailures && (err as any)?.notReady === true && (err as any).growing !== true) {
+          this.log(`milestone ${m.id} still not ready after ${n} failures: backing off, its kit's still to get`)
+          failures.set(m.id, maxFailures - 1)
+        } else if (n >= maxFailures) return this.stop(m.id, 'failed', err)
         // back at once: a while before the next try (the stock's top-ups meanwhile, then the wait for what's left)
         const worked = this.bot.survival.tasks.tick - begun
         const fast = worked < FAST_FAILURE_TICKS ? (fastFailures.get(m.id) ?? 0) + 1 : 0

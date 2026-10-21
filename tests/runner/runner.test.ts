@@ -1512,6 +1512,38 @@ test('the spare kit after a recovery is its tools alone, within SPARE_KIT_RECOVE
   assert.ok(asked.some(g => g.unit === 'nutrition'), JSON.stringify(asked))
 })
 
+test('a milestone not ready past maxFailures of NOT_READY_TRIES each never ends play: backed off, tried again till its kit comes (f3k-run5, f4-run2 stopped at the nether gate)', async () => {
+  const { SkillError } = await import('../../src/skills/errors')
+  const { NOT_READY_TRIES } = await import('../../src/runner')
+  const bot = fakeBot()
+  let calls = 0
+  const logs: string[] = []
+  const short = NOT_READY_TRIES * 2 + 3
+  const runner = new Runner(bot, {
+    until: 'wood',
+    log: (l: string) => logs.push(l),
+    maxFailures: 2,
+    handlers: {
+      wood: async () => {
+        calls++
+        if (calls <= short) throw Object.assign(new SkillError('MISSING_ITEMS', 'not going into the nether without a bow or 3 water bottles for fire resistance'), { notReady: true })
+        bot.give('wooden_pickaxe', 1)
+        bot.give('crafting_table', 1)
+      }
+    }
+  })
+  const ticking = setInterval(() => { for (let i = 0; i < 200; i++) bot.emit('physicsTick') }, 1)
+  let r: any
+  try {
+    r = await runner.play()
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.equal(r.reason, 'until', logs.slice(-5).join('\n'))
+  assert.equal(calls, short + 1)
+  assert.ok(logs.some(l => /milestone wood still not ready after 2 failures: backing off/.test(l)), logs.filter(l => /failed|still/.test(l)).join('\n'))
+})
+
 test('roomForTopUps: a bag short of the stock\'s free slots stores at the base first; with room, or no base, nothing', async () => {
   const bot = fakeBot()
   const runner = new Runner(bot, { log: () => {}, executor: { log: () => {} } })
