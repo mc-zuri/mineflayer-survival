@@ -712,6 +712,45 @@ test('collectBlazeRods: the bunker fight on after its STUCK goes from the bunker
   }
 })
 
+test('guardedTrip: a blaze about to hit holds the trip off, then on; hurt to TRIP_TURN_HEALTH, shut in to heal, then on; with no shell, turned back (tripHurt)', async () => {
+  const { guardedTrip, TRIP_TURN_HEALTH } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/nether/blazeFight')
+  const travelModule = require('../../src/skills/travel')
+  const real = { travel: travelModule.travel, danger: fightModule.walkDanger, hold: fightModule.holdOffBlazes, shell: fightModule.shutInWhereItStands }
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 40.5) })
+  bot.game.dimension = 'the_nether'
+  const log: string[] = []
+  let danger = false
+  travelModule.travel = async (_b: unknown, _a: unknown, signal: AbortSignal) => {
+    log.push('travel')
+    for (let i = 0; i < 20; i++) { if (signal.aborted) throw signal.reason; bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) }
+    return {}
+  }
+  fightModule.walkDanger = () => danger
+  fightModule.holdOffBlazes = async () => { log.push('hold'); danger = false; return { kills: 0, ticks: 1 } }
+  let shells = true
+  fightModule.shutInWhereItStands = async () => { log.push('shell'); if (shells) bot.health = 20; return shells }
+  try {
+    bot.health = 20
+    danger = true
+    await guardedTrip(bot, new Vec3(0, 64, 0))
+    assert.deepStrictEqual(log, ['travel', 'hold', 'travel'])
+    log.length = 0
+    bot.health = TRIP_TURN_HEALTH
+    await guardedTrip(bot, new Vec3(0, 64, 0))
+    assert.deepStrictEqual(log, ['travel', 'shell', 'travel'])
+    log.length = 0
+    shells = false
+    bot.health = TRIP_TURN_HEALTH - 1
+    await assert.rejects(guardedTrip(bot, new Vec3(0, 64, 0)), (err: any) => err.tripHurt === true && /turned back/.test(err.message))
+  } finally {
+    travelModule.travel = real.travel
+    fightModule.walkDanger = real.danger
+    fightModule.holdOffBlazes = real.hold
+    fightModule.shutInWhereItStands = real.shell
+  }
+})
+
 test('collectBlazeRods: the kept nook the bot finds no way back into is followed by another of the planned ones, not the camp (no nook of 1: the spawner given up mid-fight)', async () => {
   const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
   const { SkillError } = await import('../../src/skills/errors')

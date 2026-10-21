@@ -28,8 +28,8 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, blazesAbout, fetchThreats, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, inNook, shutInWhereItStands, netherStepForbidden, nookBlocks, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, shellAgain, withBlocksKept } from './blazeFight'
-import { handleFire } from '../skills/escape'
+import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, blazesAbout, fetchThreats, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, inNook, shutInWhereItStands, netherStepForbidden, nookBlocks, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, shellAgain, withBlocksKept, walkDanger, holdOffBlazes, inFireCell, NOOK_GUARD_TICKS } from './blazeFight'
+import { handleFire, isOnFire } from '../skills/escape'
 import { lightFromBunker, litCells, spawnCells } from './spawnerLight'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
@@ -506,6 +506,57 @@ export function lightTripDue (bot: Bot, spawner?: Vec3): boolean {
   return spawner == null || fetchThreats(bot, [eyePosition(bot), spawner.offset(0.5, 1 + 1.62, 0.5)]).length === 0
 }
 
+/** the trip to a spawner turns back at this health or under, shut in to heal first where it can be (guardedTrip) */
+export const TRIP_TURN_HEALTH = 12
+/** a trip's walk is held off a blaze about to hit this many times at the most, and shut in to heal this many */
+export const TRIP_GUARDS = 8
+export const TRIP_HEALS = 2
+
+/**
+ * The trip to a spawner (travel, to within 16) with the blazes about it watched: cut off while one is about to hit the
+ * bot (walkDanger: not alight, nor in a fire's cell), held off where it stands behind the shield (holdOffBlazes), then
+ * on; hurt to TRIP_TURN_HEALTH, shut in where it stands to heal (shutInWhereItStands), and with no shell to be had, or
+ * hurt again past TRIP_HEALS, turned back: the trip given up (MISSING_ITEMS, tripHurt). A 1.21.11 bot's trip across
+ * a fortress to its other spawner, after a death by the first, was fireballed to death on the way (f6-1.21.11, seed
+ * 2528942595609174214, t870045 at (137, 59, 193))
+ */
+export async function guardedTrip (bot: Bot, target: Vec3, signal?: AbortSignal, range = 16): Promise<void> {
+  let heals = 0
+  for (let guards = 0; ; ) {
+    const cut = new AbortController()
+    const onParent = (): void => cut.abort(signal?.reason)
+    signal?.addEventListener('abort', onParent, { once: true })
+    let why: 'hurt' | 'danger' | null = null
+    const onTick = (): void => {
+      if (cut.signal.aborted) return
+      if (fightHealth(bot) <= TRIP_TURN_HEALTH) { why = 'hurt'; cut.abort(new Error('hurt on the trip')); return }
+      if (guards < TRIP_GUARDS && !isOnFire(bot) && !inFireCell(bot) && walkDanger(bot)) { why = 'danger'; cut.abort(new Error('a blaze about to hit')) }
+    }
+    bot.on('physicsTick', onTick)
+    try {
+      await travel(bot, { target, range, exactY: true }, cut.signal)
+      return
+    } catch (err) {
+      if (signal?.aborted === true || !cut.signal.aborted) throw err
+    } finally {
+      bot.off('physicsTick', onTick)
+      signal?.removeEventListener('abort', onParent)
+    }
+    bot.clearControlStates()
+    if (why === 'hurt') {
+      if (heals < TRIP_HEALS && await shutInWhereItStands(bot, target, BUNKER_FETCH_HEALTH + 2, signal)) {
+        heals++
+        trace('collectBlazeRods: hurt on the trip to', target.toString(), ': shut in where it stood to heal')
+        continue
+      }
+      throw Object.assign(new SkillError('MISSING_ITEMS', `hurt to ${bot.health.toFixed(1)} on the trip to the spawner at ${target.toString()}: turned back`), { tripHurt: true })
+    }
+    guards++
+    trace('collectBlazeRods: a blaze about to hit on the trip to', target.toString(), ': held off')
+    await holdOffBlazes(bot, { signal, maxTicks: NOOK_GUARD_TICKS, untilSafe: true })
+  }
+}
+
 /** shields the blaze fight carries when it can make them (the one in the off hand and a spare) */
 export const BLAZE_SHIELDS = 2
 
@@ -641,8 +692,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
   const fightFromCover = async (spawner: Vec3, retried = false, melee = !shootsWell(bot), stuckBefore = false): Promise<BlazeRodsResult | null> => {
     if (nookBlocks(bot) < NOOK_MIN_BLOCKS) { trace('collectBlazeRods: too few blocks for a nook,', nookBlocks(bot)); return null }
     if (farFrom(spawner)) {
-      await travel(bot, { target: spawner, range: 16, exactY: true }, signal).catch(err => {
-        if (isAbort(err)) throw err
+      await guardedTrip(bot, spawner, signal).catch(err => {
+        if (isAbort(err) || (err as any).tripHurt === true) throw err
         trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
       })
     }
@@ -734,8 +785,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
   const fightFromBunker = async (spawner: Vec3, retried = false, awayFrom?: Vec3): Promise<BlazeRodsResult | null> => {
     if (nookBlocks(bot) < NOOK_MIN_BLOCKS) { trace('collectBlazeRods: too few blocks for a bunker,', nookBlocks(bot)); return null }
     if (farFrom(spawner)) {
-      await travel(bot, { target: spawner, range: 16, exactY: true }, signal).catch(err => {
-        if (isAbort(err)) throw err
+      await guardedTrip(bot, spawner, signal).catch(err => {
+        if (isAbort(err) || (err as any).tripHurt === true) throw err
         trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
       })
     }
@@ -859,8 +910,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     const campLeave = (bot as any).survival?.reflexes?.leaveAlone?.(['blaze']) as (() => void) | undefined
     try {
       if (farFrom(spawner)) {
-        await travel(bot, { target: spawner, range: 16, exactY: true }, signal).catch(err => {
-          if (isAbort(err)) throw err
+        await guardedTrip(bot, spawner, signal).catch(err => {
+          if (isAbort(err) || (err as any).tripHurt === true) throw err
           trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
         })
       }
@@ -887,8 +938,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
         // from afar (back from the portal after a death): a trip to the fortress first, by the way walked before (the
         // nether's trail) and in hops, not one goto on a straight line across the lava sea
         if (farFrom(spawner)) {
-          await travel(bot, { target: spawner, range: 16, exactY: true }, signal).catch(err => {
-            if (isAbort(err)) throw err
+          await guardedTrip(bot, spawner, signal).catch(err => {
+            if (isAbort(err) || (err as any).tripHurt === true) throw err
             trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
           })
         }
