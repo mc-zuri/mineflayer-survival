@@ -46,7 +46,7 @@ import { CaveCells, caveCells, caveRuleOn, inCaveWall } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
-import { extendFarm, farmCells, farmCensus, FARM_MIN_PLOTS, FARM_REACH, farmHoleSite, findFarmSite, grownPlots, knownFarms, plantFarm, plotCells, rememberFarm, SEED_OF } from './skills/farm'
+import { extendFarm, farmCells, farmCensus, FARM_MIN_PLOTS, FARM_REACH, farmHoleSite, findFarmSite, grownPlots, isSpring, makeFarmSpring, springCells, knownFarms, plantFarm, plotCells, rememberFarm, SEED_OF } from './skills/farm'
 import { siteLookup } from './skills/spawnProtection'
 import { describeRequest, ownedInventory, type Executor } from './executor/executor'
 import { NETHER_SCAFFOLD_KEEP } from './executor/keep'
@@ -2686,6 +2686,8 @@ export const FARM_GROW_RANGE = 16
 export async function growFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<number> {
   const dimension = normalizeDimension(bot.game?.dimension)
   let sown = 0
+  // (the first farm's water a spring first, the water bucket held: farmSpring)
+  await farmSpring(bot, executor, signal, log)
   for (const farm of knownFarms(executor.memory, dimension)) {
     if (farm.crop !== 'wheat' || bot.entity.position.distanceTo(farm.water) > FARM_GROW_RANGE) continue
     const plots = Math.min(FARM_TARGET_PLOTS - farm.cells.length, countItems(bot, 'wheat_seeds'))
@@ -2707,6 +2709,35 @@ export async function growFarms (bot: Bot, executor: Executor, signal: AbortSign
     log(`farm: ${res.cells.length} more wheat sown by the water at ${water.toString()} (${rec.cells.length} plots)`)
   }
   return sown + await anotherFarm(bot, executor, signal, log)
+}
+
+/**
+ * The farm near's water made a spring (makeFarmSpring: a 2 by 2 of sources a bucket refills at for good) when the bot
+ * holds a water bucket and no farm's water is one yet, its record without the plot the spring took, the bucket filled
+ * again at it. Resolves whether a spring is by the bot now.
+ */
+export async function farmSpring (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
+  const dimension = normalizeDimension(bot.game?.dimension)
+  if (dimension !== 'overworld') return false
+  const lookup = (pos: Vec3): any => bot.blockAt(pos)
+  const farms = knownFarms(executor.memory, dimension).filter(f => bot.entity.position.distanceTo(f.water) <= FARM_GROW_RANGE)
+  if (farms.some(f => isSpring(lookup, f.water))) return true
+  const farm = farms[0]
+  if (farm == null || countItems(bot, 'water_bucket') === 0) return false
+  const ok = await executor.task('a spring of the farm water', async (s) => await makeFarmSpring(bot, farm.water, s), signal).catch(err => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`farm: no spring: ${(err as Error).message}`)
+    return false
+  })
+  if (!ok) return false
+  // (the plot the spring took out of the record; the sowing's age kept)
+  const taken = springCells(farm.water)
+  const cells = farm.cells.filter(([x, y, z]) => !taken.some(t => t.x === x && t.y === y && t.z === z))
+  executor.memory.removePoi('farm', farm.water, dimension)
+  executor.memory.addPoi('farm', farm.water, dimension, JSON.stringify({ crop: farm.crop, cells, sown: farm.sown }))
+  log(`farm: the water at ${farm.water.toString()} a spring (${cells.length} plots)`)
+  await refillWater(bot, signal).catch(() => false)
+  return true
 }
 
 /** the plots the wheat farms make together at the most: a second water and its rows once the first is full */

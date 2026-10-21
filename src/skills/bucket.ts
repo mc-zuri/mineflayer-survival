@@ -35,7 +35,29 @@ export function keptWater (bot: Bot): (pos: Vec3) => boolean {
   for (const poi of memory.getPois('cane_farm', { dimension: 'overworld' })) {
     try { for (const [x, y, z] of JSON.parse(poi.note ?? '').spots ?? []) spots.push(new Vec3(x, y, z)) } catch {}
   }
-  return pos => farms.some(f => f.equals(pos)) || spots.some(s => s.y === pos.y && Math.abs(s.x - pos.x) + Math.abs(s.z - pos.z) === 1)
+  // (but a farm's spring, its water a 2 by 2 of sources: one taken comes back, renewableWater)
+  const lookup = (p: Vec3): any => typeof bot.blockAt === 'function' ? bot.blockAt(p) : null
+  return pos => (farms.some(f => f.equals(pos)) || spots.some(s => s.y === pos.y && Math.abs(s.x - pos.x) + Math.abs(s.z - pos.z) === 1)) && !renewableWater(lookup, pos)
+}
+
+/**
+ * The water a fill from the nearest source goes to first (fillBucket without a `pos`): a farm's spring within
+ * `maxDistance` (its water a 2 by 2 of sources, makeFarmSpring: one taken comes back, renewableWater), the nearest;
+ * null with none. The home's own water, never gone: a 1.21.11 bot by its farm found no water to fill its bucket from for
+ * a second farm's hole but one under the rock it couldn't see ('no spot found to see (2, 48, 17)', f5-1.21.11 resumed
+ * from its base, t151321)
+ */
+export function springNear (bot: Bot, maxDistance = 32): Vec3 | null {
+  const memory = (bot as any).survival?.memory
+  if (memory == null || typeof memory.getPois !== 'function' || bot.entity == null || typeof bot.blockAt !== 'function') return null
+  const lookup = (p: Vec3): any => bot.blockAt(p)
+  const cells: Vec3[] = []
+  for (const p of memory.getPois('farm', { dimension: 'overworld' })) {
+    const w = new Vec3(p.x, p.y, p.z)
+    for (const [dx, dz] of [[0, 0], [1, 0], [0, 1], [1, 1]]) cells.push(w.offset(dx, 0, dz))
+  }
+  return cells.filter(c => c.distanceTo(bot.entity.position) <= maxDistance && renewableWater(lookup, c))
+    .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))[0] ?? null
 }
 
 export interface FillBucketArgs {
@@ -169,10 +191,12 @@ export async function fillBucket (bot: Bot, args: FillBucketArgs, signal?: Abort
     if (!isSource(source, fluid)) throw new SkillError('NOT_FOUND', `no ${fluid} source at ${args.pos.toString()}`)
     if (knownNoSource(bot, args.pos)) throw new SkillError('NOT_FOUND', `no ${fluid} source at ${args.pos.toString()}: a fill came back empty from it lately`)
   } else {
-    // (the nearest one no fill came back empty from lately: the next after one that did; never a farm's own water: a
-    // lone source taken is gone, and its farm dries, keptWater)
+    // (a farm's spring first, springNear; else the nearest one no fill came back empty from lately: the next after one
+    // that did; never a farm's own lone water: taken it's gone, and its farm dries, keptWater)
+    const spring = fluid === 'water' ? springNear(bot, args.maxDistance ?? 32) : null
     const kept = fluid === 'water' ? keptWater(bot) : () => false
-    source = bot.findBlock({ matching: (block: any) => fillableSource(bot, block, fluid) && (block?.position == null || !kept(block.position)), maxDistance: args.maxDistance ?? 32 })
+    source = spring != null && !knownNoSource(bot, spring) ? bot.blockAt(spring) as Block : null
+    source ??= bot.findBlock({ matching: (block: any) => fillableSource(bot, block, fluid) && (block?.position == null || !kept(block.position)), maxDistance: args.maxDistance ?? 32 })
     if (source == null) throw new SkillError('NOT_FOUND', `no ${fluid} source nearby`)
   }
   const pos = source.position

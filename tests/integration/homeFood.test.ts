@@ -13,10 +13,11 @@ import { countItems, waitUntil } from '../../src/skills/gather'
 import { inPen, penFromMemory } from '../../src/skills/pen'
 import { herdFromMemory, rememberedAnimals } from '../../src/skills/herd'
 import { breedAnimals } from '../../src/skills/husbandry'
-import { farmCells, grownPlots, knownFarms, spacerCells } from '../../src/skills/farm'
+import { farmCells, grownPlots, isSpring, knownFarms, spacerCells } from '../../src/skills/farm'
 import { WorldMemory } from '../../src/core/memory'
 import { Executor } from '../../src/executor/executor'
-import { keepFarm, startFarm, startHerd } from '../../src/milestones'
+import { farmSpring, keepFarm, startFarm, startHerd } from '../../src/milestones'
+import { fillBucket } from '../../src/skills/bucket'
 
 const USERNAME = 'homebot'
 // the superflat's grass is at y = -61; the bot stands at -60
@@ -56,7 +57,8 @@ describe(`the home's food on a ${DEFAULT_VERSION} server`, { timeout: 30 * 60 * 
     origin = new Vec3(Math.floor(bot.entity.position.x), GROUND + 1, Math.floor(bot.entity.position.z))
     await run('kill @e[type=cow]')
     await run('time set 1000')
-    memory = new WorldMemory()
+    // (the plugin's own memory: the skills read it, keptWater's farm water among them)
+    memory = (bot as any).survival.memory
     memory.setBase(origin)
     executor = new Executor(bot, { memory, log })
   })
@@ -95,6 +97,25 @@ describe(`the home's food on a ${DEFAULT_VERSION} server`, { timeout: 30 * 60 * 
     for (const c of cells) assert.strictEqual(bot.blockAt(c.offset(0, 1, 0))?.name, 'wheat', `nothing sown again on ${c.toString()}`)
     assert.ok(after.cells.length > cells.length, `the farm not grown from its seeds (${after.cells.length} plots)\n${lines.join('\n')}`)
     assert.ok(bread >= 1, `no bread\n${lines.join('\n')}`)
+  })
+
+  it('the water of the farm made a spring with the water bucket held (a 2 by 2 of sources), a bucket filled there twice and the spring whole after', async () => {
+    const farm = knownFarms(memory)[0]
+    assert.ok(farm != null, 'no farm from the test before')
+    await run(`clear ${USERNAME} bucket`)
+    await give('water_bucket', 1)
+    assert.ok(await farmSpring(bot, executor, new AbortController().signal, log), lines.join(' | '))
+    // (the bucket filled at it after: the taken source back a fluid tick on)
+    assert.ok(await waitUntil(bot, () => isSpring(p => bot.blockAt(p), farm.water), 40), 'no spring')
+    // (the fill's first source: the spring, which fills again)
+    for (let i = 0; i < 2; i++) {
+      await run(`clear ${USERNAME} water_bucket`)
+      await run(`clear ${USERNAME} bucket`)
+      await give('bucket', 1)
+      await fillBucket(bot, { fluid: 'water', maxDistance: 32 })
+      assert.strictEqual(countItems(bot, 'water_bucket'), 1)
+      assert.ok(await waitUntil(bot, () => isSpring(p => bot.blockAt(p), farm.water), 40), `the spring not whole after fill ${i + 1}`)
+    }
   })
 
   it('two cows seen 60 blocks off with none near home: fetched, led home into a pen built there, and bred', async () => {

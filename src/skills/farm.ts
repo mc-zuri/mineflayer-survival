@@ -10,6 +10,8 @@ import { siteLookup } from './spawnProtection'
 import { collectBlock } from './collectBlock'
 import { navigateToReach } from './navigate'
 import { pickupDrops } from './pickupDrops'
+import { makeWaterHole } from './caneFarm'
+import { isSource } from './bucket'
 import { countItems, findInventoryItem, resyncInventory, settleInventory, trace, waitTicks, waitUntil, type Block } from './util'
 
 /** what each crop is sown from (vanilla's seed items: CropBlock.getBaseSeedId) */
@@ -446,3 +448,51 @@ export async function boneMealFarm (bot: Bot, farm: { cells: readonly Vec3[], cr
   }
   return uses
 }
+
+/**
+ * The cells a farm's water is widened by into a spring (makeFarmSpring): east, south and south-east of it, a 2 by 2 of
+ * sources each with two others beside it, so one taken by a bucket fills again (FlowingFluid.getNewLiquid: a cell with
+ * two sources beside it and a solid block or water under it is a source). The east cell is a crop row's plot, the two
+ * south ones a bare row's
+ */
+export function springCells (water: Vec3): Vec3[] {
+  return [water.offset(1, 0, 1), water.offset(1, 0, 0), water.offset(0, 0, 1)]
+}
+
+/** whether a farm's water is a spring: its 2 by 2 all sources */
+export function isSpring (lookup: (pos: Vec3) => any, water: Vec3): boolean {
+  return [water, ...springCells(water)].every(p => isSource(lookup(p), 'water'))
+}
+
+/**
+ * A farm's water made a spring (springCells: the 2 by 2 of sources a bucket refills at for good, the second farm's hole,
+ * the obsidian's casts, the bottles): the water bucket held poured in the south-east cell dug out (makeWaterHole), then
+ * the crop and the farmland of the two cells between it and the farm's water dug out, each a source then. The bot's
+ * one bucket of water poured into a lone hole by home was its farm's water, and no other water by home had a spot to
+ * be seen from: the second farm's hole was never dug (f5-1.21.11 resumed from its base, t151321 to t216626). Resolves
+ * whether the water is a spring now.
+ */
+export async function makeFarmSpring (bot: Bot, water: Vec3, signal?: AbortSignal): Promise<boolean> {
+  const lookup = (p: Vec3): any => bot.blockAt(p)
+  if (isSpring(lookup, water)) return true
+  if (!isSource(lookup(water), 'water')) throw new SkillError('NOT_FOUND', `no water at the farm's ${water.toString()}`)
+  if (countItems(bot, 'water_bucket') === 0) throw new SkillError('MISSING_ITEMS', 'no water bucket for the spring')
+  const [corner, east, south] = springCells(water)
+  if (!isSource(lookup(corner), 'water')) {
+    const above = lookup(corner.offset(0, 1, 0))
+    if (above != null && above.boundingBox !== 'block' && above.name !== 'air' && above.name !== 'cave_air') await collectBlock(bot, { positions: [corner.offset(0, 1, 0)], anyTool: true, pickup: false }, signal)
+    const hole = await makeWaterHole(bot, water, signal, corner)
+    if (hole == null) throw new SkillError('VERIFY_FAILED', `no water poured at ${corner.toString()}`)
+  }
+  for (const cell of [east, south]) {
+    throwIfAborted(signal)
+    if (isSource(lookup(cell), 'water')) continue
+    // (its crop first, then the farmland: the water of the two sources beside it a source there)
+    const above = lookup(cell.offset(0, 1, 0))
+    if (above != null && above.name !== 'air' && above.name !== 'cave_air') await collectBlock(bot, { positions: [cell.offset(0, 1, 0)], anyTool: true }, signal)
+    if (lookup(cell) != null && lookup(cell).name !== 'water') await collectBlock(bot, { positions: [cell], anyTool: true }, signal)
+  }
+  await waitUntil(bot, () => isSpring(lookup, water), 60, signal)
+  return isSpring(lookup, water)
+}
+

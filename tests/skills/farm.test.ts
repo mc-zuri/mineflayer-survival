@@ -655,3 +655,40 @@ test('anotherFarm: a farm with no plot ground left about its water (13 of its 14
   }
 })
 
+
+test('farmSpring: the water bucket held by the farm, its water made a spring (its 2 by 2), the plot it took out of the record, the bucket filled again at it; a spring already, nothing done', async () => {
+  const { farmSpring } = await import('../../src/milestones')
+  const { springCells, isSpring } = await import('../../src/skills/farm')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const farmModule = require('../../src/skills/farm')
+  const obsidian = require('../../src/nether/obsidian')
+  const water = new Vec3(10, 63, 10)
+  const memory = new WorldMemory()
+  const cells = plotCells(world([water]), water)
+  rememberFarm(memory, { water, cells, crop: 'wheat' }, 777)
+  const sources = [water]
+  const lookup = (p: Vec3): any => world(sources)(p)
+  const bot = fakeBot({ position: new Vec3(12.5, 64, 12.5), items: [item('water_bucket', 1)] })
+  bot.blockAt = (p: Vec3) => ({ ...lookup(p.floored()), position: p.floored() })
+  bot.game.dimension = 'overworld'
+  const tasks: string[] = []
+  const executor: any = { memory, task: async (name: string, fn: any, s: AbortSignal) => { tasks.push(name); return await fn(s) } }
+  const real = { spring: farmModule.makeFarmSpring, refill: obsidian.refillWater }
+  let refilled = 0
+  farmModule.makeFarmSpring = async () => { sources.push(...springCells(water)); return true }
+  obsidian.refillWater = async () => { refilled++; return true }
+  try {
+    assert.equal(await farmSpring(bot, executor, new AbortController().signal, () => {}), true)
+    assert.equal(isSpring(lookup, water), true)
+    const rec = knownFarms(memory)[0]
+    assert.equal(rec.cells.length, cells.length - 1)
+    assert.ok(!farmCells(rec).some(c => c.equals(water.offset(1, 0, 0))))
+    assert.equal(rec.sown, 777)
+    assert.equal(refilled, 1)
+    assert.equal(await farmSpring(bot, executor, new AbortController().signal, () => {}), true)
+    assert.equal(tasks.length, 1)
+  } finally {
+    farmModule.makeFarmSpring = real.spring
+    obsidian.refillWater = real.refill
+  }
+})

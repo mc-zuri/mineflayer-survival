@@ -168,3 +168,23 @@ test('a fill from the nearest water never takes a farm\'s own (keptWater: the wh
   }
   await assert.rejects(fillBucket(bot, { fluid: 'water' }), /no water source nearby/)
 })
+
+test('a farm\'s spring (its water a 2 by 2 of sources): no kept water, the fill\'s first source (springNear); a farm\'s lone hole kept, no spring', async () => {
+  const { keptWater, springNear } = await import('../../src/skills/bucket')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const memory = new WorldMemory()
+  memory.addPoi('farm', new Vec3(5, 63, 5), 'overworld', JSON.stringify({ crop: 'wheat', cells: [[6, 63, 4]], sown: 0 }))
+  let spring = true
+  const sources = (): Vec3[] => spring ? [new Vec3(5, 63, 5), new Vec3(6, 63, 5), new Vec3(5, 63, 6), new Vec3(6, 63, 6)] : [new Vec3(5, 63, 5)]
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  bot.survival = { memory }
+  bot.blockAt = (p: any) => sources().some(s => s.equals(p.floored())) ? { name: 'water', position: p.floored(), getProperties: () => ({ level: 0 }) } : { name: 'grass_block', position: p.floored() }
+  assert.equal(keptWater(bot)(new Vec3(5, 63, 5)), false)
+  assert.ok(springNear(bot, 32)?.equals(new Vec3(5, 63, 5)))
+  assert.equal(springNear(bot, 3), null)
+  spring = false
+  assert.equal(keptWater(bot)(new Vec3(5, 63, 5)), true)
+  assert.equal(springNear(bot, 32), null)
+})
