@@ -461,3 +461,19 @@ test('navigate: a GoalBlock in a cave\'s cell under the cave rule fails NO_PATH 
   assert.match(String(err?.message), /step rules keep out of/)
   assert.equal(searched, 0)
 })
+
+test('the cave rule\'s roof is natural rock only, and a cell with the sky open over a column 2 off is no cave\'s: a canopy of leaves and logs, a roof of cobblestone or planks, a cave\'s mouth none (combat6)', () => {
+  // a room 7 by 7 by 4 of air in rock, its roof 4 thick reaching 3 past its walls
+  const room = (roof: string): CaveCells => {
+    const cells: Record<string, string> = { ...box([-3, 71, -3], [9, 74, 9], 'stone'), ...box([0, 71, 0], [6, 74, 6]), ...box([-3, 75, -3], [9, 78, 9], roof) }
+    return new CaveCells({ block: (p: Vec3) => { const name = cells[`${p.x},${p.y},${p.z}`] ?? (p.y > 70 ? 'air' : 'stone'); return { name, boundingBox: name === 'air' ? 'empty' : 'block' } } })
+  }
+  assert.equal(room('stone').isCave(new Vec3(3, 72, 3)), true)
+  assert.equal(room('deepslate').isCave(new Vec3(3, 72, 3)), true)
+  for (const roof of ['oak_leaves', 'oak_log', 'cobblestone', 'oak_planks', 'stone_bricks']) assert.equal(room(roof).isCave(new Vec3(3, 72, 3)), false, roof)
+  // a cave whose roof stops a block past its wall: the sky open over the columns 2 off its edge cells
+  const mouth: Record<string, string> = { ...box([0, 71, 0], [6, 74, 6]), ...box([-1, 75, -1], [7, 78, 7], 'stone') }
+  const m = new CaveCells({ block: (p: Vec3) => { const name = mouth[`${p.x},${p.y},${p.z}`] ?? (p.y > 70 ? 'air' : 'stone'); return { name, boundingBox: name === 'air' ? 'empty' : 'block' } } })
+  assert.equal(m.candidate(new Vec3(0, 72, 3)), false)
+  assert.equal(m.candidate(new Vec3(3, 72, 3)), true)
+})

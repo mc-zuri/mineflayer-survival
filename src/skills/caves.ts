@@ -89,11 +89,19 @@ export const CAVE_RADIUS = 4
  * corridor as many (inNarrowPassage's 48 the same idea)
  */
 export const CAVE_CELLS = 40
+/** how far across from a cell a column open to the sky makes it no cave's (CaveCells.skyNear) */
+export const SKY_REACH = 2
 /** the blocks over a cell (its column's highest solid one this far up or more) that make it under rock, not a roof */
 export const CAVE_ROOF = 3
 
 const LIQUIDS = new Set(['water', 'lava', 'bubble_column'])
-const TREE = /_(leaves|log|wood)$|^mangrove_roots$/
+/** the natural rock and ground a cave's roof is of: its stones, ores, soils and sands, not what's built or grows */
+const ROCK = /(stone|deepslate|granite|diorite|andesite|tuff|calcite|dripstone_block|_ore|netherrack|basalt|blackstone|terracotta|^dirt$|^coarse_dirt$|^rooted_dirt$|^grass_block$|^podzol$|^mycelium$|^gravel$|^clay$|^mud$|^sand$|^red_sand$|^moss_block$|^obsidian$|^bedrock$|amethyst|^magma_block$|^soul_sand$|^soul_soil$|^packed_ice$|^blue_ice$|^snow_block$|^end_stone$)/
+const BUILT = /cobble|brick|slab|stairs|_wall$|polished|chiseled|cut_|smooth_stone|pressure_plate|button/
+/** whether a block is natural rock for a cave's roof (ROCK, not BUILT: a cobblestone the bot put, a brick wall) */
+export function isRock (name: string): boolean {
+  return ROCK.test(name) && !BUILT.test(name)
+}
 const FACES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), new Vec3(0, 1, 0), new Vec3(0, -1, 0)]
 const WORLD_TOP = 320
 const WORLD_BOTTOM = -64
@@ -113,35 +121,59 @@ const keyOf = (p: { x: number, y: number, z: number }): string => `${p.x},${p.y}
  */
 export class CaveCells {
   private readonly cells = new Map<string, boolean>()
-  private readonly tops = new Map<string, number>()
+  /** each column's natural rock blocks (isRock), their ys from the top down */
+  private readonly tops = new Map<string, number[]>()
 
   constructor (readonly view: CaveView) {}
 
-  /** the column's highest solid block (trees left out), -Infinity for none */
-  top (x: number, z: number): number {
+  /** the column's natural rock blocks (isRock), their ys from the top down */
+  rockYs (x: number, z: number): number[] {
     const k = `${x},${z}`
     const known = this.tops.get(k)
     if (known != null) return known
-    let top = -Infinity
+    const ys: number[] = []
     for (let y = WORLD_TOP; y >= WORLD_BOTTOM; y--) {
       const b = this.view.block(new Vec3(x, y, z))
-      if (b != null && b.boundingBox === 'block' && !TREE.test(b.name)) { top = y; break }
+      if (b != null && b.boundingBox === 'block' && isRock(b.name)) ys.push(y)
     }
-    this.tops.set(k, top)
-    return top
+    this.tops.set(k, ys)
+    return ys
   }
 
-  /** CAVE_ROOF or more of rock over the cell */
+  /**
+   * CAVE_ROOF or more blocks of natural rock over the cell (isRock: no leaves, logs, planks, nor what the bot puts, a
+   * cobblestone; a tree's canopy, a house, a superflat's structure or a bridge is no roof of rock)
+   */
   roofed (p: Vec3): boolean {
-    return this.top(p.x, p.z) >= p.y + CAVE_ROOF
+    let n = 0
+    for (const y of this.rockYs(p.x, p.z)) {
+      if (y <= p.y) break
+      if (++n >= CAVE_ROOF) return true
+    }
+    return false
   }
 
-  /** an open, undug, unlit cell under rock: one a cave's could be */
+  /**
+   * whether the sky is open over a column within SKY_REACH across of the cell, down to its level (no natural rock over
+   * that level there: the ground by a cave's mouth, an overhang's edge); the client's sky light isn't to be trusted for
+   * it (a cave /fill'd out of stone on a lockstep server read sky light 15)
+   */
+  skyNear (p: Vec3): boolean {
+    for (let dx = -SKY_REACH; dx <= SKY_REACH; dx++) {
+      for (let dz = -SKY_REACH; dz <= SKY_REACH; dz++) {
+        const ys = this.rockYs(p.x + dx, p.z + dz)
+        if (ys.length === 0 || ys[0] <= p.y) return true
+      }
+    }
+    return false
+  }
+
+  /** an open, undug, unlit cell under rock, the sky open over none of the columns by it: one a cave's could be */
   candidate (p: Vec3): boolean {
     if (!openBlock(this.view.block(p))) return false
     if (this.view.dug?.(p) === true) return false
     if ((this.view.light?.(p) ?? 0) > 0) return false
-    return this.roofed(p)
+    return this.roofed(p) && !this.skyNear(p)
   }
 
   /** whether the cell is a cave's (see the class) */
