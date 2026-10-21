@@ -256,34 +256,82 @@ export const drowningReflex: Reflex = {
     const { bot, config } = ctx
     if (!config.drowning.enabled || bot.entity == null || !drowningNow(ctx)) return null
     const airLow = bot.oxygenLevel <= config.drowning.air
+    // (a fight that presses, air left: the creeper's and the hostiles' reflexes let by, combatPressing)
+    const pressing = bot.oxygenLevel > DROWNING_CRITICAL_AIR && combatPressing(bot, ctx.attackers, ctx.tick)
     return {
       below: config.drowning.priority,
-      except: (task) => airLow ? task.name === 'hostiles' && lethalHostile(ctx) : !EATING_REFLEXES.has(task.name)
+      except: (task) => (pressing && (task.name === 'creeper' || task.name === 'hostiles')) || (airLow ? task.name === 'hostiles' && lethalHostile(ctx) : !EATING_REFLEXES.has(task.name))
     }
   },
   check (ctx) {
     const { bot, config } = ctx
     if (!config.drowning.enabled) return null
     if (bot.oxygenLevel > config.drowning.air || !drowningNow(ctx)) return null
+    // air left over DROWNING_CRITICAL_AIR and a fight pressing (a creeper's fuse, a mob's hits): the fight's reflexes
+    // first, the air after
+    if (bot.oxygenLevel > DROWNING_CRITICAL_AIR && combatPressing(bot, ctx.attackers, ctx.tick)) return null
     return {
       name: 'drowning',
       priority: config.drowning.priority,
       run: async (signal) => {
         // the spot kept off a while (its targets, the ways under there: skills/breath drownedNear)
         noteDrowning(bot, bot.entity.position)
+        // (given up for the fight's reflexes once one presses, air over DROWNING_CRITICAL_AIR left: watched each tick)
+        const yielded = new AbortController()
+        const onAbort = (): void => yielded.abort(signal.reason)
+        signal.addEventListener('abort', onAbort, { once: true })
+        let tick = ctx.tick
+        const watch = (): void => {
+          tick++
+          if (bot.oxygenLevel > DROWNING_CRITICAL_AIR && combatPressing(bot, ctx.attackers, tick)) yielded.abort(new SkillError('ABORTED', 'the fight presses: the air waits'))
+        }
+        bot.on('physicsTick', watch)
         try {
-          return await surface(bot, { signal, recoverTo: config.drowning.recoverTo, searchRadius: config.drowning.searchRadius, maxTicks: config.drowning.maxTicks })
+          return await surface(bot, { signal: yielded.signal, recoverTo: config.drowning.recoverTo, searchRadius: config.drowning.searchRadius, maxTicks: config.drowning.maxTicks })
         } finally {
+          bot.off('physicsTick', watch)
+          signal.removeEventListener('abort', onAbort)
           // and out of the water once the head's out of it, not left there for the work to sink back (a 1.21.11 bot's
           // smelt in a lake took it down three times after its surfacings, and it drowned: grimls-2, t83874 to
           // t85228); not with the head still under (a surfacing that found no air: toShore's walk of up to 1200 ticks
           // under the water, the reflex not going again meanwhile)
           const { inWater, toShore } = await import('../executor/explore')
-          if (!signal.aborted && bot.health > 0 && inWater(bot) && !headInWater(bot)) await shoreWhileBreathing(bot, config.drowning.air, signal, async (s) => await toShore(bot, s))
+          if (!signal.aborted && !yielded.signal.aborted && bot.health > 0 && inWater(bot) && !headInWater(bot)) await shoreWhileBreathing(bot, config.drowning.air, signal, async (s) => await toShore(bot, s))
         }
       }
     }
   }
+}
+
+/**
+ * the air (bot.oxygenLevel, 15 ticks a point) under which the drowning reflex goes whatever presses; over it, a fight
+ * that presses (combatPressing) goes first
+ */
+export const DROWNING_CRITICAL_AIR = 2
+/** ticks a mob's hit counts as pressing (combatPressing), and how near it must be */
+export const PRESS_HIT_TICKS = 40
+export const PRESS_REACH = 3.5
+
+/**
+ * Whether a fight presses on the bot now: a creeper within 3 in sight or swelling within 7.5 (its fuse runs out in
+ * 30 ticks), or a hostile on dry ground within PRESS_REACH that hurt it within PRESS_HIT_TICKS. In the water the drowning reflex
+ * (85) outranked them: a 1.21.11 bot in iron surfacing at a pond's edge was hit to death by three zombies over its
+ * 165 ticks (f5-1.21.11, t263143), and another's creeper evade was cut off by it twice till the blast (t663576)
+ */
+export function combatPressing (bot: Bot, attackers: ReadonlyMap<number, number> | undefined, tick: number): boolean {
+  if (bot.entity == null) return false
+  for (const e of Object.values(bot.entities)) {
+    if (e === bot.entity || !isHostile(bot, e) || !isAlive(bot, e)) continue
+    const d = distance(bot, e)
+    if (e.name === 'creeper') {
+      if ((d < 3 && hasLineOfSight(bot, e)) || (d < 7.5 && creeperSwelling(bot, e))) return true
+      continue
+    }
+    // (a mob on dry ground: one in the water with the bot, a drowned, is the water's fight, lethalHostile's)
+    const at = attackers?.get(e.id)
+    if (at != null && tick - at >= 0 && tick - at <= PRESS_HIT_TICKS && d <= PRESS_REACH && !bodyInWater(bot, e.position)) return true
+  }
+  return false
 }
 
 /** The creeper that threatens: one this close, or one swelling within the blast's reach. */

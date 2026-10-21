@@ -954,3 +954,31 @@ test('hostiles reflex: no pillar with a mob that shoots about, in sight within P
   // short of blocks: not
   assert.notStrictEqual(check(hostilesReflex, { health: 8, items: [item('iron_sword'), item('cobblestone', 3)], entities: four, world: cave }), 'wall in')
 })
+
+test('drowning reflex: with air over DROWNING_CRITICAL_AIR a fight that presses (a creeper close or swelling, a mob that just hit the bot in reach) goes first, the creeper and hostiles reflexes let by its hold; at critical air the drowning goes whatever (f5-1.21.11, t263143 and t663576)', async () => {
+  const { DROWNING_CRITICAL_AIR, combatPressing } = await import('../../src/reflexes/rules')
+  // the head under water at y 64
+  const pond = (p: Vec3): string => p.y < 60 ? 'stone' : p.y <= 66 ? 'water' : 'air'
+  const creeper = entity({ name: 'creeper', position: new Vec3(2.5, 64, 0.5), meta: { swell_dir: 1 } })
+  const at = { position: new Vec3(0.5, 64, 0.5), world: pond, oxygen: 5 }
+  assert.strictEqual(check(drowningReflex, { ...at }), 'drowning')
+  assert.strictEqual(check(drowningReflex, { ...at, entities: [creeper] }), null)
+  assert.strictEqual(check(drowningReflex, { ...at, oxygen: DROWNING_CRITICAL_AIR, entities: [creeper] }), 'drowning')
+  // a zombie on the shore that hit it 10 ticks ago, 1.5 off: pressing; one 6 off, or that hit it 100 ticks ago, or a
+  // drowned in the water with it: not
+  const shore = (p: Vec3): string => p.x >= 2 ? (p.y < 64 ? 'stone' : 'air') : pond(p)
+  const zombie = entity({ name: 'zombie', position: new Vec3(2, 64, 0.5) })
+  const bot = fakeBot({ ...at, world: shore, entities: [zombie] })
+  const drowned = entity({ name: 'drowned', position: new Vec3(1.2, 64, 0.5) })
+  assert.strictEqual(combatPressing(fakeBot({ ...at, entities: [drowned] }), new Map([[drowned.id, 90]]), 100), false)
+  assert.strictEqual(combatPressing(bot, new Map([[zombie.id, 90]]), 100), true)
+  assert.strictEqual(combatPressing(bot, new Map([[zombie.id, 0]]), 100), false)
+  zombie.position = new Vec3(6.5, 64, 0.5)
+  assert.strictEqual(combatPressing(bot, new Map([[zombie.id, 90]]), 100), false)
+  // the hold lets the creeper's reflex by while it presses
+  const b2 = fakeBot({ ...at, entities: [creeper] })
+  const engine = new ReflexEngine(b2, { enabled: false })
+  const hold = drowningReflex.hold!(engine.context())
+  assert.ok(hold != null && hold.except?.({ name: 'creeper', priority: 80 } as any) === true)
+  engine.stop()
+})
