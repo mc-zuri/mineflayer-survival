@@ -39,6 +39,7 @@ import { TRIP_KIT, awayFromPortals, kitSpares, stashTripKit, type TripKitKeep } 
 import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
 import { obsidianHazard } from './skills/hazardCells'
+import { caveCells, caveRuleOn } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
@@ -1280,6 +1281,37 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
   }
 }
 
+/** how far round a lava pool's middle (across, and up or down 2) its cave is looked for (lavaPoolOrder) */
+export const POOL_CAVE_RADIUS = 3
+
+/**
+ * The lava pools to cast obsidian at, in order: under the open sky first, then the ones in the rock (a pocket a tunnel
+ * gets to), nearest first in each; a pool in a cave (a cave's cell within POOL_CAVE_RADIUS of its middle: a deep lake's
+ * cavern) last, and none for a bot not fit for the caves (the cave rule). A 26.3 bot's enchanting table went to the
+ * deep lakes at y -57 and -59 and a pool at y -29 in the caves for its 4 obsidian, and died in the last (ls4-26.3,
+ * t183218 to t188576).
+ */
+export function lavaPoolOrder (bot: Bot, pools: ReadonlyArray<{ x: number, y: number, z: number }>): Array<{ x: number, y: number, z: number }> {
+  const cells = caveCells(bot)
+  const rule = caveRuleOn(bot)
+  const inCave = (p: { x: number, y: number, z: number }): boolean => {
+    const c = new Vec3(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z))
+    for (let dx = -POOL_CAVE_RADIUS; dx <= POOL_CAVE_RADIUS; dx++) {
+      for (let dz = -POOL_CAVE_RADIUS; dz <= POOL_CAVE_RADIUS; dz++) {
+        for (let dy = -2; dy <= 2; dy++) if (cells.isCave(c.offset(dx, dy, dz))) return true
+      }
+    }
+    return false
+  }
+  const at = bot.entity.position
+  const scored = pools.map(p => {
+    const cave = inCave(p)
+    const roofed = cells.roofed(new Vec3(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z)))
+    return { p, cave, rank: (cave ? 2 : roofed ? 1 : 0), d: Math.hypot(p.x - at.x, p.y - at.y, p.z - at.z) }
+  })
+  return scored.filter(s => !(rule && s.cave)).sort((a, b) => a.rank - b.rank || a.d - b.d).map(s => s.p)
+}
+
 /**
  * A water bucket in the bag before a trip to the lava for its obsidian: the bucket filled again at water near
  * (refillWater), else a water bucket planned (a bucket and the water: the executor's obtain); resolves whether one is
@@ -1313,7 +1345,8 @@ export async function obsidianFromPools (bot: Bot, executor: Executor, count: nu
     if (depth === 1 && bot.entity.position.y >= DEEP_LAVA_Y + 10) {
       await executor.task('down to the deep lava', async (s) => await descendTo(bot, DEEP_LAVA_Y, {}, s), signal).catch(quiet)
     }
-    for (const pool of nearestLavaPools(bot).slice(0, 3)) {
+    // (the pools out of the caves first, under the sky first; none in a cave for a bot not fit for the caves: lavaPoolOrder)
+    for (const pool of lavaPoolOrder(bot, nearestLavaPools(bot)).slice(0, 3)) {
       if (have() >= count) break
       const at = new Vec3(pool.x, pool.y, pool.z)
       // no trip to the lava without the water to make the obsidian with (waterForTheLava)
