@@ -91,6 +91,27 @@ test('chooseDigSite: the site with no liquid in it, the least work first', async
   assert.equal(chooseDigSite(wet, new Vec3(0, 64, 0)), null)
 })
 
+test('chooseDigSite for a cast by a deep pool: no site with lava beside or over a cell it digs (opened, the pool comes in); lava under one is none (f9-26.3, t347525: the site dug by the pool\'s side, the bot burned in it)', async () => {
+  const { chooseDigSite, portalSiteWork } = await import('../../src/nether/portalSkills')
+  // f9-26.3's deep pool: lava x -288 to -285, y -57 to -55, z -52 to -50, in deepslate; the bot by it at (-283, -59, -48)
+  // in the room its work dug east of the pool (x -283 to -281, z -53 to -48, y -59 to -54), the pool's wall at x -284
+  const pool = (p: Pos): boolean => p.x >= -288 && p.x <= -285 && p.y >= -57 && p.y <= -55 && p.z >= -52 && p.z <= -50
+  const room = (p: Pos): boolean => p.x >= -283 && p.x <= -281 && p.z >= -53 && p.z <= -48 && p.y >= -59 && p.y <= -54
+  const get = (p: Pos): BlockInfo => ({ name: pool(p) ? 'lava' : room(p) ? 'air' : 'deepslate' })
+  const touches = (p: Pos): boolean => [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]].some(([dx, dy, dz]) => pool({ x: p.x + dx, y: p.y + dy, z: p.z + dz }))
+  const feet = new Vec3(-283, -59, -48)
+  // the site the dig took before, the least work (along x, 3 north: the room's and the wall at x -284, against the
+  // pool's side at -285)
+  const north = portalSiteWork(get, feet.offset(-1, 0, -3), 'x', true)
+  assert.ok(north.dig.some(touches) && north.dig.length === 30, String(north.dig.length))
+  const site = chooseDigSite(get, feet, true)
+  assert.ok(site != null)
+  assert.ok(!site.work.dig.some(touches), JSON.stringify(site.origin))
+  // lava under the site's ground only: it stays there (no flow up)
+  const under = (p: Pos): BlockInfo => ({ name: p.y < -60 ? 'lava' : 'deepslate' })
+  assert.ok(chooseDigSite(under, new Vec3(0, -59, 0), true) != null)
+})
+
 test('portalSiteWork for a cast: 6 high and two rows each side (the mould behind, the pours before)', async () => {
   const { portalSiteWork } = await import('../../src/nether/portalSkills')
   const stone = (p: Pos): BlockInfo => ({ name: p.y < 64 ? 'stone' : 'stone' })

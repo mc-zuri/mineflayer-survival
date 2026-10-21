@@ -139,8 +139,19 @@ export function portalSiteWork (getBlock: BlockGetter, origin: Pos, axis: Axis, 
 }
 
 /**
+ * Whether lava touches a cell a site digs out, beside or over it: opened, the lava flows into it (FlowingFluid.spread:
+ * down and sideways; lava under it stays). A cast's site dug where the bot stood by a deep pool at y -57, after a fill
+ * trip, opened the pool's side: its lava came down into the site the bot worked in, and the bot burned to death there
+ * (f9-26.3, t347525)
+ */
+function lavaAgainstDig (getBlock: BlockGetter, p: Pos): boolean {
+  return [[0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]].some(([dx, dy, dz]) => getBlock({ x: p.x + dx, y: p.y + dy, z: p.z + dz })?.name === 'lava')
+}
+
+/**
  * The site to dig a frame's room out of by the bot's feet: of the four along each axis on each side of it, the one with
- * no liquid in it (the liquids aren't dug into: a cave's water by the first site failed it, 26.3) and the least work
+ * no liquid in it (the liquids aren't dug into: a cave's water by the first site failed it, 26.3), none against the
+ * cells it digs (lavaAgainstDig), and the least work
  */
 export function chooseDigSite (getBlock: BlockGetter, feet: Vec3, cast = false): { origin: Vec3, axis: Axis, work: { dig: Pos[], fill: Pos[] } } | null {
   const off = cast ? 3 : 2
@@ -151,7 +162,7 @@ export function chooseDigSite (getBlock: BlockGetter, feet: Vec3, cast = false):
   const fluid = (b: { name: string } | null | undefined): boolean => /lava|water/.test(b?.name ?? '')
   return sites
     .map(site => ({ ...site, work: portalSiteWork(getBlock, site.origin, site.axis, cast) }))
-    .filter(site => !site.work.dig.some(p => fluid(getBlock(p))) && !site.work.fill.some(p => fluid(getBlock(p))))
+    .filter(site => !site.work.dig.some(p => fluid(getBlock(p)) || lavaAgainstDig(getBlock, p)) && !site.work.fill.some(p => fluid(getBlock(p))))
     // (a hole to fill is more trouble than a block to dig)
     .sort((a, b) => (a.work.dig.length + 4 * a.work.fill.length) - (b.work.dig.length + 4 * b.work.fill.length))[0] ?? null
 }
@@ -216,7 +227,8 @@ export async function preparePortalSite (bot: Bot, signal?: AbortSignal, cast = 
       throwIfAborted(signal)
       // (water the dig let in is plugged after: plugSiteWater)
       if (PASSABLE.has(getBlock(p)?.name ?? 'air') || getBlock(p)?.name === 'water') continue
-      await collectBlock(bot, { positions: [p], pickup: false }, signal).catch(err => { if (isAbort(err)) throw err; trace('preparePortalSite:', p.toString(), (err as Error).message) })
+      // (none that lava has come against since the site was chosen: avoidLava, the lava under a cell left there)
+      await collectBlock(bot, { positions: [p], pickup: false, avoidLava: true, lavaUnder: true }, signal).catch(err => { if (isAbort(err)) throw err; trace('preparePortalSite:', p.toString(), (err as Error).message) })
     }
     dig = portalSiteWork(getBlock, origin, axis, cast).dig.map(v3)
   }
