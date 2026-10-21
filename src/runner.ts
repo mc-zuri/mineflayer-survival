@@ -114,6 +114,9 @@ export const FOOD_BANK_WAIT_TICKS = 2400
 export const GROW_WAIT_TRIES = 8
 export const GROW_WAIT_TICKS = 6000
 
+/** the ticks a spare kit for the base may take to get (stashSpareKit), its food and tools; none stored after */
+export const SPARE_KIT_TICKS = 12000
+
 /** the ticks the re-equipping after a death may take in all */
 export const REEQUIP_TICKS = 24000
 
@@ -1287,7 +1290,20 @@ export class Runner {
     const goals = spareKitGoals(carried, stored)
     if (goals.length === 0) return
     this.log('a spare kit for the base')
-    await this.executor.obtain(goals, signal)
+    // within SPARE_KIT_TICKS, given up for a meal when hungry (the hunger watch) or for the night's mine: a 1.21.11
+    // bot's spare kit after a death went on for its food 76000 ticks, cows then cod not found, and the bot starved to
+    // 0.08 health with no meal, a fall from a ledge killed it (f5-1.21.11, t1232449 to t1308224)
+    let timedOut = false
+    const how = await this.untilDusk(signal ?? new AbortController().signal, { hunger: true }, async (s) => {
+      await this.withinTicks(SPARE_KIT_TICKS, s, async (t) => { await this.executor.obtain(goals, t) }).catch(err => {
+        if (TaskError.is(err, 'TIMEOUT') && signal?.aborted !== true) { timedOut = true; return }
+        throw err
+      })
+    })
+    if (timedOut || how !== 'done') {
+      this.log(`a spare kit for the base: ${timedOut ? `out of its ${SPARE_KIT_TICKS} ticks` : how === 'hungry' ? 'hungry, a meal first' : 'the night is for the mine'}: none stored this time`)
+      return
+    }
     // one of each tool made, and food for the points short
     const inv = ownedInventory(this.bot)
     const items: ItemCount[] = []

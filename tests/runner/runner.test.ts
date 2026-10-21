@@ -1456,3 +1456,33 @@ test('a meal under the cave rule begins under the open sky: up by the rock first
     explore.ensureSurface = real
   }
 })
+
+test('a spare kit for the base gives way to a meal when hungry, and is held to SPARE_KIT_TICKS: none stored then (f5-1.21.11: 76000 ticks for its food, starved to 0.08 health)', async () => {
+  const { SPARE_KIT_TICKS } = await import('../../src/runner')
+  for (const hungry of [true, false]) {
+    const bot = fakeBot({ iron_pickaxe: 1, iron_sword: 1, iron_axe: 1 })
+    bot.food = hungry ? 5 : 20
+    bot.survival.memory.setBase({ x: 0, y: 64, z: 0 })
+    bot.survival.memory.rememberChest({ x: 2, y: 64, z: 0 }, {}, 'overworld')
+    const lines: string[] = []
+    const runner: any = new Runner(bot, { log: (l: string) => lines.push(l) })
+    let stored = 0
+    let ticks = 0
+    runner.executor.obtain = async (_goals: any, s: AbortSignal) => await new Promise((_resolve, reject) => { s.addEventListener('abort', () => reject(s.reason), { once: true }) })
+    runner.executor.storeExact = async () => { stored++ }
+    runner.nightDue = () => null
+    const ticking = setInterval(() => { for (let i = 0; i < 400; i++) { ticks++; bot.emit('physicsTick') } }, 1)
+    try {
+      await runner.stashSpareKit(new AbortController().signal)
+    } finally {
+      clearInterval(ticking)
+    }
+    assert.equal(stored, 0)
+    if (hungry) {
+      assert.ok(lines.some(l => /a spare kit for the base: hungry, a meal first/.test(l)), lines.join('\n'))
+      assert.ok(ticks < 2000, String(ticks))
+    } else {
+      assert.ok(lines.some(l => new RegExp(`out of its ${SPARE_KIT_TICKS} ticks`).test(l)), lines.join('\n'))
+    }
+  }
+})
