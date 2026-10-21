@@ -15,6 +15,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { normalizeDimension } from '../core/memory'
 import { trace } from './util'
 import { navigate } from './navigate'
+import { findBlocks } from '../core/findBlocks'
 
 /** the vanilla server's spawn-protection (DedicatedServerProperties: 16), the radius taken once a refusal is seen */
 export const SPAWN_PROTECTION_RADIUS = 16
@@ -26,6 +27,8 @@ export const SPAWN_INFER_RANGE = 32
 export const REFUSAL_TICKS = 40
 /** the cost the pathfinder's rules put on a block in the square: never broken nor placed (past its COST_INF) */
 export const SPAWN_PROTECTION_COST = 1e9
+/** how far past the square the bot walks to put a block down by it (findPlacementNear's 5 and the place's block) */
+export const SPAWN_LEAVE_MARGIN = 7
 /** the translation key of the refusal's message (ServerPlayer.sendSpawnProtectionMessage) */
 export const SPAWN_PROTECTION_KEY = 'build.spawn_protection'
 
@@ -318,4 +321,16 @@ export async function leaveSpawnProtection (bot: Bot, margin: number, signal?: A
   trace('spawnProtection: out of the square to', target.toString())
   await navigate(bot, { goal: new goals.GoalNearXZ(target.x, target.z, 1) }, signal)
   return true
+}
+
+/**
+ * A block to use (a crafting table, a furnace) that the server lets the bot use: `found` when it's out of the square,
+ * else the nearest of `matching` within `maxDistance` that is, or null (handleUseItemOn refuses a use on a block in it)
+ */
+export function usableOutside (bot: Bot, found: ReturnType<Bot['blockAt']>, matching: number | number[], maxDistance: number): ReturnType<Bot['blockAt']> {
+  if (found == null || !underSpawnProtection(bot, found.position)) return found
+  for (const pos of findBlocks(bot, { matching, maxDistance, count: 32 })) {
+    if (!underSpawnProtection(bot, pos)) return bot.blockAt(pos)
+  }
+  return null
 }

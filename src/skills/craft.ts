@@ -11,6 +11,7 @@ import { placeBlock } from './placeBlock'
 import { findPlacementNear } from './placement'
 import { countItems, inventoryItems, itemId, resyncInventory, settleInventory, waitTicks, type Block } from './util'
 import { findBlock } from '../core/findBlocks'
+import { SPAWN_LEAVE_MARGIN, leaveSpawnProtection, placeUnderSpawnProtection, usableOutside } from './spawnProtection'
 import { rawRecipes } from '../planner/recipes'
 
 type CraftingFunc = Awaited<ReturnType<typeof buildStatic>>
@@ -92,11 +93,14 @@ async function getTable (bot: Bot, args: CraftArgs, signal?: AbortSignal): Promi
     if (block?.type !== tableId) throw new SkillError('NOT_FOUND', `no crafting table at ${args.table.toString()}`)
     return { table: block, placed: false }
   }
-  const found = findBlock(bot, { matching: tableId, maxDistance: args.tableDistance ?? 16 })
+  // (not one in the square about the spawn a server keeps: its use is refused, spawn protection)
+  const found = usableOutside(bot, findBlock(bot, { matching: tableId, maxDistance: args.tableDistance ?? 16 }), tableId, args.tableDistance ?? 16)
   if (found != null) return { table: found, placed: false }
 
   if (countItems(bot, 'crafting_table') === 0) await craft(bot, { item: 'crafting_table' }, signal)
-  const pos = findPlacementNear(pos => bot.blockAt(pos), bot.entity.position)
+  // put down out of that square: the bot walks out of it first
+  await leaveSpawnProtection(bot, SPAWN_LEAVE_MARGIN, signal)
+  const pos = findPlacementNear(pos => bot.blockAt(pos), bot.entity.position, { avoid: p => placeUnderSpawnProtection(bot, p) })
   if (pos == null) throw new SkillError('CANNOT_PLACE', 'no room next to the bot for a crafting table')
   await placeBlock(bot, { pos, item: 'crafting_table' }, signal)
   const table = bot.blockAt(pos)

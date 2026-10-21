@@ -6,6 +6,7 @@ import { navigateNear, navigateToReach, walkTo } from './navigate'
 import { boxInCell, cellToStepOff, isFree, isInteractive, isSolid } from './placement'
 import { FACES, blockAtOrThrow, countItems, findInventoryItem, settleInventory, trace, waitTicks, waitUntil, withinReach, type Block } from './util'
 import { placeAgainst } from '../core/actions'
+import { underSpawnProtection } from './spawnProtection'
 
 export interface PlaceBlockArgs {
   pos: Vec3
@@ -53,7 +54,8 @@ function againstCandidates (bot: Bot, pos: Vec3): Block[] {
   const out: Block[] = []
   for (const face of FACES) {
     const block = bot.blockAt(pos.plus(face))
-    if (block != null && isSolid(block) && !isInteractive(block.name)) out.push(block)
+    // (none in the square about the spawn a server keeps: the use on it is refused, spawn protection)
+    if (block != null && isSolid(block) && !isInteractive(block.name) && !underSpawnProtection(bot, block.position)) out.push(block)
   }
   return out
 }
@@ -86,6 +88,11 @@ export async function placeBlock (bot: Bot, args: PlaceBlockArgs, signal?: Abort
   const wanted = placedBlockNames(args.item)
   const current = blockAtOrThrow(bot, pos)
   if (wanted.includes(current.name)) return { pos, block: current.name, placed: false }
+  // nothing placed in the square about the spawn a server keeps, nor against a block in it (spawn protection: the
+  // server puts it back, and the bot stood on a block it hadn't)
+  if (underSpawnProtection(bot, pos) || (args.against != null && underSpawnProtection(bot, args.against))) {
+    throw new SkillError('REFUSED', `${pos.toString()} is under spawn protection: no ${args.item} placed`)
+  }
   if (!isFree(current) && !(args.intoFluid === true && (current.name === 'water' || current.name === 'lava'))) {
     throw new SkillError('CANNOT_PLACE', `${current.name} is at ${pos.toString()}`)
   }

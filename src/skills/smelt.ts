@@ -12,6 +12,7 @@ import { findPlacementNear } from './placement'
 import { countItems, countsDelta, inventoryCounts, itemId, settleInventory, waitTicks, waitUntil, type Block, type ItemCounts } from './util'
 import { burnTicks, SMELT_TICKS } from '../core/items'
 import { findBlock, findBlocks } from '../core/findBlocks'
+import { SPAWN_LEAVE_MARGIN, leaveSpawnProtection, placeUnderSpawnProtection, underSpawnProtection, usableOutside } from './spawnProtection'
 
 // AbstractFurnaceBlockEntity's cook time and the furnace burn times (FuelValues), one table for the planner and the skill
 export { SMELT_TICKS, burnTicks }
@@ -97,10 +98,13 @@ async function getFurnace (bot: Bot, args: SmeltArgs, signal?: AbortSignal): Pro
     if (block == null || !ids.includes(block.type)) throw new SkillError('NOT_FOUND', `no furnace at ${args.furnace.toString()}`)
     return { furnace: block, placed: false }
   }
-  const found = findBlock(bot, { matching: ids, maxDistance: args.furnaceDistance ?? 16 })
+  // (not one in the square about the spawn a server keeps: its use is refused, spawn protection)
+  const found = usableOutside(bot, findBlock(bot, { matching: ids, maxDistance: args.furnaceDistance ?? 16 }), ids, args.furnaceDistance ?? 16)
   if (found != null) return { furnace: found, placed: false }
   if (countItems(bot, 'furnace') === 0) await craft(bot, { item: 'furnace' }, signal)
-  const pos = findPlacementNear(pos => bot.blockAt(pos), bot.entity.position)
+  // put down out of that square: the bot walks out of it first
+  await leaveSpawnProtection(bot, SPAWN_LEAVE_MARGIN, signal)
+  const pos = findPlacementNear(pos => bot.blockAt(pos), bot.entity.position, { avoid: p => placeUnderSpawnProtection(bot, p) })
   if (pos == null) throw new SkillError('CANNOT_PLACE', 'no room next to the bot for a furnace')
   await placeBlock(bot, { pos, item: 'furnace' }, signal)
   const furnace = bot.blockAt(pos)
@@ -302,7 +306,8 @@ export async function smeltParallel (bot: Bot, args: SmeltParallelArgs, signal?:
   const want = Math.min(args.count - Math.max(0, ...[...output].map(o => (inventoryCounts(bot)[o] ?? 0) - (before[o] ?? 0))), countItems(bot, args.input))
   const shares = shareOut(want, args.furnaces ?? PARALLEL_FURNACES)
   // the furnaces: empty ones standing near (left by a smelt before), the bag's, and more made while cobblestone lasts
-  const standing = findBlocks(bot, { matching: bot.registry.blocksByName.furnace.id, maxDistance: STANDING_FURNACE_DISTANCE, count: shares.length })
+  const standing = findBlocks(bot, { matching: bot.registry.blocksByName.furnace.id, maxDistance: STANDING_FURNACE_DISTANCE, count: shares.length + 8 })
+    .filter(p => !underSpawnProtection(bot, p)).slice(0, shares.length)
   while (standing.length + countItems(bot, 'furnace') < shares.length && countItems(bot, 'cobblestone') >= 8 + 8) {
     try {
       await craft(bot, { item: 'furnace', tableDistance: 6, pickUpTable: true }, signal)
@@ -320,7 +325,7 @@ export async function smeltParallel (bot: Bot, args: SmeltParallelArgs, signal?:
       let pos = standing.shift() ?? null
       if (pos == null) {
         if (countItems(bot, 'furnace') === 0) break
-        pos = findPlacementNear(p => bot.blockAt(p), bot.entity.position)
+        pos = findPlacementNear(p => bot.blockAt(p), bot.entity.position, { avoid: p => placeUnderSpawnProtection(bot, p) })
         if (pos == null) break
         await placeBlock(bot, { pos, item: 'furnace' }, signal)
       } else {

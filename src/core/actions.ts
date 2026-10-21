@@ -8,6 +8,8 @@ import { Vec3 } from 'vec3'
 import { blockReach, crosshairBlock, digInSight } from '@nxg-org/mineflayer-pathfinder'
 import type { Block } from '../skills/util'
 import { isInfested } from './infested'
+import { SkillError } from '../skills/errors'
+import { underSpawnProtection } from '../skills/spawnProtection'
 
 export interface DigOptions {
   signal?: AbortSignal
@@ -28,6 +30,8 @@ function breaksInTheWay (bot: Bot, b: Block): boolean {
  */
 export async function dig (bot: Bot, block: Block, options: DigOptions = {}): Promise<void> {
   if (isInfested(block.name)) throw new Error(`${block.name} at ${String(block.position)} is infested: not broken (a silverfish in it)`)
+  // nor one in the square about the spawn a server keeps: the server refuses its dig (spawn protection)
+  if (underSpawnProtection(bot, block.position)) throw new SkillError('REFUSED', `${block.name} at ${String(block.position)} is under spawn protection: not broken`)
   const inTheWay = options.digObstruction ?? ((b: Block) => breaksInTheWay(bot, b))
   await digInSight(bot, block as any, { signal: options.signal, digObstruction: ((b: Block) => !isInfested(b.name) && inTheWay(b)) as any })
 }
@@ -73,6 +77,8 @@ export async function aimAtFace (bot: Bot, block: Block, face: Vec3, accept: () 
  * (useItemOn with the hit's block, face and point). False when no point of the face is in sight: nothing is placed.
  */
 export async function placeAgainst (bot: Bot, against: Block, face: Vec3, accept?: () => boolean): Promise<boolean> {
+  // (the server refuses a use on a block in the square about the spawn it keeps: handleUseItemOn, spawn protection)
+  if (underSpawnProtection(bot, against.position)) throw new SkillError('REFUSED', `${against.name} at ${String(against.position)} is under spawn protection: nothing placed against it`)
   const delta = await aimAtFace(bot, against, face, accept)
   if (delta == null) return false
   await (bot as any)._placeBlockWithOptions(against, face, { delta, forceLook: true, swingArm: 'right' })

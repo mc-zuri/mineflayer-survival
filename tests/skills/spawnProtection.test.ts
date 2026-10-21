@@ -7,9 +7,13 @@ import { EventEmitter } from 'node:events'
 import { Vec3 } from 'vec3'
 import {
   SPAWN_INFER_RANGE, SPAWN_PROTECTION_COST, SPAWN_PROTECTION_RADIUS, installSpawnProtection, keepOffSpawnProtection,
-  placeUnderSpawnProtection, spawnProtectionMessage, spawnProtectionState, underSpawnProtection
+  placeUnderSpawnProtection, spawnProtectionMessage, spawnProtectionState, underSpawnProtection, usableOutside
 } from '../../src/skills/spawnProtection'
-import { fakeBot } from '../reflexes/fakeBot'
+import { dig, placeAgainst } from '../../src/core/actions'
+import { collectBlock } from '../../src/skills/collectBlock'
+import { placeBlock } from '../../src/skills/placeBlock'
+import { stepProtect } from '../../src/executor/executor'
+import { fakeBot, item } from '../reflexes/fakeBot'
 
 const STONE = { type: 1, stateId: 1, name: 'stone' }
 const AIR = { type: 0, stateId: 0, name: 'air' }
@@ -178,4 +182,58 @@ test('a dig that sets no targetDigBlock (mineflayer-mouse\'s) told by its diggin
     bot.emit('blockUpdate', at(AIR, p), at(STONE, p))
   }
   assert.strictEqual(spawnProtectionState(bot)?.radius, SPAWN_PROTECTION_RADIUS)
+})
+
+// The skills pass the square over: no dig, no place, no use of a block in it.
+
+/** a bot that knows the square: radius 16 about (0, 64, 0) */
+function protectedBot (input: any = {}): any {
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), ...input })
+  bot.spawnPoint = new Vec3(0, 64, 0)
+  installSpawnProtection(bot, 16)
+  return bot
+}
+
+test('a dig in the square is refused (REFUSED) before it starts; out of it, dug', async () => {
+  const bot = protectedBot()
+  let digs = 0
+  bot.dig = async () => { digs++ }
+  await assert.rejects(dig(bot, { name: 'stone', position: new Vec3(3, 63, 0) } as any), (err: any) => err.reason === 'REFUSED' && /spawn protection/.test(err.message))
+  assert.strictEqual(digs, 0)
+})
+
+test('nothing placed against a block in the square (REFUSED), nor placed in it by placeBlock', async () => {
+  const bot = protectedBot()
+  await assert.rejects(placeAgainst(bot, { name: 'stone', position: new Vec3(16, 63, 0) } as any, new Vec3(1, 0, 0)), (err: any) => err.reason === 'REFUSED')
+  await assert.rejects(placeBlock(bot, { pos: new Vec3(2, 64, 0), item: 'crafting_table' }), (err: any) => err.reason === 'REFUSED' && /spawn protection/.test(err.message))
+  await assert.rejects(placeBlock(bot, { pos: new Vec3(17, 64, 0), item: 'cobblestone', against: new Vec3(16, 64, 0) }), (err: any) => err.reason === 'REFUSED')
+})
+
+test('collectBlock breaks no block in the square: one asked for by its place is refused (REFUSED), nothing dug', async () => {
+  const bot = protectedBot({ items: [item('stone_pickaxe')] })
+  let digs = 0
+  bot.dig = async () => { digs++ }
+  await assert.rejects(collectBlock(bot, { positions: [new Vec3(2, 63, 0)], pickup: false, anyTool: true }), (err: any) => /spawn protection/.test(err.message))
+  assert.strictEqual(digs, 0)
+})
+
+test('a crafting table or furnace found in the square is passed over for the nearest out of it (its use is refused), none when there\'s none', () => {
+  const bot = protectedBot()
+  const inside = bot.blockAt(new Vec3(3, 64, 0))
+  const outside = bot.blockAt(new Vec3(-20, 64, 4))
+  bot.findBlocks = () => [new Vec3(3, 64, 0), new Vec3(10, 64, 10), new Vec3(-20, 64, 4)]
+  assert.deepStrictEqual(usableOutside(bot, inside, 1, 32)?.position, outside.position)
+  assert.strictEqual(usableOutside(bot, outside, 1, 32), outside)
+  bot.findBlocks = () => [new Vec3(3, 64, 0)]
+  assert.strictEqual(usableOutside(bot, inside, 1, 32), null)
+})
+
+test('the mine steps leave the square (StepContext.protect: the base\'s box and the square)', () => {
+  const bot = protectedBot()
+  const inBase = (p: Vec3): boolean => p.x === 40
+  const protect = stepProtect(bot, inBase)
+  assert.strictEqual(protect(new Vec3(5, 60, -5)), true)
+  assert.strictEqual(protect(new Vec3(40, 60, 0)), true)
+  assert.strictEqual(protect(new Vec3(30, 60, 0)), false)
+  assert.strictEqual(stepProtect(bot, undefined)(new Vec3(16, 60, 16)), true)
 })

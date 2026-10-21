@@ -20,6 +20,7 @@ import { storeItems } from '../skills/chest'
 import { craft, planCraft } from '../skills/craft'
 import { caveReady, watchCaveEntries } from '../skills/caves'
 import { placeBlock } from '../skills/placeBlock'
+import { underSpawnProtection } from '../skills/spawnProtection'
 import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
 import { tossAway } from '../skills/pickupDrops'
@@ -916,7 +917,8 @@ export class Executor {
         table: near && base?.table != null ? vec(base.table) : null,
         furnace: near && base != null && base.furnaces.length > 0 ? vec(base.furnaces[0]) : null,
         home: this.home(),
-        protect: base?.bounds != null ? inBox(base.bounds) : undefined,
+        // the base's blocks, and the square about the spawn a server keeps (spawn protection: a block there is refused)
+        protect: stepProtect(this.bot, base?.bounds != null ? inBox(base.bounds) : undefined),
         // the logs for a new axe are cut with the worn one: handed back for a new axe, the plan for one started over
         // 30 times and the milestone failed (seed 5)
         replacingTools: this.replacing,
@@ -1391,6 +1393,11 @@ function isEnchanted (item: unknown): boolean {
 
 function vec (p: { x: number, y: number, z: number }): Vec3 {
   return new Vec3(p.x, p.y, p.z)
+}
+
+/** what the mine steps leave (StepContext.protect): the base's box (`inBase`) and the spawn's protected square (underSpawnProtection) */
+export function stepProtect (bot: Bot, inBase: ((pos: Vec3) => boolean) | undefined): (pos: Vec3) => boolean {
+  return (pos) => inBase?.(pos) === true || underSpawnProtection(bot, pos)
 }
 
 function inBox (b: { min: { x: number, y: number, z: number }, max: { x: number, y: number, z: number } }): (pos: Vec3) => boolean {
