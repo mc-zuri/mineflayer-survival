@@ -463,7 +463,7 @@ async function digBelow (bot: Bot, toY: number, signal?: AbortSignal, column?: {
     if (below == null) throw new SkillError('NOT_FOUND', 'the block below is unloaded')
     // no dig out of the column, nor one into a cave under it (the bot would fall in)
     const hazard = below.boundingBox === 'block' && column != null ? digDownHazard(lookup, feet, column, toY) : null
-    if (hazard != null) throw new SkillError('CANNOT_PLACE', `no shelter dug down here: ${hazard}`)
+    if (hazard != null) { trace('shelter: no dig down at', feet.toString(), hazard); throw new SkillError('CANNOT_PLACE', `no shelter dug down here: ${hazard}`) }
     if (below.boundingBox === 'block') {
       await equipFor(bot, below)
       await dig(bot, below, { signal })
@@ -621,6 +621,7 @@ async function shelterOnce (bot: Bot, opts: ShelterOptions): Promise<ShelterResu
       }
     }
     const centre = target.surface.offset(0.5, 0, 0.5)
+    trace('shelter: the column at', target.surface.toString(), 'down to', target.feet.toString(), 'from', bot.entity.position.toString())
     // the body inside the column's cell (0.6 wide in a 1 wide hole), or it stays up on the rim
     await centreOn(bot, centre, signal)
     await digBelow(bot, target.feet.y, signal, target.surface)
