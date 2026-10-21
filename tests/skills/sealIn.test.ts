@@ -36,3 +36,16 @@ test('mobInCell: a zombie\'s box (0.6 wide) in the cell takes no block (Level.is
   assert.strictEqual(mobInCell({ position: new Vec3(1.5, 66, 0.5), width: 0.6, height: 1.95 }, cell), false)
   assert.deepStrictEqual(cardinalToward(new Vec3(0, 64, 0), new Vec3(0.2, 64, -3)), new Vec3(0, 0, -1))
 })
+
+test('sealBox: no box whose wall, roof or floor is an infested block (a fight in it wakes the nest: f5-26.3); the caves\' sealing and the hostiles\' wall-in take it so', () => {
+  const zombie = entity({ name: 'zombie', position: new Vec3(3.5, 64, 0.5) })
+  for (const cell of ['0,64,1', '0,66,0', '0,63,0', '-1,64,-1']) {
+    const [x, y, z] = cell.split(',').map(Number)
+    const world = (p: Vec3): string => p.x === x && p.y === y && p.z === z ? 'infested_stone' : tunnel(p)
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), entities: [zombie], world })
+    const box = sealBox(bot, [zombie])
+    // (a cell the box doesn't take in, beyond its back's corner, leaves it be)
+    if (cell === '-1,64,-1') assert.ok(box != null, cell)
+    else assert.strictEqual(box, null, `infested at ${cell}`)
+  }
+})

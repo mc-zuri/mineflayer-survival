@@ -12,7 +12,7 @@ function versionData (version: string): { registry: any, Item: any } {
   return data
 }
 
-const SOLID = new Set(['stone', 'dirt', 'grass_block', 'bedrock', 'obsidian', 'cobblestone', 'magma_block', 'oak_planks', 'end_stone', 'netherrack'])
+const SOLID = new Set(['stone', 'dirt', 'grass_block', 'bedrock', 'obsidian', 'cobblestone', 'magma_block', 'oak_planks', 'end_stone', 'netherrack', 'infested_stone', 'infested_deepslate'])
 
 /** an item of the version (the fake bot's must be the same) */
 export function item (name: string, count = 1, enchants?: Array<{ name: string, lvl: number }>, version = FAKE_VERSION): any {

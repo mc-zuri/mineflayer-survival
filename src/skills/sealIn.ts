@@ -15,7 +15,7 @@ import { eat, bestFoodInInventory } from './eat'
 import { placeBlock } from './placeBlock'
 import { walkTo } from './navigate'
 import { sealItem } from './shelter'
-import { countItems, trace, waitTicks } from './util'
+import { countItems, isInfested, trace, waitTicks } from './util'
 import { boxInCell } from './placement'
 import { nookAround, type BlazeNook } from '../nether/blazeFight'
 
@@ -48,13 +48,31 @@ export function cardinalToward (feet: Vec3, at: Vec3): Vec3 {
 /**
  * The box round the bot's feet, its front toward the nearest threat (nookAround: the back and the sides at the feet
  * and the head and the roof, with a block under a wall over nothing first, then the front's two cells); null where
- * none can be put up (a wall cell not open nor a full block: lava, water, a slab)
+ * none can be put up (a wall cell not open nor a full block: lava, water, a slab), or where a wall, the roof or the
+ * floor is an infested block (infestedBox: shut in among a silverfish nest, a fight in the box wakes it)
  */
 export function sealBox (bot: Bot, threats: readonly Entity[]): BlazeNook | null {
   const feet = bot.entity.position.floored()
   const nearest = threats.slice().sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))[0]
   const facing = nearest != null ? cardinalToward(feet, nearest.position) : new Vec3(1, 0, 0)
-  return nookAround(p => bot.blockAt(p) as any, feet, facing)
+  const box = nookAround(p => bot.blockAt(p) as any, feet, facing)
+  if (box != null && infestedBox(p => bot.blockAt(p) as any, box) != null) {
+    trace('sealBox: infested', infestedBox(p => bot.blockAt(p) as any, box)?.toString(), 'in the box round', feet.toString())
+    return null
+  }
+  return box
+}
+
+/**
+ * The first cell of a box's walls, roof, floor or front that's an infested block (isInfested), or null: a silverfish
+ * comes out of one broken or hit, and a hurt one calls out the rest of the nest round it (Silverfish's
+ * WakeUpFriendsGoal); a 26.3 bot walled in at y 29 among a nest was slain by 9 silverfish (f5-26.3)
+ */
+export function infestedBox (lookup: (pos: Vec3) => { name: string } | null, box: BlazeNook): Vec3 | null {
+  for (const cell of [...box.walls, ...box.build, ...box.front, ...box.floor]) {
+    if (isInfested(lookup(cell)?.name)) return cell
+  }
+  return null
 }
 
 /** the box's cells still open, in the order they go in */
