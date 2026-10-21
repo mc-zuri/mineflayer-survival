@@ -105,7 +105,19 @@ export interface ChunkSurface {
   z: number
   y: number
   biome: string
+  /** the top block is water (a lake's, a river's, the sea's) */
+  water?: boolean
 }
+
+/**
+ * The biomes whose shores an exploring for cane goes to: the river's banks (patch_sugar_cane, a chunk in 6, and banks
+ * all along it), the beaches' (the sea's edge) and the swamp's (patch_sugar_cane_swamp, 1 in 3, its pools all about)
+ */
+export const CANE_SHORE_BIOMES: ReadonlySet<string> = new Set(['river', 'beach', 'swamp', 'snowy_beach'])
+/** a shore seen (its note: the biome of a shore, or 'water' for land by a lake or the sea), for the cane */
+export const SHORE_POI = 'shore'
+/** shores are noted no nearer than this to each other */
+export const SHORE_SPACING = 32
 
 /** the surface of a loaded column: its top block's y and the biome there (the chunk data's: the server's), else null */
 export function surfaceAt (bot: Bot, x: number, z: number): ChunkSurface | null {
@@ -123,7 +135,7 @@ export function surfaceAt (bot: Bot, x: number, z: number): ChunkSurface | null 
     if (AIRS.has(name)) continue
     const id = col.getBiome(p)
     const biome = (bot.registry.biomes as any)?.[id]?.name
-    return biome == null ? null : { x, z, y, biome: String(biome).replace(/^minecraft:/, '') }
+    return biome == null ? null : { x, z, y, biome: String(biome).replace(/^minecraft:/, ''), water: name === 'water' }
   }
   return null
 }
@@ -166,9 +178,32 @@ export class BiomeSurvey {
   /** a chunk's surface taken in (the survey's, or the seed's read) */
   note (s: ChunkSurface): void {
     this.chunks.set(`${Math.floor(s.x / 16)},${Math.floor(s.z / 16)}`, s)
+    this.noteShores(s)
     if (!MEAT_BIOMES.has(s.biome)) return
     const near = this.memory.getPois(FOOD_BIOME_POI, { dimension: 'overworld' }).some(p => Math.hypot(p.x - s.x, p.z - s.z) < FOOD_BIOME_SPACING)
     if (!near) this.memory.addPoi(FOOD_BIOME_POI, { x: s.x, y: s.y, z: s.z }, 'overworld', s.biome)
+  }
+
+  /**
+   * The shores a chunk's surface shows, noted in the memory (SHORE_POI, SHORE_SPACING apart) for the cane, which grows by
+   * water only: a chunk of a shore biome (CANE_SHORE_BIOMES), and a land chunk with a water chunk beside it or the
+   * other way round (the land's: a lake's or the sea's shore, whatever its biome). A 1.21.11 game's nearest canes stood
+   * by the lakes of the plains about its home (f3-1.21.11, seed 4261406750935072801: (-193, 63, -3), (-106, 63, -57)).
+   */
+  private noteShores (s: ChunkSurface): void {
+    const shore = (p: ChunkSurface, why: string): void => {
+      if (this.memory.getPois(SHORE_POI, { dimension: 'overworld' }).some(o => Math.hypot(o.x - p.x, o.z - p.z) < SHORE_SPACING)) return
+      this.memory.addPoi(SHORE_POI, { x: p.x, y: p.y, z: p.z }, 'overworld', why)
+    }
+    if (CANE_SHORE_BIOMES.has(s.biome)) shore(s, s.biome)
+    if (s.water == null) return
+    const cx = Math.floor(s.x / 16)
+    const cz = Math.floor(s.z / 16)
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const n = this.chunks.get(`${cx + dx},${cz + dz}`)
+      if (n?.water == null || n.water === s.water) continue
+      shore(s.water ? n : s, 'water')
+    }
   }
 
   /** the chunks surveyed within `radius` of `center`, and those of a food biome */

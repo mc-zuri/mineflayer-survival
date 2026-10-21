@@ -52,8 +52,8 @@ const peaks: Land = (x, z) => x > 200 ? { biome: 'snowy_taiga', y: 70 } : x < -6
 for (const version of VERSIONS) {
   test(`${version}: surfaceAt reads a loaded column's top block and the chunk data's biome there; null out of the loaded chunks`, () => {
     const bot = fakeBot(version, (x) => x > 40 ? { biome: 'plains', y: 64 } : { biome: 'grove', y: 110 })
-    assert.deepEqual(surfaceAt(bot, 8, 8), { x: 8, z: 8, y: 110, biome: 'grove' })
-    assert.deepEqual(surfaceAt(bot, 72, -8), { x: 72, z: -8, y: 64, biome: 'plains' })
+    assert.deepEqual(surfaceAt(bot, 8, 8), { x: 8, z: 8, y: 110, biome: 'grove', water: false })
+    assert.deepEqual(surfaceAt(bot, 72, -8), { x: 72, z: -8, y: 64, biome: 'plains', water: false })
     assert.equal(surfaceAt(bot, 500, 0), null)
   })
 }

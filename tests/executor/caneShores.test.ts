@@ -1,11 +1,11 @@
-// The exploring for cane along the shores: the river, beach and swamp chunks the biome survey has (or the seed's), the
-// nearest not looked at first, the canes in sight noted at each.
+// The exploring for cane along the shores: the river, beach and swamp chunks the biome survey noted, and the land by a
+// lake's or the sea's water (or the seed's reads), the nearest not looked at first, the canes in sight noted at each.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { WorldMemory } from '../../src/core/memory'
 import { BiomeSurvey } from '../../src/executor/foodLand'
-import { CANE_LOOKED_POI, CANE_SEED_SURVEYED_POI, exploreCaneShores, nextCaneShore, readShoresFromSeed } from '../../src/executor/caneShores'
+import { CANE_LOOKED_POI, CANE_SEED_SURVEYED_POI, SHORE_POI, exploreCaneShores, nextCaneShore, readShoresFromSeed } from '../../src/executor/caneShores'
 import { fakeBot } from '../reflexes/fakeBot'
 
 function surveyOf (memory: WorldMemory, chunks: Array<[number, number, string]>): BiomeSurvey {
@@ -18,14 +18,14 @@ test('nextCaneShore: the nearest river, beach or swamp chunk within range of hom
   const memory = new WorldMemory()
   const survey = surveyOf(memory, [[200, 0, 'plains'], [100, 8, 'river'], [-120, 0, 'beach'], [40, 40, 'forest'], [0, 600, 'swamp']])
   const home = { x: 0, z: 0 }
-  assert.equal(nextCaneShore(survey, memory, home, home)?.biome, 'river')
+  assert.equal(nextCaneShore(memory, home, home)?.what, 'river')
   // from the west, the beach
-  assert.equal(nextCaneShore(survey, memory, home, { x: -100, z: 0 })?.biome, 'beach')
+  assert.equal(nextCaneShore(memory, home, { x: -100, z: 0 })?.what, 'beach')
   // the river looked at: the beach; both: none (the swamp past CANE_SHORE_RANGE)
   memory.addPoi(CANE_LOOKED_POI, { x: 110, y: 64, z: 0 })
-  assert.equal(nextCaneShore(survey, memory, home, home)?.biome, 'beach')
+  assert.equal(nextCaneShore(memory, home, home)?.what, 'beach')
   memory.addPoi(CANE_LOOKED_POI, { x: -120, y: 64, z: 0 })
-  assert.equal(nextCaneShore(survey, memory, home, home), null)
+  assert.equal(nextCaneShore(memory, home, home), null)
 })
 
 test('readShoresFromSeed: ring by ring until one has a shore, each read noted; the home marked read', async () => {
@@ -40,7 +40,7 @@ test('readShoresFromSeed: ring by ring until one has a shore, each read noted; t
   assert.equal(reads.length, 20)
   assert.ok([...survey.chunks.values()].some(s => s.biome === 'river'))
   assert.equal(memory.getPois(CANE_SEED_SURVEYED_POI).length, 1)
-  assert.equal(nextCaneShore(survey, memory, { x: 0, z: 0 }, { x: 0, z: 0 })?.biome, 'river')
+  assert.equal(nextCaneShore(memory, { x: 0, z: 0 }, { x: 0, z: 0 })?.what, 'river')
 })
 
 /** a bot whose trips put it where they went, with a cane column at `cane` (x, z) on the grass at y 63 */
@@ -92,4 +92,36 @@ test('exploreCaneShores: no shore surveyed, the seed\'s biomes read for one; non
     assert.equal(opened, 1)
     assert.ok(river ? trips.length > 0 && trips.every(t => t.z < -100) : trips.length === 0, trips.map(t => t.toString()).join(' '))
   }
+})
+
+test('the survey notes the shores in the memory: a shore biome\'s chunk, and the land chunk beside a water chunk (a lake in the plains); none inland', () => {
+  const memory = new WorldMemory()
+  const survey = new BiomeSurvey(fakeBot() as any, memory)
+  const chunk = (cx: number, cz: number, biome: string, water: boolean): any => ({ x: cx * 16 + 8, z: cz * 16 + 8, y: water ? 62 : 64, biome, water })
+  // plains all about, a lake in chunk (2, 0); a river chunk far off
+  for (let cx = 0; cx < 4; cx++) for (let cz = -1; cz <= 1; cz++) survey.note(chunk(cx, cz, 'plains', cx === 2 && cz === 0))
+  survey.note(chunk(20, 0, 'river', true))
+  const shores = memory.getPois(SHORE_POI)
+  assert.ok(shores.some(p => p.note === 'river' && p.x === 20 * 16 + 8))
+  // the lake's shore: a land chunk beside it (the lake's own chunk not one), SHORE_SPACING apart
+  const lake = shores.filter(p => p.note === 'water')
+  assert.ok(lake.length >= 1)
+  assert.ok(lake.every(p => Math.hypot(p.x - (2 * 16 + 8), p.z - 8) === 16), lake.map(p => `${p.x},${p.z}`).join(' '))
+  // no water, no shore
+  const dry = new WorldMemory()
+  const s2 = new BiomeSurvey(fakeBot() as any, dry)
+  for (let cx = 0; cx < 4; cx++) s2.note(chunk(cx, 0, 'plains', false))
+  assert.equal(dry.getPois(SHORE_POI).length, 0)
+})
+
+test('readShoresFromSeed: a lake on the ring by a point of land, that land noted a shore, the reads stopped there (f3-1.21.11: the lakes of the plains)', async () => {
+  const memory = new WorldMemory()
+  const survey = surveyOf(memory, [])
+  // plains all about, a lake west of home (x < -50, |z| < 30) on the first ring
+  const biomes: any = { surface: async (x: number, z: number) => ({ x, z, y: 64, biome: 'plains', water: x < -50 && Math.abs(z) < 30 }), dispose: async () => {} }
+  const n = await readShoresFromSeed(biomes, survey, memory, { x: 0, z: 0 })
+  assert.equal(n, 8)
+  const shores = memory.getPois(SHORE_POI)
+  assert.ok(shores.length >= 1 && shores.every(p => p.note === 'water' && p.x < 0), shores.map(p => `${p.x},${p.z}`).join(' '))
+  assert.equal(nextCaneShore(memory, { x: 0, z: 0 }, { x: 0, z: 0 })?.what, 'water')
 })

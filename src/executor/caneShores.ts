@@ -1,9 +1,9 @@
 // Sugar cane is found by water: vanilla's patch_sugar_cane feature (1.21.11 worldgen) puts its columns on grass, dirt
 // or sand with water beside them (SugarCaneBlock.canSurvive), in a chunk 1 time in 6 in most biomes, 1 in 3 in a swamp.
-// Inland, away from water, the feature's tries find no ground for it. So an exploring for cane goes along the shores:
-// the river, beach and swamp chunks the biome survey has seen (BiomeSurvey: the loaded chunks' biomes, and the seed's),
-// the nearest not looked at yet, the canes in sight noted at each (rememberCanes), not the spiral's land out over
-// the hills.
+// Inland, away from water, the feature's tries find no ground for it. So an exploring for cane goes along the shores
+// the biome survey noted (SHORE_POI: the river, beach and swamp chunks, and the land by a lake's or the sea's water, of
+// the loaded chunks and the seed's reads), the nearest not looked at yet, the canes in sight noted at each
+// (rememberCanes), not the spiral's land out over the hills.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import type { WorldMemory } from '../core/memory'
@@ -13,13 +13,9 @@ import { travel } from '../skills/travel'
 import { trace } from '../skills/util'
 import type { Seed } from '../worldgen/random'
 import { openSeedBiomes, type SeedBiomes } from '../worldgen/seedBiomes'
-import { ringPoints, type BiomeSurvey, type ChunkSurface } from './foodLand'
+import { CANE_SHORE_BIOMES, SHORE_POI, SHORE_SPACING, type BiomeSurvey, type ChunkSurface } from './foodLand'
 
-/**
- * The biomes whose shores an exploring for cane goes to: the river's banks (patch_sugar_cane, 1 chunk in 6, and banks
- * all along it), the beaches' (the sea's edge) and the swamp's (patch_sugar_cane_swamp, 1 in 3, its pools all about)
- */
-export const CANE_SHORE_BIOMES: ReadonlySet<string> = new Set(['river', 'beach', 'swamp', 'snowy_beach'])
+export { CANE_SHORE_BIOMES, SHORE_POI }
 /** a spot looked at for cane (its note: none) */
 export const CANE_LOOKED_POI = 'cane_looked'
 /** the seed's biomes read for shores about a home (the reads not made again) */
@@ -29,35 +25,44 @@ export const CANE_SHORE_RANGE = 384
 /** a shore within this of a spot looked at is passed over (the canes in sight there noted: CANE_SIGHT_RADIUS) */
 export const CANE_LOOKED_RADIUS = 64
 /** the shores gone to at most in one exploring */
-export const CANE_SHORE_VISITS = 6
+export const CANE_SHORE_VISITS = 10
 /** the rings of the seed's biomes read about home for shores, nearest first, and the points on each */
 export const CANE_SEED_RINGS: ReadonlyArray<{ radius: number, points: number }> = [{ radius: 64, points: 8 }, { radius: 128, points: 12 }, { radius: 208, points: 16 }, { radius: 304, points: 20 }]
 
+export interface Shore {
+  x: number
+  y: number
+  z: number
+  /** the shore's biome, or 'water' for land by a lake's or the sea's */
+  what: string
+}
+
 /**
- * The next shore to look at for cane: a chunk of CANE_SHORE_BIOMES the survey has (seen, or read from the seed) within
+ * The next shore to look at for cane: one the survey noted (SHORE_POI: seen, or read from the seed) within
  * CANE_SHORE_RANGE of `home`, none within CANE_LOOKED_RADIUS of a spot looked at, the nearest to `from`
  */
-export function nextCaneShore (survey: Pick<BiomeSurvey, 'chunks'>, memory: WorldMemory, home: { x: number, z: number }, from: { x: number, z: number }): ChunkSurface | null {
+export function nextCaneShore (memory: WorldMemory, home: { x: number, z: number }, from: { x: number, z: number }): Shore | null {
   const looked = memory.getPois(CANE_LOOKED_POI, { dimension: 'overworld' })
-  let best: { s: ChunkSurface, d: number } | null = null
-  for (const s of survey.chunks.values()) {
-    if (!CANE_SHORE_BIOMES.has(s.biome)) continue
-    if (Math.hypot(s.x - home.x, s.z - home.z) > CANE_SHORE_RANGE) continue
-    if (looked.some(p => Math.hypot(p.x - s.x, p.z - s.z) <= CANE_LOOKED_RADIUS)) continue
-    const d = Math.hypot(s.x - from.x, s.z - from.z)
-    if (best == null || d < best.d) best = { s, d }
+  let best: { s: Shore, d: number } | null = null
+  for (const p of memory.getPois(SHORE_POI, { dimension: 'overworld' })) {
+    if (Math.hypot(p.x - home.x, p.z - home.z) > CANE_SHORE_RANGE) continue
+    if (looked.some(l => Math.hypot(l.x - p.x, l.z - p.z) <= CANE_LOOKED_RADIUS)) continue
+    const d = Math.hypot(p.x - from.x, p.z - from.z)
+    if (best == null || d < best.d) best = { s: { x: p.x, y: p.y, z: p.z, what: p.note ?? 'shore' }, d }
   }
   return best?.s ?? null
 }
 
 /**
  * The seed's surface biomes on CANE_SEED_RINGS about `center`, ring by ring until one has a shore (each noted in the
- * survey, as its food reads are); once a home (CANE_SEED_SURVEYED_POI). Resolves the points read.
+ * survey, as its food reads are: a shore biome's noted a shore), a point of land beside a point of water on the ring
+ * noted a shore too (a lake's, the sea's); once a home (CANE_SEED_SURVEYED_POI). Resolves the points read.
  */
 export async function readShoresFromSeed (biomes: SeedBiomes, survey: BiomeSurvey, memory: WorldMemory, center: { x: number, z: number }, signal?: AbortSignal): Promise<number> {
   let n = 0
   for (const ring of CANE_SEED_RINGS) {
     let found = false
+    const reads: ChunkSurface[] = []
     for (let i = 0; i < ring.points; i++) {
       throwIfAborted(signal)
       const a = 2 * Math.PI * i / ring.points
@@ -67,12 +72,22 @@ export async function readShoresFromSeed (biomes: SeedBiomes, survey: BiomeSurve
       let s = survey.seedReads.get(key)
       if (s == null) {
         const r = await biomes.surface(x, z)
-        s = { x: r.x, y: r.y - 1, z: r.z, biome: r.biome }
+        s = { x: r.x, y: r.y - 1, z: r.z, biome: r.biome, water: r.water }
         survey.seedReads.set(key, s)
         n++
       }
       survey.note(s)
+      reads.push(s)
       if (CANE_SHORE_BIOMES.has(s.biome)) found = true
+    }
+    // a lake's or the sea's water on the ring by a point of land: the land's a shore (the water in sight from it)
+    for (let i = 0; i < reads.length; i++) {
+      const a = reads[i]
+      const b = reads[(i + 1) % reads.length]
+      if (a.water == null || b.water == null || a.water === b.water) continue
+      const land = a.water ? b : a
+      if (!memory.getPois(SHORE_POI, { dimension: 'overworld' }).some(o => Math.hypot(o.x - land.x, o.z - land.z) < SHORE_SPACING)) memory.addPoi(SHORE_POI, { x: land.x, y: land.y, z: land.z }, 'overworld', 'water')
+      found = true
     }
     if (found) break
   }
@@ -128,7 +143,7 @@ export async function exploreCaneShores (bot: Bot, args: CaneShoresArgs, signal?
   if (await look()) return true
   for (let visits = 0; visits < CANE_SHORE_VISITS; visits++) {
     throwIfAborted(signal)
-    let shore = nextCaneShore(survey, memory, home, bot.entity.position)
+    let shore = nextCaneShore(memory, home, bot.entity.position)
     const seed = args.seed
     if (shore == null && seed != null && !memory.getPois(CANE_SEED_SURVEYED_POI, { dimension: 'overworld' }).some(p => Math.hypot(p.x - home.x, p.z - home.z) <= CANE_LOOKED_RADIUS)) {
       const biomes = await (args.openSeed ?? openSeedBiomes)(seed, bot.version).catch(() => null)
@@ -140,13 +155,13 @@ export async function exploreCaneShores (bot: Bot, args: CaneShoresArgs, signal?
           await biomes.dispose().catch(() => {})
         }
       }
-      shore = nextCaneShore(survey, memory, home, bot.entity.position)
+      shore = nextCaneShore(memory, home, bot.entity.position)
     }
     if (shore == null) {
       log('sugar cane: no shore left to look at')
       return false
     }
-    log(`sugar cane: to the ${shore.biome} at ${shore.x} ${shore.z} (${Math.round(Math.hypot(shore.x - bot.entity.position.x, shore.z - bot.entity.position.z))} blocks)`)
+    log(`sugar cane: to the ${shore.what === 'water' ? 'shore by the water' : shore.what} at ${shore.x} ${shore.z} (${Math.round(Math.hypot(shore.x - bot.entity.position.x, shore.z - bot.entity.position.z))} blocks)`)
     // (noted before the trip: one cut off goes to the next shore, not the same one again)
     memory.addPoi(CANE_LOOKED_POI, { x: shore.x, y: shore.y, z: shore.z }, 'overworld')
     await go(new Vec3(shore.x, shore.y, shore.z))

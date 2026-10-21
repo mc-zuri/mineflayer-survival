@@ -32,6 +32,8 @@ export interface SurfaceBiome {
   y: number
   /** the biome's name without its namespace */
   biome: string
+  /** the top block is water (a lake's, a river's, the sea's) */
+  water?: boolean
 }
 
 export interface SeedBiomes {
@@ -56,7 +58,10 @@ export async function openSeedBiomes (seed: Seed, version: string): Promise<Seed
     surface: async (x, z) => {
       const y = await world.getHeight(x, z)
       const b = await world.getBiome({ x, y: y - 1, z })
-      return { x, z, y, biome: String(b.name).replace(/^minecraft:/, '') }
+      // (the top block: its chunk generated for the height already)
+      const top = await world.getBlock({ x, y: y - 1, z }).catch(() => null)
+      const name = String(top?.state?.name ?? top?.name ?? '')
+      return { x, z, y, biome: String(b.name).replace(/^minecraft:/, ''), water: /^(minecraft:)?water$/.test(name) }
     },
     dispose: async () => { await world.dispose() }
   }
