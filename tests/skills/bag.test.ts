@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
 import { Vec3 } from 'vec3'
-import { BAG_HOSTILE_RANGE, bagKeeper, bagShort, bagUnsafe, holdBag, keepRoom, unwantedDrop, type BagKeeper } from '../../src/skills/bag'
+import { BAG_HOSTILE_DY, BAG_HOSTILE_RANGE, bagKeeper, bagShort, bagThreat, bagUnsafe, holdBag, keepRoom, unwantedDrop, type BagKeeper } from '../../src/skills/bag'
 import { entity, fakeBot, item } from '../reflexes/fakeBot'
 
 /** a fake bot whose 36 slots hold `stacks` stacks of cobblestone (the rest empty) */
@@ -237,4 +237,31 @@ test('keepRoom: no room made with a hostile within BAG_HOSTILE_RANGE (bagUnsafe)
   assert.strictEqual(await keepRoom(bot), true)
   assert.strictEqual(k.calls.length, 1)
   release()
+})
+
+test('bagUnsafe: only a hostile that sees the bot within BAG_HOSTILE_DY, or a hit lately; one through the rock, a cave under the bot or an enderman keeps no room from being made (f2b-grim: 6000 ticks of \'no room made: hostiles about\' at full health in a mine by day)', () => {
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (pos: Vec3) => pos.x === 3 ? 'stone' : 'air' })
+  const zombie = entity({ name: 'zombie', position: new Vec3(5.5, 64, 0.5) })
+  bot.entities[zombie.id] = zombie
+  // behind the wall at x 3
+  assert.strictEqual(bagUnsafe(bot), false)
+  assert.strictEqual(bagThreat(bot), null)
+  // round it, in sight
+  zombie.position = new Vec3(0.5, 64, 5.5)
+  assert.strictEqual(bagUnsafe(bot), true)
+  assert.strictEqual(bagThreat(bot), 'zombie 5.0 off (dy 0)')
+  // in a cave under the bot (in sight, the air between), further down than the hostiles reflex fights
+  zombie.position = new Vec3(0.5, 64 - BAG_HOSTILE_DY - 1, 2.5)
+  assert.strictEqual(bagUnsafe(bot), false)
+  // an enderman in sight lets the bot be
+  delete bot.entities[zombie.id]
+  const enderman = entity({ name: 'enderman', position: new Vec3(0.5, 64, 4.5) })
+  bot.entities[enderman.id] = enderman
+  assert.strictEqual(bagUnsafe(bot), false)
+  // till it hits: the reflexes' hit lately
+  bot.survival = { reflexes: { enabled: true, context: () => ({ ticksSinceHurt: 10, config: { combat: { hurtTicks: 60 } } }) } }
+  assert.strictEqual(bagUnsafe(bot), true)
+  assert.strictEqual(bagThreat(bot), 'a hit lately')
+  bot.survival.reflexes.context = () => ({ ticksSinceHurt: 200, config: { combat: { hurtTicks: 60 } } })
+  assert.strictEqual(bagUnsafe(bot), false)
 })

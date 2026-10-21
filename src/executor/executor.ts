@@ -25,7 +25,7 @@ import { isAbort } from '../skills/errors'
 import { tossAway } from '../skills/pickupDrops'
 import { navigate } from '../skills/navigate'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
-import { bagUnsafe, holdBag, type BagKeeper } from '../skills/bag'
+import { bagThreat, bagUnsafe, holdBag, type BagKeeper } from '../skills/bag'
 import { countItems, emptySlots, trace, waitTicks } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
@@ -921,7 +921,7 @@ export class Executor {
         for (let t = 0; t < ROOM_COMBAT_WAIT && bagUnsafe(this.bot); t += 10) await waitTicks(this.bot, 10, inTask ?? signal)
       }
       if (bagUnsafe(this.bot)) {
-        if (this.tasks.tick - this.roomCombatLogged >= ROOM_COMBAT_WAIT) this.log('no room made: hostiles about')
+        if (this.tasks.tick - this.roomCombatLogged >= ROOM_COMBAT_WAIT) this.log(`no room made: hostiles about: ${bagThreat(this.bot) ?? 'gone'}`)
         this.roomCombatLogged = this.tasks.tick
         return
       }

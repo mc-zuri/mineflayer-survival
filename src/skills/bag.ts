@@ -9,30 +9,58 @@ import type { Bot } from 'mineflayer'
 import type { Vec3 } from 'vec3'
 import { emptySlots } from './util'
 import { throwIfAborted } from './errors'
+import { hasLineOfSight } from './combatUtil'
 
 /** how near a hostile keeps the bag as it is (bagUnsafe: the hostiles reflex's range) */
 export const BAG_HOSTILE_RANGE = 8
 
+/** how far above or below a hostile keeps the bag as it is (the hostiles reflex's maxDy) */
+export const BAG_HOSTILE_DY = 4
+
 /**
- * Whether no room is made now: a hostile within BAG_HOSTILE_RANGE, alive, or the reflexes in combat (one in range, or a
- * hit lately). A throw turns the bot from the mob, a walk off takes it 8 blocks among them: a 26.3 bot fighting four
- * zombies in a cave at y -58 threw its cobbled deepslate away 5 times in 50 ticks between its fights, walking off
- * each time, and was slain (ls4-26.3, t386611)
+ * Whether no room is made now: a hit lately (the reflexes' combat.hurtTicks), or a hostile alive within
+ * BAG_HOSTILE_RANGE and BAG_HOSTILE_DY of the bot that sees it, the ones the hostiles reflex fights (hostilesInRange:
+ * MeleeAttackGoal and RangedBowAttackGoal need a line of sight). A throw turns the bot from the mob, a walk off takes
+ * it 8 blocks among them: a 26.3 bot fighting four zombies in a cave at y -58 threw its cobbled deepslate away 5 times
+ * in 50 ticks between its fights, walking off each time, and was slain (ls4-26.3, t386611). One on the far side of
+ * the rock, in a cave over or under the bot, or a neutral one not provoked (an enderman: NEUTRAL_MOBS) is none: a
+ * 1.21.11 bot in its diamond mine at y -14 by day, at full health and never fighting, made no room for 6000 ticks
+ * ('no room made: hostiles about': some hostile within 8, through the rock), and its crafts failed for the full bag
+ * till the milestone did, five times (f2b-grim, t98985 to t105284)
  */
 export function bagUnsafe (bot: Bot): boolean {
   const engine = (bot as any).survival?.reflexes
   try {
-    if (engine?.enabled === true && engine.context?.().inCombat === true) return true
+    if (engine?.enabled === true) {
+      const ctx = engine.context?.()
+      if (ctx != null && ctx.ticksSinceHurt < (ctx.config?.combat?.hurtTicks ?? 60)) return true
+    }
   } catch {}
+  return threats(bot).length > 0
+}
+
+/** hostiles by minecraft-data that let the bot be till it hits them (EnderMan, ZombifiedPiglin: NeutralMob) */
+const NEUTRAL_MOBS = new Set(['enderman', 'zombified_piglin'])
+
+/** the hostiles alive within BAG_HOSTILE_RANGE and BAG_HOSTILE_DY that see the bot, the neutral ones left out */
+function threats (bot: Bot): any[] {
   const pos = bot.entity?.position
-  if (pos == null) return false
-  return Object.values(bot.entities ?? {}).some((e: any) => {
+  if (pos == null) return []
+  return Object.values(bot.entities ?? {}).filter((e: any) => {
     if (e === bot.entity || e?.position == null) return false
-    if ((bot.registry?.entitiesByName as any)?.[e.name ?? '']?.type !== 'hostile') return false
+    if ((bot.registry?.entitiesByName as any)?.[e.name ?? '']?.type !== 'hostile' || NEUTRAL_MOBS.has(e.name)) return false
     const health = e.metadata?.[9]
     if (typeof health === 'number' && health <= 0) return false
-    return e.position.distanceTo(pos) <= BAG_HOSTILE_RANGE
+    return e.position.distanceTo(pos) <= BAG_HOSTILE_RANGE && Math.abs(e.position.y - pos.y) <= BAG_HOSTILE_DY && hasLineOfSight(bot, e)
   })
+}
+
+/** what keeps the bag as it is now (bagUnsafe), for the log: "zombie 6.1 off (dy -1)", or "a hit lately" */
+export function bagThreat (bot: Bot): string | null {
+  if (!bagUnsafe(bot)) return null
+  const pos = bot.entity.position
+  const words = threats(bot).map((e: any) => `${String(e.name)} ${e.position.distanceTo(pos).toFixed(1)} off (dy ${(e.position.y - pos.y).toFixed(0)})`)
+  return words.length > 0 ? words.join(', ') : 'a hit lately'
 }
 
 export interface BagKeeper {
