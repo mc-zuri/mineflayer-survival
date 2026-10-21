@@ -187,6 +187,37 @@ export async function equipArmor (bot: Bot, opts: SkillOptions = {}): Promise<Eq
   return { equipped }
 }
 
+/** a shield with this much durability left or less is worn: another is held when there is one, and one made (SHIELD 336) */
+export const SHIELD_WORN = 84
+
+/** the shield's durability left */
+export function shieldLeft (item: Item): number {
+  return remainingDurability(item)
+}
+
+/**
+ * The shield to put in the off hand now: the bag's freshest when the off hand is empty, or holds a worn shield
+ * (SHIELD_WORN) and the bag a fresher one; null for none. A 1.21.11 bot carried its shield in the bag 100000 ticks, its
+ * off hand empty (raiseShield put it there only when raised), and the fights' code that looks at the off hand for it
+ * saw none (f6-1.21.11, seed 2528942595609174214, t413442 to t506847)
+ */
+export function shieldToHold (bot: Bot): Item | null {
+  const held = bot.inventory.slots[45] ?? null
+  if (held != null && held.name !== 'shield') return null
+  const bag = bot.inventory.items().filter(i => i.name === 'shield').sort((a, b) => shieldLeft(b) - shieldLeft(a))[0]
+  if (bag == null) return null
+  if (held == null) return bag
+  return shieldLeft(held) <= SHIELD_WORN && shieldLeft(bag) > shieldLeft(held) ? bag : null
+}
+
+/** Puts shieldToHold in the off hand; false with none to put */
+export async function equipShield (bot: Bot): Promise<boolean> {
+  const shield = shieldToHold(bot)
+  if (shield == null) return false
+  await bot.equip(shield, 'off-hand')
+  return true
+}
+
 /** Puts a totem of undying in the off hand (LivingEntity.checkTotemDeathProtection checks both hands). */
 export async function equipTotem (bot: Bot): Promise<boolean> {
   if (bot.inventory.slots[45]?.name === 'totem_of_undying') return true

@@ -114,6 +114,21 @@ test('armor reflex: when better armor comes into the inventory', () => {
   assert.strictEqual(check(armorReflex, { items: [item('leather_chestplate')], armor: { torso: item('iron_chestplate') } }), null)
 })
 
+test('shield reflex: the bag shield to the empty off hand, a fresher one for a worn one held; not over a totem, nor in use', async () => {
+  const { shieldReflex } = await import('../../src/reflexes/rules')
+  const { SHIELD_WORN, shieldToHold } = await import('../../src/skills/armor')
+  const shield = (used: number): any => ({ ...item('shield'), maxDurability: 336, durabilityUsed: used })
+  assert.strictEqual(check(shieldReflex, { items: [shield(0)] }), 'shield')
+  assert.strictEqual(check(shieldReflex, { items: [] }), null)
+  assert.strictEqual(check(shieldReflex, { items: [shield(0)], offhand: shield(10) }), null)
+  assert.strictEqual(check(shieldReflex, { items: [shield(0)], offhand: shield(336 - SHIELD_WORN) }), 'shield')
+  assert.strictEqual(check(shieldReflex, { items: [shield(0)], offhand: item('totem_of_undying') }), null)
+  assert.strictEqual(check(shieldReflex, { items: [shield(0)], usingHeldItem: true }), null)
+  // the freshest of the bag's
+  const bot = fakeBot({ items: [shield(300), shield(20), shield(100)] })
+  assert.strictEqual((shieldToHold(bot) as any)?.durabilityUsed, 20)
+})
+
 test('totem reflex: a totem goes to the off hand, unless the shield is up there', () => {
   const totem = [item('totem_of_undying')]
   assert.strictEqual(check(totemReflex, { items: totem }), 'totem')

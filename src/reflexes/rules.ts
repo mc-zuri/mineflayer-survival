@@ -1,5 +1,5 @@
 import type { Bot } from 'mineflayer'
-import { armorUpgrades, equipArmor, equipTotem } from '../skills/armor'
+import { armorUpgrades, equipArmor, equipShield, equipTotem, shieldToHold } from '../skills/armor'
 import { eat, dueMeal, reserveAllows } from '../skills/eat'
 import { barrierCells, escapeHazard, evadeCreeper, fireHandled, fleeFrom, headInWater, inFireOnly, inHazard, surface, wallOffShooter } from '../skills/escape'
 import { MELEE_GUARD_MARGIN, MELEE_MOBS, creeperSwelling, fight, inMobReach } from '../skills/fight'
@@ -1247,6 +1247,23 @@ export const armorReflex: Reflex = {
   }
 }
 
+/**
+ * A shield in the off hand whenever the bag has one and the off hand is empty, or holds a worn one and the bag a
+ * fresher (shieldToHold), not while a held item is in use: the off hand is where the fights and the blaze bunker raise it
+ * from, and a 1.21.11 bot carried its one shield in the bag 100000 ticks with the off hand empty (f6-1.21.11). Under
+ * the armor reflex's priority: a click or two
+ */
+export const shieldReflex: Reflex = {
+  name: 'shield',
+  priority: 69,
+  check (ctx) {
+    const { bot, config } = ctx
+    if (!config.armor.enabled || ctx.offhandLocked || (bot as any).usingHeldItem === true) return null
+    if (shieldToHold(bot) == null) return null
+    return { name: 'shield', priority: config.armor.priority - 1, run: async () => { await equipShield(bot) } }
+  }
+}
+
 const planCache = new WeakMap<Bot, { tick: number, plan: NightPlan }>()
 /** no ground to dig a shelter in found: not before this tick (`wait` after the last try), and this far out next time */
 const noGround = new WeakMap<Bot, { until: number, wait: number, radius: number }>()
@@ -1603,4 +1620,4 @@ export const cavesReflex: Reflex = {
   }
 }
 
-export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, wardenReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, cavesReflex, eatReflex, dropsReflex, spawnerReflex, nightReflex, armorReflex]
+export const DEFAULT_REFLEXES: Reflex[] = [totemReflex, fallReflex, fireballReflex, hazardReflex, wardenReflex, ghastReflex, drowningReflex, creeperReflex, emergencyEatReflex, hostilesReflex, cavesReflex, eatReflex, dropsReflex, spawnerReflex, nightReflex, armorReflex, shieldReflex]
