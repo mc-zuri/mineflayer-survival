@@ -143,3 +143,58 @@ test('rememberArrivalHere: a portal the bot came out of some other way than ente
   rememberArrivalHere(bot, 'overworld')
   assert.equal(memory.getPois('nether_portal', { dimension: 'the_nether' }).length, 1)
 })
+
+test('watchArrivals: a change of dimension by any way (a walk through a portal by chance) has its arrival portal remembered 20 ticks after; a death\'s respawn none (f8-1.21.11: in the nether with no portal remembered)', async () => {
+  const { watchArrivals, ARRIVAL_LOOK_TICKS } = await import('../../src/nether/portalTravel')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { Vec3 } = await import('vec3')
+  const portal = new Set(['-3,51,-3', '-2,51,-3', '-3,52,-3', '-2,52,-3', '-3,53,-3', '-2,53,-3'])
+  const world = (p: any): string => portal.has(`${p.x},${p.y},${p.z}`) ? 'nether_portal' : p.y < 51 ? 'obsidian' : 'air'
+  const bot = fakeBot({ position: new Vec3(-1.5, 51, -1.5), world })
+  bot.game.dimension = 'overworld'
+  const id = bot.registry.blocksByName.nether_portal.id
+  bot.findBlocks = () => [...portal].map(k => new Vec3(...k.split(',').map(Number) as [number, number, number]))
+  const realBlockAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => { const b = realBlockAt(p); return b?.name === 'nether_portal' ? { ...b, type: id } : b }) as any
+  const memory = new WorldMemory()
+  bot.survival = { memory }
+  watchArrivals(bot)
+  watchArrivals(bot)
+  // through the portal into the nether
+  bot.game.dimension = 'the_nether'
+  bot.emit('respawn')
+  for (let i = 0; i < ARRIVAL_LOOK_TICKS - 1; i++) bot.emit('physicsTick')
+  assert.equal(memory.getPois('nether_portal', { dimension: 'the_nether' }).length, 0)
+  bot.emit('physicsTick')
+  assert.equal(memory.getPois('nether_portal', { dimension: 'the_nether' }).length, 1)
+  // a respawn in the same dimension: nothing more
+  bot.emit('respawn')
+  for (let i = 0; i < ARRIVAL_LOOK_TICKS; i++) bot.emit('physicsTick')
+  assert.equal(memory.getPois('nether_portal', { dimension: 'the_nether' }).length, 1)
+})
+
+test('returnOverworld: no portal remembered nor lit near, a whole frame gone out by the bot is lit again before any \'no portal near\' (f8-1.21.11)', async () => {
+  const { returnOverworld } = await import('../../src/nether/portalTravel')
+  const { portalFrame } = await import('../../src/nether/portal')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { Vec3 } = await import('vec3')
+  // an unlit frame along x at (2, 64, 0), the bot by it
+  const frame = portalFrame({ x: 2, y: 64, z: 0 }, 'x')
+  const obsidian = new Set(frame.obsidian.map(p => `${p.x},${p.y},${p.z}`))
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 2.5), world: (p: any) => obsidian.has(`${p.x},${p.y},${p.z}`) ? 'obsidian' : p.y < 64 ? 'netherrack' : 'air' })
+  bot.game.dimension = 'the_nether'
+  bot.findBlocks = () => []
+  bot.survival = { memory: new WorldMemory() }
+  const skills = require('../../src/nether/portalSkills')
+  const real = skills.lightPortal
+  let lit = 0
+  skills.lightPortal = async () => { lit++; throw new Error('stop here') }
+  try {
+    await returnOverworld(bot).catch(() => {})
+  } finally {
+    skills.lightPortal = real
+  }
+  assert.equal(lit, 1)
+})

@@ -70,6 +70,35 @@ export function rememberArrivalHere (bot: Bot, from: Dimension): Vec3 | null {
   return here
 }
 
+/** ticks after a change of dimension the arrival portal is looked for (the chunks about the bot in by then) */
+export const ARRIVAL_LOOK_TICKS = 20
+
+/**
+ * Every change of dimension the bot makes, by any way (enterNether's, a walk through a portal by chance), has its
+ * arrival portal remembered ARRIVAL_LOOK_TICKS after it (rememberArrivalHere, linked to the portal it came by): a
+ * 1.21.11 bot that walked through its own portal found itself in the nether with no portal remembered, and 'no
+ * portal near (-20, 124, 15) to light' ended play (f8-1.21.11, t337332 to t367003). Installed once (createPlugin).
+ */
+export function watchArrivals (bot: Bot): void {
+  if ((bot as any).__survivalArrivals === true) return
+  ;(bot as any).__survivalArrivals = true
+  let last = bot.game?.dimension != null ? dimensionOf(bot) : null
+  bot.on('respawn', () => {
+    const from = last
+    const to = dimensionOf(bot)
+    last = to
+    if (from == null || from === to || bot.health <= 0) return
+    let n = 0
+    const tick = (): void => {
+      if (++n < ARRIVAL_LOOK_TICKS) return
+      bot.off('physicsTick', tick)
+      if (dimensionOf(bot) !== to) return
+      try { rememberArrivalHere(bot, from) } catch (err) { trace('watchArrivals:', (err as Error).message) }
+    }
+    bot.on('physicsTick', tick)
+  })
+}
+
 /** the nearest nether_portal block that stands on something, within `maxDistance` */
 export function findPortal (bot: Bot, maxDistance = 32): Vec3 | null {
   const id = bot.registry.blocksByName.nether_portal.id
@@ -369,6 +398,19 @@ async function takePortal (bot: Bot, to: Dimension, args: EnterNetherArgs, signa
           portal = findPortal(bot, 16)
         }
       }
+    }
+  }
+  // none remembered nor lit near: a frame by the bot gone out (the one it came out of, its arrival not remembered: a
+  // walk through a portal by chance) lit again
+  if (portal == null) {
+    const found = frameNear(bot, bot.entity.position)
+    if (found != null && found.missing.length <= countItems(bot, 'obsidian')) {
+      trace('takePortal: a frame gone out by the bot:', found.missing.length > 0 ? `${found.missing.length} obsidian put back,` : '', 'lighting it')
+      for (const cell of found.missing) {
+        await placeBlock(bot, { pos: cell, item: 'obsidian' }, signal).catch(err => { if (isAbort(err)) throw err; trace('takePortal: obsidian not put back at', cell.toString(), (err as Error).message) })
+      }
+      await lightPortal(bot, found.frame, signal).catch(err => { if (isAbort(err)) throw err; trace('takePortal: not lit:', (err as Error).message) })
+      portal = findPortal(bot, 16)
     }
   }
   if (portal == null) {
