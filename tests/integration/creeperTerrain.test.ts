@@ -11,10 +11,12 @@
 // - 'open': open superflat ground, the 'trunk' kit, a creeper from the east;
 // - 'nook': a nook of cobblestone a cell across, shut but for its east side, the bot in it with the 'trunk' kit (no
 //   shield), a creeper 3.3 off at its open side: cornered, fought with the sword;
+// - 'crowd': open ground, a creeper 3 off east, a husk with no AI a block west of the bot (mine-ai-mcp's
+//   creeper-crowd-retreat): the run not into the husk;
 // - 'nookBare': the nook with no sword (the stone pickaxe in hand, the cobblestone): cornered, its sight cut with the
 //   blocks carried.
 // Each run is a pass when the bot is alive 400 ticks on with the creepers gone (blown up, killed) or out of reach.
-// CREEPER_RUNS=n repeats each (default 2); CREEPER_CASES picks some (trunk,hollow,open,nook,nookBare).
+// CREEPER_RUNS=n repeats each (default 2); CREEPER_CASES picks some (trunk,hollow,open,nook,crowd,nookBare).
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
@@ -27,7 +29,7 @@ import { NightLog, summary } from './nightLog'
 
 const USER = 'creeperbot'
 const RUNS = Number(process.env.CREEPER_RUNS ?? 2)
-const CASES = (process.env.CREEPER_CASES ?? 'trunk,hollow,open,nook,nookBare').split(',')
+const CASES = (process.env.CREEPER_CASES ?? 'trunk,hollow,open,nook,crowd,nookBare').split(',')
 // the superflat's grass
 const GRASS = -61
 
@@ -54,6 +56,8 @@ interface Case {
   worn: Record<string, string>
   hand: string
   carried: Array<[string, number]>
+  /** other mobs put about (in the grid's coordinates), their summon NBT */
+  others?: Array<{ type: string, at: Vec3, nbt: string }>
 }
 
 /** a nook a cell across at (1, 1, 1), shut but for its east side ('C' cobblestone) */
@@ -76,6 +80,9 @@ const CASES_ALL: Case[] = [
   { name: 'hollow', grid: LS3B_CREEPER_2, bot: new Vec3(27.7, 64, 203.3), creepers: [new Vec3(19.5, 64, 206.5), new Vec3(26.5, 64, 210.5)], worn: { 'armor.chest': 'iron_chestplate' }, hand: 'diamond_pickaxe', carried: [['iron_sword', 1], ['cobblestone', 64], ['cooked_beef', 4]] },
   { name: 'open', grid: null, bot: new Vec3(0.5, 0, 0.5), creepers: [new Vec3(8.5, 0, 0.5)], ...TRUNK_KIT },
   { name: 'nook', grid: NOOK, bot: new Vec3(1.5, 1, 1.5), creepers: [new Vec3(4.8, 1, 1.5)], ...TRUNK_KIT },
+  // (after mine-ai-mcp's scenarios/flat/combat/creeper-crowd-retreat: a husk with no AI a block behind the bot, the
+  // creeper 3 off in front: the run from it is not into the husk)
+  { name: 'crowd', grid: null, bot: new Vec3(0.5, 0, 0.5), creepers: [new Vec3(3.5, 0, 0.5)], ...TRUNK_KIT, others: [{ type: 'husk', at: new Vec3(-0.5, 0, 0.5), nbt: '{NoAI:1b,PersistenceRequired:1b}' }] },
   { name: 'nookBare', grid: NOOK, bot: new Vec3(1.5, 1, 1.5), creepers: [new Vec3(4.8, 1, 1.5)], ...TRUNK_KIT, carried: [['cobblestone', 64], ['cooked_beef', 4]] }
 ]
 
@@ -142,6 +149,10 @@ async function fresh (c: Case): Promise<{ at: Vec3, creepers: Vec3[] }> {
   await run(`effect give ${USER} minecraft:saturation 1 20 true`)
   await waitFor(() => bot.inventory.items().some(i => i.name === 'cooked_beef'), 200)
   await bot.waitForTicks(10)
+  for (const o of c.others ?? []) {
+    const p = to(o.at)
+    await run(`summon minecraft:${o.type} ${p.x} ${p.y} ${p.z} ${o.nbt}`)
+  }
   return { at, creepers: c.creepers.map(to) }
 }
 

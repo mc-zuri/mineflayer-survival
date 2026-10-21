@@ -221,6 +221,37 @@ test('sightCells: a cornered bot\'s feet and head cells toward the creeper, the 
   assert.deepStrictEqual(sightCells(bot, at), [])
 })
 
+test('blastBarrierCells: one block on each open line from a creeper within 6 to the body, the first open cell with a block to put it against in reach; none past 6, none on a line a block cuts (after mine-ai-mcp blast-barrier)', async () => {
+  const { blastBarrierCells, BLAST_BARRIER_RANGE } = await import('../../src/skills/escape')
+  const { entity } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  const creeper = entity({ name: 'creeper', position: new Vec3(3.5, 64, 0.5) })
+  // the feet's line: the cell beside the bot on the floor; the head's line has nothing to put a block against
+  assert.deepStrictEqual(blastBarrierCells(bot, creeper).map(String), ['(1, 64, 0)'])
+  // a block on the lines already (both pass the cell between at the feet's height, the blast low): none
+  const walled = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (p: Vec3) => p.y < 64 || (p.x === 2 && p.y === 64 && p.z === 0) ? 'stone' : 'air' })
+  assert.deepStrictEqual(blastBarrierCells(walled, creeper), [])
+  // a creeper up a step (its blast at the head's height): the head's line's cell too, against the step
+  const step = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (p: Vec3) => p.y < 64 || (p.x >= 2 && p.y === 64) ? 'stone' : 'air' })
+  const up = entity({ name: 'creeper', position: new Vec3(3.5, 65, 0.5) })
+  assert.ok(blastBarrierCells(step, up).length >= 1, String(blastBarrierCells(step, up)))
+  // past its blast's reach: none
+  assert.deepStrictEqual(blastBarrierCells(bot, entity({ name: 'creeper', position: new Vec3(BLAST_BARRIER_RANGE + 1.5, 64, 0.5) })), [])
+})
+
+test('fleeHeading keeps the run clear of the other mobs about (clearsCrowd): from a creeper west, not straight east into a zombie (after mine-ai-mcp creeper-retreat)', async () => {
+  const { fleeHeading, clearsCrowd } = await import('../../src/skills/steer')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  const creeper = new Vec3(-2.5, 64, 0.5)
+  const east = fleeHeading(bot, creeper)
+  assert.ok(east != null && -Math.sin(east) > 0.95, String(east))
+  const zombie = { position: new Vec3(2.5, 64, 0.5), width: 0.6 }
+  assert.strictEqual(clearsCrowd(bot.entity.position, 1, 0, [zombie]), false)
+  assert.strictEqual(clearsCrowd(bot.entity.position, -1, 0, [zombie]), true)
+  const h = fleeHeading(bot, creeper, 16, undefined, [zombie])
+  assert.ok(h != null && Math.abs(Math.cos(h)) > 0.3, `heading ${h}: ${-Math.sin(h ?? 0)}, ${-Math.cos(h ?? 0)}`)
+})
+
 /** a world of named cells from a function, water and air (and seagrass) empty, the rest solid */
 function cells (name: (p: Vec3) => string): CellLookup {
   return p => {

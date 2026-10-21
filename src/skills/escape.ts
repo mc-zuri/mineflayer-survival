@@ -1061,6 +1061,58 @@ export function sightCells (bot: Bot, creeper: { position: Vec3, width?: number,
   return []
 }
 
+/** how near a creeper is for a barrier against its blast (blastBarrierCells: its reach, Explosion's 2 * 3) */
+export const BLAST_BARRIER_RANGE = 6
+/** the reach a barrier block is put from (its support's face from the eyes) */
+export const BLAST_BARRIER_REACH = 4.5
+
+/**
+ * The cells to put a block in against a creeper's blast: on each line from its blast's middle (0.1 over its feet) to
+ * the bot's body (0.5 and 1.5 up) that no block cuts yet, the first cell 0.75 to 3 along it that's open (no block, no
+ * liquid, no mob's or the bot's box in it), has a full block beside it to place against, its face within
+ * BLAST_BARRIER_REACH of the eyes. One block a line: the blast's damage is by the share of its rays that reach the body
+ * (Explosion.getSeenPercent), and the fuse runs only in sight (SwellGoal). After mine-ai-mcp's
+ * survival/positioning/combat/blast-barrier.ts (blastBarrierCells), MIT License, Copyright (c) 2026 AI Bengineering,
+ * its notice in skills/lavaFlow.ts.
+ */
+export function blastBarrierCells (bot: Bot, creeper: { position: Vec3, width?: number, height?: number }): Vec3[] {
+  if (bot.entity.position.distanceTo(creeper.position) > BLAST_BARRIER_RANGE) return []
+  const out = new Map<string, Vec3>()
+  const eyes = eyePosition(bot)
+  const solid = (p: Vec3): boolean => bot.blockAt(p)?.boundingBox === 'block'
+  const { min, max } = entityBox(creeper)
+  const inCreeper = (c: Vec3): boolean => min.x < c.x + 1 && max.x > c.x && min.y < c.y + 1 && max.y > c.y && min.z < c.z + 1 && max.z > c.z
+  for (const height of [0.5, 1.5]) {
+    const body = bot.entity.position.offset(0, height, 0)
+    const blast = creeper.position.offset(0, 0.1, 0)
+    const segment = blast.minus(body)
+    const length = segment.norm()
+    if (length < 0.01) continue
+    // (a block on the line already: none more)
+    let cut = false
+    for (let d = 0.25; d < length; d += 0.25) if (solid(body.plus(segment.scaled(d / length)).floored())) { cut = true; break }
+    if (cut) continue
+    for (let d = 0.75; d < Math.min(length, 3); d += 0.25) {
+      const cell = body.plus(segment.scaled(d / length)).floored()
+      const key = cell.toString()
+      if (out.has(key)) break
+      const b = bot.blockAt(cell)
+      if (b == null || b.boundingBox !== 'empty' || b.name === 'water' || b.name === 'lava') continue
+      if (boxInCell(bot.entity.position, cell) || inCreeper(cell)) continue
+      const support = [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, 1, 0]].find(([x, y, z]) => {
+        const s = cell.offset(x, y, z)
+        if (!solid(s)) return false
+        const face = new Vec3(s.x + 0.5 - x / 2, s.y + 0.5 - y / 2, s.z + 0.5 - z / 2)
+        return face.distanceTo(eyes) <= BLAST_BARRIER_REACH
+      })
+      if (support == null) continue
+      out.set(key, cell)
+      break
+    }
+  }
+  return [...out.values()]
+}
+
 /** times a cell that took no block (sightCells) is tried in an evade */
 export const SIGHT_CELL_TRIES = 2
 
@@ -1091,7 +1143,9 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
       const distance = bot.entity.position.distanceTo(creeper.position)
       if (distance >= safe && !swelling) return { outcome: 'away', blocked, ticks: t }
       const hasShield = bot.inventory.slots[45]?.name === 'shield' || bot.inventory.items().some(i => i.name === 'shield')
-      const way = run.jammed ? null : fleeWay(bot, creeper.position, undefined, { route: run.routing(t), keepOff: creeperKeepOff(bot.entity.position, creeper.position) })
+      // (the other mobs about kept off the run's line: clearsCrowd)
+      const crowd = Object.values(bot.entities).filter(e => e !== bot.entity && e.id !== creeper.id && isAlive(bot, e) && (bot.registry?.entitiesByName as any)?.[e.name ?? '']?.type === 'hostile' && e.position.distanceTo(bot.entity.position) <= 16)
+      const way = run.jammed ? null : fleeWay(bot, creeper.position, undefined, { route: run.routing(t), keepOff: creeperKeepOff(bot.entity.position, creeper.position), avoid: crowd })
       const cornered = way == null
       if (hasShield && distance < blockDistance && (swell >= blockAtSwell || cornered)) {
         run.stood()
@@ -1104,11 +1158,16 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
         run.stood()
         if (blocking) { lowerShield(bot); blocking = false }
         bot.clearControlStates()
-        // nowhere to run, no shield, no weapon: its sight cut with the blocks carried (sightCells), its fuse going back
-        // down behind them. (With a weapon its hits do better: the knockback keeps it off, and three or four kill it.)
+        // nowhere to run and no shield: a swelling creeper's blast cut off with a block on each open line to the body
+        // (blastBarrierCells), weapon or none; with no weapon its sight cut too (sightCells), its fuse going back down
+        // behind them. (A creeper not swelling yet is hit with a weapon: the knockback keeps it off, and three or four
+        // kill it.)
         const { sealItem } = await import('./shelter')
-        const block = bestMeleeWeapon(bot, 'creeper') == null ? sealItem(bot) : null
-        const cell = block != null && hasLineOfSight(bot, creeper) ? sightCells(bot, creeper).find(c => (failedCells.get(c.toString()) ?? 0) < SIGHT_CELL_TRIES) : undefined
+        const carried = sealItem(bot)
+        const tried = (c: Vec3): boolean => (failedCells.get(c.toString()) ?? 0) < SIGHT_CELL_TRIES
+        const barrier = carried != null && swelling ? blastBarrierCells(bot, creeper).find(tried) : undefined
+        const block = barrier != null ? carried : bestMeleeWeapon(bot, 'creeper') == null ? carried : null
+        const cell = barrier ?? (block != null && hasLineOfSight(bot, creeper) ? sightCells(bot, creeper).find(tried) : undefined)
         if (block != null && cell != null) {
           const { placeBlock } = await import('./placeBlock')
           try {

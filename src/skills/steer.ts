@@ -211,13 +211,41 @@ export function lineCost (bot: Bot, from: Vec3, dx: number, dz: number, steps = 
   return cost
 }
 
+/** a mob a flee keeps its line clear of (fleeHeading's `avoid`) */
+export interface CrowdMob { position: Vec3, width?: number }
+
+/** how far along a flee's line another mob's body is looked for (CROWD_AHEAD), and the room kept from it */
+export const CROWD_AHEAD = 2.5
+export const CROWD_MARGIN = 0.6
+
+/**
+ * Whether the next CROWD_AHEAD blocks along (dx, dz) from `pos` pass no mob of `crowd` (within 2 up or down) nearer
+ * than the two bodies' half widths and CROWD_MARGIN; one behind the line is no matter (after mine-ai-mcp's
+ * survival/positioning/combat/creeper-retreat.ts clearsCrowd, MIT, its notice in skills/lavaFlow.ts): a run from a
+ * creeper into a zombie's arms is no run
+ */
+export function clearsCrowd (pos: Vec3, dx: number, dz: number, crowd: readonly CrowdMob[]): boolean {
+  for (const e of crowd) {
+    if (Math.abs(e.position.y - pos.y) > 2) continue
+    const tx = e.position.x - pos.x
+    const tz = e.position.z - pos.z
+    const along = tx * dx + tz * dz
+    if (along <= 1e-10) continue
+    const k = Math.min(along, CROWD_AHEAD)
+    const cx = tx - dx * k
+    const cz = tz - dz * k
+    if (Math.hypot(cx, cz) < (0.6 + (e.width ?? 0.6)) / 2 + CROWD_MARGIN) return false
+  }
+  return true
+}
+
 /**
  * The heading (mineflayer yaw) that leads furthest from the threat over safe ground, or null if every way is shut;
  * with `toward` (the base, a lit place), the ways nearer it are the better by FLEE_LEAN, still never back at the threat.
  * The way is the body's (lineCost: its width, the room to jump a step), not its middle's: a line between a trunk and a
  * canopy's low leaves its middle passed and its body didn't kept a bot jumping in place by a creeper (ls3b-1.21.11)
  */
-export function fleeHeading (bot: Bot, threat: Vec3, samples = 16, toward?: Vec3): number | null {
+export function fleeHeading (bot: Bot, threat: Vec3, samples = 16, toward?: Vec3, avoid: readonly CrowdMob[] = []): number | null {
   const pos = bot.entity.position
   const from = new Vec3(pos.x, groundFeetY(bot), pos.z)
   const away = new Vec3(pos.x - threat.x, 0, pos.z - threat.z)
@@ -236,6 +264,8 @@ export function fleeHeading (bot: Bot, threat: Vec3, samples = 16, toward?: Vec3
     // never at the threat: in a tunnel shut behind it, the one open way led a 26.3 bot fleeing a creeper toward it,
     // into its blast (nether-26.3-q3); none open but that way is no way (cornered)
     if (dx * ax + dz * az < FLEE_TOWARD) continue
+    // (nor through another mob's body: clearsCrowd)
+    if (!clearsCrowd(pos, dx, dz, avoid)) continue
     const cost = lineCost(bot, from, dx, dz)
     if (cost === Infinity) continue
     const score = (dx * ax + dz * az) * 3 + (dx * tx + dz * tz) * FLEE_LEAN - cost
@@ -379,9 +409,9 @@ export type FleeWay = { heading: number } | { cell: Vec3 }
  * The way to run from the threat this tick: the straight line's heading (fleeHeading), else (or with `route`, the line
  * got the bot nowhere: Headway) the next cell of a route out (fleeRoute); null when there's neither (cornered)
  */
-export function fleeWay (bot: Bot, threat: Vec3, toward?: Vec3, opts: { route?: boolean, keepOff?: number } = {}): FleeWay | null {
+export function fleeWay (bot: Bot, threat: Vec3, toward?: Vec3, opts: { route?: boolean, keepOff?: number, avoid?: readonly CrowdMob[] } = {}): FleeWay | null {
   if (opts.route !== true) {
-    const heading = fleeHeading(bot, threat, 16, toward)
+    const heading = fleeHeading(bot, threat, 16, toward, opts.avoid)
     if (heading != null) return { heading }
   }
   const pos = bot.entity.position
