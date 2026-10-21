@@ -1,7 +1,7 @@
 // The herd kept for food against a real server (SURVIVAL_VERSION, default 1.21.11) (the tests/harness lockstep server
 // and bot), on a superflat patch: the herd step builds a pen near home of fences crafted through the planner and leads
 // the wild cows about into it; a herd of two cows in a pen with wheat grows over the days it's tended (bred as the
-// cooldown allows) and gives cooked beef from its surplus, its two breeders kept.
+// cooldown allows) and gives cooked beef from its surplus, its breeders kept (BREEDERS_KEPT).
 import { describe, it, before, after, beforeEach } from 'node:test'
 import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
@@ -97,7 +97,7 @@ describe(`a herd kept for food on a ${DEFAULT_VERSION} server`, { timeout: 30 * 
     assert.ok(cows().filter(e => inPen(pen, e.position)).length >= inside, 'none got out')
   })
 
-  it('from two cows in a pen with wheat, the herd grows and gives cooked beef over the days it is tended, its two breeders kept', async () => {
+  it('from two cows in a pen with wheat, the herd grows and gives cooked beef over the days it is tended, its breeders kept', async () => {
     await give('oak_fence', 24)
     await give('oak_fence_gate', 1)
     await give('wheat', 32)

@@ -16,8 +16,12 @@ import { countItems } from './util'
 /** the point of interest where the bot's herd lives (its pen's middle, or where it was let out of eggs) */
 export const HERD = 'herd'
 
-/** adults of the herd never killed: the pair it is bred on */
-export const BREEDERS_KEPT = 2
+/**
+ * adults of the herd never killed: a kill comes from a herd of 4 or more, the 3 kept breeding a pair while the third
+ * stands in for a breeder lost (a cow out by the gate, a creeper's blast, a kill that took the wrong one): a herd of
+ * two that lost one was a herd no more
+ */
+export const BREEDERS_KEPT = 3
 
 /** the kinds a herd is started with, the first with two adults near and its food held: cows, else sheep, else pigs */
 export const HERD_MOBS = ['cow', 'sheep', 'pig'] as const
@@ -85,7 +89,7 @@ export function herdSurplus (adults: number, keep = BREEDERS_KEPT): number {
 
 /**
  * The herd's animals a kill may not take: every calf (it drops nothing, and it's the herd's next adult), and every
- * adult while the herd has `keep` or fewer (the last two are bred on, never killed)
+ * adult while the herd has `keep` or fewer (the last BREEDERS_KEPT are bred on, never killed)
  */
 export function breedersToSpare (animals: ReadonlyArray<{ id: number, adult: boolean }>, keep = BREEDERS_KEPT): Set<number> {
   const adults = animals.filter(a => a.adult).length

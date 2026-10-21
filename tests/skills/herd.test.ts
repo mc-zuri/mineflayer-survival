@@ -11,20 +11,20 @@ import { entity, fakeBot } from '../reflexes/fakeBot'
 
 const animal = (id: number, adult: boolean): { id: number, adult: boolean } => ({ id, adult })
 
-test('breedersToSpare: the calves always; every adult while the herd has the two breeders or fewer, none beyond', () => {
-  assert.equal(BREEDERS_KEPT, 2)
-  assert.deepEqual([...breedersToSpare([animal(1, true), animal(2, true)])].sort(), [1, 2])
+test('breedersToSpare: the calves always; every adult while the herd has the three breeders or fewer, none beyond (a kill from a herd of 4 or more)', () => {
+  assert.equal(BREEDERS_KEPT, 3)
+  assert.deepEqual([...breedersToSpare([animal(1, true), animal(2, true), animal(3, true)])].sort(), [1, 2, 3])
   assert.deepEqual([...breedersToSpare([animal(1, true)])], [1])
-  assert.deepEqual([...breedersToSpare([animal(1, true), animal(2, true), animal(3, false)])].sort(), [1, 2, 3])
-  // three adults: one may go (and once it has, the two left are spared)
-  assert.deepEqual([...breedersToSpare([animal(1, true), animal(2, true), animal(3, true), animal(4, false)])], [4])
+  assert.deepEqual([...breedersToSpare([animal(1, true), animal(2, true), animal(3, true), animal(4, false)])].sort(), [1, 2, 3, 4])
+  // four adults: one may go (and once it has, the three left are spared)
+  assert.deepEqual([...breedersToSpare([animal(1, true), animal(2, true), animal(3, true), animal(5, true), animal(4, false)])], [4])
 })
 
-test('slaughterPick: the surplus adults only, never the last two, never a calf', () => {
-  const herd = [animal(1, false), animal(2, true), animal(3, true), animal(4, false), animal(5, true), animal(6, true)]
+test('slaughterPick: the surplus adults only, never the last three, never a calf', () => {
+  const herd = [animal(1, false), animal(2, true), animal(3, true), animal(4, false), animal(5, true), animal(6, true), animal(7, true)]
   assert.deepEqual(slaughterPick(herd, 10), [2, 3])
   assert.deepEqual(slaughterPick(herd, 1), [2])
-  assert.deepEqual(slaughterPick([animal(1, true), animal(2, true), animal(3, false)], 5), [])
+  assert.deepEqual(slaughterPick([animal(1, true), animal(2, true), animal(8, true), animal(3, false)], 5), [])
   assert.deepEqual(slaughterPick([animal(1, false), animal(2, false), animal(3, false)], 5), [])
 })
 
@@ -32,8 +32,8 @@ test('herdChores: the breeders kept whatever the food wanted; the surplus slaugh
   const base = { food: 20, cap: 12, sinceBred: null, perKill: 16 }
   // two adults: bred, none killed however hungry
   assert.deepEqual(herdChores({ ...base, adults: 2, calves: 0, want: 200 }), { breed: 1, slaughter: 0 })
-  // five adults, 40 points wanted: 3 kills cover it, all 3 of the surplus
-  assert.deepEqual(herdChores({ ...base, adults: 5, calves: 1, want: 40 }), { breed: 2, slaughter: 3 })
+  // five adults, 40 points wanted: 3 kills would cover it, the 2 of the surplus slaughtered
+  assert.deepEqual(herdChores({ ...base, adults: 5, calves: 1, want: 40 }), { breed: 2, slaughter: 2 })
   // 16 points: one kill
   assert.equal(herdChores({ ...base, adults: 5, calves: 1, want: 16 }).slaughter, 1)
   // no food wanted, room in the pen: the surplus kept alive (the planner's cheap meat)
@@ -77,7 +77,7 @@ function penned (): { memory: WorldMemory, bot: any, ids: { adults: number[], ca
   const pen = planPen(() => ({ name: 'air', boundingBox: 'empty' }), center, 7, 'west')
   rememberPen(memory, pen)
   rememberHerd(memory, { pos: center, mob: 'cow', adults: 2, calves: 0, bred: 1000 })
-  const adults = [entity({ name: 'cow', position: new Vec3(10.5, 64, 10.5) }), entity({ name: 'cow', position: new Vec3(11.5, 64, 9.5) }), entity({ name: 'cow', position: new Vec3(9.5, 64, 11.5) })]
+  const adults = [entity({ name: 'cow', position: new Vec3(10.5, 64, 10.5) }), entity({ name: 'cow', position: new Vec3(11.5, 64, 9.5) }), entity({ name: 'cow', position: new Vec3(9.5, 64, 11.5) }), entity({ name: 'cow', position: new Vec3(9.5, 64, 9.5) })]
   const calves = [entity({ name: 'cow', position: new Vec3(10.5, 64, 11.5), meta: { baby: true } })]
   // a wild cow outside the ring
   const wild = entity({ name: 'cow', position: new Vec3(30.5, 64, 10.5) })
@@ -86,7 +86,7 @@ function penned (): { memory: WorldMemory, bot: any, ids: { adults: number[], ca
   return { memory, bot, ids: { adults: adults.map(e => e.id), calves: calves.map(e => e.id) } }
 }
 
-test('herdSpares: the pen\'s calves always, its adults once only the two breeders are left; never a wild one', () => {
+test('herdSpares: the pen\'s calves always, its adults once only the three breeders are left; never a wild one', () => {
   const { memory, bot, ids } = penned()
   assert.deepEqual([...herdSpares(bot, memory)], ids.calves)
   delete bot.entities[ids.adults[0]]
@@ -100,20 +100,20 @@ test('herdSupply: the surplus now, the calves as later surplus with their growin
   const { memory, bot, ids } = penned()
   assert.deepEqual(herdSupply(bot, memory, 'cow', 1000 + GROW_UP_TICKS - 500), { surplus: 1, growing: 1, growTicks: 500, distance: bot.entity.position.distanceTo(new Vec3(10, 64, 10)) })
   assert.equal(herdSupply(bot, memory, 'pig', 0), undefined)
-  // two breeders and a calf: the calf alone, later
+  // three breeders and a calf: the calf alone, later
   delete bot.entities[ids.adults[0]]
   assert.deepEqual(herdSupply(bot, memory, 'cow', 1000), { surplus: 0, growing: 1, growTicks: GROW_UP_TICKS, distance: bot.entity.position.distanceTo(new Vec3(10, 64, 10)) })
-  // the two breeders alone: nothing to take
+  // the three breeders alone: nothing to take
   delete bot.entities[ids.calves[0]]
   assert.equal(herdSupply(bot, memory, 'cow', 1000), undefined)
-  // out of sight, the counts remembered (2 adults: nothing)
+  // out of sight, the counts remembered (2 adults: nothing; 5, the two beyond the breeders)
   bot.entity.position = new Vec3(300, 64, 0)
   assert.equal(herdSupply(bot, memory, 'cow', 1000), undefined)
-  rememberHerd(memory, { pos: new Vec3(10, 64, 10), mob: 'cow', adults: 4, calves: 0, bred: null })
+  rememberHerd(memory, { pos: new Vec3(10, 64, 10), mob: 'cow', adults: 5, calves: 0, bred: null })
   assert.equal(herdSupply(bot, memory, 'cow', 1000)?.surplus, 2)
 })
 
-test('a kill step passes over the pen\'s two breeders and its calf, nearer as they are, for a wild cow', async () => {
+test('a kill step passes over the pen\'s three breeders and its calf, nearer as they are, for a wild cow', async () => {
   const { memory, bot, ids } = penned()
   delete bot.entities[ids.adults[2]]
   const wild = Object.values(bot.entities).find((e: any) => e.name === 'cow' && e.position.x > 20) as any
@@ -156,7 +156,7 @@ test('a kill step with no cow near goes to the herd it keeps out of sight for it
   const { memory, bot } = penned()
   const herdCows = Object.values(bot.entities).filter((e: any) => e.name === 'cow' && e.position.x < 20) as any[]
   for (const e of Object.values(bot.entities) as any[]) if (e.name === 'cow') delete bot.entities[e.id]
-  rememberHerd(memory, { pos: new Vec3(10, 64, 10), mob: 'cow', adults: 3, calves: 1, bred: null })
+  rememberHerd(memory, { pos: new Vec3(10, 64, 10), mob: 'cow', adults: 4, calves: 1, bred: null })
   bot.entity.position = new Vec3(300.5, 64, 0.5)
   const travelModule = require('../../src/skills/travel')
   const huntModule = require('../../src/skills/hunt')
@@ -189,5 +189,5 @@ test('a kill step with no cow near goes to the herd it keeps out of sight for it
   assert.ok(herdCows.some(e => e.id === killed[0]), 'a penned cow')
   assert.ok(!lines.some(l => /exploring/.test(l)), lines.join(' | '))
   // its counts as seen there remembered
-  assert.equal(herdFromMemory(memory)?.adults, 3)
+  assert.equal(herdFromMemory(memory)?.adults, 4)
 })

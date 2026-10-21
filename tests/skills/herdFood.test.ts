@@ -90,10 +90,10 @@ test('startHerd: no two of a kind near home, or no wheat: nothing built, tried a
   assert.equal(herdFromMemory(memory), null)
 })
 
-test('tendHerd: bred as the cooldown allows, only the surplus slaughtered for the food wanted and cooked, the two breeders and the calf kept, the gate shut', async () => {
+test('tendHerd: bred as the cooldown allows, only the surplus slaughtered for the food wanted and cooked, the three breeders and the calf kept, the gate shut', async () => {
   const { tendHerd } = await import('../../src/milestones')
-  const { bot, memory } = byThePen([{ x: 9, z: 9 }, { x: 10, z: 9 }, { x: 11, z: 9 }, { x: 9, z: 11 }, { x: 10, z: 11, baby: true }], [item('wheat', 10)])
-  rememberHerd(memory, { pos: CENTER, mob: 'cow', adults: 4, calves: 1, bred: null })
+  const { bot, memory } = byThePen([{ x: 9, z: 9 }, { x: 10, z: 9 }, { x: 11, z: 9 }, { x: 9, z: 11 }, { x: 11, z: 11 }, { x: 10, z: 11, baby: true }], [item('wheat', 10)])
+  rememberHerd(memory, { pos: CENTER, mob: 'cow', adults: 5, calves: 1, bred: null })
   const calf = (Object.values(bot.entities) as any[]).find(e => e.metadata.some((m: unknown) => m === true))
   const killed: number[] = []
   const { executor, tasks, obtained } = fakeExecutor(bot, memory, (name, fn) => {
@@ -118,7 +118,7 @@ test('tendHerd: bred as the cooldown allows, only the surplus slaughtered for th
   }
   assert.equal(killed.length, 2)
   assert.ok(!killed.includes(calf.id))
-  assert.equal((Object.values(bot.entities) as any[]).filter(e => e.name === 'cow').length, 3)
+  assert.equal((Object.values(bot.entities) as any[]).filter(e => e.name === 'cow').length, 4)
   assert.ok(tasks.indexOf('breed the cows') < tasks.indexOf('slaughter a cow'), tasks.join(', '))
   // the chores from inside the pen, its gate shut behind (fed from the gate's cell, the herd walked out, 26.3)
   assert.ok(tasks.includes('into the pen') && tasks.indexOf('into the pen') < tasks.indexOf('breed the cows'), tasks.join(', '))
@@ -130,20 +130,20 @@ test('tendHerd: bred as the cooldown allows, only the surplus slaughtered for th
   assert.equal(points, 0)
   // the breeding remembered: the next upkeep within the cooldown breeds none
   assert.equal(herdFromMemory(memory)?.bred, 100000)
-  assert.equal(herdFromMemory(memory)?.adults, 2)
+  assert.equal(herdFromMemory(memory)?.adults, 3)
   tasks.length = 0
   await tendHerd(bot, executor, signal(), () => {}, { want: 200 })
   assert.ok(!tasks.includes('breed the cows') && !tasks.includes('slaughter a cow'), tasks.join(', '))
 })
 
-test('tendHerd: the two breeders alone are never slaughtered, however hungry', async () => {
+test('tendHerd: the three breeders alone are never slaughtered, however hungry', async () => {
   const { tendHerd } = await import('../../src/milestones')
-  const { bot, memory } = byThePen([{ x: 9, z: 9 }, { x: 11, z: 11 }])
-  rememberHerd(memory, { pos: CENTER, mob: 'cow', adults: 2, calves: 0, bred: null })
+  const { bot, memory } = byThePen([{ x: 9, z: 9 }, { x: 11, z: 11 }, { x: 9, z: 11 }])
+  rememberHerd(memory, { pos: CENTER, mob: 'cow', adults: 3, calves: 0, bred: null })
   const { executor, tasks } = fakeExecutor(bot, memory)
   assert.equal(await tendHerd(bot, executor, signal(), () => {}, { want: 500 }), 0)
   assert.ok(!tasks.includes('slaughter a cow'), tasks.join(', '))
-  assert.equal((Object.values(bot.entities) as any[]).filter(e => e.name === 'cow').length, 2)
+  assert.equal((Object.values(bot.entities) as any[]).filter(e => e.name === 'cow').length, 3)
 })
 
 test('harvestGrownFarms keeps the herd\'s wheat from the baking', async () => {
@@ -163,8 +163,8 @@ test('harvestGrownFarms keeps the herd\'s wheat from the baking', async () => {
 test('netherKit: short of the gate\'s food, the herd\'s surplus slaughtered and cooked before any other source is planned, its breeders kept', async () => {
   const { netherKit } = await import('../../src/milestones')
   const gear = [item('diamond_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('shield', 1), item('bow', 1), item('arrow', 64), item('flint_and_steel', 1)]
-  const { bot, memory } = byThePen([{ x: 9, z: 9 }, { x: 10, z: 9 }, { x: 11, z: 9 }, { x: 9, z: 11 }], gear)
-  rememberHerd(memory, { pos: CENTER, mob: 'cow', adults: 4, calves: 0, bred: null })
+  const { bot, memory } = byThePen([{ x: 9, z: 9 }, { x: 10, z: 9 }, { x: 11, z: 9 }, { x: 9, z: 11 }, { x: 11, z: 11 }], gear)
+  rememberHerd(memory, { pos: CENTER, mob: 'cow', adults: 5, calves: 0, bred: null })
   const give = (it: any): void => { bot.inventory.slots[bot.inventory.slots.findIndex((s: any, i: number) => i >= 9 && i < 45 && s == null)] = it }
   const calls: string[] = []
   const { executor } = fakeExecutor(bot, memory, async (name, fn) => {
@@ -188,7 +188,7 @@ test('netherKit: short of the gate\'s food, the herd\'s surplus slaughtered and 
   assert.equal(slaughtered, 2, calls.join(', '))
   assert.ok(calls.indexOf('obtain cooked_beef') > calls.lastIndexOf('slaughter a cow'), calls.join(', '))
   assert.ok(calls.indexOf('obtain food') > calls.indexOf('obtain cooked_beef'), calls.join(', '))
-  assert.equal((Object.values(bot.entities) as any[]).filter(e => e.name === 'cow').length, 2)
+  assert.equal((Object.values(bot.entities) as any[]).filter(e => e.name === 'cow').length, 3)
 })
 
 test('noteAnimals: the wild adults in sight noted by chunk with their count, not the herd\'s nor a calf; a chunk in sight with none of its kind now forgotten, one out of sight kept', async () => {

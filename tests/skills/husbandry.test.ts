@@ -71,12 +71,12 @@ test('keepFarms: eggs held let out, a pair of cows near bred with the wheat held
   assert.deepStrictEqual(tasks, [])
 })
 
-test('shelvesForLeather: the shelves the leather at hand makes books for, two cows kept to breed and a book for the anvil', async () => {
+test('shelvesForLeather: the shelves the leather at hand makes books for, three cows kept to breed and a book for the anvil', async () => {
   const { shelvesForLeather } = await import('../../src/milestones')
   const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
-  // 8 cows let out: 6 to kill, 6 books, one kept: a shelf (the table's book made already)
+  // 8 cows let out: 5 to kill, 5 books, one kept: a shelf (the table's book made already)
   assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1 }), 8), 1)
-  assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1 }), 8, 0, 0), 2)
+  assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1 }), 9, 0, 0), 2)
   // the table still to make takes a book first
   assert.strictEqual(shelvesForLeather(inv({}), 9), 1)
   assert.strictEqual(shelvesForLeather(inv({ enchanting_table: 1, leather: 10, book: 3, bookshelf: 1 }), 2), 5)
@@ -103,11 +103,11 @@ test('releaseSpots and waterHoleSite on a hillside: ground with room over it abo
   assert.strictEqual(hill(site).name, 'grass_block')
 })
 
-test('herdChore: breed and wait while the adults beyond the two breeders fall short of the leather wanted; then kill', async () => {
+test('herdChore: breed and wait while the adults beyond the three breeders fall short of the leather wanted; then kill', async () => {
   const { herdChore } = await import('../../src/milestones')
   assert.strictEqual(herdChore({ leather: 0, want: 46, adults: 8, calves: 4, wheat: 60 }), 'breed')
-  assert.strictEqual(herdChore({ leather: 10, want: 46, adults: 38, calves: 6, wheat: 20 }), 'kill')
-  assert.strictEqual(herdChore({ leather: 45, want: 46, adults: 3, calves: 0, wheat: 0 }), 'kill')
+  assert.strictEqual(herdChore({ leather: 10, want: 46, adults: 39, calves: 6, wheat: 20 }), 'kill')
+  assert.strictEqual(herdChore({ leather: 45, want: 46, adults: 4, calves: 0, wheat: 0 }), 'kill')
   assert.strictEqual(herdChore({ leather: 45, want: 46, adults: 2, calves: 0, wheat: 10 }), 'breed')
   assert.strictEqual(herdChore({ leather: 46, want: 46, adults: 2, calves: 0, wheat: 0 }), 'done')
   // the wheat gone or the time up: the surplus killed, then done
