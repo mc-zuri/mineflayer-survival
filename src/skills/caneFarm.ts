@@ -270,20 +270,27 @@ export interface CaneFarmResult {
  * round each), then a cane on each spot, the nearest first; none in `avoid` (the base's walls). Remembered as the cane
  * farm (rememberCaneFarm), the spots planted added to those it had. Throws MISSING_ITEMS without canes.
  */
-export async function plantSugarCane (bot: Bot, args: { count?: number, center?: Vec3, memory?: WorldMemory, avoid?: (pos: Vec3) => boolean } = {}, signal?: AbortSignal): Promise<CaneFarmResult> {
+export async function plantSugarCane (bot: Bot, args: { count?: number, center?: Vec3, memory?: WorldMemory, avoid?: (pos: Vec3) => boolean, radius?: number } = {}, signal?: AbortSignal): Promise<CaneFarmResult> {
   const count = Math.min(args.count ?? 8, countItems(bot, 'sugar_cane'))
   if (count <= 0) throw new SkillError('MISSING_ITEMS', 'no sugar cane to plant')
   const center = args.center ?? bot.entity.position
+  const radius = args.radius ?? 16
   const lookup: CaneLookup = p => bot.blockAt(p) as any
   const avoid = args.avoid ?? (() => false)
-  const spots = (): Vec3[] => caneSpots(lookup, center).filter(p => !avoid(p))
+  // (a channel's banks first: it was dug for them, out to the radius)
+  let banks: Vec3[] = []
+  const spots = (): Vec3[] => {
+    const own = banks.filter(p => caneSpot(lookup, p) && lookup(p.offset(0, 1, 0))?.name !== 'sugar_cane')
+    return [...own, ...caneSpots(lookup, center, radius).filter(p => !avoid(p) && !own.some(o => o.equals(p)))]
+  }
   const water: Vec3[] = []
   // water where there's too little: a channel dug and a bucket poured in it, else holes (4 spots round each)
   if (spots().length < count && countItems(bot, 'water_bucket') > 0) {
-    const site = caneChannelSite(lookup, center, { avoid })
+    const site = caneChannelSite(lookup, center, { avoid, radius })
     if (site != null) {
       try {
         water.push(...await makeCaneChannel(bot, site, signal))
+        banks = site.banks
       } catch (err) {
         if (isAbort(err)) throw err
         trace('plantSugarCane: the channel failed:', (err as Error).message)

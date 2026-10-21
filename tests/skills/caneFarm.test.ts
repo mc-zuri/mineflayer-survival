@@ -174,3 +174,20 @@ test('tendCaneFarm: the grown canes cut above their bottom blocks, the empty spo
   assert.equal(set.get('3,64,0'), 'sugar_cane')
   assert.equal(set.get('3,64,1'), 'sugar_cane')
 })
+
+test('plantSugarCane plants the banks of the channel it dug first, out to its radius: a channel by the edge of the cane ground has all its banks planted', async () => {
+  const { plantSugarCane, CANE_FARM_SPOTS } = await import('../../src/skills/caneFarm')
+  const { bot, set } = farmBot([item('water_bucket'), item('sugar_cane', 32)])
+  // stone at y 63 but for grass x 12 to 40: the channel's site at the edge of the radius
+  const ground = bot.blockAt
+  bot.blockAt = (p: Vec3) => {
+    const b = ground(p)
+    return p.y === 63 && b.name === 'grass_block' && (p.x < 12 || p.x > 40) ? { ...b, name: 'stone', boundingBox: 'block' } : b
+  }
+  const res = await stubbed([
+    ['../../src/skills/collectBlock', 'collectBlock', dig(set)],
+    ['../../src/skills/navigate', 'navigateNear', async () => {}],
+    ['../../src/skills/placeBlock', 'placeBlock', place(set, bot)]
+  ], async () => await plantSugarCane(bot, { count: CANE_FARM_SPOTS, center: new Vec3(0.5, 64, 0.5), radius: 16 }))
+  assert.equal(res.planted.length, CANE_FARM_SPOTS, res.planted.map(p => p.toString()).join(' '))
+})
