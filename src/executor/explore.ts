@@ -16,6 +16,7 @@ import { keepRoom } from '../skills/bag'
 import { headInWater, surface } from '../skills/escape'
 import { placeBlock } from '../skills/placeBlock'
 import { AIR_BLOCKS, CARDINALS, countItems, trace, waitUntil } from '../skills/util'
+import { isInfested } from '../core/infested'
 import { DIGGING_PICKAXE, wantsDiggingPickaxe } from '../skills/digTool'
 import { atCave, caveRuleOn, caveStep, sealCaveOpenings, withCavesShut } from '../skills/caves'
 
@@ -104,6 +105,11 @@ export function unsafeStep (lookup: Lookup, step: { open: Vec3[], floor: Vec3 })
   for (const cell of step.open) {
     const liquid = liquidAround(lookup, cell)
     if (liquid != null) return liquid
+  }
+  // an infested block is never opened: its silverfish, and the nest it wakes (isInfested; f5-26.3)
+  for (const cell of step.open) {
+    const name = lookup(cell)?.name
+    if (isInfested(name)) return `${name ?? 'an infested block'} at ${cell.toString()}`
   }
   // a stalagmite stood on or fallen onto impales (PointedDripstoneBlock.fallOn), and a stalactite whose block is
   // broken falls (a 26.3 staircase to the deep lava came out in a dripstone cave, where the bot was impaled)
@@ -774,10 +780,12 @@ export function climbHazard (why: string | null, wet: boolean): string | null {
  * shell, protectBase; the trip kit's chest and the beds, keepUnbroken): a dig by hand leaves it too
  */
 export function breakKept (bot: Bot, pos: Vec3): boolean {
-  const areas: Array<(block: any) => number> | undefined = (bot as any).pathfinder?.defaultMoveSettings?.exclusionAreasBreak
-  if (areas == null || areas.length === 0) return false
   const block = bot.blockAt(pos)
   if (block == null || block.boundingBox === 'empty') return false
+  // (the pathfinder breaks no infested block either: its BlockInfo.blocksCantBreak)
+  if (isInfested(block.name)) return true
+  const areas: Array<(block: any) => number> | undefined = (bot as any).pathfinder?.defaultMoveSettings?.exclusionAreasBreak
+  if (areas == null || areas.length === 0) return false
   const info = { position: pos.floored(), block }
   return areas.reduce((n, f) => n + f(info), 0) >= 1e9
 }

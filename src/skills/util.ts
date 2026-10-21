@@ -236,6 +236,8 @@ export function blockIds (bot: Bot, names: string[]): number[] {
 
 export const AIR_BLOCKS = new Set(['air', 'cave_air', 'void_air'])
 
+export { isInfested } from '../core/infested'
+
 /** blocks a placed block replaces (BlockBehaviour.canBeReplaced: the replaceable tag and the fluids) */
 export const REPLACEABLE_BLOCKS = new Set([
   ...AIR_BLOCKS, 'water', 'lava', 'short_grass', 'tall_grass', 'fern', 'large_fern', 'dead_bush', 'snow', 'vine',

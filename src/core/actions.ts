@@ -7,6 +7,7 @@ import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { blockReach, crosshairBlock, digInSight } from '@nxg-org/mineflayer-pathfinder'
 import type { Block } from '../skills/util'
+import { isInfested } from './infested'
 
 export interface DigOptions {
   signal?: AbortSignal
@@ -14,9 +15,21 @@ export interface DigOptions {
   digObstruction?: (block: Block) => boolean
 }
 
-/** digs the block through the crosshair (digInSight); resolves when it is gone */
+/** a block in the crosshair's way that a dig may break first by default: digInSight's (no fluid, not the floor) */
+function breaksInTheWay (bot: Bot, b: Block): boolean {
+  if (/^(water|lava|flowing_water|flowing_lava|bubble_column)$/.test(b.name)) return false
+  if (bot.entity != null && b.position.equals(bot.entity.position.offset(0, -0.5, 0).floored())) return false
+  return ((bot as any).digTime?.(b) ?? 0) !== Infinity
+}
+
+/**
+ * digs the block through the crosshair (digInSight); resolves when it is gone. An infested block (isInfested) is never
+ * dug, the target or one in the crosshair's way: its silverfish, and the nest it wakes
+ */
 export async function dig (bot: Bot, block: Block, options: DigOptions = {}): Promise<void> {
-  await digInSight(bot, block as any, { signal: options.signal, digObstruction: options.digObstruction as any })
+  if (isInfested(block.name)) throw new Error(`${block.name} at ${String(block.position)} is infested: not broken (a silverfish in it)`)
+  const inTheWay = options.digObstruction ?? ((b: Block) => breaksInTheWay(bot, b))
+  await digInSight(bot, block as any, { signal: options.signal, digObstruction: ((b: Block) => !isInfested(b.name) && inTheWay(b)) as any })
 }
 
 // prismarine-world's BlockFace of a face's direction (0 down, 1 up, 2 north, 3 south, 4 west, 5 east)

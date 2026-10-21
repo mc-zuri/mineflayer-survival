@@ -13,6 +13,7 @@ import {
   type Block, type ItemCounts
 } from './util'
 import { dig } from '../core/actions'
+import { isInfested } from '../core/infested'
 import { findBlocks } from '../core/findBlocks'
 import { dangerAt } from './danger'
 
@@ -204,6 +205,11 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     const block = nextTarget()
     if (block == null) break
     const pos = block.position
+    // an infested block is never broken (its silverfish, and the nest it wakes: isInfested)
+    if (isInfested(block.name)) {
+      lastFailure = new SkillError('REFUSED', `${block.name} at ${pos.toString()} is infested (a silverfish in it): not broken`)
+      continue
+    }
     // the room made toward the block (the pit for what's thrown dug off the way to it), and the block there still
     await room(pos.offset(0.5, 0.5, 0.5))
     if (!sameBlock(bot, pos, block.type)) continue

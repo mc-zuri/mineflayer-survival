@@ -8,6 +8,7 @@ import { walkTo } from './navigate'
 import { placeBlock } from './placeBlock'
 import { CARDINALS, countItems, settleInventory, trace, waitTicks, waitUntil } from './util'
 import { dig } from '../core/actions'
+import { isInfested } from '../core/infested'
 import { keepRoom } from './bag'
 
 export interface TunnelArgs {
@@ -106,6 +107,8 @@ export async function tunnelTo (bot: Bot, args: TunnelArgs, signal?: AbortSignal
         // a portal's frame, a chest or a bed is gone round, never dug (a stair beside a cave's nether portal dug into
         // its frame, and the portal was out for good: 'no site to cast' five times after, 26.3)
         if (KEPT_BLOCKS.test(b.name)) { trace('tunnelTo: kept', b.name, c.toString()); ok = false; break }
+        // nor an infested block: its silverfish, and the nest it wakes (isInfested)
+        if (isInfested(b.name)) { trace('tunnelTo: infested', b.name, c.toString()); ok = false; break }
         bot.pathingUtil?.refresh?.()
         const tool = (bot as any).pathingUtil?.bestHarvestingTool?.(b)
         if (tool != null && bot.heldItem?.slot !== tool.slot) { await settleInventory(bot, signal); await bot.equip(tool, 'hand') }
