@@ -1741,3 +1741,52 @@ test('a meal goes to the home\'s food first (a grown farm harvested and baked) a
     milestones.tendHerd = realTend
   }
 })
+
+test('the farm watch: by day, the bot within 32 of its farm with 3 plots ripe, the round of work cut for the harvest (no failure), again only after FARM_PASS_TICKS; not far off, nor by night, nor with 2 ripe', async () => {
+  const { FARM_WATCH_EVERY, FARM_PASS_TICKS } = await import('../../src/runner')
+  const bot = fakeBot()
+  const runner: any = new Runner(bot, { log: () => {}, handlers: {} })
+  const cells = [[10, 63, 0], [11, 63, 0], [12, 63, 0], [13, 63, 0]]
+  bot.survival.memory.addPoi('farm', { x: 10, y: 63, z: 1 }, 'overworld', JSON.stringify({ crop: 'wheat', cells, sown: 0 }))
+  let ripe = 3
+  bot.blockAt = (p: any) => {
+    const i = cells.findIndex(([x, y, z]) => x === p.x && y + 1 === p.y && z === p.z)
+    if (i >= 0) return { name: 'wheat', getProperties: () => ({ age: i < ripe ? 7 : 3 }) }
+    return { name: 'air' }
+  }
+  let tick = 10000
+  Object.defineProperty(runner, 'tick', { get: () => tick })
+  const off = runner.watchFarm()
+  const look = (): void => { for (let i = 0; i < FARM_WATCH_EVERY; i++) bot.emit('physicsTick') }
+  try {
+    runner.roundCtrl = new AbortController()
+    look()
+    assert.equal(runner.roundCtrl.signal.aborted, true)
+    assert.equal(runner.farmDue, true)
+    assert.equal(runner.cutForFood, true)
+    // the next look within FARM_PASS_TICKS: none
+    runner.farmDue = false
+    runner.roundCtrl = new AbortController()
+    tick += FARM_PASS_TICKS - 1
+    look()
+    assert.equal(runner.roundCtrl.signal.aborted, false)
+    // far off, by night, or 2 ripe: none
+    tick += FARM_PASS_TICKS
+    bot.entity.position = new Vec3(60, 64, 0)
+    look()
+    assert.equal(runner.roundCtrl.signal.aborted, false)
+    bot.entity.position = new Vec3(0, 64, 0)
+    bot.time.timeOfDay = 18000
+    look()
+    assert.equal(runner.roundCtrl.signal.aborted, false)
+    bot.time.timeOfDay = 1000
+    ripe = 2
+    look()
+    assert.equal(runner.roundCtrl.signal.aborted, false)
+    ripe = 3
+    look()
+    assert.equal(runner.roundCtrl.signal.aborted, true)
+  } finally {
+    off()
+  }
+})

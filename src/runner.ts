@@ -514,6 +514,13 @@ export const FOOD_DRY_TICKS = 3000
 /** ticks a meal that came to nothing waits before it is tried again */
 export const MEAL_RETRY_TICKS = 6000
 
+/** how near a farm of its own the bot is for the farm watch to harvest its ripe plots (watchFarm) */
+export const FARM_PASS_RANGE = 32
+/** ticks between the farm watch's harvests, at the least */
+export const FARM_PASS_TICKS = 2400
+/** ticks between the farm watch's looks */
+export const FARM_WATCH_EVERY = 100
+
 /** ticks between the herd's upkeeps between trips: the breeding's cooldown (Animal.setAge(6000)) */
 export const HERD_TEND_TICKS = 6000
 
@@ -639,6 +646,11 @@ export class Runner {
   private foodFirst = false
   /** feedFirst under way */
   private feeding = false
+  /** the farm watch's harvest due (watchFarm), and under way */
+  private farmDue = false
+  private harvestingFarm = false
+  /** the tick the farm watch last cut the work at */
+  private farmCutAt = -Infinity
   /** the day (bot.time.day) whose night's mining is over: the rest of that night is the milestones' and the reflexes' */
   private nightMinedDay = -1
   private inNightWork = false
@@ -821,6 +833,7 @@ export class Runner {
     }
     this.bot.on('physicsTick', onTick)
     const offStarving = this.watchStarving()
+    const offFarm = this.watchFarm()
     // the reflexes that preempt the work, in the log: one line a reflex, repeats within REFLEX_LOG_TICKS counted
     let last: { name: string, tick: number, repeats: number } | null = null
     const onReflex = (name: string, detail?: string): void => {
@@ -872,6 +885,7 @@ export class Runner {
     } finally {
       this.bot.off('physicsTick', onTick)
       offStarving()
+      offFarm()
       this.bot.off('reflex' as any, onReflex)
       this.bot.off('death', onDeath)
       this.bot.off('messagestr' as any, onMessage)
@@ -922,6 +936,20 @@ export class Runner {
             if (stopped()) return this.stop(null, 'aborted', err)
             if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
               this.log(`died getting food: ${(err as Error).message}`)
+              await this.recover(signal)
+            }
+          }
+          continue
+        }
+        // the farm passed by with its ripe plots (the farm watch: watchFarm): harvested, sown again and baked first
+        if (this.farmDue) {
+          this.farmDue = false
+          try {
+            await this.harvestPassing(signal)
+          } catch (err) {
+            if (stopped()) return this.stop(null, 'aborted', err)
+            if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+              this.log(`died at the farm: ${(err as Error).message}`)
               await this.recover(signal)
             }
           }
@@ -1773,6 +1801,51 @@ export class Runner {
     }
     this.bot.on('physicsTick', tick)
     return () => { this.bot.off('physicsTick', tick) }
+  }
+
+  /**
+   * The farm watch: every FARM_WATCH_EVERY ticks by day, the bot within FARM_PASS_RANGE of a farm of its own with
+   * MEAL_FARM_PLOTS of its plots or more ripe (farmRipeNear) and FARM_PASS_TICKS since the last, the round of work cut
+   * (a milestone's, the stock's, whatever it is: no failure counted) and the farm harvested first (harvestPassing). The
+   * farm's upkeep ran between trips only, and a long milestone (the enchanting, 50000 ticks a try) went by its ripe
+   * wheat by home day after day while the bot's meals were hunted for (f5-1.21.11 resumed from its base)
+   */
+  watchFarm (): () => void {
+    let n = 0
+    const tick = (): void => {
+      if (++n % FARM_WATCH_EVERY !== 0 || this.feeding || this.harvestingFarm || this.farmDue) return
+      if (this.tick - this.farmCutAt < FARM_PASS_TICKS || dayPhase(this.bot.time?.timeOfDay ?? 0) !== 'day') return
+      const round = this.roundCtrl
+      if (round == null || round.signal.aborted || !this.farmRipeNear()) return
+      this.farmDue = true
+      this.cutForFood = true
+      this.farmCutAt = this.tick
+      this.log('the farm by the bot ripe: the work stopped for its harvest')
+      round.abort(new TaskError('ABORTED', 'the ripe crops of the farm first'))
+    }
+    this.bot.on('physicsTick', tick)
+    return () => { this.bot.off('physicsTick', tick) }
+  }
+
+  /** a farm of the bot's within FARM_PASS_RANGE (across and up or down) with MEAL_FARM_PLOTS of its plots seen ripe */
+  farmRipeNear (): boolean {
+    const bot = this.bot
+    if (bot.entity == null || normalizeDimension(bot.game?.dimension) !== 'overworld' || typeof bot.blockAt !== 'function') return false
+    return knownFarms(this.memory, 'overworld').some(f => bot.entity.position.distanceTo(f.water) <= FARM_PASS_RANGE &&
+      grownPlots(p => bot.blockAt(p) as any, farmCells(f), f.crop).length >= MEAL_FARM_PLOTS)
+  }
+
+  /** the farm watch's harvest: the ripe plots harvested and sown again, the farm grown, the wheat baked (harvestGrownFarms) */
+  async harvestPassing (signal: AbortSignal): Promise<void> {
+    this.harvestingFarm = true
+    try {
+      await harvestGrownFarms(this.bot, this.executor, signal, this.log, true, MEAL_FARM_PLOTS).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        this.log(`farm: ${(err as Error).message}`)
+      })
+    } finally {
+      this.harvestingFarm = false
+    }
   }
 
   /**
