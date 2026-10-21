@@ -1136,6 +1136,36 @@ test('the blaze rods with no bow and no fire resistance to be had: from a bunker
   assert.ok(lines.some(l => /fire resistance: no bow and none of it: the sword from a bunker only/.test(l)), lines.join(' | '))
 })
 
+test('the blaze rods failed for food (no food left to heal on) or hurt on the trip: back to the overworld, the milestone not ready, no failure (f7-1.21.11: 5 failures at once, play stopped)', async () => {
+  const { netherHandler, rodsFailedForFood } = await import('../../src/milestones')
+  const fortressSkills = require('../../src/nether/fortressSkills')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { SkillError } = await import('../../src/skills/errors')
+  assert.equal(rodsFailedForFood(new SkillError('MISSING_ITEMS', 'no food left to heal on in the nook, health 6.8')), true)
+  assert.equal(rodsFailedForFood(Object.assign(new SkillError('MISSING_ITEMS', 'hurt'), { tripHurt: true })), true)
+  assert.equal(rodsFailedForFood(new SkillError('TIMEOUT', '0 of 8 blaze rods')), false)
+  const bot = fakeBot({ items: [item('diamond_sword', 1), item('bow', 1), item('arrow', 64)] })
+  bot.game.dimension = 'the_nether'
+  bot.findBlocks = () => []
+  ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
+  const memory = new WorldMemory()
+  ;(bot as any).survival = { memory }
+  memory.addPoi('blaze_spawner', { x: 870, y: 76, z: 143 }, 'the_nether')
+  const real = fortressSkills.collectBlazeRods
+  const tasks: string[] = []
+  fortressSkills.collectBlazeRods = async () => { throw new SkillError('MISSING_ITEMS', 'no food left to heal on in the nook, health 6.8') }
+  const executor: any = { memory, tasks: { tick: 0 }, obtain: async () => {}, task: async (name: string, fn: (s: AbortSignal) => Promise<unknown>) => { tasks.push(name); if (name === 'back to the overworld') return; return await fn(new AbortController().signal) } }
+  let err: any = null
+  try {
+    err = await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }).then(() => null, e => e)
+  } finally {
+    fortressSkills.collectBlazeRods = real
+  }
+  assert.equal(err?.notReady, true, String(err))
+  assert.equal(err?.foodShort, true)
+  assert.deepEqual(tasks, ['blaze rods', 'back to the overworld'])
+})
+
 test('netherKit: no bow to be had, the water bottles held: ready with no slime ball nor magma cream (the cubes of the nether give the cream; asking for a ball kept full-1.21.11-fresh-g out for good), not ready without the bottles', async () => {
   const { netherKit } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')

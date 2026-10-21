@@ -1414,6 +1414,15 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
           await executor.task('back to the overworld', async (s) => await backToOverworld(bot, s), signal)
           throw Object.assign(err as Error, { notReady: true })
         }
+        // out of food in the fight (no meal left to heal on), or hurt on the trip to the spawner: back through the
+        // portal for the food and the healing, the milestone not ready (its gate's food got there), not a failure: a
+        // 1.21.11 bot came back to its nook with no food 5 times, 'no food left to heal on in the nook, health 6.8' at
+        // once each, and play stopped at the nether (f7-1.21.11, seed -3768674050494303582, t328096 to t329193)
+        if (!signal.aborted && !TaskError.is(err, 'DIED') && rodsFailedForFood(err)) {
+          log(`blaze rods: ${(err as Error).message}: back to the overworld for food`)
+          await executor.task('back to the overworld', async (s) => await backToOverworld(bot, s), signal)
+          throw Object.assign(err as Error, { notReady: true, foodShort: true })
+        }
         if (signal.aborted || TaskError.is(err, 'DIED') || attempt >= BLAZE_SPAWNER_TRIES) throw err
         const message = (err as Error).message
         // no way to it: the fortress's other spawner next (findBlazeSpawner leaves this one out); none other found
@@ -1443,6 +1452,11 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     log(`ender pearls: ${still} short: the endermen of the overworld's nights`)
     await pearlsByNight(bot, executor, count('ender_pearl') + still, signal, log)
   }
+}
+
+/** whether the blaze rods failed for the bot's food or health (the nook's 'no food left to heal on', a trip turned back hurt) */
+export function rodsFailedForFood (err: unknown): boolean {
+  return (err as any)?.tripHurt === true || /no food left to heal on/.test(String((err as Error)?.message ?? ''))
 }
 
 /** spawners (and fortresses) the blaze rods are tried at before the milestone gives up */
