@@ -149,8 +149,12 @@ export async function lightBlazeSpawner (bot: Bot, spawner: Vec3, eye: Vec3, sig
 
 /** the torches a lighting trip out of the bunker puts at the most (the next trip the next) */
 export const LIGHT_TRIP_TORCHES = 3
-/** a lighting trip goes back in once more blazes than this are within 16, or one within LIGHT_TRIP_NEAR */
-export const LIGHT_TRIP_BLAZES = 3
+/**
+ * a lighting trip goes back in once more blazes than this are within 16, or one within LIGHT_TRIP_NEAR (a 1.21.11 bot
+ * back in its bunker by seed 2's open throne at (-290, 77, -209) from a trip with 4 about came in at 3.6 health and
+ * was fireballed)
+ */
+export const LIGHT_TRIP_BLAZES = 2
 export const LIGHT_TRIP_NEAR = 5
 
 /** the most ticks the bunker's lighting trip holds off the blazes before each torch */

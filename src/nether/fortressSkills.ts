@@ -28,7 +28,7 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, BUNKER_FETCH_LEAVE, blazesAbout, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, inNook, netherStepForbidden, nookAround, nookBlocks, openNook, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, sealAndHeal, shellAgain, withBlocksKept } from './blazeFight'
+import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, blazesAbout, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, inNook, netherStepForbidden, nookAround, nookBlocks, openNook, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, sealAndHeal, shellAgain, withBlocksKept } from './blazeFight'
 import { handleFire } from '../skills/escape'
 import { lightFromBunker, litCells, spawnCells } from './spawnerLight'
 import { walkTo } from '../skills/navigate'
@@ -794,7 +794,8 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       if (args.light === false || (tries.get(key) ?? 0) >= LIGHT_TRIES || countItems(bot, 'torch') === 0 || !lightTripDue(bot)) return false
       if (spawnerLitShare(bot, spawner) <= LIGHT_DONE) return false
       tries.set(key, (tries.get(key) ?? 0) + 1)
-      const put = await lightFromBunker(bot, fromBunker, spawner, BUNKER_FETCH_LEAVE, signal)
+      // (back in at BUNKER_FETCH_HEALTH: in from a trip at 3.6 health the bot was fireballed in its bunker)
+      const put = await lightFromBunker(bot, fromBunker, spawner, BUNKER_FETCH_HEALTH, signal)
       trace('collectBlazeRods:', put.length, 'torches by the spawner from the bunker')
       return true
     }

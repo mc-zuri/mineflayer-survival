@@ -287,15 +287,15 @@ test('turnBunker: the head wall that way dug for the new slit, the old slit wall
 })
 
 /** a fake bot in a built bunker at (0, 64, 5) facing -z, its blocks a set the placements and digs change */
-async function bunkerBot (entities: any[]): Promise<{ bot: any, b: any, filled: Set<string>, placed: string[], restore: () => void }> {
+async function bunkerBot (entities: any[], extra: any[] = []): Promise<{ bot: any, b: any, filled: Set<string>, placed: string[], restore: () => void }> {
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const placeModule = require('../../src/skills/placeBlock')
   const w = world()
   const b = bunkerAround(w.lookup, new Vec3(0, 64, 5), new Vec3(0, 0, -1))
   assert.ok(b != null)
   const filled = new Set(b.build.map(String))
-  const name = (p: Vec3): string => filled.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'nether_bricks' : 'air'
-  const bot = fakeBot({ position: new Vec3(0.5, 64, 5.5), items: [item('diamond_sword'), item('cobblestone', 32), item('cooked_beef', 16)], offhand: item('shield'), entities, world: name })
+  const name = (p: Vec3): string => filled.has(p.floored().toString()) ? 'cobblestone' : p.y < 64 ? 'netherrack' : 'air'
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 5.5), items: [item('diamond_sword'), item('cobblestone', 32), item('cooked_beef', 16), ...extra], offhand: item('shield'), entities, world: name })
   bot.world = {
     raycast: (from: Vec3, dir: Vec3, range: number) => {
       for (let t = 0; t <= range; t += 0.02) {
@@ -409,4 +409,28 @@ test('fightFromNook in a bunker with its rods goes on till it\'s quiet to go out
     ac.abort()
     restore()
   }
+})
+
+test('lightFromBunker: out by the sill, the planned torches put (LIGHT_TRIP_TORCHES at the most), back in and the sill put again; with more than LIGHT_TRIP_BLAZES blazes about, none put, back in at once', async () => {
+  const { entity } = await import('../reflexes/fakeBot')
+  const { lightFromBunker, LIGHT_TRIP_TORCHES, LIGHT_TRIP_BLAZES } = await import('../../src/nether/spawnerLight')
+  const { item } = await import('../reflexes/fakeBot')
+  const run = async (blazes: number): Promise<{ placed: string[], torches: number, sillBack: boolean }> => {
+    const far = Array.from({ length: blazes }, (_, i) => entity({ name: 'blaze', position: new Vec3(i, 66, -8), meta: { health: 20 } }))
+    const { bot, b, filled, placed, restore } = await bunkerBot(far, [item('torch', 16)])
+    const ticking = setInterval(() => { for (let k = 0; k < 20; k++) bot.emit('physicsTick') }, 1)
+    try {
+      await lightFromBunker(bot, b, new Vec3(0, 64, 0), 16)
+    } finally {
+      clearInterval(ticking)
+      restore()
+    }
+    return { placed, torches: placed.filter(p => !b.walls.some((w: Vec3) => w.toString() === p)).length, sillBack: filled.has(b.bunker.sill.toString()) }
+  }
+  const quiet = await run(0)
+  assert.ok(quiet.torches > 0 && quiet.torches <= LIGHT_TRIP_TORCHES, quiet.placed.join(' '))
+  assert.equal(quiet.sillBack, true)
+  const busy = await run(LIGHT_TRIP_BLAZES + 1)
+  assert.equal(busy.torches, 0, busy.placed.join(' '))
+  assert.equal(busy.sillBack, true)
 })
