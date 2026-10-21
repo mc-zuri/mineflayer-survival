@@ -155,6 +155,20 @@ export function isOnFire (bot: Bot): boolean {
 /** The head is under water (the block at the eyes is water or a bubble column). */
 export function headInWater (bot: Bot): boolean {
   const block = bot.blockAt(eyePosition(bot).floored()) as any
+  if (waterAtEyes(block)) return true
+  // a body in a gap a block high (a flooded crawl space under a ledge) is in the swimming pose, its eyes 0.4 up
+  // (Pose.SWIMMING's eye height), not at the standing eyes' cell, a solid block's: the server drowned a 1.21.11 bot in
+  // such a gap at y -30 with no drowning reflex for 2000 ticks, the reflex looking at the rock over its head (f1-1.21.11,
+  // t169239 to t171272)
+  if (block?.boundingBox === 'block') return waterAtEyes(bot.blockAt(bot.entity.position.offset(0, SWIMMING_EYE_HEIGHT, 0).floored()) as any)
+  return false
+}
+
+/** the eye height of the swimming and crawling pose (EntityDimensions of Pose.SWIMMING: 0.6 high, its eyes 0.4 up) */
+export const SWIMMING_EYE_HEIGHT = 0.4
+
+/** water as the eyes take it: water, a bubble column, a water plant, anything waterlogged */
+function waterAtEyes (block: any): boolean {
   const name = block?.name
   // the water plants are water too (a river's seagrass or kelp at the eyes: no drowning reflex, and a 26.3 bot drowned
   // under it twice), and anything waterlogged

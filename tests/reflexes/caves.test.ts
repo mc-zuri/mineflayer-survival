@@ -224,3 +224,27 @@ test('drowning reflex: out of the water once its surfacing got the head out; not
     explore.toShore = realShore
   }
 })
+
+test('drowning reflex: a bot in a flooded gap a block high (the swimming pose, its eyes 0.4 up) is under water, and air running down counts as under it too (f1-1.21.11)', async () => {
+  const { drowningReflex, airFalling } = await import('../../src/reflexes/rules')
+  const { headInWater } = await import('../../src/skills/escape')
+  // water at y -30 (the gap), deepslate over it at -29 (the standing eyes' cell)
+  const world = (p: Vec3): string => p.y === -30 ? 'water' : 'deepslate'
+  const bot = fakeBot({ position: new Vec3(0.5, -29.84, 0.5), oxygen: 3, world })
+  bot.blockAt = (p: Vec3) => { const name = world(p.floored()); return { name, position: p.floored(), boundingBox: name === 'water' ? 'empty' : 'block' } }
+  assert.equal(headInWater(bot), true)
+  const engine = new ReflexEngine(bot, { enabled: false })
+  assert.strictEqual(drowningReflex.check(engine.context())?.name, 'drowning')
+  engine.stop()
+  // the eyes' cells dry, but the air falling: under water as the server has it
+  const dry = fakeBot({ position: new Vec3(0.5, 64, 0.5), oxygen: 6 })
+  assert.equal(airFalling(dry, 100), false)
+  dry.oxygenLevel = 5
+  assert.equal(airFalling(dry, 115), true)
+  const e2 = new ReflexEngine(dry, { enabled: false })
+  ;(e2 as any).tick = 120
+  assert.strictEqual(drowningReflex.check(e2.context())?.name, 'drowning')
+  // the air back up a while: not
+  assert.equal(airFalling(dry, 200), false)
+  e2.stop()
+})

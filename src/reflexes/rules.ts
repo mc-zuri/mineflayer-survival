@@ -181,13 +181,37 @@ export function lethalHostile (ctx: ReflexContext): boolean {
  * again at once). A 26.3 bot's surfacing failed, the eat reflex ate a porkchop at 0 air in the 20 ticks of the retry
  * cooldown, and the bot drowned (full-26.3-fresh-z, t95901).
  */
+/** ticks since the air last fell (oxygenLevel down a step) within which it counts as falling (airFalling) */
+export const AIR_FALLING_TICKS = 40
+const airLooks = new WeakMap<Bot, { level: number, fellAt: number }>()
+
+/**
+ * Whether the bot's air is running down (oxygenLevel fell within AIR_FALLING_TICKS): the server takes it whenever the
+ * eyes are in water as it sees them, which the client's look at the eyes' cell can miss (a pose's eyes, a cell's state
+ * stale): the drowning reflex goes by it too
+ */
+export function airFalling (bot: Bot, tick: number): boolean {
+  const level = Number(bot.oxygenLevel ?? 20)
+  let look = airLooks.get(bot)
+  if (look == null) airLooks.set(bot, look = { level, fellAt: -Infinity })
+  if (level < look.level) look.fellAt = tick
+  look.level = level
+  return tick - look.fellAt >= 0 && tick - look.fellAt <= AIR_FALLING_TICKS
+}
+
+/** under water as the drowning reflex goes by it: the head in water (headInWater), or the air running down (airFalling) */
+function drowningNow (ctx: ReflexContext): boolean {
+  const falling = airFalling(ctx.bot, ctx.tick)
+  return headInWater(ctx.bot) || falling
+}
+
 export const drowningReflex: Reflex = {
   name: 'drowning',
   priority: 85,
   retryCooldownTicks: 0,
   hold (ctx) {
     const { bot, config } = ctx
-    if (!config.drowning.enabled || bot.entity == null || !headInWater(bot)) return null
+    if (!config.drowning.enabled || bot.entity == null || !drowningNow(ctx)) return null
     const airLow = bot.oxygenLevel <= config.drowning.air
     return {
       below: config.drowning.priority,
@@ -197,7 +221,7 @@ export const drowningReflex: Reflex = {
   check (ctx) {
     const { bot, config } = ctx
     if (!config.drowning.enabled) return null
-    if (bot.oxygenLevel > config.drowning.air || !headInWater(bot)) return null
+    if (bot.oxygenLevel > config.drowning.air || !drowningNow(ctx)) return null
     return {
       name: 'drowning',
       priority: config.drowning.priority,
