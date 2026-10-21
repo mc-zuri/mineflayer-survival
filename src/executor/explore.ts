@@ -549,6 +549,30 @@ export function dryStandNear (lookup: Lookup, from: Vec3): Vec3 | null {
   return best
 }
 
+/** ticks swimTo swims for a dry stand at most */
+export const SWIM_OUT_TICKS = 200
+
+/**
+ * Swims to a dry stand by hand (the keys, as a player does: forward toward it, the jump held to keep up and climb out
+ * onto it), till out of the water or SWIM_OUT_TICKS; resolves whether the bot's out. A 1.21.11 Grim game's bot in a
+ * pond whose pathfinder moves out all failed 'bot is too low' was taken up by the drowning reflex 71 times in 48000
+ * ticks, never out of the pond (f1-grim resumed from its diamonds, t77572 to t109250).
+ */
+export async function swimTo (bot: Bot, stand: Vec3, signal?: AbortSignal): Promise<boolean> {
+  const { steerToward } = await import('../skills/steer')
+  try {
+    for (let t = 0; t < SWIM_OUT_TICKS && inWater(bot); t++) {
+      throwIfAborted(signal)
+      steerToward(bot, stand.offset(0.5, 0, 0.5), { sprint: false })
+      bot.setControlState('jump', true)
+      await waitUntil(bot, () => false, 1, signal)
+    }
+  } finally {
+    bot.clearControlStates()
+  }
+  return !inWater(bot)
+}
+
 /**
  * out of the water onto dry ground: the nearest dry cell by it (dryStandNear) walked to, else the nearest shore
  * (nearestShore), swimming up first; resolves whether the bot is out. A GoalNearXZ of 2 by the shore's column ended
@@ -567,6 +591,8 @@ export async function toShore (bot: Bot, signal?: AbortSignal): Promise<boolean>
       trace('explore: no way to', stand.toString(), (err as Error).message)
     }
     if (!inWater(bot)) return true
+    // the pathfinder's way out of the water failing (its moves from a swimmer 'bot is too low'): swum out by hand
+    if (await swimTo(bot, stand, signal)) return true
   }
   const shore = nearestShore(lookupOf(bot), bot.entity.position)
   if (shore == null) return !inWater(bot)

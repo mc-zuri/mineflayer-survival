@@ -778,3 +778,27 @@ test('dryStandNear: out of a flooded pit 7 deep, the dry ground at its rim; none
   const lake = (p: Vec3) => ({ name: p.y >= 50 && p.y <= 62 ? 'water' : p.y < 50 ? 'stone' : 'air', boundingBox: p.y < 50 ? 'block' : 'empty' })
   assert.equal(dryStandNear(lake, new Vec3(0.5, 60, 0.5)), null)
 })
+
+test('swimTo: out of the water by the keys, forward toward the stand with the jump held, when the pathfinder\'s way out fails (f1-grim resumed)', async () => {
+  const { swimTo } = await import('../../src/executor/explore')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // a pond for x < 3 (y 60 to 62), the shore's ground beyond
+  const bot = fakeBot({ position: new Vec3(0.5, 61, 0.5), world: (p: Vec3) => p.x < 3 && p.y >= 60 && p.y <= 62 ? 'water' : p.y <= 62 ? 'stone' : 'air' })
+  const held: string[] = []
+  // each tick, forward and jump held: a little on and up (the swim), onto the shore's top once past it
+  const timer = setInterval(() => {
+    if (bot.controls.forward === true && bot.controls.jump === true) {
+      held.push('swim')
+      const p = bot.entity.position
+      bot.entity.position = new Vec3(p.x + 0.25, p.x + 0.25 >= 3 ? 63 : 61.5, p.z)
+    }
+    bot.emit('physicsTick')
+  }, 1)
+  try {
+    assert.equal(await swimTo(bot, new Vec3(4, 63, 0)), true)
+  } finally {
+    clearInterval(timer)
+  }
+  assert.ok(held.length > 0 && held.length < 40, `${held.length} ticks swimming`)
+  assert.deepEqual(bot.controls, {})
+})
