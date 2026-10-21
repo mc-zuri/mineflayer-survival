@@ -627,7 +627,7 @@ test('fightFromNook swings at a blaze hovering in the front over the roof\'s edg
   await done
 })
 
-test('fightFromNook ends (MISSING_ITEMS) with no meal left to heal on and the bar under 18, at NOOK_LEAVE_HEALTH; not with a meal in the bag, nor at full health', async () => {
+test('fightFromNook ends (MISSING_ITEMS) with no meal left to heal on but its reserve and the bar under 18, at NOOK_LEAVE_HEALTH; not with a meal more, nor at full health', async () => {
   const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
   const { fightFromNook, nookAround, mealLeft, NOOK_LEAVE_HEALTH } = await import('../../src/nether/blazeFight')
   const stand = new Vec3(0, 64, 10)
@@ -657,8 +657,13 @@ test('fightFromNook ends (MISSING_ITEMS) with no meal left to heal on and the ba
   // (seed 7741's nook: the last meal eaten, 4.9 health for 15000 ticks shut in, then out among 12 blazes)
   const r = await fight(NOOK_LEAVE_HEALTH, [item('rotten_flesh', 3)])
   assert.ok(r instanceof Error && /no food left/.test(r.message), String(r))
-  assert.equal(await fight(NOOK_LEAVE_HEALTH, [item('cooked_mutton', 1)]), null)
+  // the reserve's NOOK_MEAL_RESERVE meals kept for the walk back: the fight ends with them; one more, not
+  const { NOOK_MEAL_RESERVE, mealsLeft } = await import('../../src/nether/blazeFight')
+  const kept = await fight(NOOK_LEAVE_HEALTH, [item('cooked_mutton', NOOK_MEAL_RESERVE)])
+  assert.ok(kept instanceof Error && /no food left/.test(kept.message), String(kept))
+  assert.equal(await fight(NOOK_LEAVE_HEALTH, [item('cooked_mutton', NOOK_MEAL_RESERVE + 1)]), null)
   assert.equal(await fight(20, []), null)
+  assert.equal(mealsLeft(fakeBot({ items: [item('cooked_mutton', 2), item('bread', 3), item('rotten_flesh', 4)] })), 5)
   const { fakeBot: fb } = await import('../reflexes/fakeBot')
   assert.ok(mealLeft(fb({ items: [item('golden_apple')] })))
   assert.ok(!mealLeft(fb({ items: [item('rotten_flesh', 5), item('spider_eye')] })))

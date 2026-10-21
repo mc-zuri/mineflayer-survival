@@ -629,6 +629,22 @@ export function mealLeft (bot: Bot): boolean {
   return chooseFood(items, bot.registry.foodsByName as any, { food: 10, saturation: 0, health: 1 }) != null
 }
 
+/**
+ * meals the nook's fight keeps for the walk back to the portal: it ends (MISSING_ITEMS, 'no food left to heal on') with
+ * these in the bag, eating them only at NOOK_RESERVE_EAT_HEALTH or under. Ended on its last meal, a 1.21.11 bot went on
+ * at 6.8 health and no food, and was back at its spawner with none 5 times (f7-1.21.11, t328096 to t329193)
+ */
+export const NOOK_MEAL_RESERVE = 2
+export const NOOK_RESERVE_EAT_HEALTH = 8
+
+/** the meals in the bag to heal on (mealLeft's: the harmful foods left out), each one of a stack counted */
+export function mealsLeft (bot: Bot): number {
+  const items = bot.inventory.items()
+  const offhand = bot.inventory.slots[45]
+  if (offhand != null) items.push(offhand)
+  return items.filter(i => chooseFood([i], bot.registry.foodsByName as any, { food: 10, saturation: 0, health: 1 }) != null).reduce((n, i) => n + i.count, 0)
+}
+
 /** tries at shutting the nook's front, low, before the nook is given up (fightFromNook's CANNOT_PLACE) */
 export const SEAL_FAILS = 5
 
@@ -833,7 +849,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // nothing left to heal on (no meal, the bar under 18): the fight ends while the health's still up (a 26.3 bot
       // ate its last meal in the nook by seed 7741's spawner, sat 15000 ticks shut in it at 4.9 health, then came out
       // among 12 blazes and burned)
-      if (!mealLeft(bot) && bot.food < 18 && bot.health <= NOOK_LEAVE_HEALTH) throw new SkillError('MISSING_ITEMS', `no food left to heal on in the nook, health ${bot.health.toFixed(1)}`, { ...result, ticks: tick })
+      // (NOOK_MEAL_RESERVE meals kept for the walk back to the portal: the fight ends with them in the bag)
+      if (mealsLeft(bot) <= NOOK_MEAL_RESERVE && bot.food < 18 && bot.health <= NOOK_LEAVE_HEALTH) throw new SkillError('MISSING_ITEMS', `no food left to heal on in the nook, health ${bot.health.toFixed(1)}`, { ...result, ticks: tick })
       const blazes = blazesNow()
       if (blazes.length > 0) lastBlaze = tick
       else if (tick - lastBlaze > idleTicks) throw new SkillError('NOT_FOUND', `no blaze came from the blaze spawner at ${opts.spawner.toString()} in ${idleTicks} ticks`, { ...result, ticks: tick })
@@ -1016,7 +1033,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // a meal, when nothing can shoot before it's eaten (32 ticks), and one that fits the bar unless the health needs
       // it (dueMeal: under 18 the bar heals nothing; at 18 and 19 a porkchop's nutrition was mostly lost over it)
       const hungry = (bot.health <= eatAt && bot.food < 20) || bot.food <= eatFood
-      const meal = hungry && drawn === 0 ? dueMeal(bot, { hurtAt: eatAt }) : null
+      // (not the reserve's, NOOK_MEAL_RESERVE, but at NOOK_RESERVE_EAT_HEALTH or under)
+      const meal = hungry && drawn === 0 && (mealsLeft(bot) > NOOK_MEAL_RESERVE || bot.health <= NOOK_RESERVE_EAT_HEALTH) ? dueMeal(bot, { hurtAt: eatAt }) : null
       if (meal != null && seeing.every(b => volleys.quietFor(b.id, tick, 34))) {
         unblock()
         try { await eat(bot, { signal, food: meal }) } catch (err) { if (isAbort(err)) throw err; trace('fightFromNook: eat:', (err as Error).message) }
