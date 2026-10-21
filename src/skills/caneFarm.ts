@@ -29,11 +29,14 @@ export function caneSpot (lookup: CaneLookup, ground: Vec3): boolean {
   return SIDES.some(s => WATERS.has(lookup(ground.plus(s))?.name ?? ''))
 }
 
-/** the ground blocks within `radius` of `center` (at its height, 2 up and down) a cane can be planted on, nearest first */
-export function caneSpots (lookup: CaneLookup, center: Vec3, radius = 12): Vec3[] {
+/**
+ * the ground blocks within `radius` of `center` (`range`'s blocks under and over its height: 3 and 2 by default) a
+ * cane can be planted on, nearest first
+ */
+export function caneSpots (lookup: CaneLookup, center: Vec3, radius = 12, range: { down: number, up: number } = { down: 3, up: 2 }): Vec3[] {
   const out: Vec3[] = []
   const c = center.floored()
-  for (let dy = -3; dy <= 2; dy++) {
+  for (let dy = -range.down; dy <= range.up; dy++) {
     for (let dx = -radius; dx <= radius; dx++) {
       for (let dz = -radius; dz <= radius; dz++) {
         const p = c.offset(dx, dy, dz)
@@ -108,6 +111,11 @@ export function rememberCanes (bot: Bot, memory: WorldMemory, radius = CANE_SIGH
  * each way stays water), and the banks either side the canes stand on: 2 a cell
  */
 export const CANE_CHANNEL_LENGTH = 9
+/**
+ * how far under and over the center's height a farm's spots and channel are looked for (plantSugarCane): a base's door
+ * by the sea at y 67 had its grass at 72 to 75 (f3-1.21.11), past the 2 over the spots and the channel were looked for
+ */
+export const CANE_SITE_RANGE = { down: 8, up: 10 }
 /** a channel's cells where the level ground takes no CANE_CHANNEL_LENGTH */
 export const CANE_SHORT_CHANNEL = 5
 /** the spots a cane farm is planted on at most (a channel's two banks) */
@@ -132,7 +140,8 @@ const LIQUIDS = new Set(['water', 'lava', 'bubble_column'])
  * (the water kept in), and cane ground with room over it on both sides (its banks); none of it `avoid`'s (the base's
  * walls) nor under the bot's feet. The nearest to `center`, or null.
  */
-export function caneChannelSite (lookup: CaneLookup, center: Vec3, args: { length?: number, radius?: number, avoid?: (pos: Vec3) => boolean } = {}): CaneChannelSite | null {
+export function caneChannelSite (lookup: CaneLookup, center: Vec3, args: { length?: number, radius?: number, avoid?: (pos: Vec3) => boolean, range?: { down: number, up: number } } = {}): CaneChannelSite | null {
+  const range = args.range ?? { down: 6, up: 2 }
   const length = args.length ?? CANE_CHANNEL_LENGTH
   const radius = args.radius ?? 16
   const avoid = args.avoid ?? (() => false)
@@ -143,14 +152,14 @@ export function caneChannelSite (lookup: CaneLookup, center: Vec3, args: { lengt
   const underBot = (p: Vec3): boolean => Math.abs(p.x - c.x) <= 1 && Math.abs(p.z - c.z) <= 1 && Math.abs(p.y - c.y) <= 2
   let best: { site: CaneChannelSite, d: number } | null = null
   for (const [dir, side] of [[new Vec3(1, 0, 0), new Vec3(0, 0, 1)], [new Vec3(0, 0, 1), new Vec3(1, 0, 0)]]) {
-    for (let dy = -6; dy <= 2; dy++) {
+    for (let dy = -range.down; dy <= range.up; dy++) {
       for (let dx = -radius; dx <= radius; dx++) {
         for (let dz = -radius; dz <= radius; dz++) {
           const start = c.offset(dx, dy, dz)
-          const cells = Array.from({ length }, (_, i) => start.plus(dir.scaled(i)))
-          const d = cells[Math.floor(length / 2)].distanceTo(c)
+          const d = start.plus(dir.scaled(Math.floor(length / 2))).distanceTo(c)
           if (best != null && d >= best.d) continue
-          if (!holds(start.minus(dir)) || !holds(start.plus(dir.scaled(length)))) continue
+          if (!ground(start) || !holds(start.minus(dir)) || !holds(start.plus(dir.scaled(length)))) continue
+          const cells = Array.from({ length }, (_, i) => start.plus(dir.scaled(i)))
           if (!cells.every(p => ground(p) && holds(p.offset(0, -1, 0)) && !underBot(p))) continue
           const banks = cells.flatMap(p => [p.plus(side), p.minus(side)])
           if (!banks.every(ground)) continue
@@ -283,13 +292,13 @@ export async function plantSugarCane (bot: Bot, args: { count?: number, center?:
   let banks: Vec3[] = []
   const spots = (): Vec3[] => {
     const own = banks.filter(p => caneSpot(lookup, p) && lookup(p.offset(0, 1, 0))?.name !== 'sugar_cane')
-    return [...own, ...caneSpots(lookup, center, radius).filter(p => !avoid(p) && !own.some(o => o.equals(p)))]
+    return [...own, ...caneSpots(lookup, center, radius, CANE_SITE_RANGE).filter(p => !avoid(p) && !own.some(o => o.equals(p)))]
   }
   const water: Vec3[] = []
   // water where there's too little: a channel dug and a bucket poured in it, else holes (4 spots round each)
   if (spots().length < count && countItems(bot, 'water_bucket') > 0) {
     // (a shorter one where the level ground takes no full one: a hillside's grass)
-    const site = caneChannelSite(lookup, center, { avoid, radius }) ?? caneChannelSite(lookup, center, { avoid, radius, length: CANE_SHORT_CHANNEL })
+    const site = caneChannelSite(lookup, center, { avoid, radius, range: CANE_SITE_RANGE }) ?? caneChannelSite(lookup, center, { avoid, radius, range: CANE_SITE_RANGE, length: CANE_SHORT_CHANNEL })
     if (site != null) {
       try {
         water.push(...await makeCaneChannel(bot, site, signal))
