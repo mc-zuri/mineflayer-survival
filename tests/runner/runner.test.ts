@@ -1249,6 +1249,8 @@ test('a death after a milestone (the herd\'s upkeep, the store at the base: afte
   assert.equal(recovered, 1)
   assert.equal(r.reason, 'until')
   assert.ok(logs.some(l => /died after wood/.test(l)), logs.join('\n'))
+})
+
 test('deathSpotSkip: a spot the bot drowned at, its drops under the water, isn\'t gone back to; one with a dry stand by the drops is (f1-grim)', async () => {
   const { deathSpotSkip, dropsUnderWater } = await import('../../src/runner')
   const { Vec3 } = await import('vec3')
