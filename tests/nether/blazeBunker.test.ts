@@ -402,6 +402,37 @@ test('fightFromNook in a bunker: with no blaze in its sight the errand (the spaw
   }
 })
 
+test('fightFromNook in a bunker: a draw given up (its blaze gone out of sight) is put away unloosed (cancelDraw: the held slot changed and back), not loosed with deactivateItem', async () => {
+  const { entity, item } = await import('../reflexes/fakeBot')
+  const { fightFromNook } = await import('../../src/nether/blazeFight')
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 64.5, -2.5), meta: { health: 20, flags: 0 } })
+  const { bot, b, restore } = await bunkerBot([blaze], [item('bow'), item('arrow', 64)])
+  bot.quickBarSlot = 0
+  const slots: number[] = []
+  bot.setQuickBarSlot = (n: number) => { slots.push(n); bot.quickBarSlot = n }
+  let draws = 0
+  let loosed = 0
+  bot.activateItem = () => { draws++; bot.usingHeldItem = true }
+  bot.deactivateItem = () => { loosed++; bot.usingHeldItem = false }
+  const ac = new AbortController()
+  try {
+    const done = fightFromNook(bot, b, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 3000 }, ac.signal).catch(err => err)
+    for (let i = 0; i < 40 && draws === 0; i++) await ticks(bot, 1)
+    assert.equal(draws, 1)
+    await ticks(bot, 5)
+    // gone round the wall, out of the slit's sight, mid-draw
+    blaze.position = new Vec3(3.5, 64, 7.5)
+    await ticks(bot, 5)
+    assert.equal(loosed, 0)
+    assert.deepEqual(slots, [1, 0])
+    ac.abort()
+    await ticks(bot, 5)
+    await done
+  } finally {
+    restore()
+  }
+})
+
 test('fireballReaches: a small fireball from a blaze ahead at the bot\'s height meets the bunker\'s sill, one from over it comes in at the slit, one from beside it meets the wall', async () => {
   const { fireballReaches, FIREBALL_SPAWN_HEIGHT } = await import('../../src/nether/blazeFight')
   const { bot, restore } = await bunkerBot([])

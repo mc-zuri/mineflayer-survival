@@ -15,7 +15,7 @@ import { Vec3 } from 'vec3'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
 import { type Entity, entityBox, distanceToBox, eyePosition, hasLineOfSight, isAlive } from '../skills/combatUtil'
 import { blazeCharged, fight, lowerShield, raiseShield } from '../skills/fight'
-import { aim, arrowWorld } from '../skills/shoot'
+import { aim, arrowWorld, cancelDraw } from '../skills/shoot'
 import { motionTrackerOf } from '../skills/motion'
 import { attackStrengthOf, bestMeleeWeapon } from '../skills/weapons'
 import { eat, dueMeal } from '../skills/eat'
@@ -761,8 +761,12 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
     if (item != null && bot.heldItem?.type !== item.type) await bot.equip(item, 'hand')
   }
   const look = async (p: Vec3): Promise<void> => { await bot.lookAt(p, true) }
+  // (a draw given up put away unloosed, cancelDraw: deactivateItem loosed it, a weak shot at nothing each time the
+  // shield went up, a fetch went or a fire was punched out; a 26.3 bunker by seed 2's open throne at (-290, 77, -209)
+  // used its 64 arrows on about 40 shots, out of them at tick 6000 to 15000 of its 24000 with 20 to 60 blazes about,
+  // none killed after, 3 runs of 3)
   const stopDraw = (): void => {
-    if (drawn > 0) bot.deactivateItem()
+    if (drawn > 0) cancelDraw(bot)
     drawn = 0
     drawTarget = null
   }
@@ -1069,7 +1073,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
             drawTarget = target
           }
           drawn++
-          // (no shot at it for long: loosed as it is, and another one looked for)
+          // (no shot at it for long: put away, and another one looked for)
           if (drawn > 3 * FULL_DRAW) { stopDraw(); continue }
           const s = aim(bot, target, { leadTicks: Math.max(1, FULL_DRAW - drawn + 1), world })
           if (s != null) await bot.look(s.yaw, s.pitch, true)
@@ -1113,7 +1117,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
     bot.off('entityDead', onDead)
     bot.off('physicsTick', onTick)
     for (const id of tracked) { const e = bot.entities[id]; if (e != null) tracker.untrack(e) }
-    if (drawn > 0) bot.deactivateItem()
+    if (drawn > 0) cancelDraw(bot)
     unblock()
   }
   result.ticks = tick
@@ -2003,7 +2007,7 @@ export async function holdOffBlazes (bot: Bot, opts: HoldOffOptions = {}): Promi
   const onDead = (e: Entity): void => { if (e.name === 'blaze') kills++ }
   bot.on('entityDead', onDead)
   const hold = async (item: any): Promise<void> => { if (item != null && bot.heldItem?.type !== item.type) await bot.equip(item, 'hand') }
-  const release = (): void => { if (drawn > 0) bot.deactivateItem(); drawn = 0; drawTarget = null }
+  const release = (): void => { if (drawn > 0) cancelDraw(bot); drawn = 0; drawTarget = null }
   const block = async (at: Vec3): Promise<void> => {
     release()
     if (!blocking || (bot as any).usingHeldItem !== true) {

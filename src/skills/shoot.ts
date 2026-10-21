@@ -186,7 +186,7 @@ export function sparedInLine (bot: Bot, target: Entity | Vec3): Entity | null {
  * A draw put away without its arrow: the held slot changed and back (ServerGamePacketListenerImpl.handleSetCarriedItem
  * stops the use, LivingEntity.stopUsingItem, with no BowItem.releaseUsing); deactivateItem would loose it
  */
-function cancelDraw (bot: Bot): void {
+export function cancelDraw (bot: Bot): void {
   const slot = bot.quickBarSlot
   if (typeof bot.setQuickBarSlot !== 'function' || typeof slot !== 'number') { bot.deactivateItem(); return }
   bot.setQuickBarSlot((slot + 1) % 9)
