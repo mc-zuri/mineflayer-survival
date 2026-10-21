@@ -594,6 +594,65 @@ export const PILLAR_RETRY_TICKS = 600
 const pillars = new WeakMap<Bot, { feet: string, tick: number }>()
 
 /**
+ * Whether the mobs about press the bot hard enough for a refuge (a pillar, a wall-in under the rock): in the
+ * overworld, hurt to sealHealth, or more of them than the reflex fights at any health (a flee from zombies in a cave
+ * is a run as quick as their walk, cornered at its end); no creeper among them (its blast takes the box)
+ */
+export function refugeHard (bot: Bot, near: Entity[], config: ReflexConfig): boolean {
+  if (inNether(bot) || near.length === 0 || bot.health <= 0) return false
+  if (near.some(e => e.name === 'creeper')) return false
+  return bot.health <= config.hostiles.sealHealth || near.length > config.hostiles.maxFight
+}
+
+/**
+ * Whether the hostiles reflex walls the bot in where it stands under the rock (pillarWallIn), pressed hard (refugeHard)
+ * by two or more, the ones that shoot among them too (no arrow nor sight through the blocks), or cornered; not again
+ * at the cell within PILLAR_RETRY_TICKS
+ */
+export function caveWallInDue (bot: Bot, near: Entity[], config: ReflexConfig, tick: number): boolean {
+  if (!refugeHard(bot, near, config)) return false
+  if (near.length < 2 && !wasCornered(bot, tick)) return false
+  const at = pillars.get(bot)
+  const feet = bot.entity.position.floored().toString()
+  if (at != null && at.feet === feet && tick - at.tick >= 0 && tick - at.tick < PILLAR_RETRY_TICKS) return false
+  return pillarWallIn(bot, near)
+}
+
+/** how far a mob that shoots in sight keeps the bot off a pillar or brings it down from one (pillarRanged) */
+export const PILLAR_RANGED_CLEAR = 24
+/** and how near one out of sight does (it comes round the corner) */
+export const PILLAR_RANGED_NEAR = 16
+/** the most blocks the hostiles reflex walls the bot in with under the rock, rather than a pillar (pillarWallIn) */
+export const PILLAR_SEAL_MAX = 10
+
+/**
+ * A mob that shoots (RANGED_HOSTILES: a bogged's, a skeleton's arrows) alive in sight within PILLAR_RANGED_CLEAR, or
+ * within PILLAR_RANGED_NEAR out of sight, of all the loaded ones: a pillar is no refuge from it. A 26.3 bot pillared up
+ * in a cave from melee mobs, two bogged and a skeleton about it shot it on its top from 4 to 7 off, and it died
+ * (f4-26.3, t92144 at (568, 21, 167))
+ */
+export function pillarRanged (bot: Bot): boolean {
+  return Object.values(bot.entities).some(e => e !== bot.entity && RANGED_HOSTILES.has(e.name ?? '') && isHostile(bot, e) && isAlive(bot, e) &&
+    (distance(bot, e) <= PILLAR_RANGED_NEAR || (distance(bot, e) <= PILLAR_RANGED_CLEAR && hasLineOfSight(bot, e))))
+}
+
+/**
+ * Under the rock (caveCells' roofed: a cave's, a mine's), the bot walls itself in where it stands rather than pillar
+ * up: a box of PILLAR_SEAL_MAX blocks at most (sealBox) and the blocks for it. The cave's other mobs come into sight
+ * of a pillar (its skeletons, its bogged); behind the blocks none sees it
+ */
+export function pillarWallIn (bot: Bot, near: Entity[]): boolean {
+  const feet = bot.entity.position.floored()
+  if (!caveCells(bot).roofed(feet)) return false
+  const box = sealBox(bot, near)
+  if (box == null) return false
+  const needed = openCells(bot, box).length
+  if (needed > PILLAR_SEAL_MAX) return false
+  const item = sealItem(bot)
+  return item != null && countItems(bot, item) >= needed
+}
+
+/**
  * Whether the hostiles reflex goes up a pillar where the bot stands (pillarRefuge) rather than flee or fight on: in the
  * overworld, hurt to sealHealth with two melee mobs or more about (or cornered, wasCornered), or more than maxFight of
  * them at any health, every one about a melee
@@ -604,16 +663,15 @@ const pillars = new WeakMap<Bot, { feet: string, tick: number }>()
  * (ls4-26.3, t386611): a box there was more than SEAL_MAX_BLOCKS
  */
 export function pillarDue (bot: Bot, near: Entity[], config: ReflexConfig, tick: number): boolean {
-  // (hurt to sealHealth, or more of them than the reflex fights at any health: a flee from zombies in a cave is a run
-  // as quick as their walk, cornered at its end)
-  if (inNether(bot) || near.length === 0 || bot.health <= 0) return false
-  if (bot.health > config.hostiles.sealHealth && near.length <= config.hostiles.maxFight) return false
+  if (!refugeHard(bot, near, config)) return false
   const melee = (e: Entity): boolean => MELEE_MOBS.has(e.name ?? '') || (e.name === 'drowned' && !holdsTrident(e) && !bodyInWater(bot, e.position))
   if (!near.every(melee) || !pillarRefugeFrom(near)) return false
   if (near.length < 2 && !wasCornered(bot, tick)) return false
   // none at the bot yet: a pillar begun with them at it was knocked off its blocks by their hits, the zombies up the
   // blocks it left (tests/integration/zombieFloor); the fight's hits put them back first (its until: pillarDue)
   if (near.some(e => distance(bot, e) < PILLAR_CLEAR)) return false
+  // and no mob that shoots about (pillarRanged): up there it's a mark
+  if (pillarRanged(bot)) return false
   const at = pillars.get(bot)
   const feet = bot.entity.position.floored().toString()
   if (at != null && at.feet === feet && tick - at.tick >= 0 && tick - at.tick < PILLAR_RETRY_TICKS) return false
@@ -776,13 +834,32 @@ export const hostilesReflex: Reflex = {
       }
     }
     // hurt among melee mobs on an open floor (no box to shut in): up a pillar out of their reach (pillarDue)
+    // under the rock: walled in where it stands (caveWallInDue), a pillar only where no box is to be had
+    if (!nether && caveWallInDue(bot, near, config, ctx.tick)) {
+      pillars.set(bot, { feet: bot.entity.position.floored().toString(), tick: ctx.tick })
+      {
+        return {
+          name: 'hostiles',
+          priority: config.hostiles.priority,
+          detail: 'wall in',
+          run: async (signal) => await sealIn(bot, {
+            signal,
+            threats: () => Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange)
+          }).catch(err => {
+            if (!signal.aborted) sealFails.set(bot, ctx.tick)
+            throw err
+          })
+        }
+      }
+    }
     if (pillarDue(bot, near, config, ctx.tick)) {
       pillars.set(bot, { feet: bot.entity.position.floored().toString(), tick: ctx.tick })
       return {
         name: 'hostiles',
         priority: config.hostiles.priority,
         detail: 'pillar up',
-        run: async (signal) => await pillarRefuge(bot, () => Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange), { signal })
+        // (down off it, the hold given up, once a mob that shoots is about: pillarRanged)
+        run: async (signal) => await pillarRefuge(bot, () => Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange), { signal, giveUp: () => pillarRanged(bot) })
       }
     }
     if (fleeDue(bot, near, config, ctx.tick)) {
@@ -867,7 +944,7 @@ export const hostilesReflex: Reflex = {
     const turned = (): boolean => {
       const now = hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange) })
       const tick = ctx.tick + elapsed++
-      return now.length > 0 && (fightTurned(bot, now, config, tick) || sealDue(bot, now, config, tick) || pillarDue(bot, now, config, tick))
+      return now.length > 0 && (fightTurned(bot, now, config, tick) || sealDue(bot, now, config, tick) || caveWallInDue(bot, now, config, tick) || pillarDue(bot, now, config, tick))
     }
     if (nether && !useBow) {
       const f = netherFightsOf(bot)

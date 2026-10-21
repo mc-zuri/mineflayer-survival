@@ -57,17 +57,20 @@ export interface PillarRefugeResult {
   ticks: number
   hits: number
   health: number
+  /** the hold given up (opts.giveUp: a mob that shoots in sight) */
+  givenUp: boolean
 }
 
 /**
  * Up PILLAR_HEIGHT blocks where the bot stands (towerUp), then held there: the nearest of `threats` in the sword's
  * reach hit as the swing charges, a meal when none is, till the health is back to PILLAR_HEAL_TO with none in reach,
- * none is left within 8, PILLAR_HOLD_TICKS go by, or the bot is off the top. Left on the pillar: the work's next walk
+ * none is left within 8, PILLAR_HOLD_TICKS go by, `giveUp` holds, or the bot is off the top. Left on the pillar: the work's next walk
  * steps down off it.
  */
-export async function pillarRefuge (bot: Bot, threats: () => Entity[], opts: { signal?: AbortSignal, maxTicks?: number } = {}): Promise<PillarRefugeResult> {
+export async function pillarRefuge (bot: Bot, threats: () => Entity[], opts: { signal?: AbortSignal, maxTicks?: number, giveUp?: () => boolean } = {}): Promise<PillarRefugeResult> {
   const signal = opts.signal
   const { towerUp } = await import('../end/skills/world')
+  if (opts.giveUp?.() === true) return { top: bot.entity.position.floored(), ticks: 0, hits: 0, health: bot.health, givenUp: true }
   const base = Math.floor(bot.entity.position.y + 1e-6)
   // (a hit's knockback mid-jump puts the bot off its block: 'nothing to build on', up again from where it came down)
   for (let tries = 1; ; tries++) {
@@ -86,10 +89,13 @@ export async function pillarRefuge (bot: Bot, threats: () => Entity[], opts: { s
   if (weapon != null && bot.heldItem?.type !== weapon.type) await bot.equip(weapon, 'hand')
   let hits = 0
   let ticks = 0
+  let given = false
   const maxTicks = opts.maxTicks ?? PILLAR_HOLD_TICKS
   for (; ticks < maxTicks; ticks++) {
     throwIfAborted(signal)
     if (bot.health <= 0 || bot.entity.position.y < top.y - 0.5) break
+    // (given up: a mob that shoots come into sight, the caller's; the bot steps down to it, or off it)
+    if (opts.giveUp?.() === true) { given = true; break }
     const mobs = threats().filter(e => isAlive(bot, e)).sort((a, b) => a.position.distanceTo(bot.entity.position) - b.position.distanceTo(bot.entity.position))
     const near = mobs.filter(e => e.position.distanceTo(bot.entity.position) <= 8)
     const reach = near.find(e => distanceToBox(eyePosition(bot), entityBox(e)) <= 2.9)
@@ -108,7 +114,7 @@ export async function pillarRefuge (bot: Bot, threats: () => Entity[], opts: { s
     }
     await waitTicks(bot, 1, signal)
   }
-  return { top, ticks, hits, health: bot.health }
+  return { top, ticks, hits, health: bot.health, givenUp: given }
 }
 
 /** the melee mobs `near` hold the bot with: no climber among them (a spider would come up after it) */

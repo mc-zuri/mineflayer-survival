@@ -3,7 +3,8 @@
 // busy with a task (a wait standing in for the work), in the kit of a 26.3 bot slain so at y -58 (ls4-26.3, t386611:
 // an iron chestplate, an iron sword, cobblestone): a room of cave_air 15 by 15 and 6 high in a block of stone, the bot
 // in its middle at ZOMBIE_HEALTH health (default 9), four zombies 3 off round it. A run is a pass when the bot is alive
-// 600 ticks on. ZOMBIE_RUNS=n repeats it (default 2).
+// 600 ticks on. ZOMBIE_RUNS=n repeats it (default 2); ZOMBIE_ARCHER=bogged (or skeleton) adds one 6 off
+// (f4-26.3, t92144: pillared in a cave, shot on its top by two bogged and a skeleton).
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
@@ -15,6 +16,7 @@ import { NightLog, summary } from './nightLog'
 const USER = 'floorbot'
 const RUNS = Number(process.env.ZOMBIE_RUNS ?? 2)
 const HEALTH = Number(process.env.ZOMBIE_HEALTH ?? 9)
+const ARCHER = process.env.ZOMBIE_ARCHER
 const GRASS = -61
 
 let server: TestServer
@@ -83,7 +85,7 @@ describe(`zombies about the bot on a cave's open floor on ${DEFAULT_VERSION}`, {
     if (server != null) await server.cleanup()
   })
 
-  test(`four zombies survived (${RUNS} runs)`, async () => {
+  test(`four zombies${ARCHER != null ? ` and a ${ARCHER}` : ''} survived (${RUNS} runs)`, async () => {
     const results: string[] = []
     let failed = 0
     for (let i = 0; i < RUNS; i++) {
@@ -91,6 +93,7 @@ describe(`zombies about the bot on a cave's open floor on ${DEFAULT_VERSION}`, {
       const log = new NightLog(bot)
       const work = bot.survival.tasks.run({ name: 'step: the work', priority: 0 }, async (ctx) => { for (;;) await ctx.waitTicks(20) }).catch(() => {})
       for (const [dx, dz] of [[3, 0], [-3, 0], [0, 3], [0, -3]]) await run(`summon minecraft:zombie ${at.x + dx} ${at.y} ${at.z + dz} {PersistenceRequired:1b,CanPickUpLoot:0b,IsBaby:0b}`)
+      if (ARCHER != null) await run(`summon minecraft:${ARCHER} ${at.x + 5} ${at.y} ${at.z + 4} {PersistenceRequired:1b}`)
       bot.survival.reflexes!.enabled = true
       let dead = false
       let top = at.y

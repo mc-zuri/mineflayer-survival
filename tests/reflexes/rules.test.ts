@@ -926,3 +926,31 @@ test('a trident drowned in the water in sight up to TRIDENT_KEEP_OFF (past the s
   // out of EAT_RANGED_CLEAR: eaten
   assert.strictEqual(check(eatReflex, { food: 10, items: food, entities: [entity({ name: 'skeleton', position: new Vec3(-EAT_RANGED_CLEAR - 3.5, 64, 0.5) })] }), 'eat')
 })
+
+test('hostiles reflex: no pillar with a mob that shoots about, in sight within PILLAR_RANGED_CLEAR or within PILLAR_RANGED_NEAR out of it, of all the loaded ones; under the rock the bot walls in instead, the ones that shoot among them or not (f4-26.3, t92144: pillared in a cave, shot on its top by two bogged and a skeleton)', async () => {
+  const { pillarRanged, PILLAR_RANGED_CLEAR } = await import('../../src/reflexes/rules')
+  const zombie = (x: number, z = 0.5): any => entity({ name: 'zombie', position: new Vec3(0.5 + x, 64, z) })
+  const kit = [item('iron_sword'), item('cobblestone', 64)]
+  const four = [zombie(3), zombie(-3), zombie(0, 3.5), zombie(0, -2.5)]
+  assert.strictEqual(check(hostilesReflex, { health: 8, items: kit, entities: four }), 'pillar up')
+  // a bogged 20 off in sight (past the reflexes' scan): no pillar
+  const bogged = entity({ name: 'bogged', position: new Vec3(20.5, 64, 0.5) })
+  assert.notStrictEqual(check(hostilesReflex, { health: 8, items: kit, entities: [...four, bogged] }), 'pillar up')
+  assert.strictEqual(pillarRanged(fakeBot({ entities: [bogged] })), true)
+  // past PILLAR_RANGED_CLEAR: the pillar
+  const far = entity({ name: 'skeleton', position: new Vec3(PILLAR_RANGED_CLEAR + 4.5, 64, 0.5) })
+  assert.strictEqual(check(hostilesReflex, { health: 8, items: kit, entities: [...four, far] }), 'pillar up')
+  // one 12 off behind a wall: no pillar (it comes round)
+  const walled = (p: Vec3): string => p.y < 64 ? 'stone' : (p.x === 8 ? 'stone' : 'air')
+  const behind = entity({ name: 'skeleton', position: new Vec3(12.5, 64, 0.5) })
+  assert.strictEqual(pillarRanged(fakeBot({ entities: [behind], world: walled })), true)
+  // under the rock (a cave's room, its roof 5 up under 40 of stone): walled in where it stands, not a pillar
+  const cave = (p: Vec3): string => p.y < 64 || p.y >= 69 ? 'stone' : 'air'
+  assert.strictEqual(check(hostilesReflex, { health: 8, items: kit, entities: four, world: cave }), 'wall in')
+  // there with a bogged among them too (no arrow through the blocks), or one at the bot: walled in
+  const caveBogged = entity({ name: 'bogged', position: new Vec3(5.5, 64, 4.5) })
+  assert.strictEqual(check(hostilesReflex, { health: 8, items: kit, entities: [...four, caveBogged], world: cave }), 'wall in')
+  assert.strictEqual(check(hostilesReflex, { health: 8, items: kit, entities: [...four.slice(1), zombie(1.5)], world: cave }), 'wall in')
+  // short of blocks: not
+  assert.notStrictEqual(check(hostilesReflex, { health: 8, items: [item('iron_sword'), item('cobblestone', 3)], entities: four, world: cave }), 'wall in')
+})
