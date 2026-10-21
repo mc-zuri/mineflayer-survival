@@ -838,6 +838,52 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
   return onSurface(lookup, feetOf(bot), inOverworld(bot))
 }
 
+/**
+ * A staircase dug up toward `target` (climbOut's steps, the way nearest it tried first) till the feet are at its
+ * height: for a walk the pathfinder plans no way for, the target over a rise it can't climb. Resolves whether the
+ * feet got there, within `maxSteps` (default 16)
+ */
+export async function climbToward (bot: Bot, target: Vec3, args: DigRouteArgs = {}, signal?: AbortSignal): Promise<boolean> {
+  const lookup = lookupOf(bot)
+  const maxSteps = args.maxSteps ?? 16
+  const pickaxe = pickaxeKeeper(bot)
+  for (let i = 0; i < maxSteps; i++) {
+    throwIfAborted(signal)
+    const feet = feetOf(bot)
+    if (feet.y >= target.y || args.found?.() === true) return feet.y >= target.y
+    await pickaxe(signal)
+    const dx = target.x + 0.5 - (feet.x + 0.5)
+    const dz = target.z + 0.5 - (feet.z + 0.5)
+    const dir = Math.abs(dx) < 1 && Math.abs(dz) < 1 ? facingDir(bot.entity.yaw) : Math.abs(dx) >= Math.abs(dz) ? new Vec3(Math.sign(dx), 0, 0) : new Vec3(0, 0, Math.sign(dz))
+    const side = Math.abs(dx) >= Math.abs(dz) ? new Vec3(0, 0, Math.sign(dz) === 0 ? 1 : Math.sign(dz)) : new Vec3(Math.sign(dx) === 0 ? 1 : Math.sign(dx), 0, 0)
+    const turns = [dir, side, side.scaled(-1), dir.scaled(-1)]
+    await routeRoom(bot, args, signal, staircaseUpStep(feet, dir).next)
+    let stepped = false
+    for (const d of turns) {
+      const step = staircaseUpStep(feet, d)
+      const why = climbHazard(unsafeStep(lookup, { open: step.open, floor: step.floor }), inWater(bot)) ?? (atCave(bot) ? null : caveStep(bot, step))
+      if (why != null) { trace('explore: climb toward', target.toString(), 'turns from', d.toString(), why); continue }
+      const kept = step.open.find(c => breakKept(bot, c))
+      if (kept != null) { trace('explore: climb toward', target.toString(), 'turns from', d.toString(), 'kept unbroken at', kept.toString()); continue }
+      if (!floorHeld(lookup, step, hasPlug(bot))) continue
+      try {
+        await open(bot, step.open, signal)
+        if (!(await ensureFloor(bot, step.floor, signal))) continue
+        await walkInto(bot, step.next, signal)
+      } catch (err) {
+        if (isAbort(err)) throw err
+        trace('explore: climb toward step failed', (err as Error).message)
+        continue
+      }
+      if (feetOf(bot).y <= feet.y) continue
+      stepped = true
+      break
+    }
+    if (!stepped) return false
+  }
+  return feetOf(bot).y >= target.y
+}
+
 /** climbs out to the open sky first when the bot is underground; resolves whether it's out */
 export async function ensureSurface (bot: Bot, signal?: AbortSignal): Promise<boolean> {
   const lookup = lookupOf(bot)

@@ -728,6 +728,39 @@ test('enterBunker: the first walk in alight, hurt, the bar under 18, stopped onc
   }
 })
 
+test('enterBunker: no way in from under it (NO_PATH by the sill and by its floor) digs a staircase up toward it (climbToward), then walks in; from beside it, not', async () => {
+  const { enterBunker, ENTER_CLIMB_UNDER } = await import('../../src/nether/blazeFight')
+  const { SkillError } = await import('../../src/skills/errors')
+  const gridModule = require('../../src/skills/gridWalk')
+  const exploreModule = require('../../src/executor/explore')
+  const real = { move: gridModule.moveNear, climb: exploreModule.climbToward }
+  const { bot, b, restore } = await bunkerBot([])
+  let climbs = 0
+  let low = true
+  gridModule.moveNear = async () => {
+    if (low) throw new SkillError('NO_PATH', 'no grid path')
+    bot.entity.position = new Vec3(0.5, 64, 5.5)
+    return 'pathfinder'
+  }
+  exploreModule.climbToward = async (_b: unknown, to: Vec3) => { climbs++; bot.entity.position = new Vec3(0.5, to.y, 1.5); low = false; return true }
+  try {
+    bot.entity.position = new Vec3(0.5, 64 - ENTER_CLIMB_UNDER - 2, 1.5)
+    await enterBunker(bot, b, undefined, true)
+    assert.equal(climbs, 1)
+    assert.ok(bot.entity.position.distanceTo(new Vec3(0.5, 64, 5.5)) < 0.01)
+    // beside it, at its height: the NO_PATH as it was
+    low = true
+    climbs = 0
+    bot.entity.position = new Vec3(3.5, 64, 1.5)
+    await assert.rejects(enterBunker(bot, b, undefined, true), /no grid path/)
+    assert.equal(climbs, 0)
+  } finally {
+    gridModule.moveNear = real.move
+    exploreModule.climbToward = real.climb
+    restore()
+  }
+})
+
 test('shutInWhereItStands: hurt on the way in, a box put up round the bot (back, sides, roof), its front shut to heal, then opened toward the bunker', async () => {
   const { shutInWhereItStands } = await import('../../src/nether/blazeFight')
   const { bot, filled, placed, restore } = await bunkerBot([])

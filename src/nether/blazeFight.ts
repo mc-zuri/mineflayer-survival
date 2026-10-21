@@ -24,6 +24,7 @@ import { placeBlock } from '../skills/placeBlock'
 import { collectDropsNear } from '../skills/hunt'
 import { nearbyDrops } from '../skills/pickupDrops'
 import { moveNear } from '../skills/gridWalk'
+import { climbToward } from '../executor/explore'
 import { walkTo } from '../skills/navigate'
 import { countItems, trace, waitTicks, waitUntil } from '../skills/util'
 import { fireballIncoming } from './safety'
@@ -1446,7 +1447,16 @@ export async function enterBunker (bot: Bot, nook: BlazeNook, signal?: AbortSign
       if (isAbort(err) || !(isSkillError(err, 'NO_PATH') || isSkillError(err, 'STUCK'))) throw err
       trace('enterBunker: no way in by the sill:', (err as Error).message)
       await putOutNookFires(bot, nook, signal)
-      await go(nook.floor)
+      await go(nook.floor).catch(async err2 => {
+        // under it with no way up (no path the pathfinder plans in its time, none on the grid): a staircase dug up
+        // toward it, then the walk again. A 26.3 bot at y 72 under its bunker's site at 79 by seed 2's open throne at
+        // (-290, 77, -209) found no way to any of the three and stood there, punched and burned, to its death (tests/
+        // integration/blaze BLAZE_AT=s2fortress2)
+        if (isAbort(err2) || !(isSkillError(err2, 'NO_PATH') || isSkillError(err2, 'STUCK')) || bot.entity.position.y > nook.stand.y - ENTER_CLIMB_UNDER) throw err2
+        trace('enterBunker: no way up to it from', bot.entity.position.floored().toString(), ': a staircase dug toward it')
+        if (!await climbToward(bot, nook.stand, { maxSteps: ENTER_CLIMB_STEPS }, signal)) throw err2
+        await go(nook.floor)
+      })
     })
     const p = bot.entity.position
     if (!inNook(bot, nook) && Math.abs(p.y - nook.stand.y) < 0.6 && Math.hypot(p.x - nook.stand.x - 0.5, p.z - nook.stand.z - 0.5) <= 1.2) {
@@ -1525,6 +1535,10 @@ export async function shutInWhereItStands (bot: Bot, toward: Vec3, healTo: numbe
 
 /** the walk into a bunker is held off a blaze about to hit this many times at the most (enterBunker) */
 export const ENTER_GUARDS = 2
+/** a bunker with no way into it from this far under its stand or more has a staircase dug up toward it (enterBunker) */
+export const ENTER_CLIMB_UNDER = 2
+/** the staircase's steps at the most */
+export const ENTER_CLIMB_STEPS = 16
 /** the first walk into a bunker cut off for a meal (enterBunker) */
 const ENTER_MEAL = 'alight and hungry'
 

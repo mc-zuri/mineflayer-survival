@@ -729,6 +729,21 @@ test('climbOut: no step dug through what the pathfinder is kept from breaking (b
   assert.ok(digs > 0, 'the roof not kept: its steps tried')
 })
 
+test('climbToward: already at the target height, nothing dug; no step it can take (all its ways kept from breaking), false', async () => {
+  const { climbToward } = await import('../../src/executor/explore')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('stone_pickaxe'), item('cobblestone', 16)], world: (p: Vec3) => p.x === 0 && p.z === 0 && (p.y === 64 || p.y === 65) ? 'air' : p.y > 90 ? 'air' : 'stone' })
+  bot.game.dimension = 'the_nether'
+  let digs = 0
+  bot.pathingUtil = { refresh () { digs++; throw new Error('no dig in this test') } }
+  bot.pathfinder = { defaultMoveSettings: { exclusionAreasBreak: [] }, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+  assert.equal(await climbToward(bot, new Vec3(5, 64, 0), { room: async () => {} }), true)
+  assert.equal(digs, 0)
+  bot.pathfinder.defaultMoveSettings.exclusionAreasBreak = [() => 1e9]
+  assert.equal(await climbToward(bot, new Vec3(5, 70, 0), { room: async () => {}, maxSteps: 2 }), false)
+  assert.equal(digs, 0)
+})
+
 test('runMine: the logs collectBlock couldn\'t get to are noted unreachable, and the next run goes for others (ls-1.21.11: the same log planned 48 times, no path each time); UnreachableBlocks forgets them after UNREACHABLE_TICKS', async (t) => {
   const { runMine } = await import('../../src/executor/steps')
   const { UnreachableBlocks, UNREACHABLE_TICKS } = await import('../../src/executor/sight')
