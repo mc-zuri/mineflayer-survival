@@ -557,6 +557,27 @@ export function rememberPen (memory: WorldMemory, pen: PenPlan): void {
  * fill, blocks to clear and steps to fence on top), with a floor and room for the herd over every inside cell and no
  * water or lava in it; null when there's none
  */
+/** how far round a pen's ring no farmland or water may be (penClearOfFarm) */
+export const PEN_FARM_GAP = 3
+
+/**
+ * Whether a pen of `size` about `center` keeps PEN_FARM_GAP blocks from any farmland or water (a farm's plots and its
+ * water, at the floor's level or the feet's): a pen built by the farm had its gate's front on the farm, and two cows led
+ * home stood at its edge by the water, none in (tests/integration/homeFood, the second farm by the first)
+ */
+export function penClearOfFarm (lookup: Lookup, center: Vec3, size: number): boolean {
+  const r = Math.floor(Math.max(MIN_PEN_SIZE, size) / 2) + PEN_FARM_GAP
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dz = -r; dz <= r; dz++) {
+      for (const dy of [-1, 0]) {
+        const name = lookup(center.offset(dx, dy, dz))?.name
+        if (name === 'farmland' || name === 'water') return false
+      }
+    }
+  }
+  return true
+}
+
 export function choosePenSite (lookup: Lookup, home: Vec3, size: number): { center: Vec3, side: Side } | null {
   const r = Math.floor(Math.max(MIN_PEN_SIZE, size) / 2)
   let best: { center: Vec3, side: Side, score: number } | null = null
@@ -575,7 +596,7 @@ export function choosePenSite (lookup: Lookup, home: Vec3, size: number): { cent
             ok = isSolid(lookup(cell.offset(0, -1, 0)) as any) && isFree(lookup(cell) as any) && isFree(lookup(cell.offset(0, 1, 0)) as any)
           }
         }
-        if (!ok) continue
+        if (!ok || !penClearOfFarm(lookup, center, size)) continue
         const side = nearestSide(center, h)
         const plan = planPen(lookup, center, size, side)
         const steps = plan.fences.filter(p => p.y !== center.y).length
@@ -644,7 +665,7 @@ export function flatPenSite (lookup: Lookup, home: Vec3, size: number, range = P
             }
           }
         }
-        if (!ok || fills.length + digs.length > PEN_FLATTEN_MOST) continue
+        if (!ok || fills.length + digs.length > PEN_FLATTEN_MOST || !penClearOfFarm(lookup, center, size)) continue
         const side = nearestSide(center, h)
         const plan = planPen(lookup, center, size, side)
         const score = fills.length * 2 + digs.length + plan.fillers.length * 3 + plan.clear.length * 2 + d * 0.1

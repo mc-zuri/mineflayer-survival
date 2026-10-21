@@ -178,3 +178,18 @@ test('flatPenSite: no flat ground near home (boulders and spruces everywhere): t
   const over = flatPenSite(walls, home, 7)
   assert.ok(over == null || over.digs.every(p => walls(p).name !== 'cobblestone'))
 })
+
+test('a pen keeps PEN_FARM_GAP blocks from the farms\' farmland and water: choosePenSite passes over ground by a farm (tests/integration/homeFood: the gate\'s front on the second farm, the cows not led in)', async () => {
+  const { choosePenSite, penClearOfFarm, PEN_FARM_GAP } = await import('../../src/skills/pen')
+  const { Vec3 } = await import('vec3')
+  // flat grass, a farm's farmland from x 4 to 16, z -4 to 4 (its water at 10, 63, 0)
+  const farm = (p: any): boolean => p.y === 63 && p.x >= 4 && p.x <= 16 && Math.abs(p.z) <= 4
+  const world = (p: any): any => p.y < 63 ? { name: 'dirt', boundingBox: 'block' } : p.y === 63 ? { name: farm(p) ? (p.x === 10 && p.z === 0 ? 'water' : 'farmland') : 'grass_block', boundingBox: farm(p) && p.x === 10 && p.z === 0 ? 'empty' : 'block' } : { name: 'air', boundingBox: 'empty' }
+  const home = new Vec3(0, 64, 0)
+  const site = choosePenSite(world, home, 9) as { center: any }
+  assert.ok(site != null)
+  assert.ok(penClearOfFarm(world, site.center, 9))
+  const r = 4 + PEN_FARM_GAP
+  assert.ok(site.center.x + r < 4 || site.center.x - r > 16 || Math.abs(site.center.z) - r > 4, site.center.toString())
+  assert.equal(penClearOfFarm(world, new Vec3(10, 64, 9), 9), false)
+})
