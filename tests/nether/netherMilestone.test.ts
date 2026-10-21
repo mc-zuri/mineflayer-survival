@@ -304,8 +304,8 @@ test('netherKit: a sword (stone at least), a chestplate and a shield got when mi
   }
   await netherKit(bot, executor, new AbortController().signal, () => {})
   // (then the brewing's bottles: brewKit)
-  // (a spare iron pickaxe too: NETHER_PICKAXES)
-  assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate,iron_pickaxe,shield', 'obtain stone_sword', 'obtain golden_boots', 'obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])
+  // (a spare iron pickaxe too, on its own budget: NETHER_PICKAXES)
+  assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate,shield', 'obtain iron_pickaxe', 'obtain stone_sword', 'obtain golden_boots', 'obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])
   calls.length = 0
   const armed = fakeBot({ items: [item('diamond_sword', 1), item('diamond_chestplate', 1), item('diamond_helmet', 1), item('diamond_leggings', 1), item('shield', 1), item('golden_boots', 1), item('bread', 32), item('bow', 1), item('arrow', 64), item('flint_and_steel', 1), item('diamond_pickaxe', 2)] })
   await netherKit(armed, executor, new AbortController().signal, () => {})
