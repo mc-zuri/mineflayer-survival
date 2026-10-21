@@ -24,24 +24,66 @@ export function cropOf (seed: string): string | null {
   return Object.keys(SEED_OF).find(c => SEED_OF[c] === seed) ?? null
 }
 
-/** blocks a hoe tills into farmland (HoeItem.TILLABLES: grass, dirt path and dirt; coarse dirt to dirt first) */
+/** blocks a hoe tills into farmland (HoeItem.TILLABLES: grass, dirt path and dirt) */
 export const TILLABLE = new Set(['grass_block', 'dirt', 'dirt_path'])
+
+/**
+ * blocks a hoe turns into dirt first, a second use tilling that (HoeItem.TILLABLES: coarse dirt to dirt, rooted dirt
+ * to dirt and a hanging roots dropped): the ground of a taiga's farm
+ */
+export const TILLED_TWICE = new Set(['coarse_dirt', 'rooted_dirt'])
+
+/** ground a farm's plot can be made of: tilled once or twice, or farmland already (a plot left bare) */
+export function plotGround (name: string | undefined): boolean {
+  return name != null && (TILLABLE.has(name) || TILLED_TWICE.has(name) || name === 'farmland')
+}
 
 /** FarmBlock.isNearWater: water within 4 blocks across and at the farmland's level or a block over */
 export const HYDRATION_RANGE = 4
 
+/**
+ * how far across from its water a farm's plots go (a block of 5 by 5 round it): a block of crops grows as fast as a
+ * row (CropBlock.getGrowthSpeed: the moist farmland round a plot adds to its speed what the same crop beside it on
+ * both sides halves), and every plot is within HYDRATION_RANGE of the one water
+ */
+export const FARM_REACH = 2
+
+/** the plots a new farm has at the least: a water with fewer by it is no farm's (a water hole is dug instead) */
+export const FARM_MIN_PLOTS = 6
 
 export type Lookup = (pos: Vec3) => { name: string, boundingBox?: string, getProperties?: () => Record<string, unknown> } | null
 
 const OPEN_ABOVE = new Set(['air', 'cave_air', 'short_grass', 'tall_grass', 'fern', 'dandelion', 'poppy', 'snow'])
 
+/** the cells about a farm's water a plot may go in, the nearest first (FARM_REACH across, at its level) */
+export function farmBlockCells (water: Vec3): Vec3[] {
+  const out: Vec3[] = []
+  for (let dx = -FARM_REACH; dx <= FARM_REACH; dx++) {
+    for (let dz = -FARM_REACH; dz <= FARM_REACH; dz++) {
+      if (dx !== 0 || dz !== 0) out.push(water.offset(dx, 0, dz))
+    }
+  }
+  return out.sort((a, b) => a.distanceSquared(water) - b.distanceSquared(water))
+}
+
+/** the cells about a water a plot can be made on now: plot ground, open above (a plant there is broken first) */
+export function plotCells (lookup: Lookup, water: Vec3, plots = Infinity): Vec3[] {
+  const cells: Vec3[] = []
+  for (const cell of farmBlockCells(water)) {
+    if (cells.length >= plots) break
+    if (!plotGround(lookup(cell)?.name)) continue
+    if (!OPEN_ABOVE.has(lookup(cell.offset(0, 1, 0))?.name ?? 'stone')) continue
+    cells.push(cell)
+  }
+  return cells
+}
+
 /**
- * Where to sow: a water source with up to `plots` tillable cells beside it at its level, open above (a plant there is
- * broken first), the nearest to the water first: one row along the water grows faster than a block of crops
- * (CropBlock.getGrowthSpeed halves the speed of a crop with the same crop on both sides and diagonally). The
- * water's cell is the farm's place. Null when no water near `center` has a tillable cell beside it.
+ * Where to sow: a water source with up to `plots` cells of plot ground about it at its level (plotCells: a block of
+ * 5 by 5 round it), open above, the nearest to the water first, `least` of them at the least. The water's cell is the
+ * farm's place. Null when no water near `center` has them.
  */
-export function findFarmSite (lookup: Lookup, center: Vec3, radius = 24, plots = FARM_PLOTS): { water: Vec3, cells: Vec3[] } | null {
+export function findFarmSite (lookup: Lookup, center: Vec3, radius = 24, plots = FARM_PLOTS, least = 1): { water: Vec3, cells: Vec3[] } | null {
   let best: { water: Vec3, cells: Vec3[], score: number } | null = null
   const c = center.floored()
   for (let dx = -radius; dx <= radius; dx++) {
@@ -51,26 +93,47 @@ export function findFarmSite (lookup: Lookup, center: Vec3, radius = 24, plots =
         const b = lookup(w)
         if (b?.name !== 'water' || Number(b.getProperties?.().level ?? 0) !== 0) continue
         if (!OPEN_ABOVE.has(lookup(w.offset(0, 1, 0))?.name ?? 'stone')) continue
-        const cells: Vec3[] = []
-        // a row along the water, both ways along x and along z
-        for (const [ax, az] of [[1, 0], [0, 1]]) {
-          for (const side of [1, -1]) {
-            for (let k = -2; k <= 2 && cells.length < plots; k++) {
-              const cell = w.offset(az * side + ax * k, 0, ax * side + az * k)
-              if (cells.some(p => p.equals(cell))) continue
-              if (!TILLABLE.has(lookup(cell)?.name ?? '')) continue
-              if (!OPEN_ABOVE.has(lookup(cell.offset(0, 1, 0))?.name ?? 'stone')) continue
-              cells.push(cell)
-            }
-          }
-        }
-        if (cells.length === 0) continue
+        const cells = plotCells(lookup, w, plots)
+        if (cells.length === 0 || cells.length < Math.min(least, plots)) continue
         const score = cells.length * 100 - w.distanceTo(c)
         if (best == null || score > best.score) best = { water: w, cells, score }
       }
     }
   }
   return best == null ? null : { water: best.water, cells: best.cells }
+}
+
+const HOLDS_WATER = (name: string | undefined): boolean => name != null && !OPEN_ABOVE.has(name) && name !== 'water' && name !== 'lava' && name !== 'farmland'
+/** the natural ground a farm's hole is dug in (never a block of the base's) */
+const HOLE_GROUND = new Set(['grass_block', 'dirt', 'coarse_dirt', 'rooted_dirt', 'podzol', 'mycelium', 'dirt_path'])
+
+/**
+ * A cell to dig a farm's water hole in (no water near home has plot ground by it): a ground block with solid blocks on
+ * its four sides and under it (the water poured in stays: FlowingFluid spreads only into a cell open at its level or
+ * under), open above, with the most cells of plot ground about it (plotCells: room for the farm to grow; `least` of
+ * them at the least), then the nearest to `center`; not under the bot (its cell and the ring about it). The cane farm's hole
+ * (waterHoleSite) takes podzol as ground, which no hoe tills: a 1.21.11 bot's hole by its home in an old growth pine
+ * taiga had no plot by it and its farm was never sown, all game (f5-1.21.11, seed 671229120248951486, t76740).
+ */
+export function farmHoleSite (lookup: Lookup, center: Vec3, radius = 12, least = FARM_MIN_PLOTS): Vec3 | null {
+  const c = center.floored()
+  let best: { p: Vec3, cells: number, d: number } | null = null
+  for (let dy = -3; dy <= 2; dy++) {
+    for (let dx = -radius; dx <= radius; dx++) {
+      for (let dz = -radius; dz <= radius; dz++) {
+        if (Math.abs(dx) <= 1 && Math.abs(dz) <= 1 && dy >= -2) continue
+        const p = c.offset(dx, dy, dz)
+        if (!HOLE_GROUND.has(lookup(p)?.name ?? '') || !OPEN_ABOVE.has(lookup(p.offset(0, 1, 0))?.name ?? 'stone')) continue
+        if (!HOLDS_WATER(lookup(p.offset(0, -1, 0))?.name)) continue
+        if (![[1, 0], [-1, 0], [0, 1], [0, -1]].every(([x, z]) => HOLDS_WATER(lookup(p.offset(x, 0, z))?.name))) continue
+        const cells = plotCells(lookup, p).length
+        if (cells < least) continue
+        const d = p.distanceTo(c)
+        if (best == null || cells > best.cells || (cells === best.cells && d < best.d)) best = { p, cells, d }
+      }
+    }
+  }
+  return best?.p ?? null
 }
 
 /** the cells of a farm (its farmland) that have a crop of `crop` grown on them */
@@ -97,7 +160,7 @@ async function holdItem (bot: Bot, name: string): Promise<void> {
   if (bot.heldItem?.name !== name) await bot.equip(item, 'hand')
 }
 
-/** tills a cell with the best hoe held (a plant on it broken first); resolves once it's farmland */
+/** tills a cell with the best hoe held (a plant on it broken first; coarse or rooted dirt tilled twice); resolves once it's farmland */
 export async function till (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise<void> {
   throwIfAborted(signal)
   const above = bot.blockAt(cell.offset(0, 1, 0))
@@ -114,21 +177,23 @@ export async function till (bot: Bot, cell: Vec3, signal?: AbortSignal): Promise
     await waitTicks(bot, 2, signal)
   }
   try {
+    // (coarse or rooted dirt: dirt first, then farmland)
+    if (TILLED_TWICE.has(bot.blockAt(cell)?.name ?? '')) await tillHeld(bot, cell, hoe, signal, 'dirt')
     await tillHeld(bot, cell, hoe, signal)
   } finally {
     if (sneak) bot.setControlState('sneak', false)
   }
 }
 
-async function tillHeld (bot: Bot, cell: Vec3, hoe: Item, signal?: AbortSignal): Promise<void> {
+async function tillHeld (bot: Bot, cell: Vec3, hoe: Item, signal?: AbortSignal, into = 'farmland'): Promise<void> {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (bot.heldItem?.name !== hoe.name) await bot.equip(hoe, 'hand')
     const block = bot.blockAt(cell) as Block
     await bot.activateBlock(block, new Vec3(0, 1, 0))
-    if (await waitUntil(bot, () => bot.blockAt(cell)?.name === 'farmland', 10, signal)) return
+    if (await waitUntil(bot, () => bot.blockAt(cell)?.name === into, 10, signal)) return
     // the hand the server holds may not be the one the bag shows (every cell of a 26.3 farm stayed grass after the
     // hoe, crafted just before at a table put away): the inventory settled and the hoe selected afresh, once
-    trace('till: no farmland at', cell.toString(), 'holding', bot.heldItem?.name ?? 'nothing', 'slot', bot.quickBarSlot, 'above', bot.blockAt(cell.offset(0, 1, 0))?.name ?? '?')
+    trace('till: no', into, 'at', cell.toString(), 'holding', bot.heldItem?.name ?? 'nothing', 'slot', bot.quickBarSlot, 'above', bot.blockAt(cell.offset(0, 1, 0))?.name ?? '?')
     await settleInventory(bot, signal)
     // the server's own inventory sent again (a craft's output put in a near-full bag may sit elsewhere than the
     // client shows), then the hoe found in it
@@ -166,17 +231,22 @@ export interface FarmResult {
 }
 
 /**
- * Starts a farm by water near `center`: up to `plots` cells tilled and sown with `seed` (as many as the seeds held).
+ * Starts a farm by water near `center` (or sows more of the farm at `water`): up to `plots` cells tilled and sown with
+ * `seed` (as many as the seeds held).
  * The bot never jumps on the farmland it makes (FarmBlock.fallOn tramples it): it works each cell from beside it.
  */
-export async function plantFarm (bot: Bot, args: { seed: string, center?: Vec3, plots?: number, radius?: number }, signal?: AbortSignal): Promise<FarmResult> {
+export async function plantFarm (bot: Bot, args: { seed: string, center?: Vec3, plots?: number, radius?: number, water?: Vec3 }, signal?: AbortSignal): Promise<FarmResult> {
   const crop = cropOf(args.seed)
   if (crop == null) throw new SkillError('MISSING_ITEMS', `${args.seed} sows no crop`)
   const seeds = countItems(bot, args.seed)
   if (seeds === 0) throw new SkillError('MISSING_ITEMS', `no ${args.seed}`)
   const plots = Math.min(args.plots ?? FARM_PLOTS, seeds)
-  const site = findFarmSite(pos => bot.blockAt(pos) as any, args.center ?? bot.entity.position, args.radius ?? 24, plots)
-  if (site == null) throw new SkillError('NOT_FOUND', 'no water with tillable ground beside it')
+  const lookup: Lookup = pos => bot.blockAt(pos) as any
+  // (a farm's own water: its block's plots not made yet, the farm sown further)
+  const site = args.water != null
+    ? { water: args.water, cells: plotCells(lookup, args.water, plots) }
+    : findFarmSite(lookup, args.center ?? bot.entity.position, args.radius ?? 24, plots)
+  if (site == null || site.cells.length === 0) throw new SkillError('NOT_FOUND', 'no water with tillable ground beside it')
   const sown: Vec3[] = []
   for (const cell of site.cells) {
     if (countItems(bot, args.seed) === 0) break

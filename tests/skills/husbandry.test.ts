@@ -5,6 +5,10 @@ import { Vec3 } from 'vec3'
 import { BREED_COOLDOWN_TICKS, breedingPairs, gatherHerd, releaseSpots } from '../../src/skills/husbandry'
 import { caneSpot, caneSpots, waterHoleSite } from '../../src/skills/caneFarm'
 
+
+/** a grass plain at y 63 (the fake bot's world): the ground a farm's water hole is dug in (farmHoleSite) */
+const GRASS = (p: { y: number }): string => p.y < 63 ? 'dirt' : p.y === 63 ? 'grass_block' : 'air'
+
 test('breedingPairs: adults within 8 blocks of each other, not fed in the cooldown, nearest first', () => {
   const a = (id: number, x: number, adult = true) => ({ id, position: new Vec3(x, 64, 0), adult })
   const herd = [a(1, 2), a(2, 4), a(3, 6), a(4, 30), a(5, 3, false), a(6, 7)]
@@ -129,7 +133,7 @@ test('startFarm with no water near and a water bucket held digs a water hole for
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const tasks: string[] = []
   const executor: any = { memory: new WorldMemory(), task: async (name: string) => { tasks.push(name) } }
-  const bot = fakeBot({ items: [item('water_bucket', 1), item('wheat_seeds', 8)] })
+  const bot = fakeBot({ items: [item('water_bucket', 1), item('wheat_seeds', 8)], world: GRASS })
   bot.game.dimension = 'overworld'
   assert.strictEqual(await startFarm(bot, executor, new AbortController().signal, () => {}), false)
   assert.deepStrictEqual(tasks, ['a water hole for the farm'])
@@ -142,7 +146,7 @@ test('startFarm with no water near and an empty bucket fills it first (refillWat
   const tasks: string[] = []
   const lines: string[] = []
   const executor: any = { memory: new WorldMemory(), task: async (name: string) => { tasks.push(name) } }
-  const bot = fakeBot({ items: [item('bucket', 1), item('wheat_seeds', 8)] })
+  const bot = fakeBot({ items: [item('bucket', 1), item('wheat_seeds', 8)], world: GRASS })
   bot.game.dimension = 'overworld'
   // no water in the world about: the fill fails, no hole
   bot.findBlocks = () => []
@@ -153,7 +157,7 @@ test('startFarm with no water near and an empty bucket fills it first (refillWat
   assert.deepStrictEqual(tasks, [])
   // the bucket full already: the hole dug at once
   lines.length = 0
-  const full = fakeBot({ items: [item('water_bucket', 1), item('bucket', 1), item('wheat_seeds', 8)] })
+  const full = fakeBot({ items: [item('water_bucket', 1), item('bucket', 1), item('wheat_seeds', 8)], world: GRASS })
   full.game.dimension = 'overworld'
   await startFarm(full, executor, new AbortController().signal, l => lines.push(l))
   assert.ok(!lines.some(l => /the bucket filled/.test(l)), lines.join(' | '))
@@ -324,7 +328,7 @@ test('startFarm digs a water hole only by home, two at most: none from a cave 70
   assert.strictEqual(await startFarm(far, executor, new AbortController().signal, l => lines.push(l)), false)
   assert.deepStrictEqual(tasks, [])
   assert.ok(lines.some(l => /away from home/.test(l)), lines.join(' | '))
-  const near = fakeBot({ position: new Vec3(3.5, 64, 0.5), items: [item('water_bucket', 1), item('wheat_seeds', 8)] })
+  const near = fakeBot({ position: new Vec3(3.5, 64, 0.5), items: [item('water_bucket', 1), item('wheat_seeds', 8)], world: GRASS })
   near.game.dimension = 'overworld'
   for (let i = 0; i < 3; i++) await startFarm(near, executor, new AbortController().signal, l => lines.push(l))
   assert.deepStrictEqual(tasks, ['a water hole for the farm', 'a water hole for the farm'])

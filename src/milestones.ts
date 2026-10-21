@@ -46,7 +46,7 @@ import { CaveCells, caveCells, caveRuleOn, inCaveWall } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
-import { findFarmSite, knownFarms, plantFarm, rememberFarm, SEED_OF } from './skills/farm'
+import { FARM_MIN_PLOTS, farmHoleSite, findFarmSite, knownFarms, plantFarm, rememberFarm, SEED_OF } from './skills/farm'
 import { describeRequest, ownedInventory, type Executor } from './executor/executor'
 import { NETHER_SCAFFOLD_KEEP } from './executor/keep'
 import { heldFor, type ObtainRequest } from './planner/obtain'
@@ -2472,6 +2472,8 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
 /** how near home (across and up or down 8) the bot is for a farm's water hole to be dug there, and the holes a game */
 export const WATER_HOLE_RANGE = 24
 export const WATER_HOLE_TRIES = 2
+/** how far about home a farm's water hole is looked for (farmHoleSite) */
+export const WATER_HOLE_SITE_RADIUS = 16
 const waterHoleTries = new WeakMap<Bot, number>()
 
 /** what a farm's start may cost (a hoe and the seeds from grass) before it is left for later */
@@ -2486,7 +2488,9 @@ export async function startFarm (bot: Bot, executor: Executor, signal: AbortSign
   const dimension = normalizeDimension(bot.game?.dimension)
   if (dimension !== 'overworld' || knownFarms(executor.memory, dimension).length > 0) return false
   const home = executor.memory.base != null ? new Vec3(executor.memory.base.x, executor.memory.base.y, executor.memory.base.z) : bot.entity.position
-  let site = findFarmSite(pos => bot.blockAt(pos) as any, home, 24)
+  const lookup = (pos: Vec3): any => bot.blockAt(pos)
+  // (a water with FARM_MIN_PLOTS of plot ground by it at the least: a farm of one plot is none)
+  let site = findFarmSite(lookup, home, 24, FARM_PLOTS, FARM_MIN_PLOTS)
   // no water near: a hole dug and filled from the water bucket held (the herd's wheat farm on 26.3 had none), the
   // empty bucket filled first where there's water within REFILL_RANGE (a 26.3 bot on a mountain with an empty bucket
   // had 'no water with ground by it near: no farm yet', and no farm all game, seed 31337)
@@ -2502,9 +2506,25 @@ export async function startFarm (bot: Bot, executor: Executor, signal: AbortSign
     log('no water by ground near for a farm: the bucket filled for a water hole')
     await refillWater(bot, signal)
   }
+  // (no bucket at all: one got when it's cheap, the iron held)
+  if (site == null && countItems(bot, 'water_bucket') === 0 && countItems(bot, 'bucket') === 0) {
+    const plan = executor.plan([{ item: 'water_bucket', count: 1 }])
+    if (plan.ok && plan.cost <= FARM_START_TICKS) {
+      await executor.obtain([{ item: 'water_bucket', count: 1 }], signal).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`no water bucket for the farm's hole: ${(err as Error).message}`)
+      })
+    }
+  }
   if (site == null && countItems(bot, 'water_bucket') > 0) {
-    await executor.task('a water hole for the farm', async (s) => await makeWaterHole(bot, home, s), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
-    site = findFarmSite(pos => bot.blockAt(pos) as any, home, 24)
+    // the hole where the most plot ground is about it (farmHoleSite: grass or dirt a hoe tills, not the podzol of a
+    // pine taiga, which the cane farm's hole takes)
+    const hole = farmHoleSite(lookup, home, WATER_HOLE_SITE_RADIUS)
+    if (hole == null) log('no ground near home for the farm\'s water hole')
+    else {
+      await executor.task('a water hole for the farm', async (s) => await makeWaterHole(bot, home, s, hole), signal).catch(err => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err })
+      site = findFarmSite(lookup, hole, 0, FARM_PLOTS)
+    }
   }
   if (site == null) { log('no water with ground by it near: no farm yet'); return false }
   const plots = Math.min(FARM_PLOTS, site.cells.length)
@@ -2512,7 +2532,8 @@ export async function startFarm (bot: Bot, executor: Executor, signal: AbortSign
   const plan = executor.plan(requests)
   if (!plan.ok || plan.cost > FARM_START_TICKS) { log(`a farm would cost ${plan.ok ? plan.cost : 'no plan'} ticks to start: not now`); return false }
   await executor.obtain(requests, signal)
-  const res = await executor.task('sow a farm', async (s) => await plantFarm(bot, { seed: 'wheat_seeds', center: site.water, plots, radius: 4 }, s), signal)
+  const water = site.water
+  const res = await executor.task('sow a farm', async (s) => await plantFarm(bot, { seed: 'wheat_seeds', water, plots }, s), signal)
   rememberFarm(executor.memory, res, Number((bot.time as any)?.age ?? 0), dimension)
   log(`a farm of ${res.cells.length} wheat sown by the water at ${res.water.toString()}`)
   return true

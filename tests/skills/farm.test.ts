@@ -2,7 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
 import { WorldMemory } from '../../src/core/memory'
-import { cropOf, findFarmSite, grownPlots, knownFarms, rememberFarm, farmCells, SEED_OF } from '../../src/skills/farm'
+import { cropOf, FARM_MIN_PLOTS, FARM_REACH, farmHoleSite, findFarmSite, grownPlots, knownFarms, plotCells, plotGround, rememberFarm, farmCells, SEED_OF } from '../../src/skills/farm'
+import { waterHoleSite } from '../../src/skills/caneFarm'
+import { FARM_PLOTS } from '../../src/core/crops'
 import { obtainAll } from '../../src/planner/obtain'
 import { checkPlan } from '../../src/planner/steps'
 import { FOOD_GOAL, FOOD_POINTS } from '../../src/planner/progression'
@@ -25,7 +27,7 @@ function world (water: Vec3[], crops: Array<{ at: Vec3, name: string, age: numbe
   }
 }
 
-test('a farm site: the water, and a row of tillable cells beside it, open above, at most 8', () => {
+test('a farm site: the water, and the plot ground in a block of 5 by 5 round it, open above, the nearest first, at most 8', () => {
   const water = [new Vec3(10, 63, 10)]
   const site = findFarmSite(world(water), new Vec3(0, 64, 0), 24)
   assert.ok(site != null)
@@ -33,10 +35,14 @@ test('a farm site: the water, and a row of tillable cells beside it, open above,
   assert.equal(site.cells.length, 8)
   for (const c of site.cells) {
     assert.equal(c.y, 63)
-    // in reach of the water for FarmBlock.isNearWater
-    assert.ok(Math.max(Math.abs(c.x - 10), Math.abs(c.z - 10)) <= 4)
+    // the 3 by 3 ring first, all in reach of the water for FarmBlock.isNearWater
+    assert.ok(Math.max(Math.abs(c.x - 10), Math.abs(c.z - 10)) <= 1)
     assert.ok(!c.equals(water[0]))
   }
+  // the whole block: 24 plots by one water
+  const all = findFarmSite(world(water), new Vec3(0, 64, 0), 24, 30) as { cells: Vec3[] }
+  assert.equal(all.cells.length, 24)
+  assert.ok(all.cells.every(c => Math.max(Math.abs(c.x - 10), Math.abs(c.z - 10)) <= FARM_REACH))
   // a stone floor round the water: nothing to till
   const stone: Record<string, string> = {}
   for (let dx = -3; dx <= 3; dx++) for (let dz = -3; dz <= 3; dz++) stone[`${10 + dx},63,${10 + dz}`] = 'stone'
@@ -44,6 +50,116 @@ test('a farm site: the water, and a row of tillable cells beside it, open above,
   assert.equal(findFarmSite(world(water, [], stone), new Vec3(10, 64, 10), 6), null)
   // no water: none
   assert.equal(findFarmSite(world([]), new Vec3(0, 64, 0), 8), null)
+})
+
+test('plot ground: grass, dirt and its path, coarse and rooted dirt (tilled twice), bare farmland; podzol is none (HoeItem.TILLABLES)', () => {
+  for (const g of ['grass_block', 'dirt', 'dirt_path', 'coarse_dirt', 'rooted_dirt', 'farmland']) assert.equal(plotGround(g), true, g)
+  for (const g of ['podzol', 'mycelium', 'stone', 'sand', undefined]) assert.equal(plotGround(g), false, String(g))
+  // a pond in a pine taiga's podzol, coarse dirt on its east: the coarse dirt's plots alone, fewer than least none
+  const water = [new Vec3(10, 63, 10)]
+  const ground: Record<string, string> = {}
+  for (let dx = -2; dx <= 2; dx++) for (let dz = -2; dz <= 2; dz++) ground[`${10 + dx},63,${10 + dz}`] = dx > 0 ? 'coarse_dirt' : 'podzol'
+  delete ground['10,63,10']
+  const site = findFarmSite(world(water, [], ground), new Vec3(10, 64, 10), 4, 24) as { cells: Vec3[] }
+  assert.equal(site.cells.length, 10)
+  assert.ok(site.cells.every(c => c.x > 10))
+  assert.equal(findFarmSite(world(water, [], ground), new Vec3(10, 64, 10), 4, 24, 12), null)
+})
+
+/** an old growth pine taiga's floor at y 63: podzol, a patch of grass from x 8 to 16, the base's cobblestone at home */
+function taiga (holes: Vec3[] = []): (p: Vec3) => any {
+  return (p: Vec3) => {
+    if (holes.some(h => h.equals(p))) return { name: 'water', getProperties: () => ({ level: 0 }) }
+    if (p.y < 63) return { name: 'dirt' }
+    if (p.y === 63) return { name: Math.abs(p.x) <= 2 && Math.abs(p.z) <= 2 ? 'cobblestone' : p.x >= 8 && p.x <= 16 && Math.abs(p.z) <= 6 ? 'grass_block' : 'podzol' }
+    return { name: p.y === 64 && (p.x * 7 + p.z) % 5 === 0 ? 'fern' : 'air' }
+  }
+}
+
+test('farmHoleSite: the hole dug where the most plot ground is about it, in the grass, not in the podzol by home nor in the base (f5-1.21.11: the cane farm\'s hole in the podzol, no farm all game)', () => {
+  const home = new Vec3(0, 64, 0)
+  const hole = farmHoleSite(taiga(), home, 16) as Vec3
+  assert.ok(hole != null)
+  assert.equal(hole.y, 63)
+  // in the grass, with the whole block of it about it
+  assert.ok(hole.x >= 10 && hole.x <= 14 && Math.abs(hole.z) <= 4, hole.toString())
+  assert.equal(plotCells(taiga(), hole).length, 24)
+  // the cane farm's hole would be in the podzol by home: no plot by it
+  const cane = waterHoleSite(taiga(), home) as Vec3
+  assert.equal(plotCells(taiga([cane]), cane).length, 0)
+  // with the hole's water in, the farm's site is there
+  const site = findFarmSite(taiga([hole]), home, 24, FARM_PLOTS, FARM_MIN_PLOTS) as { water: Vec3 }
+  assert.ok(site.water.equals(hole))
+  // all podzol, or stone: no hole at all
+  assert.equal(farmHoleSite((p: Vec3) => ({ name: p.y < 63 ? 'dirt' : p.y === 63 ? 'podzol' : 'air' }), home, 16), null)
+  assert.equal(farmHoleSite((p: Vec3) => ({ name: p.y <= 63 ? 'stone' : 'air' }), home, 16), null)
+  // a cell with air on a side (the edge of a step down) holds no water
+  const step = (p: Vec3): any => ({ name: p.y < 63 ? 'dirt' : p.y === 63 && p.x < 20 ? 'grass_block' : 'air' })
+  const edge = farmHoleSite(step, new Vec3(20, 64, 0), 4) as Vec3
+  assert.ok(edge != null)
+  for (const [x, z] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) assert.notEqual(step(edge.offset(x, 0, z)).name, 'air', edge.toString())
+})
+
+test('startFarm by a home in the podzol: the water hole dug in the grass (farmHoleSite) and the farm sown by its water', async () => {
+  const { startFarm } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const farmModule = require('../../src/skills/farm')
+  const holes: Vec3[] = []
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('water_bucket', 1), item('wooden_hoe', 1), item('wheat_seeds', 12)] })
+  bot.blockAt = (p: Vec3) => ({ ...taiga(holes)(p.floored()), position: p.floored() })
+  bot.game.dimension = 'overworld'
+  bot.time = { age: 5000 }
+  const memory = new WorldMemory()
+  memory.setBase(new Vec3(0, 64, 0), 'overworld')
+  const tasks: string[] = []
+  const sown: any[] = []
+  const executor: any = {
+    memory,
+    plan: () => ({ ok: true, cost: 100, steps: [] }),
+    obtain: async () => {},
+    task: async (name: string, fn: any, s: AbortSignal) => {
+      tasks.push(name)
+      // (the hole dug: its water in the world)
+      if (name === 'a water hole for the farm') { holes.push(farmHoleSite(taiga(), new Vec3(0, 64, 0), 16) as Vec3); return holes[0] }
+      if (name === 'sow a farm') {
+        const real = farmModule.plantFarm
+        farmModule.plantFarm = async (_b: any, args: any) => { sown.push(args); return { water: args.water, cells: plotCells(taiga(holes), args.water, args.plots), crop: 'wheat' } }
+        try { return await fn(s) } finally { farmModule.plantFarm = real }
+      }
+    }
+  }
+  const lines: string[] = []
+  assert.equal(await startFarm(bot, executor, new AbortController().signal, l => lines.push(l)), true, lines.join(' | '))
+  assert.deepEqual(tasks, ['a water hole for the farm', 'sow a farm'])
+  assert.ok(sown[0].water.equals(holes[0]))
+  const farm = knownFarms(memory)[0]
+  assert.ok(farm.water.equals(holes[0]))
+  assert.equal(farm.cells.length, FARM_PLOTS)
+  assert.ok(farmCells(farm).every(c => taiga()(c).name === 'grass_block'))
+})
+
+test('till turns coarse dirt into dirt with a first use of the hoe, then into farmland', async () => {
+  const { till } = await import('../../src/skills/farm')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const cell = new Vec3(1, 63, 0)
+  let ground = 'coarse_dirt'
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wooden_hoe', 1)], world: p => p.y < 64 ? 'dirt' : 'air' })
+  const realAt = bot.blockAt.bind(bot)
+  bot.blockAt = ((p: any) => p.equals?.(cell) ? { ...realAt(p), name: ground } : realAt(p)) as any
+  ;(bot as any).equip = async () => {}
+  ;(bot as any).heldItem = { name: 'wooden_hoe' }
+  const uses: string[] = []
+  ;(bot as any).activateBlock = async () => { uses.push(ground); ground = ground === 'coarse_dirt' ? 'dirt' : 'farmland' }
+  if ((bot as any)._client == null) (bot as any)._client = { on: () => {}, off: () => {}, write: () => {} }
+  ;(bot as any).supportFeature = () => false
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await till(bot, cell)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.deepEqual(uses, ['coarse_dirt', 'dirt'])
+  assert.equal(ground, 'farmland')
 })
 
 test('grown plots and the seeds of each crop', () => {

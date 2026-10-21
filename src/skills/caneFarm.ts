@@ -204,12 +204,12 @@ export async function makeCaneChannel (bot: Bot, site: CaneChannelSite, signal?:
 }
 
 /**
- * A water hole dug where cane ground is about (waterHoleSite) and filled from a water bucket held (pourInto). Resolves
- * the hole, null with no site or no bucket.
+ * A water hole dug where cane ground is about (waterHoleSite; or at `at`: a farm's, farmHoleSite) and filled from a
+ * water bucket held (pourInto). Resolves the hole, null with no site or no bucket.
  */
-export async function makeWaterHole (bot: Bot, center: Vec3, signal?: AbortSignal): Promise<Vec3 | null> {
+export async function makeWaterHole (bot: Bot, center: Vec3, signal?: AbortSignal, at?: Vec3 | null): Promise<Vec3 | null> {
   const lookup: CaneLookup = p => bot.blockAt(p) as any
-  const hole = waterHoleSite(lookup, center)
+  const hole = at !== undefined ? at : waterHoleSite(lookup, center)
   if (hole == null || countItems(bot, 'water_bucket') === 0) return null
   trace('makeWaterHole: at', hole.toString())
   await collectBlock(bot, { positions: [hole], pickup: false }, signal)
