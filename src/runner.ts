@@ -305,6 +305,7 @@ interface DeathSpot {
   gear?: number
   inWater?: boolean
   cave?: boolean
+  drowned?: boolean
   /** the deaths before this one at the spot (WorldMemory.deathsNear, DEATH_SPOT_SAME) */
   before?: number
 }
@@ -331,6 +332,26 @@ export const DEATH_TRIP_UNDERGROUND_SHARE = 0.5
 /** the base this near the respawn: its kit is taken before a trip down to a death spot under the ground */
 export const DEATH_TRIP_KIT_RANGE = 32
 
+/**
+ * whether a death spot's drops lie under the water (the cell over the spot water: the head goes under to reach them),
+ * with no dry cell to reach them from (a floor, its feet's and head's cells open and dry, within 4 across and 2 up or down)
+ */
+export function dropsUnderWater (blockAt: (pos: Vec3) => { name: string } | null, at: { x: number, y: number, z: number }): boolean {
+  const spot = new Vec3(Math.floor(at.x), Math.floor(at.y), Math.floor(at.z))
+  const wet = (p: Vec3): boolean => /^(water|bubble_column|kelp|kelp_plant|seagrass|tall_seagrass)$/.test(blockAt(p)?.name ?? '')
+  if (!wet(spot.offset(0, 1, 0))) return false
+  for (let dx = -4; dx <= 4; dx++) {
+    for (let dz = -4; dz <= 4; dz++) {
+      for (let dy = -2; dy <= 2; dy++) {
+        const c = spot.offset(dx, dy, dz)
+        const open = (p: Vec3): boolean => { const n = blockAt(p)?.name ?? 'stone'; return /^(air|cave_air|void_air|short_grass|tall_grass|fern)$/.test(n) }
+        if (open(c) && open(c.offset(0, 1, 0)) && !open(c.offset(0, -1, 0)) && !wet(c.offset(0, -1, 0))) return false
+      }
+    }
+  }
+  return true
+}
+
 /** whether a death spot is worth going back to (deathSpotSkip: no reason not to) */
 export function deathSpotWorthIt (death: DeathSpot | null, now: DeathSpotNow, maxTicks: number): boolean {
   return deathSpotSkip(death, now, maxTicks) == null
@@ -355,6 +376,9 @@ export function deathSpotSkip (death: DeathSpot | null, now: DeathSpotNow, maxTi
   // in its tridents' reach; a 1.21.11 bot went back bare to its spot in the sea and was impaled there again
   // (ls3b-1.21.11, t401692 and t404182)
   if (death.killer === 'drowned' && death.inWater === true) return 'killed by a drowned in the water'
+  // drowned there, the drops under the water: gone back for, the head goes under again (a 1.21.11 Grim game's bot went
+  // back to its death spot in the sea and drowned there again, f1-grim t108711 to t120443)
+  if (death.drowned === true && dropsUnderWater(now.blockAt, death)) return 'drowned there, the drops under the water'
   // in a cave, the cave rule: not gone into by a bot not fit for the caves (the way down through one too)
   if (death.cave === true && now.caveReady === false) return 'in a cave, not cave-ready'
   // killed by more than one, and no better armed now than then: they're still about it, and win again

@@ -1249,4 +1249,17 @@ test('a death after a milestone (the herd\'s upkeep, the store at the base: afte
   assert.equal(recovered, 1)
   assert.equal(r.reason, 'until')
   assert.ok(logs.some(l => /died after wood/.test(l)), logs.join('\n'))
+test('deathSpotSkip: a spot the bot drowned at, its drops under the water, isn\'t gone back to; one with a dry stand by the drops is (f1-grim)', async () => {
+  const { deathSpotSkip, dropsUnderWater } = await import('../../src/runner')
+  const { Vec3 } = await import('vec3')
+  // the sea from y 50 to 62 over x < 0; the shore's ground at y 62 for x >= 0, air over it
+  const sea = (p: any): { name: string } => ({ name: p.x < 0 && p.y >= 50 && p.y <= 62 ? 'water' : p.y <= 62 ? 'stone' : 'air' })
+  const deep = { x: -10, y: 50, z: 0, dimension: 'overworld', seen: 0, drowned: true, inWater: true, worth: true } as any
+  const now: any = { tick: 100, dimension: 'overworld', position: new Vec3(5, 63, 0), minY: -64, blockAt: sea }
+  assert.equal(dropsUnderWater(sea, deep), true)
+  assert.equal(deathSpotSkip(deep, now, 6000), 'drowned there, the drops under the water')
+  // by the shore: the drops a reach from the dry ground
+  const shore = { ...deep, x: -1, y: 62 }
+  assert.equal(dropsUnderWater(sea, shore), false)
+  assert.notEqual(deathSpotSkip(shore, now, 6000), 'drowned there, the drops under the water')
 })

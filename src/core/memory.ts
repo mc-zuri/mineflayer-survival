@@ -58,6 +58,8 @@ export interface Death extends Located {
   inWater?: boolean
   /** died in a cave (its feet's or its head's cell a cave's, or the way down through one: skills/caves CaveCells) */
   cave?: boolean
+  /** the bot drowned there (its head in the water, its air out) */
+  drowned?: boolean
 }
 
 /** the deaths kept (deathsNear), the oldest dropped past it */
@@ -257,7 +259,7 @@ export class WorldMemory {
     return opts.count != null ? out.slice(0, opts.count) : out
   }
 
-  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean, worth?: boolean, killer?: string, extra: { dear?: boolean, way?: Pos[] | null, killers?: number, gear?: number, inWater?: boolean, cave?: boolean } = {}): void {
+  setDeath (pos: Pos, dimension: Dimension = 'overworld', underground?: boolean, worth?: boolean, killer?: string, extra: { dear?: boolean, way?: Pos[] | null, killers?: number, gear?: number, inWater?: boolean, cave?: boolean, drowned?: boolean } = {}): void {
     this.death = {
       ...at(pos, dimension),
       seen: this.now,
@@ -269,7 +271,8 @@ export class WorldMemory {
       ...(extra.killers != null ? { killers: extra.killers } : {}),
       ...(extra.gear != null ? { gear: extra.gear } : {}),
       ...(extra.inWater != null ? { inWater: extra.inWater } : {}),
-      ...(extra.cave != null ? { cave: extra.cave } : {})
+      ...(extra.cave != null ? { cave: extra.cave } : {}),
+      ...(extra.drowned != null ? { drowned: extra.drowned } : {})
     }
     this.deaths.push({ ...at(pos, dimension), seen: this.now })
     if (this.deaths.length > DEATHS_KEPT) this.deaths.splice(0, this.deaths.length - DEATHS_KEPT)

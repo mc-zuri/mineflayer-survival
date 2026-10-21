@@ -55,3 +55,29 @@ test('a spot the drowning reflex took the bot up from is kept off DROWNED_TICKS:
   clearDrownings(bot)
   assert.equal(drownedNear(bot, new Vec3(11, 56, 0)), false)
 })
+
+test('a spot drowned at twice within DROWNED_REPEAT_WINDOW, or died at by drowning, is left for good: DROWNED_REPEAT_TICKS, its underwater steps forbidden to a bot out of the water, dear to one in it (f1-26.3, f1-grim)', async () => {
+  const { DROWNED_FORBID, DROWNED_REPEAT_TICKS, DROWNED_STEP_COST, DROWNED_TICKS, drownedForGoodNear, drownedNear, drownedStepCost, noteDrowning } = await import('../../src/skills/breath')
+  const bot: any = new (require('node:events').EventEmitter)()
+  bot.survival = { tasks: { tick: 1000 } }
+  bot.entity = { position: new Vec3(20.5, 64, 0.5) }
+  const lookup = (p: Vec3): { name: string } => ({ name: p.x >= 10 && p.x <= 14 && p.y >= 55 && p.y <= 58 ? 'water' : p.y > 58 ? 'air' : 'stone' })
+  const cost = drownedStepCost(bot, lookup)
+  assert.equal(noteDrowning(bot, new Vec3(11.5, 56.5, 0.5)), false)
+  assert.equal(cost({ position: new Vec3(12, 56, 0) }), DROWNED_STEP_COST)
+  bot.survival.tasks.tick += 400
+  assert.equal(noteDrowning(bot, new Vec3(12.5, 56.5, 0.5)), true)
+  assert.equal(drownedForGoodNear(bot, new Vec3(12, 56, 0)), true)
+  // out of the water: no step under it there at all; in it, the way out
+  assert.equal(cost({ position: new Vec3(12, 56, 0) }), DROWNED_FORBID)
+  bot.entity.position = new Vec3(11.5, 56, 0.5)
+  assert.equal(cost({ position: new Vec3(12, 56, 0) }), DROWNED_STEP_COST)
+  // kept off past DROWNED_TICKS, up to DROWNED_REPEAT_TICKS
+  bot.survival.tasks.tick += DROWNED_TICKS + 100
+  assert.equal(drownedNear(bot, new Vec3(12, 56, 0)), true)
+  bot.survival.tasks.tick += DROWNED_REPEAT_TICKS
+  assert.equal(drownedNear(bot, new Vec3(12, 56, 0)), false)
+  // a death by drowning: for good at once
+  assert.equal(noteDrowning(bot, new Vec3(40.5, 56.5, 0.5), true), true)
+  assert.equal(drownedForGoodNear(bot, new Vec3(40, 56, 0)), true)
+})

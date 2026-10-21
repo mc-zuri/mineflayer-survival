@@ -4,7 +4,7 @@ import { TaskRunner } from './core/taskRunner'
 import { WorldMemory, normalizeDimension } from './core/memory'
 import { ReflexEngine, type ReflexEngineOptions } from './reflexes'
 import { play, type MilestoneHandler, type PlayOptions, type PlayResult } from './runner'
-import { keepHeadAboveWater } from './skills/breath'
+import { keepHeadAboveWater, noteDrowning } from './skills/breath'
 import { countRest } from './skills/shelter'
 import { keepOffDripstone, keepOffLavaEdges, keepOffMagma, keepOutOfHazardsLeft } from './skills/hazardCells'
 import { openSky } from './executor/explore'
@@ -195,13 +195,18 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
         const cells = underground === true ? caveCells(bot) : null
         const cave = cells == null ? undefined : (cells.isCave(pos) || cells.isCave(pos.offset(0, 1, 0)) || (way ?? []).some(p => cells.isCave(p)))
         const inWater = typeof pos.offset === 'function' && [pos, pos.offset(0, 1, 0)].some(p => bot.blockAt(p)?.name === 'water')
+        // drowned (in the water with no air left): the spot left for good a while (skills/breath), its drops not gone
+        // back for under the water (deathSpotSkip)
+        const drowned = inWater && Number(bot.oxygenLevel ?? 20) <= 1
+        if (drowned && typeof pos.floored === 'function') noteDrowning(bot, pos, true)
         memory.setDeath(bot.entity.position, dimension, underground, dropped == null ? undefined : dropsWorthATrip(dropped, bot.registry as any), killer, {
           dear: dropped == null ? undefined : dropsDear(dropped),
           way,
           killers: killer != null ? Math.max(1, killers) : undefined,
           gear: dropped == null ? undefined : gearScore(dropped),
           inWater: inWater ? true : undefined,
-          cave
+          cave,
+          drowned: drowned ? true : undefined
         })
         if (dimension === 'the_nether') {
           rememberNetherDeath(memory, bot.entity.position)
