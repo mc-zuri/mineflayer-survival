@@ -41,6 +41,63 @@ test('keepBaseUnbroken: the base\'s bed (both halves), table and chests kept fro
   assert.equal(cost(3, 59, 3), 0)
 })
 
+test('keepBaseUnbroken: the step before the base\'s door and the ground under it kept from the pathfinder\'s digs (f9-1.21.11: dug out from beside them, the door over a hole)', async () => {
+  const { keepBaseUnbroken } = await import('../../src/base/build')
+  const { BASE_POI } = await import('../../src/base/pois')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  // f9-1.21.11's base: its entrance at (-547, 76, 36), outside its box's north wall
+  const m = new WorldMemory()
+  m.setBase({ x: -552, y: 76, z: 40 }, 'overworld')
+  m.addPoi(BASE_POI.bounds, { x: -553, y: 75, z: 37 }, 'overworld', '-545,79,44')
+  m.addPoi(BASE_POI.entrance, { x: -547, y: 76, z: 36 }, 'overworld')
+  const bot = fakeBot({ world: (p: any) => p.y < 76 ? 'dirt' : 'air' })
+  bot.pathfinder = { defaultMoveSettings: { exclusionAreasBreak: [] }, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+  keepBaseUnbroken(bot, m)
+  const areas = bot.pathfinder.defaultMoveSettings.exclusionAreasBreak
+  const cost = (x: number, y: number, z: number): number => areas.reduce((n: number, f: any) => n + f({ position: new Vec3(x, y, z) }), 0)
+  assert.ok(cost(-547, 75, 36) >= 1e9, 'the step')
+  assert.ok(cost(-547, 74, 36) >= 1e9, 'the ground under it')
+  assert.equal(cost(-546, 75, 36), 0, 'the ground beside it')
+  assert.equal(cost(-547, 76, 36), 0, 'the entrance\'s cell')
+})
+
+for (const version of ['1.21.11', '26.3']) {
+  test(`mendBaseStep: the step before the base's door put back with a block of the bag's when it's gone and the bot is by it; not when it's there, the bot far, or the bag has none (${version})`, async () => {
+    const { mendBaseStep, STEP_MEND_RANGE } = await import('../../src/skills/refuge')
+    const placeModule = require('../../src/skills/placeBlock')
+    const { fakeBot, item } = await import('../reflexes/fakeBot')
+    const { Vec3 } = await import('vec3')
+    const base: any = { origin: { x: -552, y: 76, z: 40 }, entrance: { x: -547, y: 76, z: 36 }, table: null, furnaces: [], bed: null, chests: [], spareChests: [], bounds: { min: { x: -553, y: 75, z: 37 }, max: { x: -545, y: 79, z: 44 } } }
+    let step = 'air'
+    const world = (p: any): string => p.x === -547 && p.z === 36 && p.y === 75 ? step : p.x === -547 && p.z === 36 && p.y === 74 ? 'air' : p.y < 75 ? 'dirt' : 'air'
+    const placed: string[] = []
+    const real = placeModule.placeBlock
+    placeModule.placeBlock = async (_b: unknown, args: any) => { placed.push(`${args.item} at ${args.pos.toString()}`); return { pos: args.pos, block: args.item, placed: true } }
+    try {
+      // f9-1.21.11 at t321633: by the hole, 4 dirt and 2 oak planks carried
+      const bot = fakeBot({ position: new Vec3(-545.5, 75, 36.5), items: [item('oak_planks', 2, undefined, version), item('dirt', 4, undefined, version)], world, version })
+      assert.equal(await mendBaseStep(bot, base), true)
+      assert.deepEqual(placed, ['dirt at (-547, 75, 36)'])
+      // planks when there's no scaffolding
+      placed.length = 0
+      assert.equal(await mendBaseStep(fakeBot({ position: new Vec3(-545.5, 75, 36.5), items: [item('oak_planks', 2, undefined, version)], world, version }), base), true)
+      assert.deepEqual(placed, ['oak_planks at (-547, 75, 36)'])
+      // none to place, too far, or the step there
+      placed.length = 0
+      assert.equal(await mendBaseStep(fakeBot({ position: new Vec3(-545.5, 75, 36.5), items: [item('wheat_seeds', 2, undefined, version)], world, version }), base), false)
+      assert.equal(await mendBaseStep(fakeBot({ position: new Vec3(-547.5 + STEP_MEND_RANGE + 2, 75, 36.5), items: [item('dirt', 4, undefined, version)], world, version }), base), false)
+      step = 'dirt'
+      assert.equal(await mendBaseStep(fakeBot({ position: new Vec3(-545.5, 75, 36.5), items: [item('dirt', 4, undefined, version)], world, version }), base), false)
+      assert.equal(await mendBaseStep(fakeBot({ position: new Vec3(-545.5, 75, 36.5), items: [item('dirt', 4, undefined, version)], world, version }), { ...base, entrance: null }), false)
+      assert.deepEqual(placed, [])
+    } finally {
+      placeModule.placeBlock = real
+    }
+  })
+}
+
 test('protectBase: the shell and the blueprint\'s own blocks in the room kept from the pathfinder\'s digs; the ground left in a doorway not (ls-1.21.11: shut in by its own base)', async () => {
   const { protectBase, HOUSE_BLUEPRINT } = await import('../../src/base/build')
   const { generateBlueprint } = await import('../../src/base/blueprint')

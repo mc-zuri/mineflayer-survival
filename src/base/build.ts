@@ -197,9 +197,9 @@ export function protectBase (bot: Bot, blueprint: Pick<Blueprint, 'bounds' | 'di
 }
 
 /**
- * The base's bed (its foot and the cells round it, the head one of them), its table, furnaces and chests kept from the
- * pathfinder's digs (keepUnbroken), from the memory: after a build, and on a resume, when the blueprint's bounds
- * protection (protectBase) isn't set again. A GoalSurface out of the base after a respawn broke its bed, 'more
+ * The base's bed (its foot and the cells round it, the head one of them), its table, furnaces and chests, and the step
+ * before its door kept from the pathfinder's digs (keepUnbroken), from the memory: after a build, and on a resume, when
+ * the blueprint's bounds protection (protectBase) isn't set again. A GoalSurface out of the base after a respawn broke its bed, 'more
  * white_bed', and the respawn point was gone (full-26.3-fresh-u, t232877)
  */
 export function keepBaseUnbroken (bot: Bot, memory: WorldMemory): Vec3[] {
@@ -211,6 +211,9 @@ export function keepBaseUnbroken (bot: Bot, memory: WorldMemory): Vec3[] {
     cells.push(foot, foot.offset(1, 0, 0), foot.offset(-1, 0, 0), foot.offset(0, 0, 1), foot.offset(0, 0, -1))
   }
   for (const p of [...(base.table != null ? [base.table] : []), ...base.furnaces, ...base.chests]) cells.push(new Vec3(p.x, p.y, p.z))
+  // and the step before its outer door and the ground under it (out of the box, a dig's to take: a 1.21.11 walk to
+  // the chest dug both out from beside them, and the door stood over a hole, no way in, f9-1.21.11 t228597)
+  if (base.entrance != null) cells.push(new Vec3(base.entrance.x, base.entrance.y - 1, base.entrance.z), new Vec3(base.entrance.x, base.entrance.y - 2, base.entrance.z))
   // (the bed's cells round its foot kept only where a bed is: not the floor or a wall by it)
   const kept = cells.filter((c, i) => i === 0 || i > 4 || base.bed == null || /_bed$/.test(bot.blockAt(c)?.name ?? '_bed'))
   if (kept.length > 0) keepUnbroken(bot, kept)

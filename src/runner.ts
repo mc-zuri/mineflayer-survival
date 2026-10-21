@@ -39,7 +39,7 @@ import { knownCaneFarm } from './skills/caneFarm'
 import { EPOCHS, EPOCH_HANDLERS, isEpoch, nextEpoch } from './epochs'
 import { TRIP_KIT, keepUnbroken, takeTripKit } from './skills/tripKit'
 import { armorPoints, shelter, sleepThroughNight, undergroundAtWork } from './skills/shelter'
-import { REFUGE_TRIES, chooseRefuge, describeSituation, findBaseDoor, inBounds, refugeSituation, shutInBase, takeRefuge, waitInBase, type Refuge } from './skills/refuge'
+import { REFUGE_TRIES, chooseRefuge, describeSituation, findBaseDoor, inBounds, mendBaseStep, refugeSituation, shutInBase, takeRefuge, waitInBase, type Refuge } from './skills/refuge'
 import { bestMeleeWeapon } from './skills/weapons'
 import { followWay, wayLength } from './skills/wayDown'
 import { overland } from './end/strongholdSkills'
@@ -2530,10 +2530,14 @@ export class Runner {
       }
       // (a search that timed out 10 blocks from the dug-in base left the bot with no kit at all, its diamond tools in
       // the chest: the walk then, by hops and a stair down when the path doesn't come, 26.3)
-      await this.executor.task('to the base', async (s) => await navigate(bot, { goal: new goals.GoalNear(e.x, e.y, e.z, 2) }, s).catch(async err => {
-        if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
-        await overland(bot, { target: new Vec3(e.x, e.y, e.z), range: 2, exactY: true }, s)
-      }), signal).catch(err => {
+      await this.executor.task('to the base', async (s) => {
+        await navigate(bot, { goal: new goals.GoalNear(e.x, e.y, e.z, 2) }, s).catch(async err => {
+          if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+          await overland(bot, { target: new Vec3(e.x, e.y, e.z), range: 2, exactY: true }, s)
+        })
+        // (its step put back when it's gone: the door no way in over a hole)
+        if (await mendBaseStep(bot, base, s)) this.log(`the base's step at ${e.x} ${e.y - 1} ${e.z} put back`)
+      }, signal).catch(err => {
         if (TaskError.is(err, 'DIED')) throw err
       })
     }

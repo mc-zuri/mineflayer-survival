@@ -16,7 +16,8 @@ import { doorOpen, isHandDoor, shutDoor } from './indoors'
 import { collectBlock } from './collectBlock'
 import { bestFoodInInventory, eat } from './eat'
 import { fleeFrom } from './escape'
-import { waitTicks } from './util'
+import { trace, waitTicks } from './util'
+import { placeBlock } from './placeBlock'
 import type { BlockLookup } from './placement'
 import { SCAFFOLD_ITEMS, countItems, digDown, towerUp } from '../end/skills/world'
 import { blockIdsNamed, findBlock, findBlocks } from '../core/findBlocks'
@@ -194,6 +195,36 @@ export function findBaseDoor (bot: Bot, base: BaseRecord | null): BaseDoor | nul
     doors.push({ pos: at, facing: String(props.facing) })
   }
   return baseDoor((p) => bot.blockAt(p) as any, doors, { bounds: base.bounds, entrance: base.entrance })
+}
+
+/** how near the base's entrance the bot is for its step to be put back (mendBaseStep) */
+export const STEP_MEND_RANGE = 6
+
+/**
+ * The base's entrance step put back: the floor of the cell outside its outer door (the entrance's, a block over the
+ * ground about a dug-in base's door) when it's no floor, a block of the bag's scaffolding (else of its planks) placed
+ * there, the bot within STEP_MEND_RANGE of it. Whether one was placed. A 1.21.11 bot's walk to the base's chest dug the
+ * step and the ground under it out from beside it, and the door stood over a hole two deep: the base's door no way in
+ * (baseDoor: no side out of the box to stand in), and back from a death the searches for the chest timed out from
+ * beside the hole for 100000 ticks (f9-1.21.11, t228597; t321486 on)
+ */
+export async function mendBaseStep (bot: Bot, base: BaseRecord | null, signal?: AbortSignal): Promise<boolean> {
+  const e = base?.entrance
+  if (e == null || typeof bot.blockAt !== 'function') return false
+  const floor = new Vec3(e.x, e.y - 1, e.z)
+  const block = bot.blockAt(floor)
+  if (block == null || block.boundingBox === 'block' || /water|lava/.test(block.name)) return false
+  if (bot.entity.position.distanceTo(floor.offset(0.5, 0.5, 0.5)) > STEP_MEND_RANGE) return false
+  const item = SCAFFOLD_ITEMS.find(n => countItems(bot, [n]) > 0) ?? bot.inventory.items().find(i => i.name.endsWith('_planks'))?.name
+  if (item == null) return false
+  try {
+    await placeBlock(bot, { pos: floor, item }, signal)
+    return true
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('mendBaseStep: no', item, 'at', floor.toString(), ':', (err as Error).message)
+    return false
+  }
 }
 
 /** the bot in the base's box with its door shut */

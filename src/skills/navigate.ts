@@ -6,7 +6,7 @@ import { SkillError, abortError, isAbort, isSkillError, throwIfAborted } from '.
 import { keepRoom } from './bag'
 import { eyeHeight, trace, waitUntil } from './util'
 import type { ReportKind } from '../diagnostics/report'
-import { baseWayIn } from '../base/pois'
+import { baseRecord, baseWayIn } from '../base/pois'
 import { normalizeDimension } from '../core/memory'
 
 type Goal = goals.Goal
@@ -463,6 +463,9 @@ export async function navigateToReach (bot: Bot, pos: Vec3, signal?: AbortSignal
       if (isAbort(err)) throw err
       trace('navigateToReach: not to the entrance:', (err as Error).message)
     })
+    // (its step put back when it's gone: the door no way in over a hole)
+    const { mendBaseStep } = await import('./refuge')
+    await mendBaseStep(bot, baseRecord(memory), signal)
   }
   return await navigate(bot, { goal }, signal)
 }
