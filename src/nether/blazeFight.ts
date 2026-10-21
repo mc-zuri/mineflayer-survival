@@ -759,6 +759,9 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   // (and the blazes, a punching one too: collectBlazeRods leaves them to the reflex once one hits the bot, but in
   // here its sword meets them at the slit; out on a fetch or an errand, the reflex's then)
   const leftAlone = [...melee, 'blaze']
+  // (a bunker's ways out and back, its fetches' and its lighting trips', keep to the throne's floor: keepOffPits)
+  const pitFloor = Math.min(nook.stand.y, opts.spawner.floored().y)
+  const pits = nook.bunker != null ? keepOffPits(bot, nook.stand, pitFloor) : null
   let leave = engine?.leaveAlone?.(leftAlone) as (() => void) | undefined
   // (out of it, on a fetch or an errand, they're the reflex's again: the cube in a pit on a 26.3 bunker's lighting
   // trip by seed 2's open throne at (-290, 77, -209) hit it 14 times on its way, 18.8 health to its death, unfought)
@@ -1069,6 +1072,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       const drop = nook.bunker != null
         ? (drawn === 0 ? bunkerDrops(bot, nook).find(e => {
             if ((tried.get(e.id) ?? 0) >= DROP_TRIES) return false
+            // (none down a pit: the ways keep off it, keepOffPits)
+            if (Math.floor(e.position.y) < pitFloor - 1) return false
             if (!dropSeen.has(e.id)) dropSeen.set(e.id, tick)
             const old = tick - (dropSeen.get(e.id) ?? tick) >= BUNKER_OLD_DROP
             return bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof, e.position, old ? BUNKER_FETCH_SEEN_OLD : BUNKER_FETCH_SEEN, old ? BUNKER_OLD_CLOSE : 0)
@@ -1144,6 +1149,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
     }
   } finally {
     leave?.()
+    pits?.()
     bot.off('entityDead', onDead)
     bot.off('physicsTick', onTick)
     for (const id of tracked) { const e = bot.entities[id]; if (e != null) tracker.untrack(e) }
@@ -1884,6 +1890,36 @@ export async function withNookKept<T> (bot: Bot, nook: BlazeNook, fn: () => Prom
 }
 
 /** the pathfinder kept from breaking the blocks at `cells` while `fn` runs (the settings it had put back after) */
+/** a bunker fight's ways keep to the floor: no step under PIT_FLOOR's y less 1 within PIT_RADIUS of its stand */
+export const PIT_RADIUS = 16
+
+/**
+ * Keeps the pathfinder's ways off the cells under `floorY` - 1 within PIT_RADIUS of `center` (a step exclusion,
+ * COST_INF) till the returned release: a bunker's fetches and lighting trips by seed 2's open throne at (-290, 77, -209)
+ * went down a pit by the bunker, 2 to 5 under the throne's floor (ForwardDropDown to (-288.5, 74, -203.5), 'bot is too
+ * low'), on their way to the throne, and three bots burned or were punched to death climbing back out (26.3, tests/
+ * integration/blaze BLAZE_AT=s2fortress2)
+ */
+export function keepOffPits (bot: Bot, center: Vec3, floorY: number): () => void {
+  const pathfinder: any = (bot as any).pathfinder
+  const settings = pathfinder?.defaultMoveSettings
+  if (settings == null || typeof pathfinder.setMoveOptions !== 'function') return () => {}
+  const c = center.floored()
+  const area = (block: any): number => {
+    const p = block?.position
+    if (p == null) return 0
+    return p.y < floorY - 1 && Math.abs(p.x - c.x) <= PIT_RADIUS && Math.abs(p.z - c.z) <= PIT_RADIUS ? 1e9 : 0
+  }
+  pathfinder.setMoveOptions({ ...settings, exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), area] })
+  let released = false
+  return () => {
+    if (released) return
+    released = true
+    const now = pathfinder.defaultMoveSettings ?? {}
+    pathfinder.setMoveOptions({ ...now, exclusionAreasStep: (now.exclusionAreasStep ?? []).filter((f: unknown) => f !== area) })
+  }
+}
+
 export async function withBlocksKept<T> (bot: Bot, cells: readonly Vec3[], fn: () => Promise<T>): Promise<T> {
   const pathfinder: any = (bot as any).pathfinder
   const settings = pathfinder?.defaultMoveSettings

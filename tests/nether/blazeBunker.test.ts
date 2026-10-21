@@ -490,6 +490,34 @@ test('fightFromNook in a bunker out of ticks: the fight goes on till it is quiet
   }
 })
 
+test('keepOffPits: no step under the floor less 1 near the bunker (a pit by the throne), one far off or at the floor free; the bunker fight keeps to it till it ends', async () => {
+  const { keepOffPits, fightFromNook, PIT_RADIUS } = await import('../../src/nether/blazeFight')
+  const { bot, b, restore } = await bunkerBot([])
+  bot.pathfinder = { defaultMoveSettings: { exclusionAreasStep: [] as any[] }, setMoveOptions (o: any) { this.defaultMoveSettings = o } }
+  const cost = (p: Vec3): number => bot.pathfinder.defaultMoveSettings.exclusionAreasStep.reduce((n: number, f: any) => n + f({ position: p }), 0)
+  const release = keepOffPits(bot, new Vec3(0, 79, 0), 77)
+  assert.equal(cost(new Vec3(2, 76, 2)), 0)
+  assert.equal(cost(new Vec3(2, 75, 2)), 1e9)
+  assert.equal(cost(new Vec3(PIT_RADIUS + 1, 70, 0)), 0)
+  release()
+  release()
+  assert.deepStrictEqual(bot.pathfinder.defaultMoveSettings.exclusionAreasStep, [])
+  // the fight's: on while it runs, off after (the spawner at the bunker's height here: under 63 kept off)
+  const ac = new AbortController()
+  try {
+    const done = fightFromNook(bot, b, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 3000 }, ac.signal).catch(err => err)
+    await ticks(bot, 5)
+    assert.equal(cost(new Vec3(0, 62, 0)), 1e9)
+    assert.equal(cost(new Vec3(0, 63, 0)), 0)
+    ac.abort()
+    await ticks(bot, 5)
+    await done
+    assert.deepStrictEqual(bot.pathfinder.defaultMoveSettings.exclusionAreasStep, [])
+  } finally {
+    restore()
+  }
+})
+
 test('fireballReaches: a small fireball from a blaze ahead at the bot\'s height meets the bunker\'s sill, one from over it comes in at the slit, one from beside it meets the wall', async () => {
   const { fireballReaches, FIREBALL_SPAWN_HEIGHT } = await import('../../src/nether/blazeFight')
   const { bot, restore } = await bunkerBot([])
