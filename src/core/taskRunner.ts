@@ -52,6 +52,22 @@ export interface TaskHandle<T> {
   stop: (reason: TaskError) => void
 }
 
+/**
+ * What a task did, for whoever watches the runner (a recorder): its attempt started, ended, failed, was preempted (to
+ * run again) or failed to be retried; `attempt` 0 for a task dropped from the queue before it ran
+ */
+export interface TaskEvent {
+  type: 'start' | 'end' | 'fail' | 'preempted' | 'retry'
+  id: number
+  name: string
+  priority: number
+  attempt: number
+  /** its foreground ticks so far */
+  ticks: number
+  /** why it failed (fail, preempted, retry) */
+  error?: TaskError
+}
+
 export interface TaskRunnerOptions {
   /** how long an aborted task may take to settle before the next one starts anyway (default 20) */
   abortGraceTicks?: number
@@ -103,10 +119,26 @@ export class TaskRunner {
   private pumpQueued = false
   private readonly abortGraceTicks: number
   private readonly onTick = (): void => this.physicsTick()
+  private readonly observers = new Set<(event: TaskEvent) => void>()
 
   constructor (private readonly ticks: TickSource, opts: TaskRunnerOptions = {}) {
     this.abortGraceTicks = opts.abortGraceTicks ?? 20
     ticks.on('physicsTick', this.onTick)
+  }
+
+  /** calls `cb` with each task's start, end, failure, preemption and retry; returns the call to stop */
+  onTask (cb: (event: TaskEvent) => void): () => void {
+    this.observers.add(cb)
+    return () => { this.observers.delete(cb) }
+  }
+
+  private tell (type: TaskEvent['type'], entry: Entry, error?: unknown): void {
+    if (this.observers.size === 0) return
+    const event: TaskEvent = { type, id: entry.id, name: entry.name, priority: entry.priority, attempt: entry.attempt, ticks: entry.ticks }
+    if (error !== undefined) event.error = TaskError.from(error)
+    for (const cb of this.observers) {
+      try { cb(event) } catch {}
+    }
   }
 
   /** queues a task and returns its handle; `handle.result` settles with the task */
@@ -234,6 +266,7 @@ export class TaskRunner {
     entry.abortReason = null
     entry.attempt++
     this.running = entry
+    this.tell('start', entry)
     const ctx: TaskContext<any> = {
       signal: controller.signal,
       attempt: entry.attempt,
@@ -265,6 +298,7 @@ export class TaskRunner {
       // finished even though it was aborted: the work is done, keep the result
       this.settle(entry, true, value)
     } else if (reason?.code === 'PREEMPTED' && entry.opts.onPreempt !== 'fail') {
+      this.tell('preempted', entry, reason)
       this.insert(entry)
     } else if (reason != null) {
       this.settle(entry, false, TaskError.is(value) && value.partial !== undefined ? reason.withPartial(value.partial) : reason)
@@ -272,6 +306,7 @@ export class TaskRunner {
       const err = TaskError.from(value)
       if (entry.retriesLeft > 0 && (entry.opts.retryOn == null || entry.opts.retryOn.includes(err.code))) {
         entry.retriesLeft--
+        this.tell('retry', entry, err)
         this.insert(entry)
       } else {
         this.settle(entry, false, err)
@@ -283,6 +318,7 @@ export class TaskRunner {
   private settle (entry: Entry, ok: boolean, value: unknown): void {
     if (entry.settled) return
     entry.settled = true
+    this.tell(ok ? 'end' : 'fail', entry, ok ? undefined : value)
     if (ok) entry.resolve(value)
     else entry.reject(value)
   }

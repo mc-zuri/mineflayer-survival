@@ -175,3 +175,31 @@ test('stop aborts the running task with its reason, not to be resumed: the resul
   runner.destroy()
   await assert.rejects(busy)
 })
+
+test('onTask tells each start, preemption, retry and outcome, with the code of a failure; a task dropped from the queue at attempt 0', async () => {
+  const { runner, tick, flush } = setup({ abortGraceTicks: 0 })
+  const seen: string[] = []
+  const off = runner.onTask(e => seen.push(`${e.type} ${e.name} #${e.attempt}${e.error != null ? ` ${e.error.code}` : ''}`))
+  const mine = runner.run({ name: 'mine' }, async (ctx) => { await ctx.waitTicks(5) })
+  await flush()
+  const flee = runner.run({ name: 'flee', priority: 10 }, async () => {})
+  await flush()
+  await flee
+  await tick(6)
+  await mine
+  let tries = 0
+  await runner.run({ name: 'dig', retries: 1, retryOn: ['NO_TOOL'] }, async () => { if (tries++ === 0) throw new TaskError('NO_TOOL', 'no pickaxe') })
+  const busy = runner.enqueue({ name: 'busy' }, async (ctx) => await ctx.waitTicks(100))
+  const queued = runner.enqueue({ name: 'later' }, async () => {})
+  await flush()
+  queued.cancel()
+  busy.cancel()
+  await Promise.allSettled([busy.result, queued.result])
+  off()
+  await runner.run('after', async () => {})
+  assert.deepEqual(seen, [
+    'start mine #1', 'preempted mine #1 PREEMPTED', 'start flee #1', 'end flee #1', 'start mine #2', 'end mine #2',
+    'start dig #1', 'retry dig #1 NO_TOOL', 'start dig #2', 'end dig #2',
+    'start busy #1', 'fail later #0 ABORTED', 'fail busy #1 ABORTED'
+  ])
+})
