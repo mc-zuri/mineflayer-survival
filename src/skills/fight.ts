@@ -197,7 +197,7 @@ export class CrossbowGuard {
  * The mobs whose hits are swings at the bot (MeleeAttackGoal and its kin: ZombieAttackGoal, the spider's, a hoglin's,
  * a piglin brute's), a shield held up to them takes (Player's BlocksAttacks)
  */
-export const MELEE_MOBS = new Set(['wither_skeleton', 'zombie', 'husk', 'zombie_villager', 'zombified_piglin', 'piglin_brute', 'hoglin', 'zoglin', 'vindicator', 'spider', 'cave_spider'])
+export const MELEE_MOBS = new Set(['wither_skeleton', 'zombie', 'husk', 'zombie_villager', 'zombified_piglin', 'piglin_brute', 'hoglin', 'zoglin', 'vindicator', 'spider', 'cave_spider', 'polar_bear', 'iron_golem'])
 
 /** Mob.getAttackBoundingBox's widening of the mob's box, sideways only (DEFAULT_ATTACK_REACH: sqrt(2.04) - 0.6) */
 export const MOB_ATTACK_REACH = Math.sqrt(2.04) - 0.6

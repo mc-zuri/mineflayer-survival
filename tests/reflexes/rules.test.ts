@@ -995,3 +995,24 @@ test('unkilledLetBe: a mob the hostiles reflex\'s fight ran out of ticks on is l
   cube.position = new Vec3(0.5 + UNKILLED_NEAR - 0.5, 64, 0.5)
   assert.equal(unkilledLetBe(bot, cube, 200), false)
 })
+
+test('hostiles reflex: a mob attacking the bot (hit it within ATTACK_HOLD_TICKS, within ATTACKER_RANGE) keeps it on the fight or the flee, never the work; a strong neutral hurt, or two of them, fled (f6-1.21.11, t179279: a polar bear fought 12 ticks, then the cane explore went on under its hits)', async () => {
+  const { ATTACK_HOLD_TICKS, STRONG_FIGHT_HEALTH } = await import('../../src/reflexes/rules')
+  const bear = (x: number, y = 64): any => entity({ name: 'polar_bear', position: new Vec3(0.5 + x, y, 0.5) })
+  const kit = { items: [item('diamond_sword')], armor: { head: item('iron_helmet'), torso: item('iron_chestplate'), legs: item('iron_leggings'), feet: item('iron_boots') } }
+  const hitBy = (...ids: number[]) => (engine: ReflexEngine): void => { for (const id of ids) (engine as any).attackers.set(id, 0) }
+  // one bear that just hit it, the bot healthy: fought
+  const b1 = bear(1.5)
+  assert.strictEqual(check(hostilesReflex, { ...kit, entities: [b1] }, {}, hitBy(b1.id)), 'fight polar_bear')
+  // hurt to STRONG_FIGHT_HEALTH: fled; two hitting: fled at any health
+  assert.strictEqual(check(hostilesReflex, { ...kit, health: STRONG_FIGHT_HEALTH, entities: [b1] }, {}, hitBy(b1.id)), 'flee polar_bear')
+  const b2 = bear(-1.5)
+  assert.strictEqual(check(hostilesReflex, { ...kit, entities: [b1, b2] }, {}, hitBy(b1.id, b2.id)), 'flee polar_bear')
+  // one in the water 5 off a bot on the shore that's hitting it: not let be as the water's
+  const sea = (p: Vec3): string => p.x >= 3 ? (p.y <= 63 && p.y >= 58 ? 'water' : p.y < 58 ? 'stone' : 'air') : (p.y < 64 ? 'stone' : 'air')
+  const swimmer = bear(5, 62)
+  assert.notStrictEqual(check(hostilesReflex, { ...kit, world: sea, entities: [swimmer] }, {}, hitBy(swimmer.id)), null)
+  // a bear that hit it long ago and walked off isn't one
+  const old = bear(2.5)
+  assert.strictEqual(check(hostilesReflex, { ...kit, entities: [old] }, {}, (engine) => { (engine as any).attackers.set(old.id, -(ATTACK_HOLD_TICKS + 500)) }), null)
+})

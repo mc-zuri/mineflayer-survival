@@ -12,7 +12,7 @@ import { holdOffBlazes } from '../nether/blazeFight'
 import { ARCHER_BUDGET, GHAST_FIREBALL, deadlyDropBeside, deflectFireball, fireballIncoming, holdOffArcher, keepFromGhast, nearestGhast, withNetherSafety } from '../nether/safety'
 import { nearbyDrops, pickupDrops } from '../skills/pickupDrops'
 import { SkillError, isSkillError } from '../skills/errors'
-import type { Reflex, ReflexContext } from './types'
+import type { Reflex, ReflexContext, UrgentTask } from './types'
 import type { ReflexConfig } from './config'
 import { isBed } from '../core/items'
 import { breakFall, predictLanding, shouldBreakFall } from '../skills/fall'
@@ -840,6 +840,36 @@ function cachedRefuge (ctx: ReflexContext, near: Entity[]): DoorRefuge | null {
 const nestFails = new WeakMap<Bot, number>()
 export const NEST_RETRY_TICKS = 300
 
+/** ticks a mob's hit holds the hostiles reflex on it (attackingNow), and how near it must still be */
+export const ATTACK_HOLD_TICKS = 60
+export const ATTACKER_RANGE = 6
+/** the neutrals that hit hard (a polar bear's 6 on normal, an iron golem's 7 to 21): fled from hurt, not traded with */
+export const STRONG_NEUTRALS = new Set(['polar_bear', 'iron_golem'])
+/** at or under this health a strong neutral's fight is a flee (or more than one of them at any health) */
+export const STRONG_FIGHT_HEALTH = 12
+
+/**
+ * The mobs attacking the bot now: alive, a hostile or one of the retaliate list (a neutral angered), that hurt it
+ * within ATTACK_HOLD_TICKS and are within ATTACKER_RANGE; the nearest first. While there is one the hostiles reflex
+ * never lets the work go on: a 1.21.11 bot in iron with a diamond sword fought a polar bear 12 ticks, then the cane's
+ * exploring went on with the bear (and its family) hitting it, 10.6 to 0 health (f6-1.21.11, t179279)
+ */
+export function attackingNow (ctx: ReflexContext): Entity[] {
+  const { bot, config } = ctx
+  return Object.values(bot.entities).filter(e => {
+    if (e === bot.entity || !isAlive(bot, e)) return false
+    if (!isHostile(bot, e) && !config.hostiles.retaliate.includes(e.name ?? '') && !STRONG_NEUTRALS.has(e.name ?? '')) return false
+    const at = ctx.attackers?.get(e.id)
+    return at != null && ctx.tick - at >= 0 && ctx.tick - at <= ATTACK_HOLD_TICKS && distance(bot, e) <= ATTACKER_RANGE
+  }).sort((a, b) => distance(bot, a) - distance(bot, b))
+}
+
+/** whether the strong neutrals attacking the bot (STRONG_NEUTRALS) are fled from: hurt to STRONG_FIGHT_HEALTH, or more than one */
+export function strongNeutralFleeDue (bot: Bot, attacking: readonly Entity[]): boolean {
+  const strong = attacking.filter(e => STRONG_NEUTRALS.has(e.name ?? ''))
+  return strong.length > 0 && (bot.health <= STRONG_FIGHT_HEALTH || strong.length > 1)
+}
+
 export const hostilesReflex: Reflex = {
   name: 'hostiles',
   priority: 60,
@@ -892,7 +922,18 @@ export const hostilesReflex: Reflex = {
         }
       }
     }
-    if (near.length === 0 && wither == null) return null
+    // (the mobs attacking it now: none let go on with the work, attackingNow)
+    const attacking = nether ? [] : attackingNow(ctx)
+    const fleeAttackers = (detail: string): UrgentTask => ({
+      name: 'hostiles',
+      priority: config.hostiles.priority,
+      detail,
+      run: async (signal: AbortSignal) => await fleeFrom(bot, () => Object.values(bot.entities).filter(e => attacking.some(a => a.id === e.id) && isAlive(bot, e)), { signal, distance: config.hostiles.fleeDistance }).catch(err => noteCornered(bot, ctx.tick, err))
+    })
+    // a strong neutral (a polar bear, an iron golem) hitting the bot hurt, or more than one: away, not a trade of
+    // hits; cornered, fought (its swings on the shield, fight's meleeGuard)
+    if (strongNeutralFleeDue(bot, attacking) && !wasCornered(bot, ctx.tick)) return fleeAttackers(`flee ${attacking.find(e => STRONG_NEUTRALS.has(e.name ?? ''))?.name ?? 'attacker'}`)
+    if (near.length === 0 && wither == null) return attacking.length > 0 ? fleeAttackers('flee attacker') : null
     // silverfish: away from their nest (fleeNest), not walled in nor fought among its infested blocks, a hurt one
     // calling the rest out (f5-26.3: slain by 9 in iron); cornered, or the flight failed lately, fought where it stands
     if (!nether && near.some(e => e.name === 'silverfish') && !cornered && ctx.tick - (nestFails.get(bot) ?? -Infinity) > NEST_RETRY_TICKS) {
@@ -1014,8 +1055,10 @@ export const hostilesReflex: Reflex = {
     if (near.length === 0) return null
     // the ones in the water off dry ground let be (leftInWater, tridentInWater), never chased into it
     // (and a mob its last fight couldn't kill in fightTicks let be a while unless it's on the bot: unkilledLetBe)
-    const fightable = (nether ? near : near.filter(e => !leftInWater(bot, e) && !tridentInWater(bot, e))).filter(e => !unkilledLetBe(bot, e, ctx.tick))
-    if (fightable.length === 0) return null
+    // (one attacking it now never let be: attackingNow)
+    const hitting = (e: Entity): boolean => attacking.some(a => a.id === e.id)
+    const fightable = (nether ? near : near.filter(e => hitting(e) || (!leftInWater(bot, e) && !tridentInWater(bot, e)))).filter(e => hitting(e) || !unkilledLetBe(bot, e, ctx.tick))
+    if (fightable.length === 0) return attacking.length > 0 ? fleeAttackers('flee attacker') : null
     // creepers: shot from a distance when there's a bow; melee only with a shield to take the blast
     const target = fightable.find(e => {
       if (e.name !== 'creeper') return true
@@ -1049,9 +1092,11 @@ export const hostilesReflex: Reflex = {
     // twice in its last 200 ticks, each a new fight (full-26.3-fresh-l, a 26.3 bot in iron in the night's mine)
     let elapsed = 0
     const turned = (): boolean => {
-      const now = hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange) })
+      const now = hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => (isHostile(bot, e) || provoked(ctx, e)) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange) })
       const tick = ctx.tick + elapsed++
-      return now.length > 0 && (fightTurned(bot, now, config, tick) || sealDue(bot, now, config, tick) || caveWallInDue(bot, now, config, tick) || pillarDue(bot, now, config, tick))
+      // (a strong neutral's fight turned once the bot is hurt to STRONG_FIGHT_HEALTH: the flee next)
+      return (now.length > 0 && (fightTurned(bot, now, config, tick) || sealDue(bot, now, config, tick) || caveWallInDue(bot, now, config, tick) || pillarDue(bot, now, config, tick))) ||
+        strongNeutralFleeDue(bot, attackingNow({ ...ctx, tick }))
     }
     if (nether && !useBow) {
       const f = netherFightsOf(bot)
