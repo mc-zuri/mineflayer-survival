@@ -810,8 +810,12 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       for (let i = 0; i < again && !built; i++) {
         try {
           if (i > 0) await waitTicks(bot, KEPT_BUNKER_WAIT, signal)
-          // (the way in kept off the pits under the throne's floor too, as the fight's: keepOffPits)
-          const pits = keepOffPits(bot, c.stand, Math.min(c.stand.y, spawner.floored().y))
+          // (the way in kept off the pits under the throne's floor too, as the fight's: keepOffPits; not for a bot
+          // coming up from under it, the cave's floor: every step of its way up was kept off then, and 1.21.11 bots
+          // at y 67 under seed 2's open throne at (-290, 77, -209) dug staircases up 12 blocks among the blazes and
+          // died three runs of three)
+          const floor = Math.min(c.stand.y, spawner.floored().y)
+          const pits = bot.entity.position.y >= floor - 1 ? keepOffPits(bot, c.stand, floor) : () => {}
           try {
             await buildNook(bot, c, signal)
           } finally {

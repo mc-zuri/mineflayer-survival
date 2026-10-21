@@ -1910,7 +1910,8 @@ export function keepOffPits (bot: Bot, center: Vec3, floorY: number): () => void
   const c = center.floored()
   const area = (block: any): number => {
     const p = block?.position
-    if (p == null) return 0
+    // (none while the bot is down there itself, fallen or come up from under: its way up would be kept off)
+    if (p == null || bot.entity.position.y < floorY - 1) return 0
     return p.y < floorY - 1 && Math.abs(p.x - c.x) <= PIT_RADIUS && Math.abs(p.z - c.z) <= PIT_RADIUS ? 1e9 : 0
   }
   pathfinder.setMoveOptions({ ...settings, exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), area] })

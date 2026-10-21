@@ -751,7 +751,7 @@ test('guardedTrip: a blaze about to hit holds the trip off, then on; hurt to TRI
   }
 })
 
-test('collectBlazeRods: the way into a bunker keeps off the pits under the floor (keepOffPits while it is built), not after', async () => {
+test('collectBlazeRods: the way into a bunker keeps off the pits under the floor (keepOffPits while it is built), not after, nor from under the floor', async () => {
   const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
   const fightModule = require('../../src/nether/blazeFight')
   const { item } = await import('../reflexes/fakeBot')
@@ -768,6 +768,12 @@ test('collectBlazeRods: the way into a bunker keeps off the pits under the floor
     await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
     assert.deepStrictEqual(during, [1])
     assert.equal(bot.pathfinder.defaultMoveSettings.exclusionAreasStep.length, 0)
+    // coming up from under the floor: no exclusion (its whole way up would be kept off)
+    during.length = 0
+    bot.inventory.slots[20] = null
+    bot.entity.position = new Vec3(0.5, 56, 12.5)
+    await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    assert.deepStrictEqual(during, [0])
   } finally {
     fightModule.buildNook = real.build
     fightModule.fightFromNook = real.fight

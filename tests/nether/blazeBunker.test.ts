@@ -496,11 +496,19 @@ test('keepOffPits: no step under the floor less 1 near the bunker (a pit by the 
   const { bot, b, restore } = await bunkerBot([])
   bot.pathfinder = { defaultMoveSettings: { exclusionAreasStep: [] as any[] }, setMoveOptions (o: any) { this.defaultMoveSettings = o } }
   const cost = (p: Vec3): number => bot.pathfinder.defaultMoveSettings.exclusionAreasStep.reduce((n: number, f: any) => n + f({ position: p }), 0)
+  const home = bot.entity.position
+  bot.entity.position = new Vec3(0.5, 79, 0.5)
   const release = keepOffPits(bot, new Vec3(0, 79, 0), 77)
   assert.equal(cost(new Vec3(2, 76, 2)), 0)
   assert.equal(cost(new Vec3(2, 75, 2)), 1e9)
   assert.equal(cost(new Vec3(PIT_RADIUS + 1, 70, 0)), 0)
+  // the bot down there itself: no opinion (its way up)
+  const at = bot.entity.position
+  bot.entity.position = new Vec3(2.5, 72, 2.5)
+  assert.equal(cost(new Vec3(2, 75, 2)), 0)
+  bot.entity.position = at
   release()
+  bot.entity.position = home
   release()
   assert.deepStrictEqual(bot.pathfinder.defaultMoveSettings.exclusionAreasStep, [])
   // the fight's: on while it runs, off after (the spawner at the bunker's height here: under 63 kept off)
