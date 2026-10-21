@@ -84,7 +84,7 @@ export interface CollectBlockResult {
   /** blocks broken */
   mined: number
   positions: Vec3[]
-  /** the inventory's change, by item name */
+  /** the inventory's change, by item name (what the bag's room threw away or stored left out) */
   items: ItemCounts
   /** items gained: the inventory's gains added up */
   count: number
@@ -196,8 +196,22 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     return names.length > 0 ? names : undefined
   }
   // the bag kept from filling as the blocks come in (the keeper's room and its no to the route's stone), the drops of
-  // the blocks asked for by name always wanted
-  const room = async (toward?: Vec3): Promise<void> => { if (args.room != null) await args.room(toward); else await keepRoom(bot, signal, toward) }
+  // the blocks asked for by name always wanted. What the room threw away or stored is out of the counts the gains are
+  // measured from: it isn't the blocks' loss. The 32 cobblestone a tight bag threw before a stone's dig were counted
+  // against the cobblestone it dropped (-29), and the dig failed 'broke 1 blocks but no item came into the inventory'
+  // with its drop in the bag (a base's room dug out, f9-26.3 t81948)
+  const room = async (toward?: Vec3): Promise<void> => {
+    const held = inventoryCounts(bot)
+    try {
+      if (args.room != null) await args.room(toward); else await keepRoom(bot, signal, toward)
+    } finally {
+      const now = inventoryCounts(bot)
+      for (const [name, count] of Object.entries(held)) {
+        const gone = count - (now[name] ?? 0)
+        if (gone > 0) before[name] = (before[name] ?? 0) - gone
+      }
+    }
+  }
   const unwanted = args.unwanted ?? ((name: string): boolean => !dropNames.has(name) && unwantedDrop(bot, name))
   const gainedDrops = (): number => dropNames.size === 0 ? 0 : sumPositive(countsDelta(before, inventoryCounts(bot)), name => dropNames.has(name))
   const enough = (): boolean => positions.length >= count || gainedDrops() >= count

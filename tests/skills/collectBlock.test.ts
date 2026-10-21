@@ -222,3 +222,43 @@ test('collectBlock makes room (args.room) before each block it breaks: the walks
   }
   assert.strictEqual(rooms, 2)
 })
+
+test('collectBlock counts the drops it picks up from what the bag held after its room was made: the stone thrown for room isn\'t the dig\'s loss (f9-26.3: 32 cobblestone thrown, \'broke 1 blocks but no item came into the inventory\')', async () => {
+  const registry = require('minecraft-data')('1.21.11')
+  const Item = require('prismarine-item')('1.21.11')
+  const blocks = new Map<string, string>([['2,63,0', 'stone']])
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wooden_pickaxe')], world: (pos: Vec3) => blocks.get(`${pos.x},${pos.y},${pos.z}`) ?? (pos.y < 64 ? 'dirt' : 'air') })
+  const blockAt = bot.blockAt
+  bot.blockAt = (pos: Vec3) => { const b = blockAt(pos); b.type = registry.blocksByName[b.name].id; b.harvestTools = registry.blocksByName[b.name].harvestTools; return b }
+  bot._client = { on: () => {}, off: () => {} }
+  bot.inventory.inventoryStart = 9
+  bot.inventory.inventoryEnd = 45
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: () => null }
+  bot.equip = async () => {}
+  const stack = (name: string, count: number, slot: number): void => { bot.inventory.slots[slot] = new Item(registry.itemsByName[name].id, count); bot.inventory.slots[slot].slot = slot }
+  // a tight bag: 40 cobblestone held, 32 of them thrown for room before the dig
+  stack('cobblestone', 40, 11)
+  let thrown = 0
+  const room = async (): Promise<void> => { if (thrown === 0) { thrown = 32; stack('cobblestone', 8, 11) } }
+  bot.dig = async (block: any) => {
+    blocks.delete(`${block.position.x},${block.position.y},${block.position.z}`)
+    bot.entities[50] = { id: 50, name: 'item', position: new Vec3(2.5, 63.2, 0.5), getDroppedItem: () => new Item(registry.itemsByName.cobblestone.id, 1) }
+  }
+  bot.pathfinder = {
+    isPathing: false,
+    // walking onto the cobblestone picks it up, into the stack
+    goto: async (goal: any) => { if (goal.item?.y < 64) { delete bot.entities[50]; stack('cobblestone', 9, 11) } },
+    cancel: async () => {}
+  }
+  bot.waitForTicks = async () => {}
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    const res = await collectBlock(bot, { positions: [new Vec3(2, 63, 0)], anyTool: true, room })
+    assert.strictEqual(thrown, 32)
+    assert.strictEqual(res.mined, 1)
+    assert.deepStrictEqual(res.items, { cobblestone: 1 })
+    assert.strictEqual(res.count, 1)
+  } finally {
+    clearInterval(ticker)
+  }
+})
