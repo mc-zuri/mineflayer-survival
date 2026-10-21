@@ -84,3 +84,26 @@ test('a cane of one block (the bottom kept) is none near: the step explores for 
   assert.equal(explored, 1)
   assert.equal(collected, 0)
 })
+
+test('cane found exploring on a river\'s bank 12 under where the step began on a hill is near (no depth bound for a column plant): cut, not NOT_FOUND', async () => {
+  const { runMine } = await import('../../src/executor/steps')
+  // none in sight from y 76; the exploring comes to a bank with a column at y 63 to 65 (its cut at 64, 12 under)
+  const bot = botWith(76, { 20: [63, 3] })
+  const column = bot.findBlocks
+  let explored = false
+  bot.findBlocks = (opts: any) => explored ? column(opts) : []
+  const cuts: boolean[] = []
+  const collect = async (b: any, args: any): Promise<any> => {
+    cuts.push(args.exclude(new Vec3(20, 64, 0)))
+    const c = item('sugar_cane', 3)
+    c.slot = 30
+    b.inventory.slots[30] = c
+    return { mined: 2, positions: [new Vec3(20, 64, 0)], items: { sugar_cane: 3 }, count: 3 }
+  }
+  const out = await stubbed([
+    ['../../src/skills/collectBlock', 'collectBlock', collect],
+    ['../../src/executor/explore', 'exploreForBlocks', async () => { explored = true; return true }]
+  ], async () => await runMine(caneStep, ctxOf(bot)))
+  assert.equal(out.gained, 3)
+  assert.deepEqual(cuts, [false])
+})
