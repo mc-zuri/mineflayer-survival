@@ -678,6 +678,40 @@ test('collectBlazeRods: short of the bow nook\'s arrows with no melee nook by th
   }
 })
 
+test('collectBlazeRods: the bunker fight on after its STUCK goes from the bunker as the fight turned it (onTurn), not as first built', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const { SkillError } = await import('../../src/skills/errors')
+  const fightModule = require('../../src/nether/blazeFight')
+  const { item } = await import('../reflexes/fakeBot')
+  const real = { build: fightModule.buildNook, fight: fightModule.fightFromNook }
+  fightModule.buildNook = async () => {}
+  const fought: any[] = []
+  try {
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('cobblestone', 64), item('bow'), item('arrow', 64)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+    bot.game.dimension = 'the_nether'
+    ;(bot as any).world = { raycast: () => null }
+    bot.findBlocks = () => []
+    fightModule.fightFromNook = async (_b: unknown, nook: any, opts: any) => {
+      fought.push(nook)
+      if (fought.length === 1) {
+        assert.ok(nook.bunker != null)
+        opts.onTurn?.({ ...nook, facing: new Vec3(nook.facing.z, 0, -nook.facing.x), turned: true })
+        throw new SkillError('STUCK', 'no blaze killed from the nook in 4001 ticks')
+      }
+      bot.inventory.slots[20] = item('blaze_rod')
+      return { kills: 1, shots: 2, blocked: 0, ticks: 10 }
+    }
+    const r = await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    assert.equal(r.rods, 1)
+    assert.equal(fought.length, 2)
+    assert.equal(fought[1].turned, true)
+    assert.ok(fought[1].stand.equals(fought[0].stand))
+  } finally {
+    fightModule.buildNook = real.build
+    fightModule.fightFromNook = real.fight
+  }
+})
+
 test('collectBlazeRods: the kept nook the bot finds no way back into is followed by another of the planned ones, not the camp (no nook of 1: the spawner given up mid-fight)', async () => {
   const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
   const { SkillError } = await import('../../src/skills/errors')

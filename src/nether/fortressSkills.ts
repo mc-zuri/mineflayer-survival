@@ -776,7 +776,10 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     // the spawner lit but for the patch by the bunker, LIGHT_TRIP_TORCHES at a time, whenever it's quiet (lightTripDue)
     const tries = lightTries(bot)
     const key = spawner.toString()
-    const fromBunker = bunker
+    // (the bunker as it faces now: turned in a fight, the one on after its STUCK goes from the turned one, its slit
+    // where it was dug; from the first facing the fight dug the old slit open again beside the new, two ways in)
+    let fromBunker = bunker
+    const onTurn = (turned: BlazeNook): void => { fromBunker = turned; keepNook(bot, spawner, turned, 'bunker') }
     const light = async (): Promise<boolean> => {
       if (args.light === false || (tries.get(key) ?? 0) >= LIGHT_TRIES || countItems(bot, 'torch') === 0 || !lightTripDue(bot, spawner)) return false
       if (spawnerLitShare(bot, spawner) <= LIGHT_DONE) return false
@@ -792,7 +795,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
       // the blazes gathered about the first, burned the 26.3 bots, two runs of three
       for (;;) {
         try {
-          const fought = await fightFromNook(bot, bunker, { count, spawner, maxTicks: maxTicks - ticks, eatAt: args.eatAt ?? 14, onKill: () => { kills++ }, errand: light }, signal)
+          const fought = await fightFromNook(bot, fromBunker, { count, spawner, maxTicks: maxTicks - ticks, eatAt: args.eatAt ?? 14, onKill: () => { kills++ }, errand: light, onTurn }, signal)
           trace('collectBlazeRods: from the bunker,', fought.kills, 'kills,', fought.shots, 'shots,', fought.ticks, 'ticks')
           break
         } catch (err) {

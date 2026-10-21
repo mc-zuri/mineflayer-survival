@@ -601,6 +601,8 @@ export interface NookFightOptions {
    * resolves whether it went
    */
   errand?: () => Promise<boolean>
+  /** called with the bunker turned (turnBunker): its new facing's nook, for a fight on from it after this one */
+  onTurn?: (nook: BlazeNook) => void
 }
 
 export interface NookFightResult {
@@ -1041,7 +1043,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
           unblock()
           stopDraw()
           const turned = await turnBunker(bot, nook, way, signal)
-          if (turned != null) { nook = turned; lastInSight = tick }
+          if (turned != null) { nook = turned; lastInSight = tick; opts.onTurn?.(turned) }
           continue
         }
       }
