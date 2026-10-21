@@ -706,6 +706,8 @@ export class Runner {
       // the route's stone over the working set is thrown away once the stock has its high mark (stored before: a 26.3
       // bag down the diamonds' mine held 433 cobblestone)
       stocked: options.executor?.stocked ?? (name => this.stock == null || this.bot.entity == null || stockedItem(this.stock.marks, name, ownedInventory(this.bot), this.stockStored(), this.reached.map(r => r.id))),
+      // a mine step at the trees or the stone face takes the stock's working set while it's there (StockPolicy.bulk)
+      bulk: options.executor?.bulk ?? (name => this.stock == null || this.bot.entity == null ? null : this.stock.bulk(name, ownedInventory(this.bot), this.reached.map(r => r.id), { bag: new Inventory(this.bot.registry as any, this.bot.inventory.items().map(i => ({ name: i.name, count: i.count }))) })),
       hooks: {
         ...options.executor?.hooks,
         beforeStep: async (step) => {

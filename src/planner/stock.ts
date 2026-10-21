@@ -277,6 +277,35 @@ export class StockPolicy {
   }
 
   /**
+   * How many more of an item a mine step takes while it is at the item's source (the trees it cut its logs from, the
+   * stone face it dug), beyond what its plan needs: what the marks gathering the item (applying yet, counted in items)
+   * are short of the working set carried of it (its keep count), as many as the bag's free slots beyond reserveSlots
+   * take (the junk counted free, as a top-up's), with the ticks it may take a unit (the mark's ticksPerUnit). The
+   * working set whatever the base's chests hold: it's spent from the bag, and a step with nothing carried went off for
+   * a log each time (a 1.21.11 bot back from a death planned 'mine 1 oak_log' for each of its pickaxe, its bucket, its
+   * sword and its chestplate, the smelts' planks, f2-1.21.11 t49300 to t54752). Null when no mark gathers it or keeps it.
+   */
+  bulk (name: string, inventory: Inventory, reached: readonly MilestoneId[], opts: Pick<TopUpOptions, 'bag'> = {}): { count: number, ticksPerUnit: number } | null {
+    const registry = inventory.registry
+    const tags = itemTags(registry)
+    const keep = this.keepCount(name, registry)
+    if (keep == null || keep <= 0) return null
+    const marks = this.marks.filter(m => m.unit !== 'nutrition' && markUnlocked(m, reached) &&
+      (typeof m.gather === 'string' ? [m.gather] : m.gather).some(g => tags.matches(g, name)))
+    if (marks.length === 0) return null
+    const bag = opts.bag ?? inventory
+    const stack = Math.max(1, registry.itemsByName[name]?.stackSize ?? STACK)
+    // the free slots beyond the reserve, and what the item's own stacks have room for
+    const held = bag.count(name)
+    const fits = Math.max(0, bag.slots - keptSlots(bag) - this.reserveSlots) * stack + (held % stack === 0 ? 0 : stack - held % stack)
+    const levels = stockLevels(marks, inventory)
+    const short = Math.min(...levels.map(l => (keep - l.carried) / Math.max(1e-9, markValue(l.mark, name, registry))))
+    const count = Math.floor(Math.min(short, fits))
+    if (count <= 0) return null
+    return { count, ticksPerUnit: Math.max(...marks.map(m => m.ticksPerUnit)) }
+  }
+
+  /**
    * How many of an item the working set carries (the marks' keep and the options' keep list), or null when the list
    * says nothing of it: the executor's keep rule over its default (src/executor/keep.ts defaultKeep)
    */

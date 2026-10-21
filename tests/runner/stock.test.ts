@@ -218,3 +218,15 @@ test('between trips the herd is tended for the food the stock is short of: from 
     milestones.tendHerd = real
   }
 })
+
+test('a mine step\'s bulk is the stock\'s: the logs short of the working set carried, the stone\'s from the wood milestone on; none with no stock', () => {
+  const bot = fakeBot({ stone_axe: 1, oak_log: 8, cobblestone: 10 })
+  const runner = new Runner(bot, { executor: { log: () => {} } })
+  const logs = runner.stock?.keepCount('oak_log', registry) as number
+  assert.deepEqual(runner.executor.options.bulk('oak_log'), { count: logs - 8, ticksPerUnit: 60 })
+  // the stone mark applies from the wood milestone
+  assert.equal(runner.executor.options.bulk('cobblestone'), null)
+  runner.reached.push(...at(['wood']))
+  assert.equal(runner.executor.options.bulk('cobblestone')?.count, (runner.stock?.keepCount('cobblestone', registry) as number) - 10)
+  assert.equal(new Runner(bot, { stock: false, executor: { log: () => {} } }).executor.options.bulk('oak_log'), null)
+})

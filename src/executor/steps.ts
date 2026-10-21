@@ -28,7 +28,8 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { countItems, trace, waitUntil } from '../skills/util'
 import { findPlacementNear } from '../skills/placement'
 import { digNook, ensureSurface, exploreForBlocks, exploreSurface, findNear, onTheSurface, openSky, oreLevel, unstick } from './explore'
-import { toolKindFor, watchToolWear, wornOutTools, type WornTool } from './durability'
+import { toolKindFor, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
+import { parseTool } from '../core/items'
 import { growsAny, isGrown } from '../core/crops'
 import { SIGHTED_BLOCKS } from './sight'
 import { herdCensus, herdFromMemory, herdPenOf, herdSpares, herdSupply, herdSurplus, noteHerd } from '../skills/herd'
@@ -78,6 +79,11 @@ export interface StepContext {
   forgetProgress?: (key: string) => void
   /** a worn tool let be (the executor's: no new one could be made lately), used till it breaks */
   toolMuted?: (tool: WornTool) => boolean
+  /**
+   * how many more of an item a mine step takes from the blocks in sight once it has its plan's, and the ticks it may
+   * take a unit (the executor's bulk: the stock's working set carried), null for none
+   */
+  bulk?: (item: string) => { count: number, ticksPerUnit: number } | null
   /**
    * notes blocks a mine step couldn't get to (collectBlock's unreachable), and whether a block is one of them: left
    * by the next steps a while (Executor.unreachable)
@@ -412,7 +418,60 @@ async function mineBlocks (step: MineStep, ctx: StepContext, muted: (tool: WornT
     }
     if (isSub && substituted >= step.blockCount) return { gained: countItems(bot, step.item) - start, replan: true }
   }
+  await mineBulk(step, ctx, exclude)
   return { gained: countItems(bot, step.item) - start }
+}
+
+/** how far from the bot a mine step's bulk takes its blocks: the trees or the stone face it is at, none explored for */
+export const BULK_RANGE = 24
+
+/**
+ * A mine step's bulk: with its plan's count got, the more of its item the stock's working set is short of (ctx.bulk)
+ * from the step's blocks within BULK_RANGE, while the trees or the stone face are there: none explored for, the ticks
+ * the stock gives a unit at most (counted across the step's preemptions), and with the block's tool only (a log by hand
+ * is four times a stone axe's dig: the axe's top-up after) and no more blocks than leave it MIN_TOOL_USES uses, so it
+ * never wears the tool down to its replacement. Any failure ends it, the step's own count got. A 1.21.11 bot's steps
+ * mined just the logs they needed, 'mine 1 oak_log' for each of its pickaxe, bucket, sword and chestplate after a death
+ * and for the planks of their smelts, a walk to the trees each (f2-1.21.11 t49300 to t54752), its wood top-ups 'not
+ * now' for the plan's cost, 70000 ticks of a 26.3 game with no wood stocked (f1-26.3, t49819 to t123552).
+ */
+async function mineBulk (step: MineStep, ctx: StepContext, exclude: (pos: Vec3) => boolean): Promise<void> {
+  const { bot } = ctx
+  if (ctx.bulk == null || ctx.replacingTools === true) return
+  const kind = toolKindFor(bot.registry as any, step.block)
+  if (kind == null) return
+  // (worked out once: a step a reflex preempted goes on to the same count)
+  if (ctx.state.bulk == null) {
+    const want = ctx.bulk(step.item)
+    const uses = Math.max(-Infinity, ...bot.inventory.items().filter(i => parseTool(i.name)?.kind === kind).map(i => usesLeft(i as any)))
+    const count = want == null ? 0 : Math.max(0, Math.min(want.count, uses - MIN_TOOL_USES))
+    ctx.state.bulk = { target: countItems(bot, step.item) + count, ticks: Math.ceil(count * (want?.ticksPerUnit ?? 0)), from: countItems(bot, step.item) }
+  }
+  const { target, ticks, from } = ctx.state.bulk as { target: number, ticks: number, from: number }
+  if (ticks <= 0 || countItems(bot, step.item) >= target) return
+  const perBlock = step.blockCount > 0 ? step.count / step.blockCount : 1
+  await withinOwnTicks(bot, ctx.state, 'bulkTicks', ticks, ctx.signal, async (signal) => {
+    while (countItems(bot, step.item) < target) {
+      throwIfAborted(signal)
+      if (findNear(bot, step.blocks, BULK_RANGE, exclude) == null) return
+      const left = Math.ceil((target - countItems(bot, step.item)) / perBlock - 1e-9)
+      try {
+        const res = await collectBlock(bot, { names: step.blocks, count: Math.min(left, 8), maxDistance: BULK_RANGE, exclude, unwanted: ctx.unwanted, room: ctx.room }, signal)
+        for (const pos of res.positions) ctx.memory.forgetBlock(pos, dimensionOf(bot))
+        if (res.unreachable != null) ctx.unreachable?.note(res.unreachable)
+        if (res.mined === 0) return
+      } catch (err) {
+        if (isAbort(err) || TaskError.is(err, 'DIED')) throw err
+        const partial = (err as TaskError).partial as { positions?: Vec3[], unreachable?: Vec3[] } | undefined
+        for (const pos of partial?.positions ?? []) ctx.memory.forgetBlock(pos, dimensionOf(bot))
+        if (partial?.unreachable != null) ctx.unreachable?.note(partial.unreachable)
+        trace('executor: bulk ended', (err as Error).message)
+        return
+      }
+    }
+  })
+  const got = countItems(bot, step.item) - from
+  if (got > 0) ctx.log(`mine ${step.item}: ${got} more for the stock while here`)
 }
 
 /**

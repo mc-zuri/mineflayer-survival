@@ -92,6 +92,11 @@ export interface ExecutorOptions {
    * the bag carries what's kept of it (default: always, nothing wanting more of it than the working set)
    */
   stocked?: (name: string) => boolean
+  /**
+   * How many more of an item a mine step takes while at its source, beyond its plan's count, and the ticks it may take
+   * a unit (the runner's stock policy: StockPolicy.bulk, the working set carried; default none)
+   */
+  bulk?: (item: string) => { count: number, ticksPerUnit: number } | null
   /** the building blocks kept whatever is thrown away (default: SCAFFOLD_ITEMS, SCAFFOLD_KEEP of them) */
   scaffold?: ScaffoldKeep
   /** strategies the plans never use (default: barter, until the nether skills do it) */
@@ -312,7 +317,8 @@ export class Executor {
       stocked: opts.stocked ?? (() => true),
       scaffold: opts.scaffold ?? { items: SCAFFOLD_ITEMS, keep: SCAFFOLD_KEEP },
       exclude: opts.exclude ?? ['barter'],
-      milestoneNeeds: opts.milestoneNeeds ?? (() => ({}))
+      milestoneNeeds: opts.milestoneNeeds ?? (() => ({})),
+      bulk: opts.bulk ?? (() => null)
     }
     this.runners = { ...DEFAULT_RUNNERS, ...opts.runners } as any
     this.hooks = opts.hooks ?? {}
@@ -930,6 +936,7 @@ export class Executor {
         progress: key => this.exploreProgress.get(key) ?? this.exploreProgress.set(key, { leg: 0 }).get(key) as { leg: number },
         forgetProgress: key => { this.exploreProgress.delete(key) },
         toolMuted: tool => this.wornMuted(tool),
+        bulk: item => this.options.bulk(item),
         caneShores: async (found, s) => await exploreCaneShores(this.bot, { survey: this.biomes, memory: this.memory, home: this.home(), found, seed: this.seed, log: line => this.log(line) }, s),
         unreachable: {
           note: positions => {

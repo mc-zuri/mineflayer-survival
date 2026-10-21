@@ -248,3 +248,39 @@ test('the string mark tops up anywhere (where any): up there of the spiders, dow
     assert.ok(policy.topUps(bag, {}, ['wood', 'stone', 'food', 'iron'], places).some(u => u.mark.id === 'string'), places.join())
   }
 })
+
+for (const version of VERSIONS) {
+  const registry: any = minecraftData(version)
+  const inv = (items: Record<string, number>): Inventory => new Inventory(registry, items)
+  test(`${version}: a mine step's bulk: what the working set carried is short of, the wood's planks counted, the stone's from the wood on, none of what no mark keeps`, () => {
+    const policy = new StockPolicy()
+    const wood = STOCK_MARKS.find(m => m.id === 'wood') as StockMark
+    const stone = STOCK_MARKS.find(m => m.id === 'stone') as StockMark
+    const logs = policy.keepCount('oak_log', registry) as number
+    assert.deepEqual(policy.bulk('oak_log', inv({ oak_log: 10 }), []), { count: logs - 10, ticksPerUnit: wood.ticksPerUnit })
+    // 8 planks are 2 logs, another wood's logs count too
+    assert.equal(policy.bulk('birch_log', inv({ oak_log: 10, oak_planks: 8 }), [])?.count, logs - 12)
+    assert.equal(policy.bulk('oak_log', inv({ oak_log: logs }), []), null)
+    // the stone's from the wood milestone on, to its stack carried; the cobbled deepslate, dirt and ores none
+    assert.equal(policy.bulk('cobblestone', inv({ cobblestone: 20 }), []), null)
+    const cobble = policy.keepCount('cobblestone', registry) as number
+    assert.deepEqual(policy.bulk('cobblestone', inv({ cobblestone: 20 }), ['wood']), { count: cobble - 20, ticksPerUnit: stone.ticksPerUnit })
+    for (const name of ['cobbled_deepslate', 'dirt', 'raw_iron']) assert.equal(policy.bulk(name, inv({}), ['wood', 'stone', 'iron']), null, name)
+  })
+
+  test(`${version}: a mine step's bulk takes what the bag's free slots beyond the reserve hold, the junk counted free`, () => {
+    const policy = new StockPolicy({ reserveSlots: 10 })
+    const fill: Record<string, number> = {}
+    const blocks = ['stone_bricks', 'bricks', 'glass', 'sandstone', 'smooth_stone', 'polished_andesite', 'white_wool', 'terracotta', 'bookshelf', 'oak_slab', 'mud', 'clay', 'red_wool']
+    for (const b of blocks) fill[b] = 128
+    // 26 slots kept with the logs' own: none free beyond the reserve, the logs' stack has room for 54
+    assert.equal(policy.bulk('oak_log', inv({ ...fill, oak_log: 10 }), [])?.count, 54)
+    // 25 slots kept: one free beyond the reserve, a stack
+    fill.bricks = 64
+    assert.equal(policy.bulk('cobblestone', inv(fill), ['wood'])?.count, 64)
+    // the junk's slots counted free: a stack of dirt more is no less room
+    assert.equal(policy.bulk('cobblestone', inv({ ...fill, dirt: 64 }), ['wood'])?.count, 64)
+    // the bag full of what's kept: none
+    assert.equal(policy.bulk('cobblestone', inv({ ...fill, bricks: 128, glass: 192 }), ['wood']), null)
+  })
+}
