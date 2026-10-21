@@ -1227,3 +1227,23 @@ test('a portal frame\'s obsidian cast at home before any pool (obsidianAtHome, 1
   assert.ok(!calls.includes('to the lava'), calls.join(', '))
   assert.equal(calls[calls.length - 1], 'build a nether portal')
 })
+
+test('backToOverworld: through the portal from the nether; out of it already (the task run again after a reflex cut it off past the portal), done, no \'already in the overworld\'', async () => {
+  const { backToOverworld } = await import('../../src/milestones')
+  const skills = require('../../src/nether/portalTravel')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const real = skills.returnOverworld
+  const calls: string[] = []
+  skills.returnOverworld = async (b: any) => { calls.push('portal'); b.game.dimension = 'overworld'; return {} }
+  try {
+    const bot = fakeBot({})
+    bot.game.dimension = 'the_nether'
+    await backToOverworld(bot)
+    assert.deepEqual(calls, ['portal'])
+    // the same task's work again, the bot home already
+    await backToOverworld(bot)
+    assert.deepEqual(calls, ['portal'])
+  } finally {
+    skills.returnOverworld = real
+  }
+})

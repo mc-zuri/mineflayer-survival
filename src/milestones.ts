@@ -67,6 +67,17 @@ import { excludedSpawner, levelSeed, unreachableSpawners } from './nether/fortre
 
 const inNether = (bot: Bot): boolean => normalizeDimension(bot.game?.dimension) === 'the_nether'
 
+/**
+ * The 'back to the overworld' task's work: through the portal (returnOverworld) unless the bot is out of the nether
+ * already, which counts as done. A task cut off by a reflex after the portal took the bot home runs again, and
+ * returnOverworld's 'already in the overworld' failed the nether milestone of a 1.21.11 game resumed from its
+ * enchanting (ls3-1.21.11, t676075: the night reflex's sleep came between)
+ */
+export async function backToOverworld (bot: Bot, signal?: AbortSignal): Promise<void> {
+  if (!inNether(bot)) return
+  await returnOverworld(bot, {}, signal)
+}
+
 /** rods and pearls still wanted for EYES_TARGET eyes (each rod is 2 powder, an eye a pearl and a powder) */
 export function netherNeeds (inv: { count: (name: string) => number }): { rods: number, pearls: number } {
   const eyes = inv.count('ender_eye')
@@ -1375,7 +1386,7 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
         // ready (the gate asks for it there), not the fight with the sword alone
         if ((err as any)?.noFireResistance === true && !signal.aborted) {
           log(`blaze rods: ${(err as Error).message}: back to the overworld for it`)
-          await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
+          await executor.task('back to the overworld', async (s) => await backToOverworld(bot, s), signal)
           throw Object.assign(err as Error, { notReady: true })
         }
         if (signal.aborted || TaskError.is(err, 'DIED') || attempt >= BLAZE_SPAWNER_TRIES) throw err
@@ -1395,11 +1406,11 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     log(`ender pearls: ${pearls} to get`)
     await pearlsInTheNether(bot, executor, count('ender_pearl') + pearls, signal, log, seed)
   }
-  await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal).catch(async err => {
+  await executor.task('back to the overworld', async (s) => await backToOverworld(bot, s), signal).catch(async err => {
     if (signal.aborted || TaskError.is(err, 'DIED') || !inNether(bot)) throw err
     // low by the lava sea with no way to the portal: up first, then again
     await upFromLowGround(bot, executor, signal, log)
-    await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
+    await executor.task('back to the overworld', async (s) => await backToOverworld(bot, s), signal)
   })
   // what the nether didn't give: the overworld's endermen by night
   const still = netherNeeds({ count }).pearls
@@ -2120,7 +2131,7 @@ export function eyesShort (inv: { count: (name: string) => number }, memory: Wor
 
 export const eyesHandler: MilestoneHandler = async (ctx) => {
   const { bot, executor, signal, log } = ctx
-  if (inNether(bot)) await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
+  if (inNether(bot)) await executor.task('back to the overworld', async (s) => await backToOverworld(bot, s), signal)
   // out of eyes (thrown, broken, a long search): back for more pearls and rods first, not five failures and the end
   // of the game (26.3 seed 2); the search then goes on from the memory's rays and estimate
   const short = eyesShort({ count: (n: string) => countItems(bot, n) }, executor.memory)
@@ -2362,7 +2373,7 @@ export const endHandler: MilestoneHandler = async ({ bot, milestone, state, exec
     // back to the portal room when the kit's getting (or the stock's top-ups, a death) took the bot off from it:
     // enterEnd reads the frames within 12 blocks (1.21.11 seed 2: 48 gold mined 26 blocks off, 'no end portal frame
     // around' five times)
-    if (inNether(bot)) await executor.task('back to the overworld', async (s) => await returnOverworld(bot, {}, s), signal)
+    if (inNether(bot)) await executor.task('back to the overworld', async (s) => await backToOverworld(bot, s), signal)
     if (!portalRoomNear(bot)) {
       log('back to the portal room')
       await executor.task('to the portal room', async (s) => await strongholdToPortalRoom(bot, {}, s), signal)
