@@ -1252,3 +1252,82 @@ test('a forced room with nothing else to throw throws the last resort\'s wood an
   }
   assert.deepEqual(bot.tossed, ['oak_log'])
 })
+
+for (const version of ['1.21.11', '26.3']) {
+  test(`${version}: a tight bag (under TIGHT_SLOTS free, the room not short) throws the route's stone beyond the stack kept on the way, as much as the stock spares; by the base it's stored instead; with room or nothing spare, none (stock-1: 437 cobblestone at the iron, 3 slots free)`, async () => {
+    const { TIGHT_SLOTS } = await import('../../src/executor/keep')
+    const reg = require('minecraft-data')(version)
+    const others = ['raw_iron', 'iron_pickaxe', 'stone_sword', 'bread', 'torch', 'coal', 'spruce_log', 'spruce_planks', 'stick', 'bucket',
+      'crafting_table', 'furnace', 'wooden_pickaxe', 'stone_axe', 'spruce_sapling', 'black_wool', 'rabbit_hide', 'rabbit_foot', 'leather',
+      'bone', 'beef', 'arrow', 'blue_egg', 'iron_sword', 'gravel', 'dirt']
+    // the bag at the iron (stock-1, t75678): 7 stacks of cobblestone and 26 others, 3 slots free
+    const fill = (cobble: number[], extra = 0): any => {
+      const bot = fakeBot()
+      bot.registry = reg
+      const stacks = [...cobble.map(count => ({ name: 'cobblestone', count })), ...others.slice(0, others.length - extra).map(name => ({ name, count: name === 'dirt' ? 3 : 1 }))]
+      const slots = (): any[] => {
+        const out: any[] = new Array(46).fill(null)
+        stacks.forEach((st, i) => { if (st.count > 0) out[9 + i] = { name: st.name, count: st.count, type: reg.itemsByName[st.name].id, slot: 9 + i } })
+        return out
+      }
+      bot.inventory = { get slots () { return slots() }, inventoryStart: 9, inventoryEnd: 45, items: () => slots().slice(9, 45).filter(x => x != null) }
+      bot.tossed = []
+      bot.toss = async (type: number, _meta: unknown, n: number) => {
+        const name = reg.items[type].name
+        bot.tossed.push(`${n} ${name}`)
+        for (const st of stacks) { if (st.name !== name || n <= 0) continue; const k = Math.min(n, st.count); st.count -= k; n -= k }
+      }
+      bot.blockAt = () => null
+      bot._client = new EventEmitter()
+      bot.entity.yaw = 0
+      bot.entities = {}
+      bot.look = async () => {}
+      return bot
+    }
+    const cobble = [63, 64, 63, 60, 63, 63, 61]
+    const run = async (bot: any, ex: Executor, fn: () => Promise<void>): Promise<void> => {
+      const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+      try { await fn() } finally { clearInterval(ticking) }
+    }
+    assert.equal(TIGHT_SLOTS, 10)
+    // away, the stock full: the bag's keeper asks for room at TIGHT_SLOTS, and the room on the way throws 5 stacks
+    const away = fill(cobble)
+    const ex = new Executor(away, { runners: {}, log: () => {} })
+    assert.equal(36 - away.inventory.items().length, 3)
+    assert.equal(ex.bagKeeper.minFree, TIGHT_SLOTS)
+    await run(away, ex, async () => await ex.task('a tunnel', async (s) => await ex.makeRoomDuringStep(s)))
+    assert.deepEqual(away.tossed, ['64 cobblestone', '63 cobblestone', '63 cobblestone', '63 cobblestone', '63 cobblestone'])
+    assert.equal(count(away, 'cobblestone'), 121)
+    assert.equal(count(away, 'dirt'), 3)
+    assert.equal(ex.bagKeeper.minFree, 2)
+    // the stock's spare: its high mark kept
+    const some = fill(cobble)
+    const ex2 = new Executor(some, { runners: {}, log: () => {}, spare: name => name === 'cobblestone' ? 437 - 128 : 0 })
+    await run(some, ex2, async () => await ex2.task('a tunnel', async (s) => await ex2.makeRoomDuringStep(s)))
+    assert.deepEqual(some.tossed, ['64 cobblestone', '63 cobblestone', '63 cobblestone', '63 cobblestone'])
+    // nothing spare (the stock short of its high mark, a base to store it in), or room in the bag: none, the keeper's 2
+    for (const [bot, opts] of [[fill(cobble), { spare: () => 0 }], [fill(cobble, 12), {}]] as const) {
+      const e = new Executor(bot, { runners: {}, log: () => {}, ...opts })
+      assert.equal(e.bagKeeper.minFree, 2)
+      await run(bot, e, async () => await e.task('a tunnel', async (s) => await e.makeRoomDuringStep(s)))
+      assert.deepEqual(bot.tossed, [])
+    }
+    // by the base (outside a task: before a step), stored there, not thrown, even what the stock can't spare
+    const home = fill(cobble)
+    const ex3 = new Executor(home, { runners: {}, log: () => {}, spare: () => 0 })
+    ex3.memory.setBase({ x: 20, y: 64, z: 0 })
+    ex3.memory.rememberChest({ x: 21, y: 64, z: 0 }, {})
+    const stored: string[] = []
+    ;(ex3 as any).storeAtBase = async () => {
+      const n = count(home, 'cobblestone') - 64
+      stored.push(`${n} cobblestone`)
+      home.toss(reg.itemsByName.cobblestone.id, null, n)
+      return { cobblestone: n }
+    }
+    await run(home, ex3, async () => await ex3.tightRoom())
+    assert.deepEqual(stored, ['373 cobblestone'])
+    // (the fake's store goes through its toss)
+    assert.equal(home.tossed.length, 1)
+    assert.equal(count(home, 'cobblestone'), 64)
+  })
+}

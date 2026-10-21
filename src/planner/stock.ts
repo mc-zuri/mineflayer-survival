@@ -309,6 +309,19 @@ export class StockPolicy {
   }
 
   /**
+   * How many of an item the stock can do without and still have its high mark (carried and stored) in each mark that
+   * counts it and applies yet, in items: what a bag tight for room may throw of the route's stone (the executor's
+   * spare). Infinity when no mark counts it (andesite, dirt), 0 under the high mark.
+   */
+  spare (name: string, inventory: Inventory, stored: Readonly<Record<string, number>>, reached: readonly MilestoneId[]): number {
+    const registry = inventory.registry
+    const counting = this.marks.filter(m => markUnlocked(m, reached) && markValue(m, name, registry) > 0)
+    let n = Infinity
+    for (const l of stockLevels(counting, inventory, stored)) n = Math.min(n, Math.max(0, Math.floor((l.have - l.mark.high) / markValue(l.mark, name, registry))))
+    return n
+  }
+
+  /**
    * How many of an item the working set carries (the marks' keep and the options' keep list), or null when the list
    * says nothing of it: the executor's keep rule over its default (src/executor/keep.ts defaultKeep)
    */

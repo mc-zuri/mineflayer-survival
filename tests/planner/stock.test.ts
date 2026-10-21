@@ -284,3 +284,20 @@ for (const version of VERSIONS) {
     assert.equal(policy.bulk('cobblestone', inv({ ...fill, bricks: 128, glass: 192 }), ['wood']), null)
   })
 }
+
+for (const version of VERSIONS) {
+  test(`${version}: StockPolicy.spare: what the stock can do without and keep its high mark, carried and stored; none under it, all of what no mark counts, none before the mark applies`, () => {
+    const registry: any = minecraftData(version)
+    const policy = new StockPolicy()
+    const high = policy.marks.find(m => m.id === 'stone')?.high as number
+    assert.equal(high, 128)
+    const bag = new Inventory(registry, { cobblestone: 437, andesite: 40 })
+    assert.equal(policy.spare('cobblestone', bag, {}, ['wood']), 437 - high)
+    // the chests' count too (the cobbled deepslate in its mark with it)
+    assert.equal(policy.spare('cobblestone', bag, { cobblestone: 40, cobbled_deepslate: 20 }, ['wood']), 437 + 60 - high)
+    assert.equal(policy.spare('cobblestone', new Inventory(registry, { cobblestone: 100 }), {}, ['wood']), 0)
+    assert.equal(policy.spare('andesite', bag, {}, ['wood']), Infinity)
+    // the stone's mark from the wood milestone on: before it nothing counts it
+    assert.equal(policy.spare('cobblestone', bag, {}, []), Infinity)
+  })
+}

@@ -441,8 +441,9 @@ export function splitInventory (items: readonly ItemCount[], opts: SplitOptions 
  * what's kept (the stock over its working set with no base to store it in); and only when `anything` is set, what
  * `splitInventory` would store. Never what's kept or needed, nor a valuable (isValuable) or an enchanted stack, whatever
  * the room it takes: fewer stacks than asked for then, nor the building blocks `scaffold` keeps. Each entry is one stack.
+ * `only`: the stacks it may throw (the others counted in what's left of their item all the same).
  */
-export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number, enchanted?: boolean }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean, scaffold?: ScaffoldKeep, spareTools?: boolean, lastResort?: boolean } = {}): Array<{ name: string, count: number }> {
+export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number, enchanted?: boolean }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean, scaffold?: ScaffoldKeep, spareTools?: boolean, lastResort?: boolean, only?: (stack: { name: string, count: number }) => boolean } = {}): Array<{ name: string, count: number }> {
   const needed = opts.needed ?? {}
   // (spareTools: the tools beyond the spare quota go after the junk drops, spareToolsBeyond)
   const beyond = opts.spareTools === true ? spareToolsBeyond(stacks.filter(s => s.enchanted !== true), opts.protect?.farming === true) : new Map<string, number>()
@@ -458,7 +459,7 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number,
   let scaffoldLeft = [...left].reduce((n, [name, c]) => n + (scaffoldItems.has(name) ? c : 0), 0)
   const pick = (filter: (name: string) => boolean): void => {
     const candidates = [...stacks]
-      .filter(s => s.enchanted !== true && value(s.name) != null && filter(s.name))
+      .filter(s => s.enchanted !== true && value(s.name) != null && filter(s.name) && (opts.only?.(s) ?? true))
       .sort((a, b) => {
         const worth = (value(a.name) ?? 0) - (value(b.name) ?? 0)
         if (worth !== 0) return worth
@@ -486,6 +487,42 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number,
     (opts.anything === true && (keepRule(name, opts.registry) ?? 0) !== Infinity))
   if (opts.lastResort === true) pick(lastResortItem)
   return out
+}
+
+/**
+ * The bag's free slots under which it is tight: the route's stone beyond what's kept goes then (routeStoneToToss),
+ * though the room isn't short yet (the stock's top-ups leave as many free: STOCK_RESERVE_SLOTS)
+ */
+export const TIGHT_SLOTS = 10
+
+/**
+ * The stacks of the route's stone (ROUTE_STONE) a bag tight for room throws (TIGHT_SLOTS), with no base near to store
+ * them in, `slots` of them at most (the room short of TIGHT_SLOTS: a pit takes so many, a bag full of the stone thrown
+ * at once spilled over it and was picked up again): what junkToToss would throw of them as junk or surplus, each a
+ * stack of half a stack or more (a smaller one
+ * frees little, and is the one the work places from and picks up into), no more of an item than `spare` (the stock's:
+ * what it can do without and still have its high mark; none to the keep with no base's chests to store it in). The
+ * keep count, what's needed, what the milestones need and the scaffold's stack stay. The tunnels' and staircases'
+ * stone filled the bag till 2 slots were left: a 1.21.11 bot with no base yet carried 437 cobblestone at the iron, 6
+ * stacks over the stack it keeps, 3 slots free (stock-1, t75678), and another 361 (f8-1.21.11, t26522)
+ */
+export function routeStoneToToss (stacks: ReadonlyArray<{ name: string, count: number, enchanted?: boolean }>, slots: number, opts: SplitOptions & { spare: (name: string) => number, scaffold?: ScaffoldKeep, stackSize?: (name: string) => number }): Array<{ name: string, count: number }> {
+  const size = opts.stackSize ?? (() => 64)
+  const left = new Map<string, number>()
+  return junkToToss(stacks, Infinity, {
+    keep: opts.keep,
+    registry: opts.registry,
+    needed: opts.needed,
+    protect: opts.protect,
+    scaffold: opts.scaffold,
+    surplus: name => ROUTE_STONE.has(name),
+    only: s => ROUTE_STONE.has(s.name) && s.count >= size(s.name) / 2
+  }).filter(t => {
+    const spare = left.get(t.name) ?? opts.spare(t.name)
+    if (t.count > spare) return false
+    left.set(t.name, spare - t.count)
+    return true
+  }).slice(0, slots)
 }
 
 /**

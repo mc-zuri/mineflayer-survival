@@ -29,7 +29,7 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { bagThreat, bagUnsafe, holdBag, type BagKeeper } from '../skills/bag'
 import { countItems, emptySlots, trace, waitTicks } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
-import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
+import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, routeStoneToToss, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, TIGHT_SLOTS, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
 import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, UnreachableBlocks, VILLAGE_RANGE, WATCHED_MOBS, WATER_MOBS, type MobLand } from './sight'
 import { BiomeSurvey, KELP_BIOMES, LAND_FOODS, MIN_SURVEYED, MOB_BIOMES, MOB_LAND_RANGE } from './foodLand'
@@ -92,6 +92,16 @@ export interface ExecutorOptions {
    * the bag carries what's kept of it (default: always, nothing wanting more of it than the working set)
    */
   stocked?: (name: string) => boolean
+  /**
+   * The bag's free slots under which the route's stone beyond what's kept goes, though the room isn't short of
+   * minFreeSlots: stored at the base when it's near, else thrown (routeStoneToToss; default TIGHT_SLOTS)
+   */
+  tightSlots?: number
+  /**
+   * How many of an item a tight bag may throw (the runner's stock policy: what it can do without and still have its
+   * high mark, StockPolicy.spare; default: all beyond the keep when `stocked`, none when not)
+   */
+  spare?: (name: string) => number
   /**
    * How many more of an item a mine step takes while at its source, beyond its plan's count, and the ticks it may take
    * a unit (the runner's stock policy: StockPolicy.bulk, the working set carried; default none)
@@ -291,6 +301,8 @@ export class Executor {
   private readonly throws = new ThrowHistory()
   /** a loop of throws with no chest to break it found: no room made on the way till this tick */
   private roomLoopUntil = -Infinity
+  /** a tight bag's store at the base took none of the route's stone (the chests full): none tried again till this tick */
+  private tightStoreUntil = -Infinity
   /** worn tools (kind:material) whose replacement failed: the tick until which no task is stopped for them */
   private readonly wearMuted = new Map<string, number>()
   /** the crafts' results the craft skill made none of from some of their recipes' ingredients (noteUncraftable) */
@@ -315,6 +327,8 @@ export class Executor {
       minFreeSlots: opts.minFreeSlots ?? 2,
       surplus: opts.surplus ?? (() => false),
       stocked: opts.stocked ?? (() => true),
+      tightSlots: opts.tightSlots ?? TIGHT_SLOTS,
+      spare: opts.spare ?? (name => (opts.stocked ?? (() => true))(name) ? Infinity : 0),
       scaffold: opts.scaffold ?? { items: SCAFFOLD_ITEMS, keep: SCAFFOLD_KEEP },
       exclude: opts.exclude ?? ['barter'],
       milestoneNeeds: opts.milestoneNeeds ?? (() => ({})),
@@ -341,8 +355,10 @@ export class Executor {
     // and the chunks loaded since the last survey every BIOME_SURVEY_TICKS
     this.biomes = new BiomeSurvey(bot, this.memory)
     bot.on('physicsTick', () => { if (looks % BIOME_SURVEY_TICKS === 0) this.biomes.survey(BIOME_SURVEY_MAX) })
+    const minFree = (): number => this.tightStone().length > 0 ? this.options.tightSlots : this.options.minFreeSlots
     this.bagKeeper = {
-      minFree: this.options.minFreeSlots,
+      // (more when the bag is tight with the route's stone beyond what's kept: tightStone)
+      get minFree () { return minFree() },
       room: async (s, toward) => await this.makeRoomDuringStep(s, toward),
       unwanted: name => this.unwantedDrop(name)
     }
@@ -986,8 +1002,59 @@ export class Executor {
     return countItems(this.bot, name) >= kept
   }
 
+  /**
+   * The stacks of the route's stone a tight bag throws (fewer than tightSlots free, minFreeSlots or more: keep.ts
+   * routeStoneToToss, as many as the options' `spare`, the slots short of tightSlots at most), or with `all` the ones
+   * it would store at the base; none when the bag isn't tight
+   */
+  tightStone (all = false): Array<{ name: string, count: number }> {
+    const free = emptySlots(this.bot)
+    if (free < this.options.minFreeSlots || free >= this.options.tightSlots) return []
+    const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
+    return routeStoneToToss(stacks, this.options.tightSlots - free, {
+      keep: this.options.keep,
+      registry: this.bot.registry as any,
+      needed: this.needed,
+      protect: this.protect(),
+      scaffold: this.scaffoldKeep(),
+      spare: all ? () => Infinity : this.options.spare,
+      stackSize: name => this.bot.registry.itemsByName[name]?.stackSize ?? 64
+    })
+  }
+
+  /**
+   * A tight bag's room (tightStone): the route's stone beyond what's kept stored at the base when it's within
+   * BASE_STORE_RANGE (outside a task: `inTask` none), else thrown as the junk is, what the stock can spare of it
+   * (tossJunk's throw: into lava in reach or a pit off the way). The tunnels', staircases' and mines' stone is picked
+   * up as the bot walks into it (bag.ts), and it rode in the bag till 2 slots were left: 437 cobblestone at the iron, 6
+   * stacks over the one kept, 3 slots free (stock-1, 1.21.11, t75678). Never with hostiles about (bagUnsafe).
+   */
+  async tightRoom (signal?: AbortSignal, inTask?: AbortSignal, toward?: Vec3): Promise<void> {
+    if (this.makingRoom || bagUnsafe(this.bot)) return
+    const base = this.base
+    if (inTask == null && base != null && base.chests.length > 0 && this.nearBase(base, BASE_STORE_RANGE) &&
+      this.tasks.tick >= this.tightStoreUntil && this.tightStone(true).length > 0) {
+      const stored = await this.storeAtBase(this.needed, signal)
+      // (the chests full: thrown from now on a while, not a chest opened each step)
+      if (!Object.keys(stored).some(name => ROUTE_STONE.has(name))) this.tightStoreUntil = this.tasks.tick + THROW_LOOP_TICKS
+    }
+    const toss = this.tightStone()
+    if (toss.length === 0) return
+    this.makingRoom = true
+    try {
+      this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')} (the bag tight: ${emptySlots(this.bot)} slots free)`)
+      const run: RoomRunner = inTask != null ? async (_name, fn) => await fn(inTask) : async (name, fn) => await this.task(name, fn, signal, { room: false })
+      await this.throwStacks(toss, run, toward)
+    } finally {
+      this.makingRoom = false
+    }
+  }
+
   /** before a step: room in the inventory, a tool that won't break during it, the hooks */
   private async prepare (step: PlanStep, needed: Record<string, number>, signal?: AbortSignal): Promise<void> {
+    if (emptySlots(this.bot) >= this.options.minFreeSlots && emptySlots(this.bot) < this.options.tightSlots) {
+      await this.tightRoom(signal).catch(err => { if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true || isAbort(err)) throw err; this.log(`no room made in a tight bag: ${(err as Error).message}`) })
+    }
     if (emptySlots(this.bot) < this.options.minFreeSlots) {
       try {
         await this.makeRoom(needed, signal)
@@ -1100,7 +1167,17 @@ export class Executor {
    * the base, never a failure (the step's own pickups say NO_SPACE)
    */
   async makeRoomDuringStep (signal: AbortSignal, toward?: Vec3): Promise<void> {
-    if (emptySlots(this.bot) >= this.options.minFreeSlots) return
+    if (emptySlots(this.bot) >= this.options.minFreeSlots) {
+      // (a tight bag: the route's stone beyond what's kept thrown, tightRoom)
+      if (emptySlots(this.bot) >= this.options.tightSlots) return
+      try {
+        await this.tightRoom(signal, signal, toward)
+      } catch (err) {
+        if (isAbort(err) || TaskError.is(err, 'DIED', 'ABORTED') || signal.aborted) throw err
+        this.log(`no room made in a tight bag on the way: ${(err as Error).message}`)
+      }
+      return
+    }
     // a loop of throws with no chest to break it: the work goes on with the bag as it is a while (a full bag picks up
     // nothing), not one more throw and stash each step
     if (this.tasks.tick < this.roomLoopUntil) return
@@ -1162,30 +1239,39 @@ export class Executor {
     }
     if (toss.length > 0) {
       this.log(`throwing away ${toss.map(t => `${t.count} ${t.name}`).join(', ')}`)
-      this.throws.record(toss, this.tasks.tick)
-      await run('make room', async (s) => {
-        // what kept coming back where the bot works is thrown away from there, the pit off the way back to it
-        let back = toward
-        if (walkOff) {
-          const from = this.bot.entity.position.clone()
-          if (await this.walkOff(s, from)) back = from
-          else this.log(`no way ${THROW_AWAY_RANGE} blocks off: thrown here`)
-        }
-        // into lava in reach, where it burns (lavaThrow); else into a pit dug beside the bot, out of its reach as it
-        // walks by (or behind it), and never gone back for (tossAway): thrown at a wall, the stack fell at its feet and
-        // was picked up again 40 ticks on (Player.drop's pickup delay)
-        let pit: Vec3 | null | undefined
-        for (const t of toss) {
-          const burn = lava()
-          if (burn == null && pit === undefined) pit = await dumpPit(this.bot, s, back)
-          // into the pit along a look whose flight ends there (pitThrow), else aimed at it
-          const look = burn == null && pit != null ? pitThrow(p => this.bot.blockAt(p) as any, this.bot.entity.position, pit, (this.bot.entity as any).eyeHeight ?? 1.62) : null
-          const into = burn ?? (look != null && pit != null ? { ...look, pit } : pit)
-          await tossAway(this.bot, t.name, t.count, s, into ?? undefined).catch(err => { if (isAbort(err)) throw err })
-        }
-      })
+      await this.throwStacks(toss, run, toward, walkOff)
     }
     return { room: emptySlots(this.bot) >= this.options.minFreeSlots, looping: forChest }
+  }
+
+  /**
+   * Throws the stacks away (recorded in the throws' history), into lava in reach, else into a pit off the way
+   * (`toward`), from THROW_AWAY_RANGE blocks off with `walkOff`
+   */
+  private async throwStacks (toss: ReadonlyArray<{ name: string, count: number }>, run: RoomRunner, toward?: Vec3, walkOff = false): Promise<void> {
+    const lava = (): { yaw: number, pitch: number } | null => lavaThrow(p => this.bot.blockAt(p) as any, this.bot.entity.position, (this.bot.entity as any).eyeHeight ?? 1.62)
+    this.throws.record(toss, this.tasks.tick)
+    await run('make room', async (s) => {
+      // what kept coming back where the bot works is thrown away from there, the pit off the way back to it
+      let back = toward
+      if (walkOff) {
+        const from = this.bot.entity.position.clone()
+        if (await this.walkOff(s, from)) back = from
+        else this.log(`no way ${THROW_AWAY_RANGE} blocks off: thrown here`)
+      }
+      // into lava in reach, where it burns (lavaThrow); else into a pit dug beside the bot, out of its reach as it
+      // walks by (or behind it), and never gone back for (tossAway): thrown at a wall, the stack fell at its feet and
+      // was picked up again 40 ticks on (Player.drop's pickup delay)
+      let pit: Vec3 | null | undefined
+      for (const t of toss) {
+        const burn = lava()
+        if (burn == null && pit === undefined) pit = await dumpPit(this.bot, s, back)
+        // into the pit along a look whose flight ends there (pitThrow), else aimed at it
+        const look = burn == null && pit != null ? pitThrow(p => this.bot.blockAt(p) as any, this.bot.entity.position, pit, (this.bot.entity as any).eyeHeight ?? 1.62) : null
+        const into = burn ?? (look != null && pit != null ? { ...look, pit } : pit)
+        await tossAway(this.bot, t.name, t.count, s, into ?? undefined).catch(err => { if (isAbort(err)) throw err })
+      }
+    })
   }
 
   /** a known chest within DEPOT_RANGE that stands there still (stashNearby's first choice), the nearest; null with none */

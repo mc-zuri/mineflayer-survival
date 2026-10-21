@@ -162,6 +162,20 @@ export const TRIP_MILESTONES: readonly MilestoneId[] = ['eyes', 'end']
 /** the stock's marks topped up on a trip: what it spends on the way (food, arrows, blocks to bridge and pillar with) */
 export const TRIP_STOCK_MARKS: readonly string[] = ['food', 'arrow', 'stone']
 
+/**
+ * What a trip carries of the stock (TRIP_STOCK_MARKS' marks with a working set): each of their keep's items up to the
+ * mark's high, the stone's 2 stacks for the bridges and pillars on the way (the End's void has none to dig), the
+ * arrows': not the working set's one stack alone, the rest thrown by a tight bag (Executor.tightRoom)
+ */
+export function tripStockNeeds (stock: Pick<StockPolicy, 'marks'> | null): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const m of stock?.marks ?? []) {
+    if (!TRIP_STOCK_MARKS.includes(m.id) || m.unit === 'nutrition') continue
+    for (const name of Object.keys(m.keep ?? {})) if (!name.startsWith('#')) out[name] = Math.max(out[name] ?? 0, m.high)
+  }
+  return out
+}
+
 export interface MilestoneEvent {
   id: MilestoneId
   title: string
@@ -709,6 +723,14 @@ export class Runner {
       // the route's stone over the working set is thrown away once the stock has its high mark (stored before: a 26.3
       // bag down the diamonds' mine held 433 cobblestone)
       stocked: options.executor?.stocked ?? (name => this.stock == null || this.bot.entity == null || stockedItem(this.stock.marks, name, ownedInventory(this.bot), this.stockStored(), this.reached.map(r => r.id))),
+      // a tight bag (fewer free than the top-ups leave) throws the route's stone the stock can spare (its high mark kept,
+      // carried and stored), all beyond the working set with no base's chests to store it in; stored instead by the base
+      tightSlots: options.executor?.tightSlots ?? this.stock?.reserveSlots,
+      spare: options.executor?.spare ?? (name => {
+        if (this.stock == null || this.bot.entity == null) return Infinity
+        if (this.stock.keepCount(name, bot.registry as any) != null && (baseRecord(this.memory)?.chests.length ?? 0) === 0) return Infinity
+        return this.stock.spare(name, ownedInventory(this.bot), this.stockStored(), this.reached.map(r => r.id))
+      }),
       // a mine step at the trees or the stone face takes the stock's working set while it's there (StockPolicy.bulk)
       bulk: options.executor?.bulk ?? (name => this.stock == null || this.bot.entity == null ? null : this.stock.bulk(name, ownedInventory(this.bot), this.reached.map(r => r.id), { bag: new Inventory(this.bot.registry as any, this.bot.inventory.items().map(i => ({ name: i.name, count: i.count }))) })),
       hooks: {
@@ -728,8 +750,8 @@ export class Runner {
 
   /**
    * What the milestone being worked on (else the next to work on) and the one after it need (keep.ts milestoneNeeds:
-   * their goals, the plan for them, their kit), planned again every MILESTONE_NEEDS_TICKS: no store, stash, depot or
-   * throw takes it from the bag
+   * their goals, the plan for them, their kit), planned again every MILESTONE_NEEDS_TICKS, and on a trip what the trip
+   * carries of the stock (tripStockNeeds): no store, stash, depot or throw takes it from the bag
    */
   milestoneNeeds (): Readonly<Record<string, number>> {
     if (this.bot.entity == null || this.bot.inventory == null) return {}
@@ -740,6 +762,7 @@ export class Runner {
       if (m == null) return {}
       if (this.needs != null && this.needs.id === m.id && tick - this.needs.tick < MILESTONE_NEEDS_TICKS) return this.needs.needs
       const needs = milestoneNeeds(milestonesAhead(m, state), state, goals => this.executor.plan(goals, state.inventory))
+      if (TRIP_MILESTONES.includes(m.id)) for (const [name, n] of Object.entries(tripStockNeeds(this.stock))) needs[name] = Math.max(needs[name] ?? 0, n)
       this.needs = { id: m.id, tick, needs }
       return needs
     } catch {

@@ -231,3 +231,33 @@ test('a mine step\'s bulk is the stock\'s: the logs short of the working set car
   assert.equal(runner.executor.options.bulk('cobblestone')?.count, (runner.stock?.keepCount('cobblestone', registry) as number) - 10)
   assert.equal(new Runner(bot, { stock: false, executor: { log: () => {} } }).executor.options.bulk('oak_log'), null)
 })
+
+test('a tight bag throws the route\'s stone the stock can spare: all beyond the working set with no base\'s chests, its high mark kept with them; at the top-ups\' reserve of free slots', () => {
+  const bot = fakeBot({ cobblestone: 437, andesite: 40 })
+  const runner = new Runner(bot, { log: () => {}, executor: { log: () => {} } })
+  runner.reached.push(...at(['wood', 'stone']))
+  assert.equal(runner.executor.options.tightSlots, runner.stock?.reserveSlots)
+  assert.equal(runner.executor.options.spare('cobblestone'), Infinity)
+  assert.equal(runner.executor.options.spare('andesite'), Infinity)
+  bot.survival.memory.setBase({ x: 0, y: 40, z: 0 })
+  bot.survival.memory.rememberChest({ x: 1, y: 40, z: 0 }, { cobblestone: 20 })
+  assert.equal(runner.executor.options.spare('cobblestone'), 437 + 20 - 128)
+  assert.equal(new Runner(bot, { stock: false, log: () => {}, executor: { log: () => {} } }).executor.options.spare('cobblestone'), Infinity)
+})
+
+test('a trip carries the stone\'s and the arrows\' high marks (tripStockNeeds): the eyes\' search and the End keep 2 stacks of cobblestone from a tight bag\'s throw and the base\'s store', async () => {
+  const { tripStockNeeds } = await import('../../src/runner')
+  assert.deepEqual(tripStockNeeds(new StockPolicy()), { cobblestone: 128, arrow: 64 })
+  assert.deepEqual(tripStockNeeds(null), {})
+  const gear = { diamond_pickaxe: 1, diamond_sword: 1, iron_helmet: 1, iron_chestplate: 1, iron_leggings: 1, iron_boots: 1, shield: 1, bucket: 1, crafting_table: 1, furnace: 1, stone_axe: 1, cooked_beef: 4 }
+  const bot = fakeBot({ ...gear, ender_eye: 16, cobblestone: 200 })
+  bot.survival.memory.setBase({ x: 0, y: 40, z: 0 })
+  const runner = new Runner(bot, { log: () => {}, executor: { log: () => {}, runners: {} } })
+  runner.reached.push(...at(['wood', 'stone', 'food', 'base', 'iron', 'diamonds', 'enchanting', 'nether']))
+  assert.equal(runner.milestoneNeeds().cobblestone, 128)
+  // at home before a trip: the stack kept alone
+  const home = fakeBot({ ...gear, cobblestone: 200 })
+  const r2 = new Runner(home, { log: () => {}, executor: { log: () => {}, runners: {} } })
+  r2.reached.push(...at(['wood', 'stone', 'food', 'base']))
+  assert.ok((r2.milestoneNeeds().cobblestone ?? 0) < 128)
+})

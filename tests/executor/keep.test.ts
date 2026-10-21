@@ -437,3 +437,40 @@ test('the home\'s food kept from a room\'s throw and a store (homeFoodKeeps): a 
   const { store } = splitInventory(stacks, { registry, protect: { homeFood: homeFoodKeeps(cows) } })
   assert.ok(!store.some(s => s.name === 'wheat' || s.name === 'wheat_seeds'), JSON.stringify(store))
 })
+
+for (const version of VERSIONS) {
+  test(`routeStoneToToss (${version}): a tight bag's route stone beyond the stack kept, half stacks and more, as much as the stock spares; the scaffold's, the needs' and the milestones' stay (stock-1: 437 cobblestone at the iron, 3 slots free)`, async () => {
+    const { routeStoneToToss, stockKeepRule } = await import('../../src/executor/keep')
+    const { StockPolicy } = await import('../../src/planner/stock')
+    const { SCAFFOLD_ITEMS } = await import('../../src/executor/steps')
+    const registry: any = minecraftData(version)
+    const keep = stockKeepRule(new StockPolicy())
+    const scaffold = { items: SCAFFOLD_ITEMS, keep: 64 }
+    // the bag at the iron (stock-1, t75678), its 7 stacks of cobblestone
+    const bag = [63, 64, 63, 60, 63, 63, 61].map(count => ({ name: 'cobblestone', count }))
+    bag.push({ name: 'raw_iron', count: 22 }, { name: 'dirt', count: 3 }, { name: 'gravel', count: 1 }, { name: 'spruce_log', count: 64 })
+    const total = (toss: Array<{ count: number }>): number => toss.reduce((n, t) => n + t.count, 0)
+    // no base: all of it beyond the stack kept, the biggest stacks first, the dirt and gravel (small) left
+    const all = routeStoneToToss(bag, 7, { keep, registry, scaffold, spare: () => Infinity })
+    assert.deepEqual(all.map(t => t.count), [64, 63, 63, 63, 63])
+    assert.ok(all.every(t => t.name === 'cobblestone'))
+    assert.equal(437 - total(all), 121)
+    // no more stacks than the slots asked for
+    assert.deepEqual(routeStoneToToss(bag, 2, { keep, registry, scaffold, spare: () => Infinity }).map(t => t.count), [64, 63])
+    // the stock's spare (its high mark kept, carried and stored): no more than that
+    const some = routeStoneToToss(bag, 7, { keep, registry, scaffold, spare: name => name === 'cobblestone' ? 200 : Infinity })
+    assert.deepEqual(some.map(t => t.count), [64, 63, 63])
+    assert.deepEqual(routeStoneToToss(bag, 7, { keep, registry, scaffold, spare: () => 0 }), [])
+    // what the work needs and the milestones need stay
+    assert.equal(437 - total(routeStoneToToss(bag, 7, { keep, registry, scaffold, needed: { cobblestone: 300 }, spare: () => Infinity })), 310)
+    assert.equal(437 - total(routeStoneToToss(bag, 7, { keep, registry, scaffold, protect: { needs: { cobblestone: 128 } }, spare: () => Infinity })), 184)
+    // with no cobblestone (the cobbled deepslate kept none of), a stack of building blocks stays (scaffold): the tuff's
+    // and andesite's part stacks counted, never thrown
+    const deep = [{ name: 'cobbled_deepslate', count: 64 }, { name: 'cobbled_deepslate', count: 64 }, { name: 'cobbled_deepslate', count: 40 }, { name: 'tuff', count: 30 }, { name: 'andesite', count: 12 }]
+    const thrown = routeStoneToToss(deep, 7, { keep, registry, scaffold, spare: () => Infinity })
+    assert.deepEqual(thrown, [{ name: 'cobbled_deepslate', count: 64 }, { name: 'cobbled_deepslate', count: 64 }])
+    assert.ok(210 - total(thrown) >= 64)
+    // nothing but the route's stone: the logs, the iron, the junk drops stay
+    assert.deepEqual(routeStoneToToss([{ name: 'rotten_flesh', count: 64 }, { name: 'oak_log', count: 64 }, { name: 'oak_log', count: 64 }, { name: 'raw_iron', count: 64 }], 7, { keep, registry, scaffold, spare: () => Infinity }), [])
+  })
+}
