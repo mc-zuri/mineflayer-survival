@@ -128,6 +128,17 @@ export const FAR_LOOT = 96
 /** ticks a replacement may cost to be got at once (a tier lower, or a spare of it held, before a dearer one) */
 export const WEAR_REPLACE_TICKS = 6000
 
+/**
+ * The ticks a worn tool's replacement may take (a reflex's not counted): WEAR_REPLACE_TICKS twice over, or three times
+ * its plan's cost when dearer; then the worn tool is used on. A 1.21.11 bot's trip to the food land, hungry, was
+ * stopped for its iron pickaxe's 13 uses left, and the plan of 1320 ticks for another explored the deepslate at y -52
+ * for iron 155000 ticks, the bot starved down to 1 health there and a wall's suffocation killed it (f5-1.21.11,
+ * t969014 to t1124683)
+ */
+export function wearReplaceBudget (planCost: number): number {
+  return Math.max(2 * WEAR_REPLACE_TICKS, Math.round(3 * planCost))
+}
+
 /** how far from where a task stopped for a worn tool the bot goes back there before it runs the task again */
 export const WEAR_RETURN_RANGE = 8
 
@@ -734,15 +745,35 @@ export class Executor {
         const alts = toolsAtLeast(tool.kind, material)
         return this.bot.inventory.items().find(i => alts.includes(i.name) && usesLeft(i) > this.options.minToolUses * 2)?.name ?? null
       }
-      const get = async (material: ToolMaterial, why: string): Promise<boolean> => {
+      const get = async (material: ToolMaterial, why: string, cost: number): Promise<boolean> => {
         this.log(`the ${tool.name} has ${tool.uses} uses left: another of ${material} or better (${why})`)
+        // within its budget (wearReplaceBudget: a reflex's ticks not counted), the worn tool used on after it
+        const limit = wearReplaceBudget(cost)
+        const ctrl = new AbortController()
+        const onOuter = (): void => ctrl.abort(signal?.reason)
+        if (signal?.aborted === true) onOuter()
+        signal?.addEventListener('abort', onOuter, { once: true })
+        let n = 0
+        let out = false
+        const count = (): void => {
+          if ((this.bot as any).survival?.reflexes?.current != null || ctrl.signal.aborted) return
+          if (++n >= limit) { out = true; ctrl.abort(new TaskError('TIMEOUT', `out of its ${limit} ticks`)) }
+        }
+        this.bot.on('physicsTick', count)
         try {
-          await this.obtain(request(material), signal)
+          await this.obtain(request(material), ctrl.signal)
           return true
         } catch (err) {
+          if (out && signal?.aborted !== true && !TaskError.is(err, 'DIED')) {
+            this.log(`no new ${tool.kind} of ${material}: out of its ${limit} ticks`)
+            return false
+          }
           if (TaskError.is(err, 'DIED', 'ABORTED') || signal?.aborted === true) throw err
           this.log(`no new ${tool.kind} of ${material}: ${(err as Error).message}`)
           return false
+        } finally {
+          this.bot.off('physicsTick', count)
+          signal?.removeEventListener('abort', onOuter)
         }
       }
       // a loot from a chest far off is dear whatever the plan's walk says (the trip back up from the deep caves and down
@@ -757,13 +788,13 @@ export class Executor {
           this.muteWorn(tool)
           return true
         }
-        if (plan.ok && cost(plan) <= WEAR_REPLACE_TICKS && await get(material, `a plan of ${Math.round(plan.cost)} ticks`)) return true
+        if (plan.ok && cost(plan) <= WEAR_REPLACE_TICKS && await get(material, `a plan of ${Math.round(plan.cost)} ticks`, cost(plan))) return true
       }
       // a dear plan only where asked: a task stopped mid-way goes on with the worn tool instead (it has its uses left,
       // and a pickaxe made from what's carried does the rest when it breaks: pickaxeKeeper), the dear replacement left
       // to the steps between tasks (replaceWornTools)
       for (const { material, plan } of opts.dear === false ? [] : plans) {
-        if (plan.ok && cost(plan) > WEAR_REPLACE_TICKS && await get(material, `a dear plan, ${Math.round(cost(plan))} ticks`)) return true
+        if (plan.ok && cost(plan) > WEAR_REPLACE_TICKS && await get(material, `a dear plan, ${Math.round(cost(plan))} ticks`, cost(plan))) return true
       }
       this.log(`no new ${tool.kind} for the ${tool.name}: it's used till it breaks`)
       this.muteWorn(tool)

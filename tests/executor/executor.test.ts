@@ -1187,3 +1187,31 @@ test('a hunt stopped by its owner after STOPPED_HUNT_TICKS with none got is a mi
   assert.equal((await run(STOPPED_HUNT_TICKS - 100, 0)).ex.sightings.isScarce('spider'), false)
   assert.equal((await run(STOPPED_HUNT_TICKS, 2)).ex.sightings.isScarce('spider'), false)
 })
+
+test('a worn tool\'s replacement is held to its budget (wearReplaceBudget, a reflex\'s ticks not counted): the mine step that explores on for its iron is stopped, the worn tool used on (f5-1.21.11: 155000 ticks exploring the deepslate for iron, starved to 1 health)', async () => {
+  const { wearReplaceBudget, WEAR_REPLACE_TICKS } = await import('../../src/executor/executor')
+  assert.equal(wearReplaceBudget(1320), 2 * WEAR_REPLACE_TICKS)
+  assert.equal(wearReplaceBudget(10000), 30000)
+  const { bot } = wornPickBot(13, {})
+  const lines: string[] = []
+  let ticks = 0
+  const ex = new Executor(bot, {
+    runners: {
+      // the iron never found: the step explores till it's stopped
+      mine: async (_step: any, ctx: any) => await new Promise((_resolve, reject) => {
+        ctx.signal.addEventListener('abort', () => reject(ctx.signal.reason), { once: true })
+      })
+    },
+    log: line => lines.push(line)
+  })
+  const ticking = setInterval(() => { for (let i = 0; i < 500; i++) { ticks++; bot.emit('physicsTick') } }, 1)
+  let got: boolean | null = null
+  try {
+    got = await ex.replaceWornTool({ kind: 'pickaxe', material: 'iron', name: 'iron_pickaxe', uses: 13 } as any)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.equal(got, false)
+  assert.ok(lines.some(l => /no new pickaxe of .*: out of its \d+ ticks/.test(l)), lines.join('\n'))
+  assert.ok(ticks < 4 * wearReplaceBudget(30000), String(ticks))
+})
