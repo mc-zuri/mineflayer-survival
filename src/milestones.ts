@@ -1441,6 +1441,11 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
  */
 export const OBSIDIAN_HOME_RANGE = 160
 
+/** the heights round home's column its lava is looked for at too (homeLavaSources), besides round the bot */
+export const HOME_LAVA_SCAN_YS = [0, -50]
+/** how far across from home a bot is at home for obsidianAtHome's lava */
+export const HOME_NEAR = 32
+
 /** the trips obsidianAtHome makes for a bucket of lava at most (a block each) */
 export const HOME_CAST_TRIPS = 8
 /** the lava sources obsidianAtHome tries a trip */
@@ -1449,14 +1454,27 @@ export const HOME_CAST_SOURCES = 4
 /**
  * The lava sources a bucket is filled at for obsidianAtHome, nearest the bot first: sources (a block's level 0) within
  * the bound, none in the deep dark (deepDarkNear), none against a cave's cells for a bot not fit for the caves (a
- * pocket in the rock, a pool reached by a tunnel, its stand in the rock)
+ * pocket in the rock, a pool reached by a tunnel, its stand in the rock). Looked for round the bot and round home's
+ * column at y 0 and at DEEP_LAVA_Y (HOME_LAVA_SCAN_YS): the lava under home is mostly deep, out of a scan's 96 blocks
+ * from the surface (a 1.21.11 bot's casts at home ran out of sources after 2 of its frame's 10, f3-1.21.11 t195449).
  */
 export function homeLavaSources (bot: Bot, bound: ObsidianBound): Vec3[] {
   const id = bot.registry.blocksByName.lava?.id
   if (id == null) return []
   const rule = caveRuleOn(bot)
   const cells = caveCells(bot)
-  return findBlocks(bot, { matching: id, maxDistance: 96, count: 512 })
+  const points = [bot.entity.position.floored()]
+  if (bound.home != null) for (const y of HOME_LAVA_SCAN_YS) points.push(new Vec3(Math.floor(bound.home.x), y, Math.floor(bound.home.z)))
+  const seen = new Set<string>()
+  const found: Vec3[] = []
+  for (const point of points) {
+    for (const p of findBlocks(bot, { matching: id, maxDistance: 96, count: 512, point })) {
+      if (seen.has(p.toString())) continue
+      seen.add(p.toString())
+      found.push(p)
+    }
+  }
+  return found
     .filter(p => isLavaSource({ name: 'lava', properties: (bot.blockAt(p) as any)?.getProperties?.() } as any))
     .filter(p => withinBound(bound, p) && !deepDarkNear(bot, p) && !(rule && cells.beside([p]).length > 0))
     .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
@@ -1486,6 +1504,16 @@ export async function obsidianAtHome (bot: Bot, executor: Executor, count: numbe
     await executor.obtain([{ item: 'bucket', count: countItems(bot, 'bucket') + extra }], signal).catch(quiet)
   }
   const home = bound.home != null ? new Vec3(bound.home.x, bot.entity.position.y, bound.home.z) : bot.entity.position.clone()
+  // none in the chunks loaded round a bot far from home: home first, its lava looked for from there (a 1.21.11 bot
+  // 310 blocks off after its enchanting's trips to the pools found none 'near home' and went on to no pool at all,
+  // f4-1.21.11 t187092)
+  if (bound.home != null && Math.hypot(bot.entity.position.x - home.x, bot.entity.position.z - home.z) > HOME_NEAR && homeLavaSources(bot, bound).length === 0) {
+    log('obsidian: back home to look for its lava')
+    await executor.task('home for the lava', async (s) => {
+      await ensureSurface(bot, s)
+      await overland(bot, { target: home, range: 8 }, s)
+    }, signal).catch(quiet)
+  }
   // the empty buckets a trip fills with lava (one kept for the water when its bucket is empty)
   const fillable = (): number => countItems(bot, 'bucket') - (countItems(bot, 'water_bucket') === 0 ? 1 : 0)
   for (let trip = 0; trip < trips && have() < count; trip++) {

@@ -243,3 +243,54 @@ test('buildAPortal: no trip to a lava pool without a water bucket, none to be ha
   await buildAPortal(bot, executor, new AbortController().signal, () => {}).catch(() => {})
   assert.ok(!calls.includes('to the lava'), calls.join(', '))
 })
+
+test('homeLavaSources: looked for round home\'s column at y 0 and -50 too, the deep lava out of a scan from the surface (f3-1.21.11 t195449)', async () => {
+  const { homeLavaSources, HOME_LAVA_SCAN_YS } = await import('../../src/milestones')
+  assert.deepEqual(HOME_LAVA_SCAN_YS, [0, -50])
+  const deep = new Vec3(10, -52, 4)
+  const near = new Vec3(6, 40, 0)
+  const bot = fakeBot({ position: new Vec3(0.5, 70, 0.5), world: p => p.equals(deep) || p.equals(near) ? 'lava' : p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'overworld'
+  const points: string[] = []
+  bot.findBlocks = (opts: any) => {
+    const at = opts.point ?? bot.entity.position
+    if (opts.matching !== bot.registry.blocksByName.lava.id) return []
+    points.push(`${Math.floor(at.y)}`)
+    return [deep, near].filter(p => p.distanceTo(at) <= opts.maxDistance)
+  }
+  bot.blockAt = (p: Vec3) => ({ name: p.equals(deep) || p.equals(near) ? 'lava' : 'stone', position: p, getProperties: () => ({ level: 0 }) })
+  const found = homeLavaSources(bot, { home: { x: 0, z: 0 }, range: 160 }).map(p => p.toString())
+  assert.deepEqual(points, ['70', '0', '-50'])
+  assert.deepEqual(found, [near.toString(), deep.toString()])
+})
+
+test('obsidianAtHome: none in the chunks round a bot far from home, home first and its lava looked for there (f4-1.21.11 t187092)', async () => {
+  const { obsidianAtHome } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const bot = fakeBot({ position: new Vec3(330.5, -55, -273.5), items: [item('diamond_pickaxe', 1), item('water_bucket', 1), item('bucket', 1)] })
+  bot.game.dimension = 'overworld'
+  const lava = new Vec3(180, 40, 0)
+  // the lava by home is in the chunks once the bot is there
+  bot.findBlocks = () => Math.hypot(bot.entity.position.x - 176, bot.entity.position.z) < 32 ? [lava] : []
+  bot.blockAt = (p: Vec3) => ({ name: p.equals(lava) ? 'lava' : 'stone', position: p, getProperties: () => ({ level: 0 }) })
+  const bucket = require('../../src/skills/bucket')
+  const obsidian = require('../../src/nether/obsidian')
+  const real = { fill: bucket.fillBucket, pit: obsidian.obsidianInPit }
+  const calls: string[] = []
+  const setSlot = (slot: number, name: string): void => { bot.inventory.slots[slot] = Object.assign(item(name, 1), { slot }) }
+  bucket.fillBucket = async (_b: any, args: any) => { calls.push(`fill ${args.pos.toString()}`); setSlot(11, 'lava_bucket') }
+  obsidian.obsidianInPit = async () => { calls.push('cast'); setSlot(11, 'bucket'); setSlot(20, 'obsidian'); return true }
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    obtain: async () => {},
+    task: async (name: string, fn: any) => { calls.push(name); if (name === 'home for the lava') { bot.entity.position = new Vec3(176.5, 72, 0.5); return } return await fn(new AbortController().signal) }
+  }
+  try {
+    assert.equal(await obsidianAtHome(bot, executor, 1, new AbortController().signal, () => {}, { home: { x: 176, z: -3 }, range: 160 }), true)
+  } finally {
+    bucket.fillBucket = real.fill
+    obsidian.obsidianInPit = real.pit
+  }
+  assert.deepEqual(calls.filter(c => c !== 'lava for a cast at home' && c !== 'a cast at home'), ['home for the lava', `fill ${lava.toString()}`, 'cast'])
+})
