@@ -5,7 +5,8 @@ import assert from 'node:assert'
 import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { formatWall, parseArgs, summary, testPassed } from '../e2e/e2e'
+import { EventEmitter } from 'node:events'
+import { disconnection, formatWall, parseArgs, summary, testPassed } from '../e2e/e2e'
 import { copyWorld } from '../harness/server'
 
 describe('pnpm e2e', () => {
@@ -128,4 +129,22 @@ test('GrimFlags counts the alerts in the server log by check', async () => {
   assert.ok(!flags.add('[20:01:35] [Server thread/INFO]: player joined the game'))
   assert.equal(flags.total, 3)
   assert.equal(flags.toString(), '3 Grim flags: Simulation 2, GroundSpoof 1')
+})
+
+test('the connection of the bot lost while play runs ends the run with its reason: the kick message, else the end (ls3d-1.21.11, t380646: kicked for floating too long, the e2e hung)', async () => {
+  const bot = new EventEmitter()
+  const kicked = disconnection(bot)
+  bot.emit('kicked', JSON.stringify({ translate: 'multiplayer.disconnect.flying' }), true)
+  bot.emit('end', 'socketClosed')
+  assert.strictEqual(await kicked.gone, 'kicked: multiplayer.disconnect.flying')
+  kicked.off()
+  assert.strictEqual(bot.listenerCount('kicked') + bot.listenerCount('end'), 0)
+  const text = disconnection(bot)
+  bot.emit('kicked', { text: '', extra: [{ text: 'Flying is not enabled on this server' }] })
+  assert.strictEqual(await text.gone, 'kicked: Flying is not enabled on this server')
+  text.off()
+  const ended = disconnection(bot)
+  bot.emit('end', 'socketClosed')
+  assert.strictEqual(await ended.gone, 'the connection ended: socketClosed')
+  ended.off()
 })

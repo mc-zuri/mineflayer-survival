@@ -110,6 +110,36 @@ export function summary (reached: readonly MilestoneEvent[], totalTicks: number,
 
 /** the console's `execute if entity` answer: "Test passed" (with a count from some versions) */
 /**
+ * The bot's connection lost while play runs: resolves with the reason, the server's kick message ('kicked', its reason
+ * a chat component or a string) or the end's; `off` stops the watch. A kick (a 1.21.11 bot 'kicked for floating too
+ * long', ls3d-1.21.11, t380646) ended the bot but not play, whose tasks waited on ticks that never came: the e2e hung
+ * with 'no game tick for 60 s' till it was killed.
+ */
+export function disconnection (bot: { on: (event: string, fn: (...args: any[]) => void) => unknown, off: (event: string, fn: (...args: any[]) => void) => unknown }): { gone: Promise<string>, off: () => void } {
+  let done = (_reason: string): void => {}
+  const gone = new Promise<string>(resolve => { done = resolve })
+  let kickedFor: string | null = null
+  const text = (reason: unknown): string => {
+    if (typeof reason === 'string') {
+      try { return text(JSON.parse(reason)) } catch { return reason }
+    }
+    if (reason != null && typeof reason === 'object') {
+      const r = reason as any
+      if (typeof r.text === 'string' || Array.isArray(r.extra) || typeof r.translate === 'string') {
+        return [r.text ?? r.translate ?? '', ...(r.extra ?? []).map(text)].join('')
+      }
+      if (r.value != null) return text(r.value)
+    }
+    return String(reason)
+  }
+  const onKicked = (reason: unknown): void => { kickedFor = `kicked: ${text(reason)}`; done(kickedFor) }
+  const onEnd = (reason?: unknown): void => { done(kickedFor ?? `the connection ended${reason != null ? `: ${text(reason)}` : ''}`) }
+  bot.on('kicked', onKicked)
+  bot.on('end', onEnd)
+  return { gone, off: () => { bot.off('kicked', onKicked); bot.off('end', onEnd) } }
+}
+
+/**
  * A wall-clock watch on the game's ticks: `onStall` with the seconds gone when no tick has run for `seconds` (once a
  * stall, again after ticks run again). The stall watchdog in the plugin counts ticks, so a loop that runs none (a hop
  * that returned at once, spun for 10 minutes on 26.3) or a server that stopped answering goes unseen by it.
@@ -280,11 +310,22 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
         log(`checkpoint ${dir}`)
       }).catch(err => log(`checkpoint ${dir} failed: ${(err as Error).message}`))
     })
-    // (a throw out of play is a FAIL with its reason, not a crash of the runner)
-    const result: PlayResult = await b.survival.play(playOptions(opts, saveFile)).catch((err: unknown): PlayResult => {
-      log(`play threw: ${(err as Error)?.stack ?? String(err)}`)
-      return { reached: [...reached], stoppedAt: null, reason: 'aborted', error: err }
-    })
+    // (a throw out of play is a FAIL with its reason, not a crash of the runner; and so is the bot's connection lost
+    // while play runs, a kick: play's tasks would wait on ticks that never come)
+    const connection = disconnection(b as any)
+    let lost: string | null = null
+    const result: PlayResult = await Promise.race([
+      b.survival.play(playOptions(opts, saveFile)).catch((err: unknown): PlayResult => {
+        log(`play threw: ${(err as Error)?.stack ?? String(err)}`)
+        return { reached: [...reached], stoppedAt: null, reason: 'aborted', error: err }
+      }),
+      connection.gone.then((reason): PlayResult => {
+        lost = reason
+        log(`the bot's connection is gone: ${reason}`)
+        return { reached: [...reached], stoppedAt: null, reason: 'aborted', error: new Error(reason) }
+      })
+    ])
+    connection.off()
     await checkpointing
     const ticks = b.lockstep.ticks - k0
     const wallMs = Date.now() - wall0
@@ -292,6 +333,10 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
     log(`${where(b)}`)
     if (opts.grim) log(grim.toString())
     for (const line of summary(result.reached, result.reached.length > 0 ? Math.max(ticks, result.reached[result.reached.length - 1].tick) : ticks, wallMs, ticks)) log(line)
+    if (lost != null) {
+      log(`FAIL: ${String(lost)}`)
+      return false
+    }
     if (opts.until != null) {
       const ok = result.reason === 'until'
       log(ok ? `PASS: ${opts.until} reached` : `FAIL: ${opts.until} not reached`)
