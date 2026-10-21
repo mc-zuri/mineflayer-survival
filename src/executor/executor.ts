@@ -20,7 +20,7 @@ import { storeItems } from '../skills/chest'
 import { craft, planCraft } from '../skills/craft'
 import { caveReady, watchCaveEntries } from '../skills/caves'
 import { placeBlock } from '../skills/placeBlock'
-import { underSpawnProtection } from '../skills/spawnProtection'
+import { breakRefused } from '../skills/spawnProtection'
 import { findPlacement } from '../skills/placement'
 import { isAbort } from '../skills/errors'
 import { tossAway } from '../skills/pickupDrops'
@@ -1395,9 +1395,9 @@ function vec (p: { x: number, y: number, z: number }): Vec3 {
   return new Vec3(p.x, p.y, p.z)
 }
 
-/** what the mine steps leave (StepContext.protect): the base's box (`inBase`) and the spawn's protected square (underSpawnProtection) */
+/** what the mine steps leave (StepContext.protect): the base's box (`inBase`), and the spawn's protected square and the cells and regions the server refused digs in (breakRefused) */
 export function stepProtect (bot: Bot, inBase: ((pos: Vec3) => boolean) | undefined): (pos: Vec3) => boolean {
-  return (pos) => inBase?.(pos) === true || underSpawnProtection(bot, pos)
+  return (pos) => inBase?.(pos) === true || breakRefused(bot, pos)
 }
 
 function inBox (b: { min: { x: number, y: number, z: number }, max: { x: number, y: number, z: number } }): (pos: Vec3) => boolean {

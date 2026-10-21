@@ -7,6 +7,7 @@ import { EventEmitter } from 'node:events'
 import { Vec3 } from 'vec3'
 import {
   SPAWN_INFER_RANGE, SPAWN_PROTECTION_COST, SPAWN_PROTECTION_RADIUS, installSpawnProtection, keepOffSpawnProtection,
+  REFUSED_CELL_TICKS, REGION_RANGE, REGION_TICKS, breakRefused, inRefusedRegion, placeRefused,
   placeUnderSpawnProtection, spawnProtectionMessage, spawnProtectionState, underSpawnProtection, usableOutside
 } from '../../src/skills/spawnProtection'
 import { dig, placeAgainst } from '../../src/core/actions'
@@ -236,4 +237,55 @@ test('the mine steps leave the square (StepContext.protect: the base\'s box and 
   assert.strictEqual(protect(new Vec3(40, 60, 0)), true)
   assert.strictEqual(protect(new Vec3(30, 60, 0)), false)
   assert.strictEqual(stepProtect(bot, undefined)(new Vec3(16, 60, 16)), true)
+})
+
+// Any server's refusals (a claim, a protected region, adventure mode), far from the spawn too: a bot in the browser
+// walked into a block whose break was refused, still there, and was teleported back 25 to 82 times every 100 ticks.
+
+test(`a dig refused once anywhere marks its cell: no dig of it for REFUSED_CELL_TICKS, the path under way planned again; a place refused, no place there`, () => {
+  const bot = spawnBot()
+  let resets = 0
+  let settings: any = { exclusionAreasBreak: [], exclusionAreasPlace: [] }
+  bot.pathfinder = { isPathing: true, reset: async () => { resets++ }, get defaultMoveSettings () { return settings }, setMoveOptions: (s: any) => { settings = s } }
+  installSpawnProtection(bot, 'auto')
+  const cell = new Vec3(300, 40, -200)
+  refusedDig(bot, cell)
+  assert.strictEqual(breakRefused(bot, cell), true)
+  assert.strictEqual(placeRefused(bot, cell), false)
+  assert.strictEqual(breakRefused(bot, cell.offset(1, 0, 0)), false)
+  assert.strictEqual(settings.exclusionAreasBreak[0]({ position: cell }), SPAWN_PROTECTION_COST)
+  assert.strictEqual(resets, 1)
+  refusedPlace(bot, new Vec3(310, 41, -200))
+  assert.strictEqual(placeRefused(bot, new Vec3(310, 41, -200)), true)
+  assert.strictEqual(spawnProtectionState(bot)?.radius, null)
+  for (let i = 0; i <= REFUSED_CELL_TICKS; i++) bot.emit('physicsTick')
+  assert.strictEqual(breakRefused(bot, cell), false)
+})
+
+test(`REGION_REFUSALS refusals within REGION_RANGE of each other lately are a protected region (no dig nor place in it for REGION_TICKS); spread out, or an op's, none`, () => {
+  const bot = spawnBot()
+  installSpawnProtection(bot, 'auto')
+  refusedDig(bot, new Vec3(300, 40, -200))
+  refusedDig(bot, new Vec3(303, 40, -198))
+  assert.strictEqual(inRefusedRegion(bot, new Vec3(301, 60, -199)), false)
+  refusedPlace(bot, new Vec3(305, 41, -201))
+  // the refusals' square (300..305, -201..-198) about (302, -200) and REGION_MARGIN
+  assert.strictEqual(inRefusedRegion(bot, new Vec3(302, 90, -200)), true)
+  assert.strictEqual(breakRefused(bot, new Vec3(297, 40, -200)), true)
+  assert.strictEqual(breakRefused(bot, new Vec3(308, 40, -200)), false)
+  assert.strictEqual(placeRefused(bot, new Vec3(308, 40, -200)), true)
+  for (let i = 0; i <= REGION_TICKS; i++) bot.emit('physicsTick')
+  assert.strictEqual(inRefusedRegion(bot, new Vec3(302, 90, -200)), false)
+  // spread out: none
+  const spread = spawnBot()
+  installSpawnProtection(spread, 'auto')
+  for (const x of [300, 300 + REGION_RANGE + 1, 300 + 2 * (REGION_RANGE + 1)]) refusedDig(spread, new Vec3(x, 40, -200))
+  assert.strictEqual(spawnProtectionState(spread)?.regions.length, 0)
+  // an op's (an anticheat's refusals): none
+  const op = spawnBot()
+  installSpawnProtection(op, 'auto')
+  op._client.emit('entity_status', { entityId: op.entity.id, entityStatus: 28 })
+  for (const x of [300, 301, 302]) refusedDig(op, new Vec3(x, 40, -200))
+  assert.strictEqual(spawnProtectionState(op)?.regions.length, 0)
+  assert.strictEqual(breakRefused(op, new Vec3(301, 40, -200)), true)
 })

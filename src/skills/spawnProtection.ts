@@ -6,6 +6,9 @@
 // says so on the action bar (ServerPlayer.sendSpawnProtectionMessage: 'build.spawn_protection' with the block's
 // toShortString, "1, 67, 1 is under spawn protection"); 1.21.11 says nothing, the block is only put back.
 //
+// And any server's refusals (a claim, a protected region, adventure mode): a dig or a place the server put back marks
+// its cell for REFUSED_CELL_TICKS, and more than two close together a region with no dig nor place in it.
+//
 // The bot learns the square (from the message, or from the same cell's dig or place put back SPAWN_REFUSALS times
 // near the spawn) and keeps its work out of it: the pathfinder breaks and places nothing in it, the mine steps,
 // collectBlock and placeBlock pass its blocks over, and the base's site is chosen out of it. It walks through it.
@@ -29,6 +32,15 @@ export const REFUSAL_TICKS = 40
 export const SPAWN_PROTECTION_COST = 1e9
 /** how far past the square the bot walks to put a block down by it (findPlacementNear's 5 and the place's block) */
 export const SPAWN_LEAVE_MARGIN = 7
+/** a cell whose dig or place the server put back is neither dug nor placed in for this many ticks */
+export const REFUSED_CELL_TICKS = 1200
+/** this many refusals within REGION_RANGE of each other within REGION_WINDOW ticks are a protected region */
+export const REGION_REFUSALS = 3
+export const REGION_RANGE = 8
+export const REGION_WINDOW = 1200
+/** the region: the refusals' square and REGION_MARGIN about it, for REGION_TICKS */
+export const REGION_MARGIN = 2
+export const REGION_TICKS = 6000
 /** the translation key of the refusal's message (ServerPlayer.sendSpawnProtectionMessage) */
 export const SPAWN_PROTECTION_KEY = 'build.spawn_protection'
 
@@ -54,6 +66,12 @@ export interface SpawnProtectionState {
   digs: Map<string, Pending>
   /** the places the client predicted, by cell: the block that was there before */
   places: Map<string, Pending>
+  /** cells (by dimension and cell) whose dig or place the server refused lately: not tried again till `until` */
+  refused: Map<string, { until: number, dig: boolean, place: boolean }>
+  /** the refusals of the last REGION_WINDOW ticks */
+  recent: Array<{ cell: Vec3, tick: number, dimension: string }>
+  /** the protected regions learnt from them: no dig nor place in them till `until` */
+  regions: Array<{ x: number, z: number, radius: number, dimension: string, until: number }>
   tick: number
 }
 
@@ -78,6 +96,39 @@ export function spawnDistance (bot: Bot, pos: { x: number, z: number }): number 
   const c = spawnCenter(bot)
   if (c == null) return Infinity
   return Math.max(Math.abs(Math.floor(pos.x) - c.x), Math.abs(Math.floor(pos.z) - c.z))
+}
+
+const dimensionOf = (bot: Bot): string => normalizeDimension((bot as any).game?.dimension)
+
+/** whether the server refused a dig (or a place) at this very cell lately (REFUSED_CELL_TICKS) */
+export function refusedCell (bot: Bot, pos: { x: number, y: number, z: number }, kind: 'dig' | 'place'): boolean {
+  const state = states.get(bot)
+  const mark = state?.refused.get(`${dimensionOf(bot)}:${keyOf(pos)}`)
+  return mark != null && mark.until > (state as SpawnProtectionState).tick && mark[kind]
+}
+
+/** whether the cell is in a protected region learnt from the refusals (and `margin` about it) */
+export function inRefusedRegion (bot: Bot, pos: { x: number, y: number, z: number }, margin = 0): boolean {
+  const state = states.get(bot)
+  if (state == null || state.regions.length === 0) return false
+  const dimension = dimensionOf(bot)
+  return state.regions.some(r => r.until > state.tick && r.dimension === dimension &&
+    Math.max(Math.abs(Math.floor(pos.x) - r.x), Math.abs(Math.floor(pos.z) - r.z)) <= r.radius + margin)
+}
+
+/** whether a dig of the block is refused: the spawn's square, the cell refused lately, or a region */
+export function breakRefused (bot: Bot, pos: { x: number, y: number, z: number }): boolean {
+  return underSpawnProtection(bot, pos) || refusedCell(bot, pos, 'dig') || inRefusedRegion(bot, pos)
+}
+
+/** whether a use of the block (a place against it, opening it) is refused: the spawn's square or a region */
+export function useRefused (bot: Bot, pos: { x: number, y: number, z: number }): boolean {
+  return underSpawnProtection(bot, pos) || inRefusedRegion(bot, pos)
+}
+
+/** whether a block placed in the cell is refused: the square or a region and a block about them, or the cell refused lately */
+export function placeRefused (bot: Bot, pos: { x: number, y: number, z: number }): boolean {
+  return placeUnderSpawnProtection(bot, pos) || refusedCell(bot, pos, 'place') || inRefusedRegion(bot, pos, 1)
 }
 
 /** whether the bot is in the spawn's dimension, where the square is */
@@ -106,14 +157,14 @@ export function placeUnderSpawnProtection (bot: Bot, pos: { x: number, y: number
   return underSpawnProtection(bot, pos, 1)
 }
 
-/** the pathfinder's break rule: SPAWN_PROTECTION_COST in the square */
+/** the pathfinder's break rule: SPAWN_PROTECTION_COST where a dig is refused (breakRefused) */
 export function spawnProtectionBreakCost (bot: Bot): (block: { position: { x: number, y: number, z: number } }) => number {
-  return (block) => underSpawnProtection(bot, block.position) ? SPAWN_PROTECTION_COST : 0
+  return (block) => breakRefused(bot, block.position) ? SPAWN_PROTECTION_COST : 0
 }
 
-/** the pathfinder's place rule: SPAWN_PROTECTION_COST in the square and a block out of it */
+/** the pathfinder's place rule: SPAWN_PROTECTION_COST where a place is refused (placeRefused) */
 export function spawnProtectionPlaceCost (bot: Bot): (block: { position: { x: number, y: number, z: number } }) => number {
-  return (block) => placeUnderSpawnProtection(bot, block.position) ? SPAWN_PROTECTION_COST : 0
+  return (block) => placeRefused(bot, block.position) ? SPAWN_PROTECTION_COST : 0
 }
 
 /** the pathfinder's break and place rules for the square, added once (they cost nothing while no radius is known) */
@@ -182,10 +233,13 @@ export function learnSpawnProtection (bot: Bot, cell: Vec3, why: string): void {
   if (digging != null && underSpawnProtection(bot, digging) && typeof bot.stopDigging === 'function') {
     try { bot.stopDigging() } catch {}
   }
-  if (grew) {
-    const pf = bot.pathfinder as any
-    if (pf?.isPathing === true && typeof pf.reset === 'function') void Promise.resolve(pf.reset('blockUpdate')).catch(() => {})
-  }
+  if (grew) replan(bot)
+}
+
+/** the path under way planned again, with the refused cells kept */
+function replan (bot: Bot): void {
+  const pf = bot.pathfinder as any
+  if (pf?.isPathing === true && typeof pf.reset === 'function') void Promise.resolve(pf.reset('blockUpdate')).catch(() => {})
 }
 
 /**
@@ -209,10 +263,24 @@ function undoRefusedPlaces (bot: Bot, cell: Vec3): void {
   }
 }
 
-/** a refusal counted at the cell: SPAWN_REFUSALS of them near the spawn are its protection ('auto' and no op) */
+/**
+ * A refusal at the cell (its dig or place put back by the server): the cell marked for REFUSED_CELL_TICKS (any server:
+ * a claim, a protected region, adventure mode) and the path under way planned round it; REGION_REFUSALS of them
+ * within REGION_RANGE of each other lately (no op) a protected region; SPAWN_REFUSALS at the same cell near the
+ * spawn ('auto' and no op) its protection.
+ */
 export function noteRefusal (bot: Bot, cell: Vec3, why: string): void {
   const state = states.get(bot)
-  if (state == null || state.option !== 'auto' || state.opLevel > 0) return
+  if (state == null) return
+  const dimension = dimensionOf(bot)
+  const markKey = `${dimension}:${keyOf(cell)}`
+  const mark = state.refused.get(markKey)
+  const dig = why === 'dig'
+  state.refused.set(markKey, { until: state.tick + REFUSED_CELL_TICKS, dig: dig || (mark?.dig ?? false), place: !dig || (mark?.place ?? false) })
+  trace('spawnProtection: refused', why, cell.toString(), 'kept from it', REFUSED_CELL_TICKS, 'ticks')
+  replan(bot)
+  if (state.opLevel === 0) noteRegion(bot, state, cell, dimension)
+  if (state.option !== 'auto' || state.opLevel > 0) return
   if (!inSpawnDimension(bot, state)) return
   if (spawnDistance(bot, cell) > SPAWN_INFER_RANGE) return
   const key = keyOf(cell)
@@ -220,6 +288,24 @@ export function noteRefusal (bot: Bot, cell: Vec3, why: string): void {
   state.refusals.set(key, n)
   trace('spawnProtection: refused', why, cell.toString(), n)
   if (n >= SPAWN_REFUSALS) learnSpawnProtection(bot, cell, `${n} ${why}s put back`)
+}
+
+/** the refusals close together lately: REGION_REFUSALS of them a protected region about them */
+function noteRegion (bot: Bot, state: SpawnProtectionState, cell: Vec3, dimension: string): void {
+  state.recent = state.recent.filter(r => state.tick - r.tick <= REGION_WINDOW)
+  state.recent.push({ cell: cell.floored(), tick: state.tick, dimension })
+  const near = state.recent.filter(r => r.dimension === dimension && Math.max(Math.abs(r.cell.x - cell.x), Math.abs(r.cell.z - cell.z)) <= REGION_RANGE)
+  if (near.length < REGION_REFUSALS) return
+  const xs = near.map(r => r.cell.x)
+  const zs = near.map(r => r.cell.z)
+  const [x0, x1, z0, z1] = [Math.min(...xs), Math.max(...xs), Math.min(...zs), Math.max(...zs)]
+  const x = Math.floor((x0 + x1) / 2)
+  const z = Math.floor((z0 + z1) / 2)
+  const radius = Math.max(x1 - x, x - x0, z1 - z, z - z0) + REGION_MARGIN
+  state.regions = state.regions.filter(r => r.until > state.tick)
+  state.regions.push({ x, z, radius, dimension, until: state.tick + REGION_TICKS })
+  trace('spawnProtection: a protected region about', x, z, 'radius', radius, 'from', near.length, 'refusals')
+  replan(bot)
 }
 
 /**
@@ -237,6 +323,9 @@ export function installSpawnProtection (bot: Bot, option: SpawnProtectionOption 
     refusals: new Map(),
     digs: new Map(),
     places: new Map(),
+    refused: new Map(),
+    recent: [],
+    regions: [],
     tick: 0
   }
   states.set(bot, state)
@@ -261,6 +350,7 @@ export function installSpawnProtection (bot: Bot, option: SpawnProtectionOption 
     for (const map of [state.digs, state.places]) {
       for (const [key, p] of map) if (state.tick - p.tick > REFUSAL_TICKS) map.delete(key)
     }
+    if (state.tick % 200 === 0) for (const [key, m] of state.refused) if (m.until <= state.tick) state.refused.delete(key)
   })
   // the server's putting a predicted block back: the dug block back in its cell, the placed one gone to what was there;
   // then a break the client predicts (mineflayer's dig ends on its own air, the block it digs at that cell) noted,
@@ -328,9 +418,9 @@ export async function leaveSpawnProtection (bot: Bot, margin: number, signal?: A
  * else the nearest of `matching` within `maxDistance` that is, or null (handleUseItemOn refuses a use on a block in it)
  */
 export function usableOutside (bot: Bot, found: ReturnType<Bot['blockAt']>, matching: number | number[], maxDistance: number): ReturnType<Bot['blockAt']> {
-  if (found == null || !underSpawnProtection(bot, found.position)) return found
+  if (found == null || !useRefused(bot, found.position)) return found
   for (const pos of findBlocks(bot, { matching, maxDistance, count: 32 })) {
-    if (!underSpawnProtection(bot, pos)) return bot.blockAt(pos)
+    if (!useRefused(bot, pos)) return bot.blockAt(pos)
   }
   return null
 }

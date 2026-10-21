@@ -16,7 +16,7 @@ import { dig } from '../core/actions'
 import { isInfested } from '../core/infested'
 import { findBlocks } from '../core/findBlocks'
 import { dangerAt } from './danger'
-import { underSpawnProtection } from './spawnProtection'
+import { breakRefused } from './spawnProtection'
 
 export interface CollectBlockArgs {
   /** block names to look for, nearest first */
@@ -175,8 +175,8 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
     // not in the deep dark's hearing (a sensor's 8 blocks: each block broken a vibration, the shriekers' call for the
     // warden) nor by pillagers in view (an outpost's hay bales: dangerAt)
     const found = [...targets.values()]
-      // (nor in the square about the spawn a server keeps: its digs are refused, spawn protection)
-      .filter(pos => !tried.has(vecKey(pos)) && args.exclude?.(pos) !== true && !(avoidLava && lavaBeside(p => bot.blockAt(p), pos)) && !dangerAt(bot, pos) && !underSpawnProtection(bot, pos))
+      // (nor in the square about the spawn a server keeps, spawn protection, nor where the server refused a dig lately)
+      .filter(pos => !tried.has(vecKey(pos)) && args.exclude?.(pos) !== true && !(avoidLava && lavaBeside(p => bot.blockAt(p), pos)) && !dangerAt(bot, pos) && !breakRefused(bot, pos))
       .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
     if (found.length === 0) return null
     tried.add(vecKey(found[0]))
@@ -213,8 +213,8 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       continue
     }
     // nor one in the square about the spawn a server keeps (spawn protection: the dig refused and the block put back)
-    if (underSpawnProtection(bot, pos)) {
-      lastFailure = new SkillError('REFUSED', `${block.name} at ${pos.toString()} is under spawn protection: not broken`)
+    if (breakRefused(bot, pos)) {
+      lastFailure = new SkillError('REFUSED', `${block.name} at ${pos.toString()} is under spawn protection or refused: not broken`)
       continue
     }
     // the room made toward the block (the pit for what's thrown dug off the way to it), and the block there still
