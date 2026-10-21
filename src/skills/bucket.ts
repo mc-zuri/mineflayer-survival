@@ -244,12 +244,41 @@ export interface EmptyBucketArgs {
   fluid?: Fluid
 }
 
+/** prismarine's block faces by their index in a raycast's hit (0 down, 1 up, 2 north, 3 south, 4 west, 5 east) */
+const HIT_FACES = [new Vec3(0, -1, 0), new Vec3(0, 1, 0), new Vec3(0, 0, -1), new Vec3(0, 0, 1), new Vec3(-1, 0, 0), new Vec3(1, 0, 0)]
+
 /**
- * A face to click to pour into `pos`: a solid neighbour's face toward it that the bot's eyes see, with nothing in the
- * way. BucketItem.use raycasts without fluids and pours on the clicked face's side (into the block itself when it
- * holds water, as a slab can, so those aren't used).
+ * Whether the use ray from `eye` toward `point` lands where a full bucket's pour into `pos` needs it: the server's ray
+ * ignores fluids and the liquid goes into the cell in front of the face it hits first (BucketItem.use), so the ray's
+ * own first hit (the world's raycast, fluids passed through) has to be `block`'s face toward `pos`; and it crosses no
+ * liquid on its way before `pos` (a pour whose ray went over lava would set a wall of obsidian along it as the water
+ * spreads back). After mine-ai-mcp's pourAim (src/world/liquid.ts, MIT): picking the cell and then a face on it as two
+ * guesses, a ray could hit the block's other face first and pour the water elsewhere.
  */
-function pourPoint (bot: Bot, pos: Vec3, eye: Vec3 = eyePosition(bot)): Vec3 | null {
+export function pourRayLands (bot: Bot, eye: Vec3, point: Vec3, block: Vec3, pos: Vec3): boolean {
+  const delta = point.minus(eye)
+  const dist = delta.norm()
+  if (dist < 1e-6) return false
+  const dir = delta.scaled(1 / dist)
+  const hit: any = bot.world.raycast(eye, dir, dist + 0.5)
+  if (hit == null || hit.position == null || !(hit.position as Vec3).equals(block)) return false
+  const face = HIT_FACES[Number(hit.face ?? -1)]
+  if (face == null || !block.plus(face).equals(pos)) return false
+  for (let t = 0; t < dist; t += 0.05) {
+    const cell = eye.plus(dir.scaled(t)).floored()
+    if (cell.equals(pos)) break
+    const name = bot.blockAt(cell)?.name
+    if (name === 'water' || name === 'lava' || name === 'bubble_column') return false
+  }
+  return true
+}
+
+/**
+ * A face to click to pour into `pos`: a solid neighbour's face toward it that the bot's eyes see, the use ray's first
+ * hit that face (pourRayLands). BucketItem.use raycasts without fluids and pours on the clicked face's side (into the
+ * block itself when it holds water, as a slab can, so those aren't used).
+ */
+export function pourPoint (bot: Bot, pos: Vec3, eye: Vec3 = eyePosition(bot)): Vec3 | null {
   for (const face of FACES) {
     const block = bot.blockAt(pos.minus(face))
     if (block == null || !isSolid(block) || isInteractive(block.name) || 'waterlogged' in (block.getProperties?.() ?? {})) continue
@@ -258,9 +287,9 @@ function pourPoint (bot: Bot, pos: Vec3, eye: Vec3 = eyePosition(bot)): Vec3 | n
     const spread = [[0, 0], [0.3, 0.3], [-0.3, 0.3], [0.3, -0.3], [-0.3, -0.3]]
     for (const [a, b] of spread) {
       const point = face.x !== 0 ? centre.offset(0, a, b) : face.y !== 0 ? centre.offset(a, 0, b) : centre.offset(a, b, 0)
-      // the eyes on the face's outer side, nothing between them and it
+      // the eyes on the face's outer side, the ray's first hit that face
       if (eye.minus(point).dot(face) <= 0) continue
-      if (canSee(bot, point, block.position, eye)) return point
+      if (pourRayLands(bot, eye, point, block.position, pos)) return point
     }
   }
   return null

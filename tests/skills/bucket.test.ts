@@ -108,3 +108,36 @@ test('fillBucket: a fill that comes back empty marks its cell no source NO_SOURC
     clearInterval(ticks)
   }
 })
+
+test('pourPoint: a face the use ray hits first (pourRayLands): a point whose ray hits the block\'s other face, or crosses lava on its way, is passed over (after mine-ai-mcp\'s pourAim)', async () => {
+  const { pourPoint, pourRayLands } = await import('../../src/skills/bucket')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // the pour's cell (2, 64, 0) over the floor (2, 63, 0); lava at (1, 64, 0) in one case
+  const pos = new Vec3(2, 64, 0)
+  const floor = new Vec3(2, 63, 0)
+  let lava = false
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  bot.blockAt = (p: Vec3) => {
+    const c = p.floored()
+    const name = lava && c.equals(new Vec3(1, 64, 0)) ? 'lava' : c.y < 64 ? 'stone' : 'air'
+    return { name, position: c, boundingBox: name === 'stone' ? 'block' : 'empty', getProperties: () => ({}) }
+  }
+  // the world's ray: the floor's west face for a point at its top face's middle (as a ray grazing its edge would),
+  // its top face for the others
+  bot.world = {
+    raycast: (eye: Vec3, dir: Vec3, range: number) => {
+      const t = (64 - eye.y) / dir.y
+      const at = eye.plus(dir.scaled(t))
+      const centre = Math.abs(at.x - 2.5) < 0.01 && Math.abs(at.z - 0.5) < 0.01
+      return { position: floor, face: centre ? 4 : 1, intersect: at }
+    }
+  }
+  const eye = new Vec3(0.5, 65.62, 0.5)
+  assert.equal(pourRayLands(bot, eye, new Vec3(2.5, 64, 0.5), floor, pos), false)
+  assert.equal(pourRayLands(bot, eye, new Vec3(2.8, 64, 0.8), floor, pos), true)
+  const point = pourPoint(bot, pos, eye)
+  assert.ok(point != null && !(Math.abs(point.x - 2.5) < 0.01 && Math.abs(point.z - 0.5) < 0.01), String(point))
+  // lava on the ray's way to the cell: none
+  lava = true
+  assert.equal(pourRayLands(bot, eye, new Vec3(2.8, 64, 0.8), floor, pos), false)
+})
