@@ -33,7 +33,7 @@ import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOf
 import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, UnreachableBlocks, VILLAGE_RANGE, WATCHED_MOBS, WATER_MOBS, type MobLand } from './sight'
 import { BiomeSurvey, KELP_BIOMES, LAND_FOODS, MIN_SURVEYED, MOB_BIOMES, MOB_LAND_RANGE } from './foodLand'
 import { fishableWaterNear } from '../skills/fish'
-import { herdSpares, herdSupply, noteAnimals } from '../skills/herd'
+import { herdSpares, herdSupply, homeFoodKeeps, noteAnimals } from '../skills/herd'
 import { noteVillage } from '../skills/village'
 import { digDepotNook, dumpPit, lavaThrow, pitThrow, rememberAround } from './explore'
 import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
@@ -931,10 +931,12 @@ export class Executor {
 
   /**
    * What no store or throw takes from the bag beyond keep.ts protectedCounts' own: the best hoe while the bot keeps a
-   * farm, and what the milestones being worked on need (milestoneNeeds)
+   * farm, what the milestones being worked on need (milestoneNeeds), and the home's food's seeds and breeding food
+   * (homeFoodKeeps)
    */
   protect (): ProtectOptions {
-    return { farming: knownFarms(this.memory, normalizeDimension(this.bot.game?.dimension)).length > 0, needs: this.options.milestoneNeeds() }
+    const dimension = normalizeDimension(this.bot.game?.dimension)
+    return { farming: knownFarms(this.memory, dimension).length > 0, needs: this.options.milestoneNeeds(), homeFood: homeFoodKeeps(this.memory, dimension) }
   }
 
   /** what making room may throw away beyond the keep count: the options' surplus, and the route's stone the stock has enough of */

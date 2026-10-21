@@ -297,6 +297,8 @@ export interface ProtectOptions {
   foodPoints?: number
   /** what the milestones being worked on need (milestoneNeeds), kept up to these counts */
   needs?: Readonly<Record<string, number>>
+  /** what the home's food keeps (homeFoodKeeps: a farm's seeds, the herd's breeding food), up to these counts */
+  homeFood?: Readonly<Record<string, number>>
 }
 
 /**
@@ -338,6 +340,7 @@ export function protectedCounts (items: readonly ItemCount[], registry?: Registr
     }
   }
   for (const [name, n] of Object.entries(opts.needs ?? {})) keep(name, n)
+  for (const [name, n] of Object.entries(opts.homeFood ?? {})) keep(name, n)
   return out
 }
 

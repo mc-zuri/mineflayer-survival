@@ -412,3 +412,28 @@ test('lastResort: a room with nothing else to throw throws the stone beyond the 
   assert.deepEqual(toss, [{ name: 'cobblestone', count: 64 }, { name: 'oak_log', count: 21 }])
   assert.ok(lastResortItem('oak_planks') && lastResortItem('cobblestone') && !lastResortItem('melon_slice') && !lastResortItem('torch'))
 })
+
+test('the home\'s food kept from a room\'s throw and a store (homeFoodKeeps): a farm\'s seeds up to 64, the herd\'s wheat up to 12; none of it with no farm and a herd of pigs but the start\'s seeds and the pigs\' carrots (f5-1.21.11: seeds thrown, the herd\'s wheat stashed a wheat at a time)', async () => {
+  const registry = minecraftData('1.21.11')
+  const { homeFoodKeeps, SEEDS_KEPT, HERD_FOOD_HELD } = await import('../../src/skills/herd')
+  const { FARM_PLOTS } = await import('../../src/core/crops')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { rememberFarm } = await import('../../src/skills/farm')
+  const { Vec3 } = await import('vec3')
+  const memory = new WorldMemory()
+  // no farm yet, no herd: the start's seeds and the herd's wheat to start one
+  assert.deepEqual(homeFoodKeeps(memory), { wheat_seeds: FARM_PLOTS, wheat: HERD_FOOD_HELD })
+  rememberFarm(memory, { water: new Vec3(0, 63, 0), cells: [new Vec3(1, 63, 0)], crop: 'wheat' }, 0)
+  rememberFarm(memory, { water: new Vec3(20, 63, 0), cells: [new Vec3(21, 63, 0)], crop: 'carrots' }, 0)
+  memory.addPoi('herd', new Vec3(10, 64, 10), 'overworld', JSON.stringify({ mob: 'pig', adults: 2, calves: 0, bred: null }))
+  assert.deepEqual(homeFoodKeeps(memory), { wheat_seeds: SEEDS_KEPT, carrot: SEEDS_KEPT, potato: HERD_FOOD_HELD, beetroot: HERD_FOOD_HELD })
+  assert.deepEqual(homeFoodKeeps(memory, 'the_nether'), {})
+  // a room's throw: the junk goes, the farm's seeds and the herd's wheat stay
+  const cows = new WorldMemory()
+  rememberFarm(cows, { water: new Vec3(0, 63, 0), cells: [new Vec3(1, 63, 0)], crop: 'wheat' }, 0)
+  const stacks = [{ name: 'wheat_seeds', count: 30 }, { name: 'wheat', count: 9 }, { name: 'dirt', count: 64 }, { name: 'gravel', count: 10 }]
+  const tossed = junkToToss(stacks, 5, { registry, protect: { homeFood: homeFoodKeeps(cows) } })
+  assert.deepEqual(tossed.map(t => t.name).sort(), ['dirt', 'gravel'])
+  const { store } = splitInventory(stacks, { registry, protect: { homeFood: homeFoodKeeps(cows) } })
+  assert.ok(!store.some(s => s.name === 'wheat' || s.name === 'wheat_seeds'), JSON.stringify(store))
+})

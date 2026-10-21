@@ -9,6 +9,8 @@ import { Vec3 } from 'vec3'
 import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import { BREED_COOLDOWN_TICKS, BREEDING_FOOD, isAdult } from './husbandry'
+import { knownFarms, SEED_OF } from './farm'
+import { FARM_PLOTS } from '../core/crops'
 import { inPen, penFromMemory, type PenPlan } from './pen'
 import { type Entity, isAlive } from './combatUtil'
 import { countItems } from './util'
@@ -295,3 +297,31 @@ export function rememberedAnimals (memory: WorldMemory, near: Vec3, range: numbe
     .filter(g => g.adults >= least)
     .sort((a, b) => a.pos.distanceTo(near) - b.pos.distanceTo(near))
 }
+
+/** the wheat seeds a bag keeps while the bot keeps a wheat farm: a stack, its next sowings and its growth */
+export const SEEDS_KEPT = 64
+/** the breeding food a bag keeps for the herd (its pairs' and a lead's), or for a herd to start */
+export const HERD_FOOD_HELD = 12
+
+/**
+ * What the bag keeps for the home's food, whatever a room or a store takes (the executor's protect): the seeds of
+ * each farm's crop (SEED_OF: wheat seeds, beetroot seeds, carrots, potatoes) up to SEEDS_KEPT while it has one, and the
+ * FARM_PLOTS a farm starts with while none is sown yet; and the herd's breeding food (wheat for cows and sheep, carrots
+ * or potatoes for pigs), HERD_FOOD_HELD, or wheat for a herd still to start. The bag threw its wheat seeds as junk and
+ * stashed the herd's wheat in the base's chest a wheat at a time (f5-1.21.11 resumed from its base, t198772 to
+ * t200356), and the herd's start then had none to lead with ('herd: none to start yet ... 0 wheat', t169785)
+ */
+export function homeFoodKeeps (memory: WorldMemory, dimension = 'overworld'): Record<string, number> {
+  const out: Record<string, number> = {}
+  const farms = knownFarms(memory, dimension)
+  if (dimension === 'overworld' && farms.length === 0) out.wheat_seeds = FARM_PLOTS
+  for (const f of farms) {
+    const seed = SEED_OF[f.crop]
+    if (seed != null) out[seed] = SEEDS_KEPT
+  }
+  if (dimension !== 'overworld') return out
+  const herd = herdFromMemory(memory)
+  for (const food of herd == null ? ['wheat'] : (BREEDING_FOOD[herd.mob] ?? [])) out[food] = Math.max(out[food] ?? 0, HERD_FOOD_HELD)
+  return out
+}
+
