@@ -595,3 +595,20 @@ test('enterBunker: back from a fetch, the walk in goes on whatever the blazes do
     restore()
   }
 })
+
+test('shutInWhereItStands: hurt on the way in, a box put up round the bot (back, sides, roof), its front shut to heal, then opened toward the bunker', async () => {
+  const { shutInWhereItStands } = await import('../../src/nether/blazeFight')
+  const { bot, filled, placed, restore } = await bunkerBot([])
+  bot.entity.position = new Vec3(6.5, 64, 12.5)
+  bot.health = 10
+  const ticking = setInterval(() => { for (let k = 0; k < 50; k++) bot.emit('physicsTick') }, 1)
+  try {
+    assert.equal(await shutInWhereItStands(bot, new Vec3(0.5, 64, 5.5), 18), true)
+  } finally {
+    clearInterval(ticking)
+    restore()
+  }
+  // its walls and roof put, the front's two put and opened again
+  for (const p of ['(6, 64, 13)', '(7, 65, 12)', '(5, 64, 12)', '(6, 66, 12)', '(6, 64, 11)', '(6, 65, 11)']) assert.ok(placed.includes(p), `${p} put: ${placed.join(' ')}`)
+  assert.ok(!filled.has('(6, 64, 11)') && !filled.has('(6, 65, 11)'))
+})

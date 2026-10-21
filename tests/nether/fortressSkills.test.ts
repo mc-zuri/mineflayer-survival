@@ -485,27 +485,25 @@ test('the camp\'s retreat with blocks in the bag: shut in where the bot stands t
   ;(bot as any).world = { raycast: () => null }
   bot.findBlocks = () => []
   const calls: string[] = []
-  const real = { build: fightModule.buildNook, seal: fightModule.sealAndHeal, open: fightModule.openNook, move: gridModule.moveNear, walk: navModule.walkTo }
-  fightModule.buildNook = async (_b: unknown, nook: any) => { calls.push(`build ${nook.stand.toString()} facing ${nook.facing.toString()}`) }
-  fightModule.sealAndHeal = async () => { calls.push('seal'); (bot as any).health = 20; return true }
-  fightModule.openNook = async () => { calls.push('open') }
+  // (the box's own work is blazeFight's shutInWhereItStands: its building, sealing and opening tested with it)
+  const real = { shut: fightModule.shutInWhereItStands, move: gridModule.moveNear, walk: navModule.walkTo }
+  fightModule.shutInWhereItStands = async (_b: unknown, toward: Vec3, healTo: number) => { calls.push(`shut in at ${bot.entity.position.floored().toString()} toward ${toward.toString()} to ${healTo}`); (bot as any).health = 20; return true }
   gridModule.moveNear = async (_b: unknown, to: Vec3) => { calls.push(`move ${to.toString()}`) }
   navModule.walkTo = async () => true
   const ticking = setInterval(() => bot.emit('physicsTick'), 1)
   try {
     await assert.rejects(collectBlazeRods(bot, { count: 8, spawner: new Vec3(0, 64, 0), maxTicks: 200, safety: false, nook: false }), /TIMEOUT|rods/)
-    assert.deepEqual(calls.slice(0, 3), ['build (8, 64, 0) facing (-1, 0, 0)', 'seal', 'open'], calls.join(' | '))
+    assert.deepEqual(calls.slice(0, 1), ['shut in at (8, 64, 0) toward (0, 64, 0) to 18'], calls.join(' | '))
     assert.ok(!calls.some(c => c.startsWith('move (3')), calls.join(' | '))
     // with too few blocks for the box: false, nothing done
+    fightModule.shutInWhereItStands = real.shut
     ;(bot.inventory.slots as any[]).fill(null, 9, 45)
     calls.length = 0
     assert.equal(await healSealed(bot, new Vec3(0, 64, 0)), false)
     assert.deepEqual(calls, [])
   } finally {
     clearInterval(ticking)
-    fightModule.buildNook = real.build
-    fightModule.sealAndHeal = real.seal
-    fightModule.openNook = real.open
+    fightModule.shutInWhereItStands = real.shut
     gridModule.moveNear = real.move
     navModule.walkTo = real.walk
   }

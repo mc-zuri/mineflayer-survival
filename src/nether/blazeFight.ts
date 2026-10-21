@@ -1362,8 +1362,16 @@ export async function enterBunker (bot: Bot, nook: BlazeNook, signal?: AbortSign
           bot.off('physicsTick', onTick)
           signal?.removeEventListener('abort', onParent)
         }
-        trace('enterBunker: a blaze about to hit on the way in: held off')
         bot.clearControlStates()
+        // hurt: shut in a box where it stands to heal (3 walls and a roof, the front shut too: shutInWhereItStands),
+        // out of the blazes' sight, then on; else held off behind the shield. A 1.21.11 bot came up to its bunker's
+        // site by seed 2's open throne at (-290, 77, -209) at 9 health among the blazes and was fireballed before a
+        // block of it was down
+        if (fightHealth(bot) <= ENTER_SHELL_HEALTH && await shutInWhereItStands(bot, nook.stand.offset(0.5, 0, 0.5), BUNKER_FETCH_HEALTH + 2, signal)) {
+          trace('enterBunker: a blaze about to hit on the way in, hurt: shut in where it stood to heal')
+          continue
+        }
+        trace('enterBunker: a blaze about to hit on the way in: held off')
         await holdOffBlazes(bot, { signal, maxTicks: NOOK_GUARD_TICKS, untilSafe: true })
       }
     }
@@ -1413,6 +1421,39 @@ export function rodFloor (bot: Bot, nook: BlazeNook, at: Vec3): Vec3 | null {
     return on
   }
   return null
+}
+
+/** at this fight health or under the walk into a bunker shuts itself in where it stands to heal (enterBunker) */
+export const ENTER_SHELL_HEALTH = 16
+
+/**
+ * A box shut round the bot where it stands (nookAround: the back, the sides and a roof, the front toward `toward`),
+ * the front shut too, fed and healed to `healTo` inside (sealAndHeal), and opened toward `toward` again: no blaze's
+ * fireball nor a wither skeleton's sword reaches into a box of full blocks. False, and nothing done, when there's no
+ * box to be had there (no floor, a wall that isn't a full block, too few blocks in the bag) or its front won't shut.
+ */
+export async function shutInWhereItStands (bot: Bot, toward: Vec3, healTo: number, signal?: AbortSignal): Promise<boolean> {
+  const feet = bot.entity.position.floored()
+  const d = toward.minus(feet)
+  const facing = Math.abs(d.x) >= Math.abs(d.z) ? new Vec3(d.x < 0 ? -1 : 1, 0, 0) : new Vec3(0, 0, d.z < 0 ? -1 : 1)
+  const lookup: NookLookup = p => bot.blockAt(p) as NookBlock | null
+  const nook = nookAround(lookup, feet, facing)
+  if (nook == null) return false
+  const front = nook.front.filter(p => lookup(p)?.boundingBox !== 'block').length
+  if (nookBlocks(bot) < nook.build.length + front) return false
+  trace('shutInWhereItStands: at', feet.toString(), nook.build.length + front, 'blocks')
+  // (the body in the middle of its cell: half in a wall's cell, the wall's block would walk it out of the box)
+  await walkTo(bot, feet.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal)
+  try {
+    await buildNook(bot, nook, signal, false)
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('shutInWhereItStands: no box:', (err as Error).message)
+    return false
+  }
+  const shut = await sealAndHeal(bot, nook, healTo, signal)
+  if (shut) await openNook(bot, nook, signal)
+  return shut
 }
 
 /** the walk into a bunker is held off a blaze about to hit this many times at the most (enterBunker) */
