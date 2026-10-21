@@ -33,7 +33,7 @@ import { baseRecord } from './base/pois'
 import { withinOwnTicks } from './executor/steps'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
 import { enterPen, herdPen, inPen, leadIntoPen, leavePen, penBroken, protectPen, type PenPlan } from './skills/pen'
-import { BREEDERS_KEPT, HERD, HERD_MOBS, MEAT_OF, POINTS_PER_KILL, breedingFoodHeld, chooseHerdMob, herdCap, herdCensus, herdChores, herdFromMemory, herdPenOf, herdSurplus, holdsBreedingFood, noteHerd, rememberHerd, slaughterPick } from './skills/herd'
+import { ANIMALS_POI, BREEDERS_KEPT, HERD, HERD_MOBS, MEAT_OF, POINTS_PER_KILL, breedingFoodHeld, chooseHerdMob, herdCap, herdCensus, herdChores, herdFromMemory, herdPenOf, herdSurplus, holdsBreedingFood, noteHerd, rememberedAnimals, rememberHerd, slaughterPick } from './skills/herd'
 import { hunt } from './skills/hunt'
 import { isAlive } from './skills/combatUtil'
 import { foodInfo } from './core/items'
@@ -2655,8 +2655,10 @@ export const HERD_LOOK_RANGE = 48
 export const HERD_HOME_RANGE = 48
 /** ticks before a herd's start that found nothing to start with is tried again */
 export const HERD_RETRY_TICKS = 6000
-/** how far off the herd is gone back to for its chores */
-export const HERD_TRIP = 96
+/** how far off the herd is gone back to for its chores (a herd fetched is penned up to HERD_FETCH_RANGE from home) */
+export const HERD_TRIP = 176
+/** how near the herd the bot is for its upkeep without a chore due by its remembered counts (strays, the pen mended) */
+export const HERD_NEAR = 48
 /** the wheat kept from the baking for the herd: leading it in and two pairs bred */
 export const HERD_WHEAT_KEPT = 6
 
@@ -2701,6 +2703,8 @@ export async function startHerd (bot: Bot, executor: Executor, signal: AbortSign
   const near = adultsNear(bot, home, HERD_LOOK_RANGE)
   const mob = chooseHerdMob(near, m => holdsBreedingFood(bot, m))
   if (mob == null) {
+    // none by home: a group seen farther off (noteAnimals) fetched, led home or penned where it is
+    if (await fetchHerd(bot, executor, home, signal, log)) return true
     log(`herd: none to start yet (${HERD_MOBS.map(m => `${near[m] ?? 0} ${m}s`).join(', ')} near home, ${countItems(bot, 'wheat')} wheat)`)
     return false
   }
@@ -2718,6 +2722,61 @@ export async function startHerd (bot: Bot, executor: Executor, signal: AbortSign
   rememberHerd(memory, herd)
   const census = noteHerd(bot, memory, herd)
   log(`herd: ${census?.adults.length ?? penned.inside} ${mob}s and ${census?.calves.length ?? 0} calves penned at ${penned.pen.center.toString()}`)
+  return true
+}
+
+/** how far from home a group of animals seen (noteAnimals) is fetched for a herd when none live near it */
+export const HERD_FETCH_RANGE = 160
+/** a group fetched within this of home is led home with its food (leadIntoPen); farther, it's penned where it is */
+export const HERD_LEAD_RANGE = 64
+/** ticks a herd's fetch may take (the pen, the walk, the lead) */
+export const HERD_FETCH_TICKS = 12000
+
+/**
+ * A herd started from animals that don't live near home: the nearest group of two adults or more of a kind whose food
+ * is held, seen within HERD_FETCH_RANGE of home (rememberedAnimals: the sightings' groups), gone to and led home into a
+ * pen built there first (TemptGoal: an animal follows a player holding its food within 10 blocks), or, farther than
+ * HERD_LEAD_RANGE, penned where it is (penForHerd about it), within HERD_FETCH_TICKS; the herd remembered at its pen
+ * with two adults in it at the least. A 1.21.11 bot's home in an old growth pine taiga had its animals hunted out, 'herd:
+ * none to start yet (0 cows, 0 sheeps, 0 pigs near home)' at every try, and its meals hunted farther and farther off
+ * (f5-1.21.11, f3-1.21.11). Resolves whether a herd was started.
+ */
+export async function fetchHerd (bot: Bot, executor: Executor, home: Vec3, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
+  const memory = executor.memory
+  const group = rememberedAnimals(memory, home, HERD_FETCH_RANGE, memory.now, HERD_MOBS.filter(m => holdsBreedingFood(bot, m)))[0]
+  if (group == null) return false
+  const mob = group.mob
+  const off = Math.round(Math.hypot(group.pos.x - home.x, group.pos.z - home.z))
+  const leadHome = off <= HERD_LEAD_RANGE
+  log(`herd: none near home: the ${group.adults} ${mob}s seen ${off} blocks off at ${group.pos.toString()}, ${leadHome ? 'led home into a pen' : 'penned where they are'}`)
+  let penned: { pen: PenPlan, inside: number } | null
+  try {
+    penned = await withTickBudget(bot, HERD_FETCH_TICKS, signal, async (s) => {
+      // (the pen at home first: the herd led straight in)
+      const atHome = leadHome ? await penForHerd(bot, executor, home, mob, s, log, HERD_PEN_TICKS) : null
+      if (leadHome && atHome == null) return null
+      await executor.task(`to the ${mob}s`, async (t) => await overland(bot, { target: group.pos, range: 6 }, t), s)
+      if (atHome == null) return await penForHerd(bot, executor, group.pos, mob, s, log, HERD_PEN_TICKS)
+      const pen = atHome.pen
+      const inside = await executor.task(`lead the ${mob}s home`, async (t) => await leadIntoPen(bot, pen, { mob, trips: 4, radius: off + 24 }, t), s)
+      return { pen, inside }
+    })
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`herd: not fetched: ${(err as Error).message}`)
+    penned = null
+  }
+  const herd = penned != null ? { pos: penned.pen.center.clone(), mob, adults: 0, calves: 0, bred: null } : null
+  const census = herd != null && penned != null ? (herdCensus(bot, herd, penned.pen)?.adults.length ?? penned.inside) : 0
+  if (herd == null || census < 2) {
+    // (not there any more, or not led: the group forgotten, the next one's)
+    memory.removePoi(ANIMALS_POI, group.pos, 'overworld')
+    log(`herd: the ${mob}s at ${group.pos.toString()} not penned (${census} in)`)
+    return false
+  }
+  rememberHerd(memory, herd)
+  const counted = noteHerd(bot, memory, herd)
+  log(`herd: ${counted?.adults.length ?? census} ${mob}s and ${counted?.calves.length ?? 0} calves penned at ${herd.pos.toString()}, fetched from ${off} blocks off`)
   return true
 }
 
@@ -2750,10 +2809,24 @@ export async function tendHerd (bot: Bot, executor: Executor, signal: AbortSigna
     herd = herdFromMemory(memory, bot.entity.position)
     if (herd == null) return 0
   }
-  if (Math.hypot(bot.entity.position.x - herd.pos.x, bot.entity.position.z - herd.pos.z) > HERD_TRIP) return 0
+  const away = Math.hypot(bot.entity.position.x - herd.pos.x, bot.entity.position.z - herd.pos.z)
+  if (away > HERD_TRIP) return 0
   const mob = herd.mob
   const at = herd.pos
   let pen = herdPenOf(memory, herd)
+  // a herd far off (one fetched and penned where it was) gone to only for a chore its remembered counts call for
+  if (away > HERD_NEAR) {
+    const due = herdChores({
+      adults: herd.adults,
+      calves: herd.calves,
+      food: breedingFoodHeld(bot, mob),
+      cap: herdCap(pen?.size ?? PEN_SIZES[0]),
+      sinceBred: herd.bred == null ? null : Number((bot.time as any)?.age ?? 0) - herd.bred,
+      want: opts.want ?? 0,
+      perKill: POINTS_PER_KILL[mob] ?? 9
+    })
+    if (due.breed + due.slaughter === 0) return 0
+  }
   if (Math.hypot(bot.entity.position.x - at.x, bot.entity.position.z - at.z) > 12 || Math.abs(bot.entity.position.y - at.y) > 4) {
     await executor.task('back to the herd', async (s) => await overland(bot, { target: at, range: 4 }, s), signal).catch(fail('no way back'))
   }

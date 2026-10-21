@@ -209,3 +209,85 @@ export function noteHerd (bot: Bot, memory: WorldMemory, herd: Herd): { adults: 
   if (census != null) rememberHerd(memory, { ...herd, adults: census.adults.length, calves: census.calves.length })
   return census
 }
+
+/**
+ * the wild adults of a herd's kinds seen, noted in the memory by chunk (a point of interest at their middle, the note
+ * their kind and count): where a herd is started from when none live near home (Animal: a farm animal never despawns,
+ * Animal.removeWhenFarAway, and wanders, so a group seen stays about where it was)
+ */
+export const ANIMALS_POI = 'animals'
+/** how far about the bot its wild animals are noted (noteAnimals), the chunks of none forgotten */
+export const ANIMALS_SIGHT = 48
+/** how long a group of animals noted counts (three days: they may be hunted or wander off) */
+export const ANIMALS_TTL = 72000
+
+export interface AnimalGroup {
+  pos: Vec3
+  mob: string
+  adults: number
+  /** the memory's tick it was noted at */
+  seen: number
+}
+
+function chunkKey (p: { x: number, z: number }): string {
+  return `${Math.floor(p.x / 16)},${Math.floor(p.z / 16)}`
+}
+
+function readGroup (poi: { x: number, y: number, z: number, note?: string, seen: number }): AnimalGroup | null {
+  try {
+    const n = JSON.parse(poi.note ?? '')
+    if (typeof n?.mob === 'string') return { pos: new Vec3(poi.x, poi.y, poi.z), mob: n.mob, adults: Number(n.adults ?? 0), seen: poi.seen }
+  } catch {}
+  return null
+}
+
+/**
+ * The wild adults of HERD_MOBS within ANIMALS_SIGHT of the bot noted by chunk (ANIMALS_POI), the herd's own (`spared`,
+ * herdSpares, and those in its pen) not; the groups noted before in the chunks in sight with none of their kind now
+ * forgotten. Resolves the groups noted.
+ */
+export function noteAnimals (bot: Bot, memory: WorldMemory, spared: ReadonlySet<number> = new Set()): number {
+  if (bot.entity == null || normalizeDimension(bot.game?.dimension) !== 'overworld') return 0
+  const at = bot.entity.position
+  const herd = herdFromMemory(memory)
+  const pen = herd != null ? herdPenOf(memory, herd) : null
+  const groups = new Map<string, { mob: string, sum: Vec3, n: number }>()
+  for (const e of Object.values(bot.entities ?? {})) {
+    if (e === bot.entity || e.name == null || !(HERD_MOBS as readonly string[]).includes(e.name)) continue
+    if (e.position.distanceTo(at) > ANIMALS_SIGHT || spared.has(e.id) || !isAdult(bot, e) || !isAlive(bot, e)) continue
+    if (herd != null && inHerd(herd, pen, e)) continue
+    const k = `${e.name}@${chunkKey(e.position)}`
+    const g = groups.get(k) ?? { mob: e.name, sum: new Vec3(0, 0, 0), n: 0 }
+    g.sum = g.sum.plus(e.position)
+    g.n++
+    groups.set(k, g)
+  }
+  // (the chunks in sight: their old groups are as seen now, or gone)
+  for (const poi of memory.getPois(ANIMALS_POI, { dimension: 'overworld' })) {
+    if (Math.hypot(poi.x - at.x, poi.z - at.z) > ANIMALS_SIGHT - 8) continue
+    const g = readGroup(poi)
+    if (g == null || !groups.has(`${g.mob}@${chunkKey(poi)}`)) memory.removePoi(ANIMALS_POI, poi, 'overworld')
+  }
+  for (const [k, g] of groups) {
+    for (const poi of memory.getPois(ANIMALS_POI, { dimension: 'overworld' })) {
+      if (`${readGroup(poi)?.mob ?? ''}@${chunkKey(poi)}` === k) memory.removePoi(ANIMALS_POI, poi, 'overworld')
+    }
+    memory.addPoi(ANIMALS_POI, g.sum.scaled(1 / g.n).floored(), 'overworld', JSON.stringify({ mob: g.mob, adults: g.n }))
+  }
+  return groups.size
+}
+
+/**
+ * The groups of wild animals noted (noteAnimals) within `range` of `near`, seen within ANIMALS_TTL of `now` (the
+ * memory's tick), of `mobs`, `least` adults of a kind at the least (the groups of a kind within 16 of each other
+ * counted together: a herd of two straddling a chunk's edge), the nearest `near` first
+ */
+export function rememberedAnimals (memory: WorldMemory, near: Vec3, range: number, now: number, mobs: readonly string[] = HERD_MOBS, least = 2): AnimalGroup[] {
+  const all = memory.getPois(ANIMALS_POI, { dimension: 'overworld' })
+    .map(readGroup)
+    .filter((g): g is AnimalGroup => g != null && mobs.includes(g.mob) && now - g.seen <= ANIMALS_TTL && Math.hypot(g.pos.x - near.x, g.pos.z - near.z) <= range)
+  return all
+    .map(g => ({ ...g, adults: all.filter(o => o.mob === g.mob && o.pos.distanceTo(g.pos) <= 16).reduce((n, o) => n + o.adults, 0) }))
+    .filter(g => g.adults >= least)
+    .sort((a, b) => a.pos.distanceTo(near) - b.pos.distanceTo(near))
+}

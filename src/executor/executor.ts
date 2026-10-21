@@ -33,7 +33,7 @@ import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOf
 import { KELP_BLOCKS, OCEAN_RANGE, SIGHTED_BLOCKS, Sightings, SIGHT_RADIUS, UnreachableBlocks, VILLAGE_RANGE, WATCHED_MOBS, WATER_MOBS, type MobLand } from './sight'
 import { BiomeSurvey, KELP_BIOMES, LAND_FOODS, MIN_SURVEYED, MOB_BIOMES, MOB_LAND_RANGE } from './foodLand'
 import { fishableWaterNear } from '../skills/fish'
-import { herdSpares, herdSupply } from '../skills/herd'
+import { herdSpares, herdSupply, noteAnimals } from '../skills/herd'
 import { noteVillage } from '../skills/village'
 import { digDepotNook, dumpPit, lavaThrow, pitThrow, rememberAround } from './explore'
 import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
@@ -256,6 +256,9 @@ export const ROOM_COMBAT_WAIT = 400
 export const BIOME_SURVEY_TICKS = 100
 export const BIOME_SURVEY_MAX = 64
 
+/** ticks between the notes of the wild herd animals in sight (noteAnimals) */
+export const ANIMALS_NOTE_TICKS = 100
+
 export class Executor {
   readonly memory: WorldMemory
   readonly tasks: TaskRunner
@@ -323,6 +326,11 @@ export class Executor {
     // the animals in sight noted every second (an exploring for berries that saw none is a land without them too)
     let looks = 0
     bot.on('physicsTick', () => { if (++looks % 20 === 0) this.sightings.look() })
+    // and the wild herd animals' groups every ANIMALS_NOTE_TICKS, where a herd is started from when none live by home
+    bot.on('physicsTick', () => {
+      if (looks % ANIMALS_NOTE_TICKS !== 0) return
+      try { noteAnimals(bot, this.memory) } catch (err) { trace('executor: noteAnimals', (err as Error).message) }
+    })
     // and the chunks loaded since the last survey every BIOME_SURVEY_TICKS
     this.biomes = new BiomeSurvey(bot, this.memory)
     bot.on('physicsTick', () => { if (looks % BIOME_SURVEY_TICKS === 0) this.biomes.survey(BIOME_SURVEY_MAX) })
