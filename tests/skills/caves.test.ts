@@ -498,3 +498,30 @@ test('navigate: the head under water with the air low surfaces first, the way pl
   }
   assert.equal(ups.length, 1)
 })
+
+test('navigate: after WET_FAILS failed walks from the water in a row, out of it first (toShore), NO_PATH while still in it, no search (f2-1.21.11)', async () => {
+  const { noteWetFail, wetStart, WET_FAILS } = await import('../../src/skills/navigate')
+  const explore = require('../../src/executor/explore')
+  const real = explore.toShore
+  const shores: boolean[] = []
+  let out = false
+  explore.toShore = async () => { shores.push(true); return out }
+  try {
+    const bot = fakeBot({ position: new Vec3(0.5, 61, 0.5), world: (p: Vec3) => p.y >= 61 && p.y <= 62 ? 'water' : p.y < 61 ? 'dirt' : 'air' })
+    bot.survival = { tasks: { tick: 100 } }
+    // a first walk from the water: planned as any
+    assert.equal(await wetStart(bot), true)
+    for (let i = 0; i < WET_FAILS; i++) noteWetFail(bot)
+    let err: any = null
+    await wetStart(bot).catch(e => { err = e })
+    assert.equal(err?.code ?? err?.reason, 'NO_PATH')
+    assert.deepEqual(shores, [true])
+    // out on the shore this time: the walk goes on from there
+    for (let i = 0; i < WET_FAILS; i++) noteWetFail(bot)
+    out = true
+    assert.equal(await wetStart(bot), false)
+    assert.equal(shores.length, 2)
+  } finally {
+    explore.toShore = real
+  }
+})

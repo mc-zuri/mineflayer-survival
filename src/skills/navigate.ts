@@ -93,6 +93,55 @@ export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSign
   // the head under water with the air low: up to it first, then the way planned from there (a way planned from under
   // the waves went on under them, move after move 'bot is too low', and the bot drowned: f1-grim t108053 to t108690)
   await surfaceFirst(bot, signal)
+  // walks from the water that failed WET_FAILS times in a row lately: out of it to the shore first, and none planned
+  // from it while it stays in (each search to its timeout some 5 s: a 1.21.11 game's night mine by a pond went from 112
+  // to 25 ticks a second, 53 drowning reflexes in 8000 ticks, f2-1.21.11 t36000 to t44057)
+  const wet = await wetStart(bot, signal)
+  try {
+    const res = await navigateWalks(bot, args, signal)
+    if (wet) wetFails.delete(bot)
+    return res
+  } catch (err) {
+    if (wet && !isAbort(err)) noteWetFail(bot)
+    throw err
+  }
+}
+
+/** walks from the water failed in a row, by bot (their count and the tick of the last) */
+const wetFails = new WeakMap<Bot, { count: number, tick: number }>()
+/** the failed walks from the water in a row (within WET_FAIL_TICKS of each other) after which the bot gets out of it first */
+export const WET_FAILS = 2
+export const WET_FAIL_TICKS = 1200
+
+const tickOf = (bot: Bot): number => Number((bot as any).survival?.tasks?.tick ?? (bot as any).lockstep?.ticks ?? 0)
+
+export function noteWetFail (bot: Bot): void {
+  const now = tickOf(bot)
+  const f = wetFails.get(bot)
+  wetFails.set(bot, { count: f != null && now - f.tick <= WET_FAIL_TICKS ? f.count + 1 : 1, tick: now })
+}
+
+/**
+ * Whether the walk starts in the water (the feet's or the head's cell water); after WET_FAILS failed ones in a row
+ * there, out of it first (toShore, the keys' swim when its pathfinder's way fails) and NO_PATH while still in it
+ */
+export async function wetStart (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  if (typeof bot.blockAt !== 'function' || bot.entity == null) return false
+  const { inWater, toShore } = await import('../executor/explore')
+  if (!inWater(bot)) return false
+  const f = wetFails.get(bot)
+  if (f == null || f.count < WET_FAILS || tickOf(bot) - f.tick > WET_FAIL_TICKS) return true
+  trace('navigate: walks from the water failed', f.count, 'times: out of it first')
+  wetFails.delete(bot)
+  if (!(await toShore(bot, signal))) {
+    noteWetFail(bot)
+    throw new SkillError('NO_PATH', `in the water at ${bot.entity.position.floored().toString()}: no way out of it`)
+  }
+  return false
+}
+
+/** navigate's walks (a stuck one stepped off and tried again: args.unstick) */
+async function navigateWalks (bot: Bot, args: NavigateArgs, signal?: AbortSignal): Promise<NavigateResult> {
   await keepRoom(bot, signal, goalPoint(args.goal) ?? undefined).catch(err => { if (isAbort(err)) throw err })
   const tries = 1 + Math.max(0, args.unstick ?? 2)
   let ticks = 0

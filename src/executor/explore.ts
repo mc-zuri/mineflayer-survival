@@ -551,6 +551,17 @@ export function dryStandNear (lookup: Lookup, from: Vec3): Vec3 | null {
 
 /** ticks swimTo swims for a dry stand at most */
 export const SWIM_OUT_TICKS = 200
+/** ticks toShore swims for a shore's column (up to 32 off) at most */
+export const SWIM_SHORE_TICKS = 600
+
+/** the y of the highest solid block of a column within 40 of `y`, null for none (a shore's top) */
+function columnTopOf (lookup: Lookup, x: number, z: number, y: number): number | null {
+  for (let at = y + 40; at > y - 40; at--) {
+    const b = lookup(new Vec3(x, at, z))
+    if (b != null && b.boundingBox === 'block' && !TREE.test(b.name)) return at
+  }
+  return null
+}
 
 /**
  * Swims to a dry stand by hand (the keys, as a player does: forward toward it, the jump held to keep up and climb out
@@ -558,10 +569,10 @@ export const SWIM_OUT_TICKS = 200
  * pond whose pathfinder moves out all failed 'bot is too low' was taken up by the drowning reflex 71 times in 48000
  * ticks, never out of the pond (f1-grim resumed from its diamonds, t77572 to t109250).
  */
-export async function swimTo (bot: Bot, stand: Vec3, signal?: AbortSignal): Promise<boolean> {
+export async function swimTo (bot: Bot, stand: Vec3, signal?: AbortSignal, ticks = SWIM_OUT_TICKS): Promise<boolean> {
   const { steerToward } = await import('../skills/steer')
   try {
-    for (let t = 0; t < SWIM_OUT_TICKS && inWater(bot); t++) {
+    for (let t = 0; t < ticks && inWater(bot); t++) {
       throwIfAborted(signal)
       steerToward(bot, stand.offset(0.5, 0, 0.5), { sprint: false })
       bot.setControlState('jump', true)
@@ -602,6 +613,11 @@ export async function toShore (bot: Bot, signal?: AbortSignal): Promise<boolean>
   } catch (err) {
     if (isAbort(err)) throw err
     trace('explore: no way to the shore', (err as Error).message)
+  }
+  // (and swum to by the keys when the pathfinder's way failed, as to a dry stand: its column's top)
+  if (inWater(bot)) {
+    const top = columnTopOf(lookupOf(bot), shore.x, shore.z, Math.floor(bot.entity.position.y))
+    if (top != null) await swimTo(bot, new Vec3(shore.x, top + 1, shore.z), signal, SWIM_SHORE_TICKS)
   }
   return !inWater(bot)
 }
