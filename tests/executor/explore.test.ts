@@ -817,3 +817,19 @@ test('swimTo: out of the water by the keys, forward toward the stand with the ju
   assert.ok(held.length > 0 && held.length < 40, `${held.length} ticks swimming`)
   assert.deepEqual(bot.controls, {})
 })
+
+test('dumpPitFor: no pit in a column the bot\'s box stands over (bodyColumns: its feet at x -18.3, the box\'s edge on x -18 counted), the block under it there what may hold the bot up (f5-1.21.11: the throw\'s pit dug under the bot by a lava lake\'s cave)', async () => {
+  const { dumpPitFor, bodyColumns } = await import('../../src/executor/explore')
+  assert.deepEqual(bodyColumns(new Vec3(-18.3, 20, 0.5)).map(p => `${p.x},${p.z}`).sort(), ['-18,0', '-19,0'].sort())
+  assert.deepEqual(bodyColumns(new Vec3(-18.5, 20, 0.5)).map(p => `${p.x},${p.z}`), ['-19,0'])
+  // a corridor along x at y 20 and 21 from x -22 to -14, the bot facing +x at x -18.3 (feet -19)
+  const cells: Record<string, string> = {}
+  for (let x = -22; x <= -14; x++) for (const y of [20, 21]) cells[`${x},${y},0`] = 'air'
+  // bedrock round the bot's cell but ahead (+x): no pit to its sides nor behind
+  for (const y of [18, 19, 20, 21]) { cells[`-19,${y},1`] = 'bedrock'; cells[`-19,${y},-1`] = 'bedrock'; cells[`-20,${y},0`] = 'bedrock' }
+  const feet = new Vec3(-19, 20, 0)
+  const free = dumpPitFor(world(cells), feet, -Math.PI / 2)
+  assert.ok(free != null && free.side.x === -18, String(free?.side))
+  // the box over x -18 too: not there
+  assert.equal(dumpPitFor(world(cells), feet, -Math.PI / 2, undefined, bodyColumns(new Vec3(-18.3, 20, 0.5))), null)
+})

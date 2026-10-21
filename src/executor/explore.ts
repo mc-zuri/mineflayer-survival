@@ -235,11 +235,13 @@ export type PitWays = 'any' | 'behind' | 'sides'
  * with the next step, 30 steps running). Rock under the bottom, no liquid against the cells, nothing that doesn't
  * break; null when no side will do.
  */
-export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3, ways: PitWays = 'any', depth = 1): { side: Vec3, bottom: Vec3, open: Vec3[] } | null {
+export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3, ways: PitWays = 'any', depth = 1, body: readonly Vec3[] = []): { side: Vec3, bottom: Vec3, open: Vec3[] } | null {
   const left = new Vec3(-facing.z, 0, facing.x)
   const order = ways === 'sides' ? [left, left.scaled(-1)] : ways === 'behind' ? [facing.scaled(-1), left, left.scaled(-1)] : [left, left.scaled(-1), facing.scaled(-1), facing]
   for (const d of order) {
     const side = feet.plus(d)
+    // (none in a column the bot's box stands over: the block under it there may be what holds it up)
+    if (body.some(b => b.x === side.x && b.z === side.z)) continue
     const bottom = side.offset(0, -depth, 0)
     const cells = [side.offset(0, 1, 0), side]
     for (let dy = 1; dy <= depth; dy++) cells.push(side.offset(0, -dy, 0))
@@ -248,6 +250,21 @@ export function dumpPitCells (lookup: Lookup, feet: Vec3, facing: Vec3, ways: Pi
     return { side, bottom, open: cells }
   }
   return null
+}
+
+/**
+ * The columns (x, z) the bot's box stands over at `pos` (0.6 wide, an edge on a block's side counted on both: the
+ * physics holds the bot up by a block its box only touches). A 1.21.11 bot by a deep lava lake, its feet at x -18.3 (the
+ * box's edge on x -18), dug its throw's pit in the column at x -18, the block under it the one that held it up over a
+ * cave: it fell 5 blocks into the lake's cave, its fall's water lost, and died in the lava (f5-1.21.11 from 04-base,
+ * t120667 to t120886, three runs of three)
+ */
+export function bodyColumns (pos: Vec3, half = 0.3): Vec3[] {
+  const out: Vec3[] = []
+  for (let x = Math.floor(pos.x - half - 1e-3); x <= Math.floor(pos.x + half + 1e-3); x++) {
+    for (let z = Math.floor(pos.z - half - 1e-3); z <= Math.floor(pos.z + half + 1e-3); z++) out.push(new Vec3(x, 0, z))
+  }
+  return out
 }
 
 /** how far off a `toward` is a dug route's next step (the cell beside the bot it walks into), not a trip's goal */
@@ -268,8 +285,8 @@ export const PIT_DEPTH = 2
  * more); behind a trip's way (farther off); else (`toward` over or under the feet, or none) by the facing
  * (dumpPitCells); PIT_DEPTH deep but by a route's step, a block less where no side has the rock for it
  */
-export function dumpPitFor (lookup: Lookup, feet: Vec3, yaw: number, toward?: Vec3): ReturnType<typeof dumpPitCells> {
-  const deepest = (facing: Vec3, ways: PitWays): ReturnType<typeof dumpPitCells> => dumpPitCells(lookup, feet, facing, ways, PIT_DEPTH) ?? dumpPitCells(lookup, feet, facing, ways, PIT_DEPTH - 1)
+export function dumpPitFor (lookup: Lookup, feet: Vec3, yaw: number, toward?: Vec3, body: readonly Vec3[] = []): ReturnType<typeof dumpPitCells> {
+  const deepest = (facing: Vec3, ways: PitWays): ReturnType<typeof dumpPitCells> => dumpPitCells(lookup, feet, facing, ways, PIT_DEPTH, body) ?? dumpPitCells(lookup, feet, facing, ways, PIT_DEPTH - 1, body)
   // from the feet's cell to the cell of `toward` (a goal's block, a block, a point): a GoalBlock's corner seen from the
   // bot off its cell's middle pointed along the route, the pit dug in the next step's floor
   const dx = toward != null ? Math.floor(toward.x) - feet.x : 0
@@ -277,7 +294,7 @@ export function dumpPitFor (lookup: Lookup, feet: Vec3, yaw: number, toward?: Ve
   const dist = Math.hypot(dx, dz)
   if (toward != null && dist >= 1) {
     const way = facingDir(Math.atan2(-dx, -dz))
-    if (dist <= ROUTE_STEP_RANGE) return dumpPitCells(lookup, feet, way, 'sides', 2 + Math.min(1, Math.max(0, feet.y - Math.floor(toward.y) - 1)))
+    if (dist <= ROUTE_STEP_RANGE) return dumpPitCells(lookup, feet, way, 'sides', 2 + Math.min(1, Math.max(0, feet.y - Math.floor(toward.y) - 1)), body)
     const behind = deepest(way, 'behind')
     if (behind != null) return behind
   }
@@ -290,7 +307,7 @@ export function dumpPitFor (lookup: Lookup, feet: Vec3, yaw: number, toward?: Ve
  * route's next step and under its reach, behind a trip)
  */
 export async function dumpPit (bot: Bot, signal?: AbortSignal, toward?: Vec3): Promise<Vec3 | null> {
-  const cells = dumpPitFor(lookupOf(bot), feetOf(bot), bot.entity.yaw, toward)
+  const cells = dumpPitFor(lookupOf(bot), feetOf(bot), bot.entity.yaw, toward, bodyColumns(bot.entity.position))
   if (cells == null) return null
   if (cells.open.every(c => isOpen(bot, c))) return cells.bottom
   trace('explore: digging a pit to throw into at', cells.side.toString())
