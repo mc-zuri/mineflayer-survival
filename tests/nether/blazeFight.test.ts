@@ -1155,3 +1155,26 @@ test('sealAndHeal: shut in hurt, a porkchop waits at food 18 and 19 (the bar hea
   assert.deepEqual(eaten, [17])
   assert.ok(ticks >= 100, `${ticks}`)
 })
+
+test('holdOffBlazes: a fire in the bot\'s cell is put out first, not stood in behind the shield (a bot shutting itself in burned so)', async () => {
+  const { fakeBot, entity, item } = await import('../reflexes/fakeBot')
+  const { holdOffBlazes } = await import('../../src/nether/blazeFight')
+  const fires = new Set(['(0, 64, 5)'])
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 65, 0.5), meta: { health: 20, flags: 1 } })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 5.5), items: [item('diamond_sword')], offhand: item('shield'), entities: [blaze], world: (p: Vec3) => fires.has(p.floored().toString()) ? 'fire' : p.y < 64 ? 'stone' : 'air' })
+  bot.world = { raycast: () => null }
+  bot.equip = async (it: any, dest: string) => { if (dest === 'hand') bot.heldItem = it }
+  bot.activateItem = () => { bot.usingHeldItem = true }
+  bot.deactivateItem = () => { bot.usingHeldItem = false }
+  bot.lookAt = async () => {}
+  bot.look = async () => {}
+  const dug: string[] = []
+  bot.dig = async (b: any) => { dug.push(b.position.toString()); fires.delete(b.position.toString()) }
+  const ticking = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await holdOffBlazes(bot, { maxTicks: 3 })
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.deepEqual(dug, ['(0, 64, 5)'])
+})

@@ -1275,6 +1275,13 @@ export async function holdOffBlazes (bot: Bot, opts: HoldOffOptions = {}): Promi
     for (; tick < maxTicks; tick++) {
       throwIfAborted(signal)
       if (bot.health <= 0) break
+      // the fire in its cells put out first, not stood in behind the shield (a 26.3 bot shutting itself in by seed 2's
+      // open throne at (-290, 77, -209) held its shield up at a blaze for 180 ticks in a fireball's fire, and burned)
+      if (!fireProof(bot) && inFireCell(bot)) {
+        release()
+        unblock()
+        await putOutFireOnBot(bot, signal)
+      }
       const me = bot.entity.position
       const blazes = Object.values(bot.entities).filter(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(me) <= 48)
       for (const b of blazes) if (!tracked.has(b.id)) { tracked.add(b.id); tracker.track(b) }
