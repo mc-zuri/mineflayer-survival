@@ -99,6 +99,13 @@ export interface ObtainOptions {
    * with rabbits about and a frozen lake by it, full-26.3-s31337-g)
    */
   unseenFactor?: number
+  /**
+   * Items a craft's result is not made of, though its recipe has them (result → the ingredients): what the craft
+   * skill found no recipe of when the plan's craft step ran (the executor's, Executor.noteUncraftable). The craft goes
+   * with its other alternatives, or another source: the same step failing the same way at every plan was a 1.21.11
+   * milestone's end ('craft 8 oak_planks' of oak_wood, f2-grim)
+   */
+  uncraftable?: Readonly<Record<string, readonly string[]>>
 }
 
 /** what findCost is asked about: a block or mob of a source, and the source's own estimate */
@@ -411,7 +418,12 @@ export class Resolver {
     const out: Strategy[] = []
     const use = (kind: StrategyKind): boolean => kind !== skip && !this.exclude.has(kind)
     if (use('loot') && this.opts.memory != null && this.opts.memory.findItem(item).length > 0) out.push((s, p, l) => this.loot(s, item, n, p, l))
-    if (use('craft')) for (const r of recipesFor(this.registry, item)) out.push((s, p, l) => this.craft(s, r, n, p, l))
+    if (use('craft')) {
+      for (const recipe of recipesFor(this.registry, item)) {
+        const r = this.usable(recipe)
+        if (r != null) out.push((s, p, l) => this.craft(s, r, n, p, l))
+      }
+    }
     if (use('smelt')) for (const r of this.smelting.get(item) ?? []) out.push((s, p, l) => this.smelt(s, r, item, n, p, l))
     if (use('mine')) for (const b of this.blockSources.get(item) ?? []) out.push((s, p, l) => this.mine(s, b, item, n, p, l))
     if (use('fill')) { const f = this.fluids.get(item); if (f != null) out.push((s, p, l) => this.fill(s, f, n, p, l)) }
@@ -420,6 +432,22 @@ export class Resolver {
     if (use('fish') && this.opts.undergroundOnly !== true && FISHING.drops.some(d => d.item === item)) out.push((s, p, l) => this.fish(s, item, n, p, l))
     if (use('barter')) { const o = this.barter.get(item); if (o != null) out.push((s, p, l) => this.trade(s, o, n, p, l)) }
     return out
+  }
+
+  private readonly usableRecipes = new WeakMap<CraftRecipe, CraftRecipe | null>()
+
+  /** the recipe less the ingredients its result is uncraftable of (ObtainOptions.uncraftable), null with none left of one */
+  private usable (recipe: CraftRecipe): CraftRecipe | null {
+    const not = this.opts.uncraftable?.[recipe.result]
+    if (not == null || not.length === 0) return recipe
+    let r = this.usableRecipes.get(recipe)
+    if (r === undefined) {
+      const ingredients = recipe.ingredients.map(i => ({ ...i, items: i.items.filter(x => !not.includes(x)) }))
+      // (one recipe object per recipe for the plan: its steps merge by it)
+      r = ingredients.some(i => i.items.length === 0) ? null : { ...recipe, ingredients }
+      this.usableRecipes.set(recipe, r)
+    }
+    return r
   }
 
   private hasStation (s: State, station: Station): boolean {

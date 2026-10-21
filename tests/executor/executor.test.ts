@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events'
 import { Vec3 } from 'vec3'
 import { TaskRunner } from '../../src/core/taskRunner'
 import { TaskError } from '../../src/core/errors'
+import { SkillError } from '../../src/skills/errors'
 import { WorldMemory } from '../../src/core/memory'
 import { Executor, describeStep, neededItems, ownedInventory, requestsMet } from '../../src/executor/executor'
 import type { StepRunner } from '../../src/executor/steps'
@@ -112,6 +113,44 @@ test('a step that keeps failing fails the requests with its error; a death goes 
   assert.equal(tries, 3)
   const dead = new Executor(bot, { runners: { mine: async () => { throw new TaskError('DIED', 'the bot died') } } })
   await assert.rejects(dead.obtain([{ item: 'oak_log', count: 1 }]), (err: any) => err.code === 'DIED')
+})
+
+test('a craft the craft skill makes none of from the step\'s ingredients is planned another way: the next plans leave them out of the recipe', async () => {
+  // f2-grim (1.21.11): 'craft 8 oak_planks' of the 32 oak_wood held, the skill short of 8 oak_planks at every plan,
+  // five milestone failures and the play stopped
+  const bot = fakeBot({ oak_wood: 4 })
+  const log: string[] = []
+  const lines: string[] = []
+  const runners = honestRunners(bot, log)
+  const craft = runners.craft
+  runners.craft = async (step, ctx) => {
+    if (step.ingredients.some((i: any) => i.name === 'oak_wood')) {
+      log.push(`${describeStep(step)} of oak_wood`)
+      throw new SkillError('MISSING_ITEMS', `can't craft ${step.count} ${step.item}: short of ${step.count} ${step.item}`, { item: step.item, crafted: 0, table: null, placedTable: false })
+    }
+    return await craft(step, ctx)
+  }
+  const ex = new Executor(bot, { runners, log: line => lines.push(line) })
+  await ex.obtain([{ item: 'oak_planks', count: 8 }])
+  assert.deepEqual(log, ['craft 8 oak_planks of oak_wood', 'mine 2 oak_log (2 oak_log)', 'craft 8 oak_planks'])
+  assert.equal(count(bot, 'oak_planks'), 8)
+  assert.ok(lines.includes('the craft skill makes no oak_planks of oak_wood: the plans make it another way'), lines.join('\n'))
+  // and the executor's plans after go without it
+  assert.ok(!ex.plan([{ item: 'oak_planks', count: 16 }]).steps.some(s => s.kind === 'craft' && s.ingredients.some(i => i.name === 'oak_wood')))
+
+  // a craft that fails for want of what its table took (the table made of the planks first), or of a table it couldn't
+  // make, is no recipe of the skill's: the same plan again
+  for (const partial of [{ item: 'oak_planks', crafted: 0, table: null, placedTable: true }, { item: 'crafting_table', crafted: 0, table: null, placedTable: false }]) {
+    const short = fakeBot({ oak_wood: 4 })
+    const tries: string[] = []
+    const failing = new Executor(short, {
+      runners: { craft: async (step) => { tries.push(describeStep(step)); throw new SkillError('MISSING_ITEMS', 'short', partial) } },
+      maxStepFailures: 3,
+      log: () => {}
+    })
+    await assert.rejects(failing.obtain([{ item: 'oak_planks', count: 8 }]), /short/)
+    assert.deepEqual(tries, ['craft 8 oak_planks', 'craft 8 oak_planks', 'craft 8 oak_planks'])
+  }
 })
 
 test('steps run as foreground tasks a reflex preempts and resumes', async () => {

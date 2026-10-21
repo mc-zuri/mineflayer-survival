@@ -17,7 +17,7 @@ import type { ToolMaterial } from '../core/items'
 import { checkPlan, type PlanStep, type Station } from '../planner/steps'
 import { BASE_POI, baseRecord, type BaseRecord } from '../base/pois'
 import { storeItems } from '../skills/chest'
-import { craft } from '../skills/craft'
+import { craft, planCraft } from '../skills/craft'
 import { caveReady, watchCaveEntries } from '../skills/caves'
 import { placeBlock } from '../skills/placeBlock'
 import { findPlacement } from '../skills/placement'
@@ -262,6 +262,8 @@ export class Executor {
   private roomLoopUntil = -Infinity
   /** worn tools (kind:material) whose replacement failed: the tick until which no task is stopped for them */
   private readonly wearMuted = new Map<string, number>()
+  /** the crafts' results the craft skill made none of from some of their recipes' ingredients (noteUncraftable) */
+  private readonly uncraftable = new Map<string, Set<string>>()
   /** what the requests being obtained need (neededItems): kept by the room made during a step */
   private needed: Record<string, number> = {}
   /**
@@ -382,6 +384,7 @@ export class Executor {
       position: this.bot.entity.position,
       dimension: this.bot.game?.dimension,
       exclude: [...this.options.exclude, ...(extra.exclude ?? [])],
+      uncraftable: Object.fromEntries([...this.uncraftable].map(([item, not]) => [item, [...not]])),
       findCost: t => this.sightings.cost(t),
       // no cobweb's string for a bot not fit for the caves: a mineshaft's, by the cave spiders' spawners (caveReady)
       caves: caveReady(this.bot),
@@ -478,6 +481,7 @@ export class Executor {
           if (step.kind === 'mine') this.forgetFailedBlocks(step)
           this.forgetMissingStation(err)
           this.noteMissing(step, err, began)
+          await this.noteUncraftable(step, err)
           if (n >= this.options.maxStepFailures) throw err
           if (TaskError.is(err, 'INVENTORY_FULL')) await this.makeRoom(needed, signal, true)
           break
@@ -487,6 +491,38 @@ export class Executor {
         if (outcome.gained < step.count) { this.log(`replan: ${describeStep(step)} gained ${outcome.gained}`); break }
       }
     }
+  }
+
+  /**
+   * A craft step the craft skill found no recipe for (MISSING_ITEMS, nothing crafted, no table made of the
+   * ingredients first), though the step's check had its ingredients held: the planner and the skill disagree on the
+   * recipe, and the next plans make the item of other ingredients or get it another way, instead of the same step
+   * failing at every plan (f2-grim, 1.21.11: 'craft 8 oak_planks' of 32 oak_wood, 'short of 8 oak_planks', five
+   * milestone failures and the play stopped)
+   */
+  private async noteUncraftable (step: PlanStep, err: unknown): Promise<void> {
+    if (step.kind !== 'craft' || !TaskError.is(err, 'MISSING_ITEMS')) return
+    const partial = err.partial as { item?: string, crafted?: number, placedTable?: boolean } | undefined
+    if (partial?.item !== step.item || (partial.crafted ?? 0) > 0 || partial.placedTable === true) return
+    let names = [...new Set(step.ingredients.map(i => i.name))]
+    if (names.length === 0) return
+    // of a one-ingredient recipe (the planks of a log), the alternatives the skill makes none of alone; of the others,
+    // the step's ingredients together
+    const [one] = step.recipe.ingredients
+    if (step.recipe.ingredients.length === 1) {
+      const registry = this.bot.registry as any
+      const alone = await Promise.all(names.map(async n => {
+        const id = registry.itemsByName[n]?.id
+        if (id == null) return false
+        const plan = await planCraft(registry, [{ id, count: one.count }], step.item, step.recipe.count)
+        return plan.status === 'complete'
+      }))
+      if (alone.some(ok => !ok)) names = names.filter((_, i) => !alone[i])
+    }
+    let not = this.uncraftable.get(step.item)
+    if (not == null) this.uncraftable.set(step.item, not = new Set())
+    for (const n of names) not.add(n)
+    this.log(`the craft skill makes no ${step.item} of ${names.join(', ')}: the plans make it another way`)
   }
 
   /**

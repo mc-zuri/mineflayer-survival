@@ -394,3 +394,19 @@ test('a bot not fit for the caves (caves: false) plans no cobweb, even remembere
   assert.equal(arrows.ok, true)
   assert.deepEqual(arrows.steps.filter(s => s.kind === 'mine' || s.kind === 'kill').map(s => `${s.kind} ${(s as any).block ?? (s as any).mob}`).sort(), [...new Set(obtain(registry, 'arrow', 32, { inventory, memory, position: at }).steps.filter(s => s.kind === 'mine' || s.kind === 'kill').map(s => `${s.kind} ${(s as any).block ?? (s as any).mob}`))].sort())
 })
+
+test('uncraftable: a recipe\'s ingredients the craft skill makes none of its result from are left out of it (the executor\'s), the rest of its alternatives or another source used', () => {
+  const held = { oak_wood: 4, oak_log: 1 }
+  const ofWood = (steps: PlanStep[]): boolean => crafts(steps, 'oak_planks').some(s => s.ingredients.some(i => i.name === 'oak_wood'))
+  assert.equal(ofWood(obtain(registry, 'oak_planks', 8, { inventory: held }).steps), true)
+  const plan = obtain(registry, 'oak_planks', 8, { inventory: held, uncraftable: { oak_planks: ['oak_wood'] } })
+  assert.equal(plan.ok, true)
+  assert.equal(ofWood(plan.steps), false)
+  assert.equal(total(mines(plan.steps, 'oak_log')), 1)
+  assert.equal(plan.inventory.count('oak_wood'), 4)
+  // none of the oak's alternatives left: the oak_planks are no craft at all
+  const none = obtain(registry, 'oak_planks', 4, { inventory: held, uncraftable: { oak_planks: ['oak_log', 'oak_wood', 'stripped_oak_log', 'stripped_oak_wood'] } })
+  assert.equal(none.ok, false)
+  // and the other planks are made as before
+  assert.equal(obtain(registry, 'birch_planks', 4, { uncraftable: { oak_planks: ['oak_log'] } }).ok, true)
+})
