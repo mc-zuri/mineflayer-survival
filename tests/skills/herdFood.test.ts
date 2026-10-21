@@ -382,3 +382,58 @@ test('a fetch whose home has no ground for a pen pens the animals where they are
   assert.ok(tasks.includes('to the cows') && !tasks.includes('lead the cows home'), tasks.join(', '))
   assert.ok(herdOf(memory)?.pos.equals(there))
 })
+
+test('herd search: due with none yet, then every 3 days, a failed one dear for 6; its spot the open land\'s food biomes first, within the fetch range and away from home and from spots searched', async () => {
+  const { herdSearchDue, herdSearchTarget, HERD_SEARCH_POI, HERD_SEARCH_TICKS, HERD_SEARCH_FAIL_TICKS } = await import('../../src/milestones')
+  const memory = new WorldMemory()
+  assert.equal(herdSearchDue(memory, 0), true)
+  const home = new Vec3(0, 64, 0)
+  memory.addPoi('food_biome', new Vec3(20, 70, 0), 'overworld', 'old_growth_pine_taiga')
+  memory.addPoi('food_biome', new Vec3(120, 70, 0), 'overworld', 'old_growth_pine_taiga')
+  memory.addPoi('food_biome', new Vec3(0, 70, 200), 'overworld', 'plains')
+  memory.addPoi('food_biome', new Vec3(0, 70, 300), 'overworld', 'meadow')
+  // the plains first, though the taiga's nearer; not the taiga 20 off (home's), not the meadow past the range
+  assert.deepEqual(herdSearchTarget(memory, home), { pos: new Vec3(0, 70, 200), biome: 'plains' })
+  memory.now = 1000
+  memory.addPoi(HERD_SEARCH_POI, new Vec3(0, 70, 200), 'overworld', JSON.stringify({ found: false }))
+  assert.deepEqual(herdSearchTarget(memory, home), { pos: new Vec3(120, 70, 0), biome: 'old_growth_pine_taiga' })
+  assert.equal(herdSearchDue(memory, 1000 + HERD_SEARCH_TICKS), false)
+  assert.equal(herdSearchDue(memory, 1000 + HERD_SEARCH_FAIL_TICKS), true)
+  memory.now = 2000
+  memory.addPoi(HERD_SEARCH_POI, new Vec3(120, 70, 0), 'overworld', JSON.stringify({ found: true }))
+  assert.equal(herdSearchDue(memory, 2000 + HERD_SEARCH_TICKS - 1), false)
+  assert.equal(herdSearchDue(memory, 2000 + HERD_SEARCH_TICKS), true)
+})
+
+test('startHerd with no group seen within 256 of home: by day a search of the plains noted 200 off, the group it sees fetched home; by night, or not due, none', async () => {
+  const { startHerd, HERD_SEARCH_POI } = await import('../../src/milestones')
+  const { herdFromMemory: herdOf, ANIMALS_POI } = await import('../../src/skills/herd')
+  const memory = new WorldMemory()
+  memory.addPoi('food_biome', new Vec3(0, 70, 200), 'overworld', 'plains')
+  const cows = [entity({ name: 'cow', position: new Vec3(0.5, 64, 200.5) }), entity({ name: 'cow', position: new Vec3(2.5, 64, 200.5) })]
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wheat', 6)] })
+  bot.game.dimension = 'overworld'
+  bot.time = { age: 0, timeOfDay: 1000 }
+  const pen = planPen(() => ({ name: 'air', boundingBox: 'empty' }), CENTER, 9, 'west')
+  const { executor, tasks } = fakeExecutor(bot, memory, (name) => {
+    // (the search's exploring: the cows seen by the plains, the sightings' note)
+    if (name === 'look for a herd') { memory.addPoi(ANIMALS_POI, new Vec3(1, 64, 200), 'overworld', JSON.stringify({ mob: 'cow', adults: 2 })) }
+    if (name === 'the herd pen') { rememberPen(memory, pen); return { pen, inside: 0, built: true } }
+    if (name === 'to the cows') { for (const c of cows) bot.entities[c.id] = c; bot.entity.position = new Vec3(0.5, 64, 196.5) }
+    if (name === 'lead the cows home') { for (const c of cows) c.position = CENTER.offset(0.5, 0, 0.5); bot.entity.position = CENTER.offset(-6, 0, 0); return 2 }
+  })
+  const lines: string[] = []
+  assert.equal(await startHerd(bot, executor, signal(), l => lines.push(l)), true, lines.join(' | '))
+  assert.deepEqual(tasks, ['look for a herd', 'the herd pen', 'to the cows', 'lead the cows home'])
+  assert.ok(herdOf(memory) != null)
+  assert.equal(memory.getPois(HERD_SEARCH_POI).length, 1)
+  // another game by night: no search
+  const night = new WorldMemory()
+  night.addPoi('food_biome', new Vec3(0, 70, 200), 'overworld', 'plains')
+  const nb = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wheat', 6)] })
+  nb.game.dimension = 'overworld'
+  nb.time = { age: 0, timeOfDay: 18000 }
+  const n = fakeExecutor(nb, night)
+  assert.equal(await startHerd(nb, n.executor, signal(), () => {}), false)
+  assert.ok(!n.tasks.includes('look for a herd'))
+})

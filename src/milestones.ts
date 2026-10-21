@@ -14,7 +14,8 @@ import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
 import { obsidianFromLava, obsidianInPit, obsidianLookup, refillWater } from './nether/obsidian'
 import { setFoodReserve } from './skills/eat'
 import { POTION_IDS, potionOf } from './skills/potion'
-import { SURFACE_MIN_Y, descendTo, ensureSurface, inWater, spiralWaypoints, toShore } from './executor/explore'
+import { SURFACE_MIN_Y, descendTo, ensureSurface, exploreSurface, inWater, spiralWaypoints, toShore } from './executor/explore'
+import { FOOD_BIOME_POI } from './executor/foodLand'
 import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from './skills/errors'
@@ -2935,8 +2936,10 @@ export async function startHerd (bot: Bot, executor: Executor, signal: AbortSign
   const near = adultsNear(bot, home, HERD_LOOK_RANGE)
   const mob = chooseHerdMob(near, m => holdsBreedingFood(bot, m))
   if (mob == null) {
-    // none by home: a group seen farther off (noteAnimals) fetched, led home or penned where it is
+    // none by home: a group seen farther off (noteAnimals) fetched, led home or penned where it is; none seen, one
+    // looked for in the meat biomes about (searchHerd), then fetched
     if (await fetchHerd(bot, executor, home, signal, log)) return true
+    if (await searchHerd(bot, executor, home, signal, log) && await fetchHerd(bot, executor, home, signal, log)) return true
     log(`herd: none to start yet (${HERD_MOBS.map(m => `${near[m] ?? 0} ${m}s`).join(', ')} near home, ${countItems(bot, 'wheat')} wheat)`)
     return false
   }
@@ -3046,6 +3049,78 @@ export async function fetchHerd (bot: Bot, executor: Executor, home: Vec3, signa
   const counted = noteHerd(bot, memory, herd)
   log(`herd: ${counted?.adults.length ?? census} ${mob}s and ${counted?.calves.length ?? 0} calves penned at ${herd.pos.toString()}, fetched from ${off} blocks off`)
   return true
+}
+
+/** the biomes a herd's search goes to first (their creature spawns' cows, sheep and pigs, the open land's) */
+export const HERD_BIOMES: ReadonlySet<string> = new Set(['plains', 'sunflower_plains', 'meadow', 'savanna', 'savanna_plateau', 'forest', 'flower_forest', 'birch_forest', 'old_growth_birch_forest'])
+/** a herd's search, once every this many ticks at the most (three days) */
+export const HERD_SEARCH_TICKS = 72000
+/** after a search that found none, the next only after this many (six days: a search is dear) */
+export const HERD_SEARCH_FAIL_TICKS = 144000
+/** the ticks a herd's search explores for, at the most */
+export const HERD_SEARCH_BUDGET = 8000
+/** a herd's search's spot, noted (its note: whether a group was found) */
+export const HERD_SEARCH_POI = 'herd_search'
+/** how far from home a search's spot is at the least (the land about home is hunted out) and from a spot searched before */
+export const HERD_SEARCH_OUT = 48
+export const HERD_SEARCH_SPACING = 64
+
+/** whether a herd's search is due: none yet, or HERD_SEARCH_TICKS since the last (HERD_SEARCH_FAIL_TICKS after one that found none) */
+export function herdSearchDue (memory: WorldMemory, now: number): boolean {
+  const last = memory.getPois(HERD_SEARCH_POI, { dimension: 'overworld' }).sort((a, b) => b.seen - a.seen)[0]
+  if (last == null) return true
+  let found = false
+  try { found = JSON.parse(last.note ?? '').found === true } catch {}
+  return now - last.seen >= (found ? HERD_SEARCH_TICKS : HERD_SEARCH_FAIL_TICKS)
+}
+
+/**
+ * Where a herd's search goes: the food biomes noted (FOOD_BIOME_POI: the surveys' and the seed's) within
+ * HERD_FETCH_RANGE of home and HERD_SEARCH_OUT off it, not within HERD_SEARCH_SPACING of a spot searched before, the
+ * open land's (HERD_BIOMES) first, the nearest home first; null with none
+ */
+export function herdSearchTarget (memory: WorldMemory, home: Vec3): { pos: Vec3, biome: string } | null {
+  const searched = memory.getPois(HERD_SEARCH_POI, { dimension: 'overworld' })
+  const spots = memory.getPois(FOOD_BIOME_POI, { dimension: 'overworld' })
+    .map(p => ({ pos: new Vec3(p.x, p.y, p.z), biome: p.note ?? '' }))
+    .filter(t => {
+      const d = Math.hypot(t.pos.x - home.x, t.pos.z - home.z)
+      return d <= HERD_FETCH_RANGE && d >= HERD_SEARCH_OUT && !searched.some(s => Math.hypot(s.x - t.pos.x, s.z - t.pos.z) < HERD_SEARCH_SPACING)
+    })
+  const by = (t: { pos: Vec3 }): number => Math.hypot(t.pos.x - home.x, t.pos.z - home.z)
+  return spots.filter(t => HERD_BIOMES.has(t.biome)).sort((a, b) => by(a) - by(b))[0] ?? spots.sort((a, b) => by(a) - by(b))[0] ?? null
+}
+
+/**
+ * A herd looked for when no group of two or more of a kind whose food is held has been seen within HERD_FETCH_RANGE of
+ * home (rememberedAnimals): by day, when due (herdSearchDue), the land about the next search spot (herdSearchTarget:
+ * the open land's food biomes first) explored for one within HERD_SEARCH_BUDGET ticks, the animals seen noted by the
+ * sightings as it goes (noteAnimals); the spot noted with whether a group was found (a failed search makes the next
+ * one wait HERD_SEARCH_FAIL_TICKS). A 1.21.11 bot's home in a pine taiga saw no group within 256 blocks in two
+ * resumed games, 'herd: none to start yet' at every upkeep and no herd all game (f5-1.21.11, new10 and new11).
+ * Resolves whether a group is known now.
+ */
+export async function searchHerd (bot: Bot, executor: Executor, home: Vec3, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
+  const memory = executor.memory
+  const mobs = HERD_MOBS.filter(m => holdsBreedingFood(bot, m))
+  const known = (): boolean => rememberedAnimals(memory, home, HERD_FETCH_RANGE, memory.now, mobs).length > 0
+  if (mobs.length === 0 || known()) return known()
+  if (dayPhase(bot.time?.timeOfDay ?? 0) !== 'day' || !herdSearchDue(memory, memory.now)) return false
+  const target = herdSearchTarget(memory, home)
+  if (target == null) { log('herd: no group seen and no meat biome noted near to look for one in'); return false }
+  log(`herd: no group seen within ${HERD_FETCH_RANGE} of home: looking for one in the ${target.biome} at ${target.pos.toString()}`)
+  try {
+    await withTickBudget(bot, HERD_SEARCH_BUDGET, signal, async (s) => {
+      await executor.task('look for a herd', async (t) => await exploreSurface(bot, { found: known, center: target.pos, step: 16, maxRadius: 64, memory }, t), s)
+    })
+  } catch (err) {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`herd: the search: ${(err as Error).message}`)
+  }
+  const found = known()
+  memory.addPoi(HERD_SEARCH_POI, target.pos, 'overworld', JSON.stringify({ found }))
+  log(found ? 'herd: a group found' : `herd: none found about ${target.pos.toString()}: the next search later`)
+  return found
 }
 
 /** the breeding food kept from the baking (harvestGrownFarms): HERD_WHEAT_KEPT for a herd bred with wheat, or for one to start */
