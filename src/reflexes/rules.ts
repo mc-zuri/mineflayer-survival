@@ -20,7 +20,7 @@ import { blockIdsNamed, findBlock } from '../core/findBlocks'
 import { findDoorRefuge, retreatIndoors, type DoorRefuge } from '../skills/indoors'
 import { clearOfWarden, darkSpawners, escapeWarden, lightSpawner, nearestWarden, spawnerLit } from '../skills/danger'
 import { XP_FARM_POI } from '../skills/spawnerFarm'
-import { SEAL_MAX_BLOCKS, openCells, sealBox, sealIn } from '../skills/sealIn'
+import { SEAL_MAX_BLOCKS, boxRefused, openCells, sealBox, sealIn } from '../skills/sealIn'
 import { sealItem } from '../skills/shelter'
 import { countItems } from '../skills/util'
 import { caveCells, caveOpenings, caveRuleOn, inCaveWall, leaveCave, liquidOpenings, sealCaveOpenings } from '../skills/caves'
@@ -685,8 +685,9 @@ export function sealDue (bot: Bot, near: Entity[], config: ReflexConfig, tick: n
   if (e.onGround !== true || e.isInWater === true || e.isInLava === true) return false
   const failed = sealFails.get(bot)
   if (failed != null && tick - failed >= 0 && tick - failed < SEAL_RETRY_TICKS) return false
+  // (none the server refuses the blocks of: boxRefused)
   const box = sealBox(bot, near)
-  if (box == null) return false
+  if (box == null || boxRefused(bot, box)) return false
   const needed = openCells(bot, box).length
   if (needed > SEAL_MAX_BLOCKS) return false
   const item = sealItem(bot)
@@ -750,8 +751,9 @@ export function pillarRanged (bot: Bot): boolean {
 export function pillarWallIn (bot: Bot, near: Entity[]): boolean {
   const feet = bot.entity.position.floored()
   if (!caveCells(bot).roofed(feet)) return false
+  // (none the server refuses the blocks of: boxRefused)
   const box = sealBox(bot, near)
-  if (box == null) return false
+  if (box == null || boxRefused(bot, box)) return false
   const needed = openCells(bot, box).length
   if (needed > PILLAR_SEAL_MAX) return false
   const item = sealItem(bot)
@@ -810,8 +812,9 @@ export function wallInDue (bot: Bot, near: Entity[], config: ReflexConfig, tick:
   if (last != null && last.feet === feet.toString() && tick - last.tick >= 0 && tick - last.tick < WALL_IN_RETRY_TICKS) return false
   const failed = sealFails.get(bot)
   if (failed != null && tick - failed >= 0 && tick - failed < SEAL_RETRY_TICKS) return false
+  // (none the server refuses the blocks of: boxRefused)
   const box = sealBox(bot, near)
-  if (box == null) return false
+  if (box == null || boxRefused(bot, box)) return false
   const needed = openCells(bot, box).length
   if (needed > SEAL_MAX_BLOCKS) return false
   const item = sealItem(bot)

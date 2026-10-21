@@ -1117,3 +1117,27 @@ test('hostiles reflex: a mob fought FRUITLESS_TICKS with no damage done is let b
   assert.strictEqual(fruitlessLetBe(engine.context(), bear), false)
   engine.stop()
 })
+
+test('hostiles reflex at the spawn of a server with spawn protection: no pillar up nor shut in where the server refuses the blocks (the spawn\'s square), a flee or a fight instead; out of the square as before', async () => {
+  const { EventEmitter } = await import('node:events')
+  const { installSpawnProtection } = await import('../../src/skills/spawnProtection')
+  const protect = (engine: ReflexEngine): void => {
+    const bot = (engine as any).bot
+    bot.spawnPoint = new Vec3(0, 64, 0)
+    bot._client = new EventEmitter()
+    installSpawnProtection(bot, 16)
+  }
+  // four zombies on an open floor: a pillar out of the square, none in it
+  const zombie = (x: number, z = 0.5): any => entity({ name: 'zombie', position: new Vec3(0.5 + x, 64, z) })
+  const kit = [item('iron_sword'), item('cobblestone', 64)]
+  const four = [zombie(3), zombie(-3), zombie(0, 3.5), zombie(0, -2.5)]
+  assert.strictEqual(check(hostilesReflex, { health: 8, items: kit, entities: four }), 'pillar up')
+  assert.notStrictEqual(check(hostilesReflex, { health: 8, items: kit, entities: four }, {}, protect), 'pillar up')
+  // two zombies down a tunnel, hurt: shut in out of the square, not in it
+  const zombies = [entity({ name: 'zombie', position: at(2) }), entity({ name: 'zombie', position: at(3) })]
+  const tunnel = (p: Vec3): string => p.z === 0 && p.y >= 64 && p.y <= 65 ? 'air' : 'stone'
+  const sealOnly = { hostiles: { wallIn: false } }
+  const tunnelKit = { items: [item('diamond_sword'), item('cobblestone', 64)], world: tunnel, health: 9 }
+  assert.strictEqual(check(hostilesReflex, { entities: zombies, ...tunnelKit }, sealOnly), 'seal in')
+  assert.notStrictEqual(check(hostilesReflex, { entities: zombies, ...tunnelKit }, sealOnly, protect), 'seal in')
+})

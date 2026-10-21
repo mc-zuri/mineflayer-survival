@@ -11,6 +11,7 @@ import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { bestFoodInInventory, eat } from './eat'
 import { countItems, waitTicks } from './util'
 import { isAbort } from './errors'
+import { placeRefused } from './spawnProtection'
 
 /**
  * blocks up: a zombie's box is 1.95 high, but one by the pillar jumps at the bot (its MoveControl after a target over
@@ -40,7 +41,8 @@ function open (bot: Bot, p: Vec3): boolean {
 
 /**
  * Whether a pillar goes up where the bot stands: on its feet on a full block, out of the water and the lava, the cells
- * over its head open to the pillar's top (feet + 2 to feet + PILLAR_HEIGHT + 1), and PILLAR_HEIGHT blocks carried
+ * over its head open to the pillar's top (feet + 2 to feet + PILLAR_HEIGHT + 1), PILLAR_HEIGHT blocks carried, and
+ * none of its blocks one the server refuses (skills/spawnProtection placeRefused: the spawn's square, a claim)
  */
 export function pillarFits (bot: Bot): boolean {
   const e = bot.entity as any
@@ -48,6 +50,7 @@ export function pillarFits (bot: Bot): boolean {
   const feet = bot.entity.position.floored()
   if (!solid(bot, feet.offset(0, -1, 0))) return false
   for (let dy = 0; dy <= PILLAR_HEIGHT + 1; dy++) if (!open(bot, feet.offset(0, dy, 0))) return false
+  for (let dy = 0; dy < PILLAR_HEIGHT; dy++) if (placeRefused(bot, feet.offset(0, dy, 0))) return false
   return countItems(bot, PILLAR_BLOCKS) >= PILLAR_HEIGHT
 }
 

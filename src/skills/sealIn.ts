@@ -18,6 +18,7 @@ import { sealItem } from './shelter'
 import { countItems, isInfested, trace, waitTicks } from './util'
 import { boxInCell } from './placement'
 import { nookAround, type BlazeNook } from '../nether/blazeFight'
+import { placeRefused } from './spawnProtection'
 
 /** the health the bot heals to shut in (FoodData.tick: a point every 10 ticks saturated, every 80 from food 18 up) */
 export const SEAL_HEAL_TO = 18
@@ -78,6 +79,11 @@ export function infestedBox (lookup: (pos: Vec3) => { name: string } | null, box
 /** the box's cells still open, in the order they go in */
 export function openCells (bot: Bot, box: BlazeNook): Vec3[] {
   return [...box.build, ...box.front].filter(p => bot.blockAt(p)?.boundingBox !== 'block')
+}
+
+/** whether the server refuses a block in one of the box's open cells (skills/spawnProtection placeRefused: the spawn's square, a claim) */
+export function boxRefused (bot: Bot, box: BlazeNook): boolean {
+  return openCells(bot, box).some(p => placeRefused(bot, p))
 }
 
 export interface SealInOptions {
