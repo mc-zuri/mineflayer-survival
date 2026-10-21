@@ -7,7 +7,7 @@ import { shoot, sparedInLine } from '../skills/shoot'
 import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterRunning, shelterToLeave, sleepThroughNight, ticksSinceRest, undergroundAtWork, type NightPlan } from '../skills/shelter'
 import type { Vec3 } from 'vec3'
 import { bestMeleeWeapon } from '../skills/weapons'
-import { hasLineOfSight, isAlive, type Entity } from '../skills/combatUtil'
+import { TaskError, hasLineOfSight, isAlive, type Entity } from '../skills/combatUtil'
 import { holdOffBlazes } from '../nether/blazeFight'
 import { ARCHER_BUDGET, GHAST_FIREBALL, deadlyDropBeside, deflectFireball, fireballIncoming, holdOffArcher, keepFromGhast, nearestGhast, withNetherSafety } from '../nether/safety'
 import { nearbyDrops, pickupDrops } from '../skills/pickupDrops'
@@ -538,6 +538,31 @@ function netherFightsOf (bot: Bot): { anchors: Map<number, { at: Vec3, tick: num
   return f
 }
 
+/** a mob the hostiles reflex's fight couldn't kill in its fightTicks is let be this long (unkilledLetBe) */
+export const UNKILLED_TICKS = 2400
+/** unless it's this near the bot (on it, in the way) */
+export const UNKILLED_NEAR = 2.5
+const unkilledMaps = new WeakMap<Bot, Map<number, number>>()
+
+/** the mob a fight of the hostiles reflex ran out of ticks on (TIMEOUT: out of the sword's reach for all of them) */
+export function noteUnkilled (bot: Bot, e: Entity, tick: number): void {
+  let m = unkilledMaps.get(bot)
+  if (m == null) unkilledMaps.set(bot, m = new Map())
+  m.set(e.id, tick)
+}
+
+/**
+ * Whether the hostiles reflex lets a mob be: its last fight ran out of ticks with it alive (noteUnkilled) within
+ * UNKILLED_TICKS, and it's no nearer the bot than UNKILLED_NEAR. A 1.21.11 bot on its way into its bunker by seed 2's
+ * open throne at (-290, 77, -209) fought a magma cube it couldn't reach 600 ticks at a time, again and again, 86 fights,
+ * the blazes shooting it the while, till it died there
+ */
+export function unkilledLetBe (bot: Bot, e: Entity, tick: number): boolean {
+  const at = unkilledMaps.get(bot)?.get(e.id)
+  if (at == null || tick - at > UNKILLED_TICKS) return false
+  return e.position.distanceTo(bot.entity.position) > UNKILLED_NEAR
+}
+
 /** a mob the hostiles reflex lets be in the nether: an archer held off ARCHER_BUDGET ticks, one the bot is past the leash of */
 export function letBeInNether (bot: Bot, e: Entity, tick: number): boolean {
   const f = netherFightsOf(bot)
@@ -988,7 +1013,8 @@ export const hostilesReflex: Reflex = {
     }
     if (near.length === 0) return null
     // the ones in the water off dry ground let be (leftInWater, tridentInWater), never chased into it
-    const fightable = nether ? near : near.filter(e => !leftInWater(bot, e) && !tridentInWater(bot, e))
+    // (and a mob its last fight couldn't kill in fightTicks let be a while unless it's on the bot: unkilledLetBe)
+    const fightable = (nether ? near : near.filter(e => !leftInWater(bot, e) && !tridentInWater(bot, e))).filter(e => !unkilledLetBe(bot, e, ctx.tick))
     if (fightable.length === 0) return null
     // creepers: shot from a distance when there's a bow; melee only with a shield to take the blast
     const target = fightable.find(e => {
@@ -1060,7 +1086,10 @@ export const hostilesReflex: Reflex = {
       detail: `${useBow ? 'shoot' : 'fight'} ${target.name ?? ''}`,
       run: async (signal) => useBow
         ? await shoot(bot, target, { signal, maxShots: 3 })
-        : await fight(bot, target, { signal, ...meleeOptions(target, config), dry, until: () => turned() || (dry && bodyInWater(bot, bot.entity.position)) })
+        : await fight(bot, target, { signal, ...meleeOptions(target, config), dry, until: () => turned() || (dry && bodyInWater(bot, bot.entity.position)) }).catch(err => {
+          if (TaskError.is(err, 'TIMEOUT')) noteUnkilled(bot, target, ctx.tick)
+          throw err
+        })
     }
   }
 }

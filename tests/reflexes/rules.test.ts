@@ -982,3 +982,16 @@ test('drowning reflex: with air over DROWNING_CRITICAL_AIR a fight that presses 
   assert.ok(hold != null && hold.except?.({ name: 'creeper', priority: 80 } as any) === true)
   engine.stop()
 })
+
+test('unkilledLetBe: a mob the hostiles reflex\'s fight ran out of ticks on is let be UNKILLED_TICKS unless it\'s within UNKILLED_NEAR (a magma cube out of reach fought 86 times on a bunker\'s way in)', async () => {
+  const { noteUnkilled, unkilledLetBe, UNKILLED_TICKS, UNKILLED_NEAR } = await import('../../src/reflexes/rules')
+  const { fakeBot, entity } = await import('./fakeBot')
+  const cube = entity({ name: 'magma_cube', position: new Vec3(4.5, 62, 0.5) })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), entities: [cube] })
+  assert.equal(unkilledLetBe(bot, cube, 100), false)
+  noteUnkilled(bot, cube, 100)
+  assert.equal(unkilledLetBe(bot, cube, 200), true)
+  assert.equal(unkilledLetBe(bot, cube, 100 + UNKILLED_TICKS + 1), false)
+  cube.position = new Vec3(0.5 + UNKILLED_NEAR - 0.5, 64, 0.5)
+  assert.equal(unkilledLetBe(bot, cube, 200), false)
+})
