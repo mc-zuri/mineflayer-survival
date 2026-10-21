@@ -634,6 +634,43 @@ test('enterBunker: back from a fetch, the walk in goes on whatever the blazes do
   }
 })
 
+test('enterBunker: the first walk in alight, hurt, the bar under 18, stopped once for a meal, then on; not hungry or not alight, no meal', async () => {
+  const { enterBunker } = await import('../../src/nether/blazeFight')
+  const gridModule = require('../../src/skills/gridWalk')
+  const eatModule = require('../../src/skills/eat')
+  const realMove = gridModule.moveNear
+  const realEat = eatModule.eat
+  const { bot, b, restore } = await bunkerBot([])
+  const walks: string[] = []
+  let meals = 0
+  gridModule.moveNear = async (_b: unknown, to: Vec3, _r: number, signal?: AbortSignal) => {
+    walks.push(to.toString())
+    for (let i = 0; i < 10; i++) { if (signal?.aborted === true) throw signal.reason; await new Promise(resolve => setImmediate(resolve)); bot.emit('physicsTick') }
+    bot.entity.position = new Vec3(0.5, 64, 5.5)
+    return 'pathfinder'
+  }
+  eatModule.eat = async () => { meals++; bot.food = 20 }
+  const ticking = setInterval(() => { for (let k = 0; k < 20; k++) bot.emit('physicsTick') }, 1)
+  try {
+    for (const [alight, food, want] of [[true, 16, 1], [true, 18, 0], [false, 16, 0]] as Array<[boolean, number, number]>) {
+      meals = 0
+      walks.length = 0
+      bot.entity.position = new Vec3(0.5, 64, 1.5)
+      bot.entity.metadata = { ...(bot.entity.metadata ?? {}), 0: alight ? 1 : 0 }
+      bot.health = 12
+      bot.food = food
+      await enterBunker(bot, b, undefined, false)
+      assert.equal(meals, want, `alight ${String(alight)}, bar ${food}`)
+      assert.equal(walks.length, want + 1)
+    }
+  } finally {
+    clearInterval(ticking)
+    gridModule.moveNear = realMove
+    eatModule.eat = realEat
+    restore()
+  }
+})
+
 test('shutInWhereItStands: hurt on the way in, a box put up round the bot (back, sides, roof), its front shut to heal, then opened toward the bunker', async () => {
   const { shutInWhereItStands } = await import('../../src/nether/blazeFight')
   const { bot, filled, placed, restore } = await bunkerBot([])

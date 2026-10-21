@@ -1360,16 +1360,28 @@ export async function enterBunker (bot: Bot, nook: BlazeNook, signal?: AbortSign
   if (!inNook(bot, nook)) {
     // (the walk cut off while a blaze is about to hit the bot, held off where it stands behind the shield, then on:
     // walkDanger, ENTER_GUARDS times at the most)
+    let fed = false
     const go = async (kept: Vec3[]): Promise<void> => {
       for (let guards = 0; ; guards++) {
         const cut = new AbortController()
         const onParent = (): void => cut.abort(signal?.reason)
         signal?.addEventListener('abort', onParent, { once: true })
-        // (not alight or in a fire's cell: held there, it burns; a 1.21.11 bot back from a fetch held off in the throne by
-        // seed 2's spawner at (-277, 77, -159) 4 times, alight, and burned to death 5 blocks from its bunker)
-        // (the first walk in only, not one back from a fetch: held off in the throne by seed 2's open throne at (-290, 77,
-        // -209), a 1.21.11 bot was set alight and fireballed 4 blocks from its bunker)
-        const onTick = (): void => { if (!reseal && guards < ENTER_GUARDS && !cut.signal.aborted && !isOnFire(bot) && !inFireCell(bot) && walkDanger(bot)) cut.abort(new Error('a blaze about to hit')) }
+        const onTick = (): void => {
+          if (reseal || cut.signal.aborted) return
+          // (the first walk in alight, hurt, its bar under 18 (FoodData.tick heals nothing then): stopped once for a
+          // meal, its bar's healing outrunning the burning (a point each 10 ticks saturated, the fire's each 20): a
+          // 1.21.11 bot came up to its bunker by seed 2's throne at (-277, 77, -159) alight at 13 health, its bar at 16
+          // with 20 porkchops, and burned to death in it putting its walls up)
+          if (!fed && isOnFire(bot) && bot.food < 18 && fightHealth(bot) <= ENTER_SHELL_HEALTH && dueMeal(bot, { hurtAt: ENTER_SHELL_HEALTH }) != null) {
+            cut.abort(new Error(ENTER_MEAL))
+            return
+          }
+          // (not alight or in a fire's cell: held there, it burns; a 1.21.11 bot back from a fetch held off in the throne
+          // by seed 2's spawner at (-277, 77, -159) 4 times, alight, and burned to death 5 blocks from its bunker)
+          // (the first walk in only, not one back from a fetch: held off in the throne by seed 2's open throne at (-290,
+          // 77, -209), a 1.21.11 bot was set alight and fireballed 4 blocks from its bunker)
+          if (guards < ENTER_GUARDS && !isOnFire(bot) && !inFireCell(bot) && walkDanger(bot)) cut.abort(new Error('a blaze about to hit'))
+        }
         bot.on('physicsTick', onTick)
         try {
           await withBlocksKept(bot, kept, async () => await moveNear(bot, nook.stand, 0, cut.signal))
@@ -1381,6 +1393,14 @@ export async function enterBunker (bot: Bot, nook: BlazeNook, signal?: AbortSign
           signal?.removeEventListener('abort', onParent)
         }
         bot.clearControlStates()
+        if ((cut.signal.reason as Error | undefined)?.message === ENTER_MEAL) {
+          fed = true
+          trace('enterBunker: alight on the way in at', bot.health.toFixed(1), 'health, the bar at', bot.food, ': a meal first')
+          const meal = dueMeal(bot, { hurtAt: ENTER_SHELL_HEALTH })
+          if (meal != null) { try { await eat(bot, { signal, food: meal }) } catch (err) { if (isAbort(err)) throw err; trace('enterBunker: eat:', (err as Error).message) } }
+          guards--
+          continue
+        }
         // hurt: shut in a box where it stands to heal (3 walls and a roof, the front shut too: shutInWhereItStands),
         // out of the blazes' sight, then on; else held off behind the shield. A 1.21.11 bot came up to its bunker's
         // site by seed 2's open throne at (-290, 77, -209) at 9 health among the blazes and was fireballed before a
@@ -1476,6 +1496,9 @@ export async function shutInWhereItStands (bot: Bot, toward: Vec3, healTo: numbe
 
 /** the walk into a bunker is held off a blaze about to hit this many times at the most (enterBunker) */
 export const ENTER_GUARDS = 2
+/** the first walk into a bunker cut off for a meal (enterBunker) */
+const ENTER_MEAL = 'alight and hungry'
+
 
 /**
  * Whether a blaze is about to hit the bot where it walks: a small fireball coming (fireballIncoming), a charged one
