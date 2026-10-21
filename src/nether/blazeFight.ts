@@ -756,13 +756,15 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   // fight of 9898 ticks)
   const melee = nook.bunker != null ? BUNKER_MELEE : NOOK_MELEE
   const engine = (bot as any).survival?.reflexes
-  // (and the blazes, a punching one too: collectBlazeRods leaves them to the reflex once one hits the bot, but in
-  // here its sword meets them at the slit; out on a fetch or an errand, the reflex's then)
-  const leftAlone = [...melee, 'blaze']
+  // (and the blazes, a punching one too, all the fight long, out on a fetch too: collectBlazeRods leaves a punching
+  // one to the reflex, but in here the bunker's sword meets them at the slit and a fetch's walk its own; the reflex's
+  // hold-off on a 26.3 bot's fetch on seed 2's open throne at (-290, 77, -209) backed it off the throne's edge, 16
+  // blocks down)
+  const blazesLeft = engine?.leaveAlone?.(['blaze']) as (() => void) | undefined
   // (a bunker's ways out and back, its fetches' and its lighting trips', keep to the throne's floor: keepOffPits)
   const pitFloor = Math.min(nook.stand.y, opts.spawner.floored().y)
   const pits = nook.bunker != null ? keepOffPits(bot, nook.stand, pitFloor) : null
-  let leave = engine?.leaveAlone?.(leftAlone) as (() => void) | undefined
+  let leave = engine?.leaveAlone?.(melee) as (() => void) | undefined
   // (out of it, on a fetch or an errand, they're the reflex's again: the cube in a pit on a 26.3 bunker's lighting
   // trip by seed 2's open throne at (-290, 77, -209) hit it 14 times on its way, 18.8 health to its death, unfought)
   const outOfIt = async <T>(work: () => Promise<T>): Promise<T> => {
@@ -771,7 +773,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
     try {
       return await work()
     } finally {
-      leave = engine?.leaveAlone?.(leftAlone) as (() => void) | undefined
+      leave = engine?.leaveAlone?.(melee) as (() => void) | undefined
     }
   }
   const sword = (): any => bestMeleeWeapon(bot, 'blaze')
@@ -1149,6 +1151,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
     }
   } finally {
     leave?.()
+    blazesLeft?.()
     pits?.()
     bot.off('entityDead', onDead)
     bot.off('physicsTick', onTick)
