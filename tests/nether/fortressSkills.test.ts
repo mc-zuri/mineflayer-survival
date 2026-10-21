@@ -173,7 +173,7 @@ test('collectBlazeRods fights from a nook by the spawner when the bag has the bl
     ;(bot as any).world = { raycast: () => null }
     bot.findBlocks = () => []
     fightModule.fightFromNook = async () => { bot.inventory.slots[20] = item('blaze_rod'); return { kills: 1, shots: 2, blocked: 0, ticks: 10 } }
-    const r = await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    const r = await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false, bunker: false })
     assert.equal(r.rods, 1)
     assert.equal(built.length, 1)
     const h = Math.hypot(built[0].stand.x, built[0].stand.z)
@@ -184,7 +184,7 @@ test('collectBlazeRods fights from a nook by the spawner when the bag has the bl
     ;(few as any).world = { raycast: () => null }
     few.findBlocks = () => []
     fightModule.fightFromNook = async () => { few.inventory.slots[20] = item('blaze_rod'); return { kills: 1, shots: 0, blocked: 0, ticks: 10 } }
-    await collectBlazeRods(few, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    await collectBlazeRods(few, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false, bunker: false })
     assert.equal(built.length, 2)
     assert.ok(Math.hypot(built[1].stand.x, built[1].stand.z) <= 5, built[1].stand.toString())
     built.length = 1
@@ -198,7 +198,7 @@ test('collectBlazeRods fights from a nook by the spawner when the bag has the bl
     gridModule.moveNear = async (_b: unknown, to: Vec3) => { moves.push(to.toString()) }
     const ticking = setInterval(() => bare.emit('physicsTick'), 1)
     try {
-      await assert.rejects(collectBlazeRods(bare, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 30, safety: false }), /TIMEOUT|rods/)
+      await assert.rejects(collectBlazeRods(bare, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 30, safety: false, bunker: false }), /TIMEOUT|rods/)
     } finally {
       clearInterval(ticking)
     }
@@ -367,7 +367,7 @@ test('collectBlazeRods: a nook with no kill for long (STUCK) is left for another
   bot.findBlocks = () => []
   const ticking = setInterval(() => bot.emit('physicsTick'), 1)
   try {
-    await assert.rejects(collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 30, safety: false }), /TIMEOUT|rods/)
+    await assert.rejects(collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 30, safety: false, bunker: false }), /TIMEOUT|rods/)
     assert.equal(fought.length, 3, fought.join(' '))
     const [far, far2, near] = fought.map(t => t.replace(/[()]/g, '').split(', ').map(Number))
     assert.ok(Math.hypot(far[0], far[2]) >= 7, fought[0])
@@ -667,7 +667,7 @@ test('collectBlazeRods: short of the bow nook\'s arrows with no melee nook by th
     ;(bot as any).world = { raycast: () => null }
     bot.findBlocks = () => []
     fightModule.fightFromNook = async () => { bot.inventory.slots[20] = item('blaze_rod'); return { kills: 1, shots: 2, blocked: 0, ticks: 10 } }
-    const r = await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    const r = await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false, bunker: false })
     assert.equal(r.rods, 1)
     assert.equal(built.length, 1)
     assert.ok(Math.hypot(built[0].stand.x, built[0].stand.z) >= 7, built[0].stand.toString())
@@ -859,4 +859,61 @@ test('collectBlazeRods gives up a spawner the bot died by (the memory\'s nether 
   }
   assert.deepEqual(fought, [])
   assert.deepEqual(unreachableSpawners(bot).map(p => [p.x, p.y, p.z]), [[0, 64, 0]])
+})
+
+test('collectBlazeRods fights from a sealed bunker by the spawn volume first (planBlazeBunkers), kept for its next call; with a potion of fire resistance held too', async () => {
+  const { collectBlazeRods, resetBlazeCover } = await import('../../src/nether/fortressSkills')
+  const fightModule = require('../../src/nether/blazeFight')
+  const realBuild = fightModule.buildNook
+  const realFight = fightModule.fightFromNook
+  const built: any[] = []
+  fightModule.buildNook = async (_b: unknown, nook: any) => { built.push(nook) }
+  try {
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('cobblestone', 64), item('bow'), item('arrow', 64)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+    bot.game.dimension = 'the_nether'
+    bot.entity.effects = {}
+    ;(bot as any).world = { raycast: () => null }
+    bot.findBlocks = () => []
+    resetBlazeCover(bot)
+    fightModule.fightFromNook = async (_b: unknown, nook: any) => { bot.inventory.slots[20 + built.length] = item('blaze_rod'); return { kills: 1, shots: 0, blocked: 0, ticks: 10, nook } }
+    await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    assert.equal(built.length, 1)
+    assert.ok(built[0].bunker != null, 'a bunker')
+    // the next rod from the same one
+    await collectBlazeRods(bot, { count: 2, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false })
+    assert.deepEqual(built[1].stand, built[0].stand)
+    assert.ok(built[1].bunker != null)
+    // a potion held: the bunker all the same
+    const potion = item('potion')
+    potion.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: 11, customEffects: [] } }]])
+    bot.inventory.slots[30] = potion
+    bot.inventory.slots[30].slot = 30
+    await collectBlazeRods(bot, { count: 3, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false, fireResistance: false })
+    assert.ok(built[2].bunker != null)
+  } finally {
+    fightModule.buildNook = realBuild
+    fightModule.fightFromNook = realFight
+  }
+})
+
+test('collectBlazeRods bunkerOnly (a sword alone, no fire resistance): no bunker to be had, no nook nor camp, MISSING_ITEMS noFireResistance', async () => {
+  const { collectBlazeRods } = await import('../../src/nether/fortressSkills')
+  const gridModule = require('../../src/skills/gridWalk')
+  const realMove = gridModule.moveNear
+  const moves: string[] = []
+  gridModule.moveNear = async (_b: unknown, to: Vec3) => { moves.push(to.toString()) }
+  try {
+    // no blocks for one
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('diamond_sword')], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+    bot.game.dimension = 'the_nether'
+    bot.entity.effects = {}
+    ;(bot as any).world = { raycast: () => null }
+    bot.findBlocks = () => []
+    const err = await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 100, safety: false, bunkerOnly: true }).catch(e => e)
+    assert.match(String(err?.message), /no bunker to fight from/)
+    assert.equal(err.noFireResistance, true)
+    assert.deepEqual(moves, [])
+  } finally {
+    gridModule.moveNear = realMove
+  }
 })

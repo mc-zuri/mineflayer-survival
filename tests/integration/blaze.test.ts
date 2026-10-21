@@ -28,7 +28,7 @@ import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { createPlugin } from '../../src'
 import { DEFAULT_VERSION, connectLockstepBot, quitBot, startServer, type TestServer } from '../harness'
-import { collectBlazeRods, UNREACHABLE_SPAWNER } from '../../src/nether/fortressSkills'
+import { collectBlazeRods, resetBlazeCover, UNREACHABLE_SPAWNER } from '../../src/nether/fortressSkills'
 import { blazeRodsWithBrew, resetBrewTries } from '../../src/nether/brewing'
 import { Executor } from '../../src/executor/executor'
 import { countItems, waitUntil } from '../../src/skills/util'
@@ -290,6 +290,7 @@ describe(`the blaze fight at seed ${SEED}'s fortress spawner ${SPAWNER.toString(
     bot.on('messagestr' as any, onMessage)
     const executor = new Executor(bot, { log: () => {} })
     resetBrewTries(bot)
+    resetBlazeCover(bot)
     // each run from a fresh memory of the nether's deaths and the spawners given up (a spawner the bot died by is given
     // up: deathsByBlazeSpawner), unless BLAZE_KEEP_DEATHS; BLAZE_DEATH="x y z" a death remembered there first (a game's
     // death by that spawner before the resume)

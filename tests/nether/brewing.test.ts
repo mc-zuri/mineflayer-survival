@@ -47,7 +47,7 @@ test('blazeRodsWithBrew: with the wart and cream held, the rods a rod at a time 
     bot.pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
     resetBrewTries(bot)
     fortress.collectBlazeRods = async (_b: unknown, a: any) => {
-      calls.push(`rods ${String(a.count)}`)
+      calls.push(`rods ${String(a.count)}${a.bunkerOnly === true ? ' from a bunker only' : ''}`)
       const have = bot.inventory.items().filter((i: any) => i.name === 'blaze_rod').reduce((n: number, i: any) => n + i.count, 0)
       for (let n = have; n < a.count; n++) give(bot, item('blaze_rod'))
       return { rods: a.count, kills: 0, ticks: 0 }
@@ -90,9 +90,10 @@ test('blazeRodsWithBrew: with the wart and cream held, the rods a rod at a time 
   // no bottles: nothing looked for
   assert.deepEqual(await run([item('nether_wart'), item('magma_cream')]), ['rods 8'])
   assert.deepEqual(lines, ['fire resistance: no water bottles to brew it in'])
-  // no cream and no bow: no fight with the sword alone (full-1.21.11-fresh-e), the decisions logged
-  assert.deepEqual(await run([water(), water(), water()], false), ['threw MISSING_ITEMS: no bow and no fire resistance for the blazes (no magma cream or slime ball to brew it) (noFireResistance)'])
-  assert.deepEqual(lines, ['fire resistance: no magma cream or slime ball: the cubes about looked for', 'fire resistance: no magma cream and no slime ball for it: no wart sought, no brew', 'fire resistance: not brewed, short of nether_wart, magma_cream, blaze rods', 'fire resistance: no bow and none of it: no fight'])
+  // no cream and no bow: no fight with the sword alone in the open (full-1.21.11-fresh-e), but from a bunker by the
+  // spawner (open ground about it here: planBlazeBunkers has one), no nook nor camp after it; the decisions logged
+  assert.deepEqual(await run([water(), water(), water()], false), ['rods 8 from a bunker only'])
+  assert.deepEqual(lines, ['fire resistance: no magma cream or slime ball: the cubes about looked for', 'fire resistance: no magma cream and no slime ball for it: no wart sought, no brew', 'fire resistance: not brewed, short of nether_wart, magma_cream, blaze rods', 'fire resistance: no bow and none of it: the sword from a bunker only'])
   // no bow, the makings held: the brew, then the rest with the potions
   assert.deepEqual(await run([water(), water(), water(), item('nether_wart'), item('magma_cream')], false), ['rods 1', 'rods 2', 'craft blaze_powder', 'craft brewing_stand', 'box', 'brew', 'rods 8'])
 })
@@ -181,16 +182,18 @@ test('getMagmaCream: no cube near, a fortress cube in sight (bricks by it, no la
   assert.equal(fortressCube(bot, spawner), null)
 })
 
-test('blazeRodsWithBrew: with the makings and LIGHT_TORCHES torches the spawner is lit first (spawnerLight), once a trip; with fewer torches not', async () => {
+test('blazeRodsWithBrew: with the makings and LIGHT_TORCHES torches the spawner is lit first (spawnerLight), once a trip; with fewer torches not; with a bunker to be had by the spawner (planBlazeBunkers) left to the lighting of the bunker', async () => {
   const { blazeRodsWithBrew, resetBrewTries, LIGHT_TORCHES } = await import('../../src/nether/brewing')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const fortress = require('../../src/nether/fortressSkills')
   const light = require('../../src/nether/spawnerLight')
-  const real = { rods: fortress.collectBlazeRods, light: light.lightBlazeSpawner }
+  const fight = require('../../src/nether/blazeFight')
+  const real = { rods: fortress.collectBlazeRods, light: light.lightBlazeSpawner, bunkers: fight.planBlazeBunkers }
   const water = (): any => { const p = item('potion'); p.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: 0, customEffects: [] } }]]); return p }
   const calls: string[] = []
-  const run = async (torches: number): Promise<string[]> => {
+  const run = async (torches: number, bunker = false): Promise<string[]> => {
     calls.length = 0
+    fight.planBlazeBunkers = () => bunker ? [{}] : []
     const bot = fakeBot({ items: [water(), item('nether_wart'), item('magma_cream'), item('bow'), item('arrow', 32), ...(torches > 0 ? [item('torch', torches)] : [])], position: new Vec3(0.5, 64, 30.5) })
     bot.entity.effects = {}
     bot.pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
@@ -202,9 +205,11 @@ test('blazeRodsWithBrew: with the makings and LIGHT_TORCHES torches the spawner 
     } finally {
       fortress.collectBlazeRods = real.rods
       light.lightBlazeSpawner = real.light
+      fight.planBlazeBunkers = real.bunkers
     }
     return calls.slice()
   }
   assert.deepEqual((await run(LIGHT_TORCHES)).slice(0, 2), ['light (0, 64, 0)', 'rods 1'])
   assert.deepEqual((await run(LIGHT_TORCHES - 1)).slice(0, 1), ['rods 1'])
+  assert.deepEqual((await run(LIGHT_TORCHES, true)).slice(0, 1), ['rods 1'])
 })

@@ -25,7 +25,7 @@ import { collectDropsNear } from '../skills/hunt'
 import { nearbyDrops } from '../skills/pickupDrops'
 import { moveNear } from '../skills/gridWalk'
 import { walkTo } from '../skills/navigate'
-import { countItems, trace, waitTicks } from '../skills/util'
+import { countItems, trace, waitTicks, waitUntil } from '../skills/util'
 import { fireballIncoming } from './safety'
 import { dig } from '../core/actions'
 import { isOnFire } from '../skills/escape'
@@ -132,6 +132,11 @@ export interface BlazeNook {
    * the front with nothing to go against ('nothing solid to place against', every tick for 3000 ticks)
    */
   floor: Vec3[]
+  /**
+   * a sealed bunker's (bunkerAround): the front's foot walled (the sill), its head the slit the bot fights through
+   * (`front` is the slit alone), and the block over the slit when there's one (the visor)
+   */
+  bunker?: { sill: Vec3, slit: Vec3, visor: Vec3 | null }
 }
 
 export interface NookOptions {
@@ -336,6 +341,18 @@ export function nookAround (lookup: NookLookup, stand: Vec3, facing: Vec3, maxBl
   const walls: Vec3[] = []
   for (const dy of [0, 1]) for (const d of [back, side, side.scaled(-1)]) walls.push(stand.plus(d).offset(0, dy, 0))
   walls.push(stand.offset(0, 2, 0))
+  const front = [stand.plus(facing), stand.plus(facing).plus(UP)]
+  const build = shellBuild(lookup, walls, [stand, stand.plus(UP), ...front], maxBlocks)
+  if (build == null) return null
+  return { stand, facing, build, front, walls, floor: [stand.offset(0, -1, 0), stand.plus(facing).offset(0, -1, 0)] }
+}
+
+/**
+ * The blocks that put up `walls` (each a full block there already, or open to fill), in an order that has each go
+ * against a solid one, the `kept` cells (the bot's, the opening's) never filled for it; null when some can't be, or
+ * it takes more than `maxBlocks`
+ */
+function shellBuild (lookup: NookLookup, walls: readonly Vec3[], keptCells: readonly Vec3[], maxBlocks: number): Vec3[] | null {
   const solid = new Set<string>()
   const isIn = (p: Vec3): boolean => solid.has(p.toString()) || isSolidBlock(lookup(p))
   const todo: Vec3[] = []
@@ -350,7 +367,7 @@ export function nookAround (lookup: NookLookup, stand: Vec3, facing: Vec3, maxBl
   // for the roof to go against: a roof touches no wall but across a corner)
   const build: Vec3[] = []
   const neighbours = (p: Vec3): Vec3[] => [p.offset(0, -1, 0), p.offset(0, 1, 0), ...SIDES.map(s => p.plus(s))]
-  const kept = new Set([stand, stand.plus(UP), stand.plus(facing), stand.plus(facing).plus(UP)].map(p => p.toString()))
+  const kept = new Set(keptCells.map(p => p.toString()))
   const backed = (p: Vec3): boolean => neighbours(p).some(n => !kept.has(n.toString()) && isIn(n))
   let left = todo.slice()
   for (let guard = 0; left.length > 0 && guard < 20; guard++) {
@@ -371,7 +388,102 @@ export function nookAround (lookup: NookLookup, stand: Vec3, facing: Vec3, maxBl
     solid.add(support.toString())
   }
   if (left.length > 0 || build.length > maxBlocks) return null
-  return { stand, facing, build, front: [stand.plus(facing), stand.plus(facing).plus(UP)], walls, floor: [stand.offset(0, -1, 0), stand.plus(facing).offset(0, -1, 0)] }
+  return build
+}
+
+// ---- the bunker
+
+/**
+ * A bunker's distances from the spawner across: its stand just out of the spawn volume (inSpawnVolume: no blaze comes
+ * out in its cells), its slit at the volume's edge, where the blazes come out within the sword's reach of it
+ */
+export const BUNKER = { minDistance: 5, maxDistance: 11, standOff: 7 }
+/** the least share of the spawner's spawns a bunker's eyes see through its slit */
+export const BUNKER_MIN_VIEW = 0.08
+
+/**
+ * The sealed bunker round a stand facing a way (the first rods' cover, with no fire resistance): the back and the two
+ * sides walled at the feet and the head, a full block over the head, the front walled at the feet (the sill) and,
+ * with `visor`, over the slit too, so the one way in for a blaze's sight, a fireball or a punch is the slit, the open
+ * cell in front of the eyes. A small fireball aimed at the bot's middle (Blaze.BlazeAttackGoal: the target's
+ * getY(0.5), from the blaze's getY(0.5) + 0.5) from a blaze about the bot's height meets the sill; one from over it comes
+ * in at the slit and meets the shield, held toward the slit. Null when its walls can't all be had, or take more than
+ * `maxBlocks`.
+ */
+export function bunkerAround (lookup: NookLookup, stand: Vec3, facing: Vec3, visor = true, maxBlocks = 12): BlazeNook | null {
+  const side = new Vec3(facing.z, 0, -facing.x)
+  const back = facing.scaled(-1)
+  const walls: Vec3[] = []
+  for (const dy of [0, 1]) for (const d of [back, side, side.scaled(-1)]) walls.push(stand.plus(d).offset(0, dy, 0))
+  const sill = stand.plus(facing)
+  const slit = sill.plus(UP)
+  walls.push(sill, stand.offset(0, 2, 0))
+  const over = visor ? slit.plus(UP) : null
+  if (over != null) walls.push(over)
+  if (!isOpen(lookup(slit))) return null
+  const build = shellBuild(lookup, walls, [stand, stand.plus(UP), slit], maxBlocks)
+  if (build == null) return null
+  return { stand, facing, build, front: [slit], walls, floor: [stand.offset(0, -1, 0), sill.offset(0, -1, 0)], bunker: { sill, slit, visor: over } }
+}
+
+/** the nook or the bunker round a planned one's stand, its blocks to put looked at afresh (null when it can't be had now) */
+export function shellAgain (lookup: NookLookup, nook: BlazeNook, maxBlocks = 12): BlazeNook | null {
+  return nook.bunker != null
+    ? bunkerAround(lookup, nook.stand, nook.facing, nook.bunker.visor != null, maxBlocks)
+    : nookAround(lookup, nook.stand, nook.facing, maxBlocks)
+}
+
+export interface BunkerOptions {
+  /** where the bot is (a nearer bunker is the cheaper) */
+  from?: Vec3
+  /** most blocks to put (default 12) */
+  maxBlocks?: number
+  /** the least share of the spawns its eyes see through the slit (default BUNKER_MIN_VIEW) */
+  minView?: number
+}
+
+/**
+ * The `n` cheapest bunkers by the spawner (bunkerAround), no two on the same stand: a floor cell BUNKER.minDistance to
+ * maxDistance across from it, 3 under it to 2 over, out of its spawn volume, open at the feet and the head, none the
+ * nether's paths may not step on (netherStepForbidden), facing the spawner (the cardinal way nearest it, within 35
+ * degrees), its eyes seeing at least `minView` of the spawns through the slit (spawnView, the bunker built; without
+ * the visor when only that way). The cheapest: the most spawns seen and within the sword's reach, the fewest blocks,
+ * nearest the spawn volume, nearest the bot.
+ */
+export function planBlazeBunkers (lookup: NookLookup, spawner: Vec3, opts: BunkerOptions = {}, n = 3): BlazeNook[] {
+  const maxBlocks = opts.maxBlocks ?? 12
+  const minView = opts.minView ?? BUNKER_MIN_VIEW
+  const S = spawner.floored()
+  const found: Array<{ nook: BlazeNook, cost: number }> = []
+  for (let dx = -BUNKER.maxDistance; dx <= BUNKER.maxDistance; dx++) {
+    for (let dz = -BUNKER.maxDistance; dz <= BUNKER.maxDistance; dz++) {
+      const h = Math.hypot(dx, dz)
+      if (h < BUNKER.minDistance || h > BUNKER.maxDistance) continue
+      const to = new Vec3(-dx, 0, -dz).scaled(1 / h)
+      const facing = SIDES.reduce((a, b) => (b.dot(to) > a.dot(to) ? b : a))
+      if (facing.dot(to) < Math.cos(35 * Math.PI / 180)) continue
+      for (let dy = -3; dy <= 4; dy++) {
+        const stand = S.offset(dx, dy, dz)
+        if (inSpawnVolume(S, stand)) continue
+        if (stand.offset(0.5, 0, 0.5).distanceTo(S.offset(0.5, 0.5, 0.5)) >= SPAWNER_ACTIVATION - 1) continue
+        if (!isOpen(lookup(stand)) || !isOpen(lookup(stand.plus(UP))) || !isFloor(lookup(stand.offset(0, -1, 0)))) continue
+        if (netherStepForbidden(lookup, stand)) continue
+        let best: { nook: BlazeNook, cost: number } | null = null
+        for (const visor of [true, false]) {
+          const nook = bunkerAround(lookup, stand, facing, visor, maxBlocks)
+          if (nook == null) continue
+          const view = spawnView(lookup, S, nook)
+          if (view.seen < minView) continue
+          const floor = lookup(stand.offset(0, -1, 0))?.name ?? ''
+          const cost = nook.build.length * 2 + Math.abs(h - BUNKER.standOff) - view.seen * 30 - view.reach * 10 + (visor ? 0 : 4) + Math.max(0, 1 - dy) * 2 +
+            (floor === 'netherrack' ? 2 : 0) + (opts.from != null ? stand.offset(0.5, 0, 0.5).distanceTo(opts.from) * 0.2 : 0)
+          if (best == null || cost < best.cost) best = { nook, cost }
+        }
+        if (best != null) found.push(best)
+      }
+    }
+  }
+  return found.sort((a, b) => a.cost - b.cost).slice(0, n).map(f => f.nook)
 }
 
 // ---- the fight
@@ -449,6 +561,15 @@ export const NOOK_IDLE_TICKS = 3000
 export const NOOK_STALL_TICKS = 3000
 /** the same with no bow and arrows: only a blaze come into the sword's reach is killed */
 export const NOOK_STALL_UNARMED = 1000
+/** the same in a bunker */
+export const BUNKER_STALL_TICKS = 4000
+/** a bunker's lure (its slit shut a while) after this many ticks with no kill, once each BUNKER_LURE_EVERY at most */
+export const BUNKER_LURE_AFTER = 400
+export const BUNKER_LURE_EVERY = 60
+/** the lures for each kill at the most */
+export const BUNKER_LURES = 6
+/** the ticks the lure keeps the slit shut: the blazes come on 5 of them (BlazeAttackGoal's lastSeen < 5) */
+export const BUNKER_LURE_TICKS = 10
 
 export interface NookFightOptions {
   /** rods to have */
@@ -475,6 +596,11 @@ export interface NookFightOptions {
   stallTicks?: number
   /** called on each kill */
   onKill?: (blaze: Entity) => void
+  /**
+   * a bunker's errand out of it when it's quiet (its spawner's lighting: lightFromBunker), tried where its fetches are;
+   * resolves whether it went
+   */
+  errand?: () => Promise<boolean>
 }
 
 export interface NookFightResult {
@@ -523,11 +649,36 @@ export const MELEE_REACH = 2.9
 
 /** the melee mobs (besides the blazes) the nook's fight meets itself, with the sword once in reach */
 export const NOOK_MELEE = ['magma_cube']
+/**
+ * and a bunker's: the fortress's skeletons too, none of which gets in at its slit (a wither skeleton 2.4 high, a
+ * skeleton 1.99) nor shoots but through it, at the shield. The hostiles reflex went out of a bunker by seed 2's throne
+ * at (-277, 77, -159) after a wither skeleton, fled it into the throne and fought its blazes there till they killed the
+ * bot, its 9 rods with it (26.3)
+ */
+export const BUNKER_MELEE = [...NOOK_MELEE, 'wither_skeleton', 'skeleton']
 
 /** the bow's draw to a full-power shot (BowItem.getPowerForTime: full from 20 ticks), a tick to spare */
 const FULL_DRAW = 21
 /** a draw cut short by a blaze about to shoot is loosed from this many ticks on (the power then about 0.7) */
 const MIN_DRAW = 14
+
+/** a blaze's small fireball starts this far over its feet (BlazeAttackGoal: getY(0.5) + 0.5 of its 1.8) */
+export const FIREBALL_SPAWN_HEIGHT = 1.4
+
+/**
+ * Whether a small fireball from `from` aimed at the bot's middle (BlazeAttackGoal: the target's getY(0.5); its
+ * spread is across only) comes to it with no block first: the projectile's move is clipped as a line
+ * (ProjectileUtil.getHitResultOnMoveVector, ClipContext.Block.COLLIDER), and a bunker's sill takes the ones from about
+ * the bot's height and under it
+ */
+export function fireballReaches (bot: Bot, from: Vec3): boolean {
+  const to = bot.entity.position.offset(0, 0.9, 0)
+  const d = to.minus(from)
+  const len = d.norm()
+  if (len < 1e-6) return true
+  const hit: any = (bot.world as any).raycast(from, d.scaled(1 / len), len)
+  return hit == null || (hit.intersect != null && hit.intersect.distanceTo(from) >= len - 1e-3)
+}
 
 /** whether a blaze sees the bot from where it is (its eyes to the bot's: Sensing.hasLineOfSight) */
 export function blazeSeesBot (bot: Bot, blaze: Entity): boolean {
@@ -574,6 +725,12 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   let sealFails = 0
   let shutAgain = 0
   let drinkFails = 0
+  let lastReport = 0
+  let lureAgain = 0
+  let lures = 0
+  let lureGain = 0
+  let lastInSight = 0
+  let turnAgain = 0
   const tracked = new Set<number>()
   const dead = new Set<number>()
   const tried = new Map<number, number>()
@@ -590,7 +747,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   // the magma cubes are the nook's to meet (the sword at one come into reach), not the hostiles reflex's: it went
   // after them out of the nook, about the basalt delta under the blazes' fire (26.3, seed 2's spawner: 19 times in a
   // fight of 9898 ticks)
-  const leave = (bot as any).survival?.reflexes?.leaveAlone?.(NOOK_MELEE) as (() => void) | undefined
+  const melee = nook.bunker != null ? BUNKER_MELEE : NOOK_MELEE
+  const leave = (bot as any).survival?.reflexes?.leaveAlone?.(melee) as (() => void) | undefined
   const sword = (): any => bestMeleeWeapon(bot, 'blaze')
   const bow = (): any => bot.inventory.items().find(i => i.name === 'bow') ?? null
   const hasArrows = (): boolean => countItems(bot, ARROWS) > 0
@@ -619,7 +777,14 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   const blazesNow = (): Entity[] => Object.values(bot.entities)
     .filter(e => e.name === 'blaze' && !dead.has(e.id) && isAlive(bot, e) && e.position.distanceTo(bot.entity.position) <= 48)
   try {
-    while (countItems(bot, 'blaze_rod') < opts.count) {
+    // (a bunker's fight with its rods goes on till it's quiet to go out of it: bunkerDepartDue)
+    let reached: number | null = null
+    for (;;) {
+      if (countItems(bot, 'blaze_rod') >= opts.count) {
+        if (nook.bunker == null || !inNook(bot, nook)) break
+        reached ??= tick
+        if (bunkerDepartDue(bot, fightHealth(bot)) || tick - reached > BUNKER_DEPART_WAIT) break
+      }
       throwIfAborted(signal)
       if (bot.health <= 0) throw new SkillError('VERIFY_FAILED', 'the bot died in the nook', { ...result, ticks: tick })
       // the fireballs' fire in the nook's cells put out here (the hazard reflex leaves it to the fight: handleFire)
@@ -634,7 +799,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       else if (tick - lastBlaze > idleTicks) throw new SkillError('NOT_FOUND', `no blaze came from the blaze spawner at ${opts.spawner.toString()} in ${idleTicks} ticks`, { ...result, ticks: tick })
       // blazes about but none killed for long (out of the bow's sight or reach, the arrows gone): a nook nearer
       if (countItems(bot, 'blaze_rod') > rods) { rods = countItems(bot, 'blaze_rod'); lastGain = tick }
-      const stall = opts.stallTicks ?? (bow() != null && hasArrows() ? NOOK_STALL_TICKS : NOOK_STALL_UNARMED)
+      // (a bunker's sword meets the blazes that come to its slit: as long with no bow)
+      const stall = opts.stallTicks ?? (nook.bunker != null ? BUNKER_STALL_TICKS : bow() != null && hasArrows() ? NOOK_STALL_TICKS : NOOK_STALL_UNARMED)
       if (tick - lastGain > stall) throw new SkillError('STUCK', `no blaze killed from the nook in ${tick - lastGain} ticks`, { ...result, ticks: tick })
       if (!inNook(bot, nook)) {
         // out of it (a drop fetched, a reflex's work): the shield up where it is while a blaze that sees it is about
@@ -657,14 +823,23 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       volleys.update(blazes.map(b => ({ id: b.id, charged: blazeCharged(bot, b) })), tick)
       const seeing = blazes.filter(b => blazeSeesBot(bot, b))
       const me = bot.entity.position
+      if (tick - lastReport >= 400) {
+        lastReport = tick
+        const nearest = blazes.reduce((d, b) => Math.min(d, b.position.distanceTo(me)), Infinity)
+        trace(`fightFromNook: tick ${tick}, ${blazes.length} blazes within 48 (nearest ${nearest.toFixed(1)}), ${seeing.length} seeing the bot, ${result.kills} kills, ${result.shots} shots, health ${bot.health.toFixed(1)}`)
+      }
       const near = (a: Entity, b: Entity): number => a.position.distanceTo(me) - b.position.distanceTo(me)
       // (fire resistant, no fireball nor volley is a danger: the bow and the fetches go on through them)
       const proof = fireProof(bot)
-      const fireball = proof ? undefined : Object.values(bot.entities).find(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 24))
-      const danger = proof ? [] : seeing.filter(b => volleys.dangerous(b.id, tick)).sort(near)
+      // (in a bunker, only the shots that reach the bot past its sill: fireballReaches. With 5 to 8 blazes about seeing
+      // it, shooting at the sill, one or another was always about to shoot, and the shield held up for them let the bow
+      // shoot none for 4000 ticks, by seed 2's open throne at (-290, 77, -209), 26.3)
+      const reaches = (from: Vec3): boolean => nook.bunker == null || fireballReaches(bot, from)
+      const fireball = proof ? undefined : Object.values(bot.entities).find(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 24) && reaches(e.position))
+      const danger = proof ? [] : seeing.filter(b => volleys.dangerous(b.id, tick) && reaches(b.position.offset(0, FIREBALL_SPAWN_HEIGHT, 0))).sort(near)
 
-      // fire in the nook (a fireball's on the floor by the feet): out at once
-      for (const p of [nook.stand, nook.stand.plus(UP)]) {
+      // fire in the nook (a fireball's on the floor by the feet), or on a bunker's sill: out at once
+      for (const p of [nook.stand, nook.stand.plus(UP), ...(nook.bunker != null ? [nook.bunker.slit] : [])]) {
         const b = bot.blockAt(p)
         if (b != null && (b.name === 'fire' || b.name === 'soul_fire')) await bot.dig(b as any, true).catch(() => {})
       }
@@ -678,7 +853,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // (a blaze hovering in the front over the roof's edge, its eyes not seeing the bot's, is hit all the same: in the
       // front cell it kept the front from being shut, 26.3, seed 7741's bridge)
       const close = seeing.find(inReach) ?? blazes.find(b => inReach(b) && seenPoint(bot, b) != null) ??
-        Object.values(bot.entities).find(e => NOOK_MELEE.includes(e.name ?? '') && isAlive(bot, e) && inReach(e) && hasLineOfSight(bot, e))
+        Object.values(bot.entities).find(e => melee.includes(e.name ?? '') && isAlive(bot, e) && inReach(e) && hasLineOfSight(bot, e))
       if (close != null && (danger.length === 0 || proof || !hasShield() || meleeWindow(bot, volleys, tick, seeing, close))) {
         stopDraw()
         await hold(sword())
@@ -779,17 +954,51 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         continue
       }
 
+      if (nook.bunker != null && drawn === 0 && opts.errand != null && seeing.length === 0) {
+        unblock()
+        if (await opts.errand()) { blocking = false; continue }
+      }
+      if (nook.bunker != null) {
+        // a rod by the sill (a blaze the sword killed at the slit drops it 2 off, out of the bot's reach in its cell): the
+        // bot a step out into the sill's cell for it and back (sillPickup), when no blaze is on it there
+        const bySill = drawn === 0 ? sillDrops(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES) : undefined
+        if (bySill != null && sillPickupDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)))) {
+          tried.set(bySill.id, (tried.get(bySill.id) ?? 0) + 1)
+          unblock()
+          await sillPickup(bot, nook, bySill, signal)
+          blocking = false
+          continue
+        }
+        // no blaze in its slit's sight for long, some about it behind its walls (they gather round the bot out of its
+        // sight: BlazeAttackGoal takes them toward it each time they lose it): the slit turned toward the most of them
+        if (seeing.length > 0) lastInSight = tick
+        const way = tick - lastInSight > BUNKER_TURN_AFTER && tick >= turnAgain ? bunkerTurnWay(nook, blazes.map(b => b.position)) : null
+        if (way != null) {
+          turnAgain = tick + BUNKER_TURN_AFTER
+          unblock()
+          stopDraw()
+          const turned = await turnBunker(bot, nook, way, signal)
+          if (turned != null) { nook = turned; lastInSight = tick }
+          continue
+        }
+      }
+
       // the rods on the floor before another shot (between draws), whenever no blaze that sees the bot can shoot for
       // FETCH_QUIET: the bow's turn came first and the fetch only with every blaze quiet for 75 ticks, which with two or
       // three about never was, and the nooks at seed 2's spawners at (97, 64, -515) and (925, 64, 123) killed blazes
       // for 20000 ticks with their rods left on the throne (26.3 runs mag-b and mag-d: 0 rods)
-      const drop = drawn === 0 && fetchWanted(fightHealth(bot), sealAt, proof, () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)))
-        ? dropsNear(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES)
-        : undefined
+      // (a bunker's: with few blazes about, healed, out of it by the sill: bunkerFetchDue)
+      const drop = nook.bunker != null
+        ? (drawn === 0 && bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof) ? bunkerDrops(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES) : undefined)
+        : drawn === 0 && fetchWanted(fightHealth(bot), sealAt, proof, () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)))
+          ? dropsNear(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES)
+          : undefined
       if (drop != null) {
         tried.set(drop.id, (tried.get(drop.id) ?? 0) + 1)
         unblock()
-        await fetchDrops(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
+        stopDraw()
+        if (nook.bunker != null) await fetchFromBunker(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
+        else await fetchDrops(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
         blocking = false
         continue
       }
@@ -824,6 +1033,22 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         }
       }
       stopDraw()
+
+      // a bunker's blazes that see the bot, out of the sword's reach and the bow's shot (under its sill, by the slit's
+      // edge), drawn in: the slit shut BUNKER_LURE_TICKS, out of their sight they come at the bot (Blaze.BlazeAttackGoal:
+      // the target unseen under 5 ticks, the move toward it), then open again. A bunker by seed 2's throne spawners went
+      // 4000 ticks with 3 to 5 blazes 4 off seeing it, shooting at its sill, and no kill (26.3)
+      // (BUNKER_LURES at most for each kill: a 1.21.11 bunker by seed 2's throne at (-277, 77, -159) shut its slit on 3
+      // to 5 blazes every 60 ticks for 3000, none of them coming)
+      if (lureGain !== lastGain) { lureGain = lastGain; lures = 0 }
+      if (nook.bunker != null && seeing.length > 0 && tick - lastGain > BUNKER_LURE_AFTER && tick >= lureAgain && lures < BUNKER_LURES && nook.front.every(p => bot.blockAt(p)?.boundingBox !== 'block')) {
+        lureAgain = tick + BUNKER_LURE_EVERY
+        lures++
+        trace('fightFromNook: the slit shut to draw in', seeing.length, 'blazes')
+        unblock()
+        if (await fillNook(bot, nook.front, signal, false, false) === 0) shutUntil = tick + BUNKER_LURE_TICKS
+        continue
+      }
 
       // nothing to do: the shield up, toward the nearest blaze, else the spawner
       const watch = seeing.sort(near)[0] ?? blazes.sort(near)[0]
@@ -907,6 +1132,8 @@ export interface FetchWatch {
   now: () => number
   /** a fetch is given up at this health */
   sealAt: number
+  /** and when this says so */
+  abort?: () => boolean
 }
 
 /**
@@ -981,7 +1208,7 @@ export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch
   }
   trace('fightFromNook: drops at', item.position.toString())
   try {
-    while (bot.entities[item.id] === item && watch.now() - start < FETCH_TICKS && fightHealth(bot) > watch.sealAt) {
+    while (bot.entities[item.id] === item && watch.now() - start < FETCH_TICKS && fightHealth(bot) > watch.sealAt && watch.abort?.() !== true) {
       throwIfAborted(signal)
       // in a fire's cell, not fire resistant: back to the nook, never held there behind the shield (a 26.3 bot whose
       // fetch stopped for a charged blaze in seed 2's throne at (-277, 77, -159) stood in the fireballs' fire with its
@@ -1020,7 +1247,7 @@ export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch
       const cut = new AbortController()
       const onParent = (): void => cut.abort(signal?.reason)
       signal?.addEventListener('abort', onParent, { once: true })
-      const onTick = (): void => { if (threat() != null || closeBlaze() != null) cut.abort(new Error('a blaze about to shoot or in reach')) }
+      const onTick = (): void => { if (threat() != null || closeBlaze() != null || watch.abort?.() === true) cut.abort(new Error('a blaze about to shoot or in reach')) }
       bot.on('physicsTick', onTick)
       try {
         await collectDropsNear(bot, item.position.clone(), { signal: cut.signal, radius: 3, maxTicks: 120 })
@@ -1042,8 +1269,12 @@ export async function fetchDrops (bot: Bot, nook: BlazeNook, item: Entity, watch
   await enterNook(bot, nook, signal)
 }
 
-/** into the nook's cell (by the open front: the walls are kept from the pathfinder's breaking) */
-export async function enterNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal): Promise<void> {
+/**
+ * into the nook's cell (by the open front: the walls are kept from the pathfinder's breaking); a bunker's by its sill
+ * (bunker: enterBunker), shut again after unless `reseal` is false
+ */
+export async function enterNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal, reseal = true): Promise<void> {
+  if (nook.bunker != null) { await enterBunker(bot, nook, signal, reseal); return }
   if (inNook(bot, nook)) return
   // the fireballs' fire in its front or round the bot puts out first when the walk finds no way (the grid walk keeps
   // out of fire's cells): a 26.3 bot 1 off its nook under seed 2's throne at (-277, 77, -159), fire burning in the
@@ -1059,6 +1290,238 @@ export async function enterNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal
   if (!inNook(bot, nook) && Math.abs(p.y - nook.stand.y) < 0.6 && Math.hypot(p.x - nook.stand.x - 0.5, p.z - nook.stand.z - 0.5) <= 1.2) {
     await walkTo(bot, nook.stand.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal).catch(err => { if (isAbort(err)) throw err })
   }
+}
+
+/**
+ * Into the bunker's cell: by its sill when it's open (the walls but the sill kept from the pathfinder's breaking),
+ * else through whichever of its walls the pathfinder breaks (the floor kept); then its open walls filled again from
+ * inside (shellAgain: the blocks dug on the way in, a sill opened for a fetch), unless `reseal` is false
+ */
+export async function enterBunker (bot: Bot, nook: BlazeNook, signal?: AbortSignal, reseal = true): Promise<void> {
+  const b = nook.bunker
+  if (b == null) return await enterNook(bot, nook, signal, reseal)
+  if (!inNook(bot, nook)) {
+    const go = async (kept: Vec3[]): Promise<void> => { await withBlocksKept(bot, kept, async () => await moveNear(bot, nook.stand, 0, signal)) }
+    await go(bunkerKept(nook)).catch(async err => {
+      if (isAbort(err) || !(isSkillError(err, 'NO_PATH') || isSkillError(err, 'STUCK'))) throw err
+      trace('enterBunker: no way in by the sill:', (err as Error).message)
+      await putOutNookFires(bot, nook, signal)
+      await go(nook.floor)
+    })
+    const p = bot.entity.position
+    if (!inNook(bot, nook) && Math.abs(p.y - nook.stand.y) < 0.6 && Math.hypot(p.x - nook.stand.x - 0.5, p.z - nook.stand.z - 0.5) <= 1.2) {
+      await walkTo(bot, nook.stand.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal).catch(err => { if (isAbort(err)) throw err })
+    }
+  }
+  if (!reseal || !inNook(bot, nook)) return
+  const again = shellAgain(p => bot.blockAt(p) as NookBlock | null, nook)
+  if (again == null || again.build.length === 0) return
+  trace('enterBunker: shut again,', again.build.length, 'blocks')
+  await walkTo(bot, nook.stand.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal).catch(err => { if (isAbort(err)) throw err })
+  await fillNook(bot, again.build, signal, false, false)
+}
+
+/**
+ * Whether an item lying at `item` is in the pickup reach of a player whose feet are at `feet` (Player.aiStep: the
+ * items touching its box inflated by 1 across and 0.5 up and down; the player's box 0.6 wide and 1.8 high, the item's
+ * 0.25): its middle within 1.425 across either way, its feet 0.75 under the player's to 2.3 over
+ */
+export function inPickupReach (feet: Vec3, item: Vec3): boolean {
+  const across = 0.3 + 1 + 0.125
+  return Math.abs(item.x - feet.x) < across && Math.abs(item.z - feet.z) < across && item.y > feet.y - 0.75 && item.y < feet.y + 2.3
+}
+
+/** the most a bunker's fetch goes from it for a drop (a throne's floor 5 to 9 off its slit) */
+export const BUNKER_DROP_REACH = 12
+/** the blazes counted about the bot for a bunker's fetch (a fireball's flight, the spawner's 16) */
+export const BUNKER_CLEAR = 16
+/**
+ * a bunker's fight with its rods is left (the bot out of it for the brew, or the next work) once it's quiet
+ * (bunkerDepartDue), or after this many ticks: a 26.3 bot out of its bunker for the brew with 5 blazes about it, at
+ * seed 2's open throne at (-290, 77, -209), was held off at its door by the hostiles reflex and burned there
+ */
+export const BUNKER_DEPART_WAIT = 2400
+
+/** whether the bot goes out of its bunker now: BUNKER_FETCH_BLAZES or fewer blazes about, no fireball near, healed */
+export function bunkerDepartDue (bot: Bot, health: number): boolean {
+  return health >= BUNKER_FETCH_HEALTH && blazesAbout(bot) <= BUNKER_FETCH_BLAZES && !fireballNear(bot)
+}
+
+/** a bunker's fetch goes with at most this many living blazes within BUNKER_CLEAR (fire resistant, the second) */
+export const BUNKER_FETCH_BLAZES = 2
+export const BUNKER_FETCH_PROOF_BLAZES = 5
+/**
+ * a bunker's fetch goes at this health at the least (the bot heals to it inside: at 18 a bot left at 17.6, its bar
+ * under 18, fetched none of the rods of 12 kills with no blaze about), and is given up for the bunker at
+ * BUNKER_FETCH_LEAVE: out of it among the blazes a fetch at 10 burned
+ */
+export const BUNKER_FETCH_HEALTH = 16
+export const BUNKER_FETCH_LEAVE = 12
+
+/**
+ * The blaze rods (and a magma cube's cream) by the bunker its kills dropped, out of the bot's pickup reach from its
+ * cell (one in the slit, on the sill, comes to it by itself: inPickupReach), on a floor no lower than 3 under it,
+ * within BUNKER_DROP_REACH, nearest first
+ */
+export function bunkerDrops (bot: Bot, nook: BlazeNook): Entity[] {
+  const feet = nook.stand.offset(0.5, 0, 0.5)
+  return nearbyDrops(bot, feet, BUNKER_DROP_REACH, ['blaze_rod', 'magma_cream'])
+    .filter(e => e.position.y >= nook.stand.y - 3 && !inPickupReach(feet, e.position))
+}
+
+/** the living blazes within BUNKER_CLEAR of the bot */
+export function blazesAbout (bot: Bot): number {
+  const me = bot.entity.position
+  return Object.values(bot.entities).filter(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(me) <= BUNKER_CLEAR).length
+}
+
+/** whether no living blaze is within BUNKER_CLEAR of the bot, nor a small fireball within 24 */
+export function bunkerClear (bot: Bot): boolean {
+  return blazesAbout(bot) === 0 && !fireballNear(bot)
+}
+
+function fireballNear (bot: Bot): boolean {
+  const me = bot.entity.position
+  return Object.values(bot.entities).some(e => e.name === SMALL_FIREBALL && e.position.distanceTo(me) <= 24)
+}
+
+/** the bunker's sill dug from inside (the way out by its front), with the tool for it; none but a full block there */
+export async function openSill (bot: Bot, nook: BlazeNook, signal?: AbortSignal): Promise<void> {
+  if (nook.bunker == null) return
+  const sill = bot.blockAt(nook.bunker.sill)
+  if (sill == null || sill.boundingBox !== 'block' || sill.name === 'spawner' || sill.name === 'bedrock') return
+  const tool = (bot as any).pathingUtil?.bestHarvestingTool?.(sill)
+  if (tool != null && bot.heldItem?.type !== tool.type) await bot.equip(tool, 'hand')
+  await dig(bot, sill as any, { signal }).catch(err => { if (isAbort(err)) throw err; trace('fightFromNook: the sill:', (err as Error).message) })
+}
+
+/** the bunker's walls but its sill, and its floor: what the walks out of it and back mustn't break */
+export function bunkerKept (nook: BlazeNook): Vec3[] {
+  const sill = nook.bunker?.sill
+  return [...nook.walls.filter(w => sill == null || !w.equals(sill)), ...nook.floor]
+}
+
+/**
+ * Whether the bunker's fetch goes now: at BUNKER_FETCH_HEALTH, BUNKER_FETCH_BLAZES or fewer blazes about
+ * (blazesAbout), no small fireball near, and the ones that see the bot `quiet` (none about to shoot for FETCH_QUIET).
+ * The bunker's sword and bow kill a throne's blazes about as fast as the spawner makes them while it's quiet (seed 2's
+ * two throne spawners, 26.3: 10 to 14 kills in the first 3000 ticks), but rarely all of them: with none to be about a
+ * fetch never went, and 5 rods of 6 dropped were left lying
+ */
+export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true, proof = false): boolean {
+  if (nook.bunker == null || health < BUNKER_FETCH_HEALTH) return false
+  // (fire resistant, the fireballs are nothing: only their punches, BUNKER_FETCH_PROOF_BLAZES of them about at the most)
+  if (proof) return blazesAbout(bot) <= BUNKER_FETCH_PROOF_BLAZES
+  return blazesAbout(bot) <= BUNKER_FETCH_BLAZES && !fireballNear(bot) && quiet()
+}
+
+/**
+ * A drop by the bunker fetched: the sill dug (the way out the cell's front), then the nook's fetch (fetchDrops: the
+ * walk stopped behind the shield while a blaze that sees the bot may shoot, the sword at one in reach, out of a fire's
+ * cell back in), the bunker's walls but the sill kept from the pathfinder's breaking, given up at BUNKER_FETCH_LEAVE or
+ * once more than BUNKER_FETCH_BLAZES + 1 blazes are about; then back in and the bunker shut again (enterBunker)
+ */
+export async function fetchFromBunker (bot: Bot, nook: BlazeNook, item: Entity, watch: FetchWatch, signal?: AbortSignal): Promise<void> {
+  if (nook.bunker == null) return await fetchDrops(bot, nook, item, watch, signal)
+  trace('fightFromNook: out of the bunker for the drops at', item.position.toString())
+  await openSill(bot, nook, signal)
+  const bunkerWatch: FetchWatch = { ...watch, sealAt: Math.max(watch.sealAt, BUNKER_FETCH_LEAVE), abort: () => blazesAbout(bot) > (fireProof(bot) ? BUNKER_FETCH_PROOF_BLAZES : BUNKER_FETCH_BLAZES) + 1 }
+  await withBlocksKept(bot, bunkerKept(nook), async () => await fetchDrops(bot, nook, item, bunkerWatch, signal))
+}
+
+/** the rods (and cream) a step out of the bunker into its sill's cell takes: in reach there (inPickupReach), not from its cell */
+export function sillDrops (bot: Bot, nook: BlazeNook): Entity[] {
+  if (nook.bunker == null) return []
+  const feet = nook.stand.offset(0.5, 0, 0.5)
+  const out = nook.bunker.sill.offset(0.5, 0, 0.5)
+  return nearbyDrops(bot, out, 2.5, ['blaze_rod', 'magma_cream']).filter(e => inPickupReach(out, e.position) && !inPickupReach(feet, e.position))
+}
+
+/** a blaze this near the sill's cell keeps the bot in its bunker (BlazeAttackGoal hits within 2) */
+export const SILL_CLEAR = 3
+
+/**
+ * whether the step out for a rod by the sill goes: over BUNKER_FETCH_LEAVE, no living blaze within SILL_CLEAR of the
+ * sill's cell nor a small fireball near, the blazes that see the bot `quiet`
+ */
+export function sillPickupDue (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true): boolean {
+  if (nook.bunker == null || health <= BUNKER_FETCH_LEAVE || fireballNear(bot)) return false
+  const out = nook.bunker.sill.offset(0.5, 0.9, 0.5)
+  return !Object.values(bot.entities).some(e => e.name === 'blaze' && isAlive(bot, e) && e.position.offset(0, 0.9, 0).distanceTo(out) <= SILL_CLEAR) && quiet()
+}
+
+/**
+ * A rod by the sill taken: the sill dug, the bot a step out into its cell (the shield up toward the slit's way) till
+ * the rod comes to it (Player.aiStep's touch) or 20 ticks, then back in its cell and the sill put again
+ */
+export async function sillPickup (bot: Bot, nook: BlazeNook, item: Entity, signal?: AbortSignal): Promise<void> {
+  const b = nook.bunker
+  if (b == null) return
+  trace('fightFromNook: a step out of the bunker for the drop at', item.position.toString())
+  await openSill(bot, nook, signal)
+  try {
+    if (bot.blockAt(b.sill)?.boundingBox === 'block') return
+    // (a fireball's fire on the sill's floor put out first)
+    for (const p of [b.sill, b.slit]) {
+      const f = bot.blockAt(p)
+      if (f != null && (f.name === 'fire' || f.name === 'soul_fire')) await bot.dig(f as any, true).catch(() => {})
+    }
+    await walkTo(bot, b.sill.offset(0.5, 0, 0.5), { within: 0.25, maxTicks: 20 }, signal).catch(err => { if (isAbort(err)) throw err })
+    await waitUntil(bot, () => bot.entities[item.id] !== item, 20, signal)
+  } finally {
+    await walkTo(bot, nook.stand.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal).catch(err => { if (isAbort(err)) throw err })
+    await enterBunker(bot, nook, signal)
+  }
+}
+
+/** a bunker's slit turned after this many ticks with no blaze in its sight (one turn each so many ticks at most) */
+export const BUNKER_TURN_AFTER = 300
+/** the blazes a turn counts: within this of the bunker's stand */
+export const BUNKER_TURN_NEAR = 8
+
+/**
+ * The way to turn the bunker's slit (a cardinal way but the one it faces): the one most of the blazes within
+ * BUNKER_TURN_NEAR of its stand are, across; null for none
+ */
+export function bunkerTurnWay (nook: BlazeNook, blazes: readonly Vec3[]): Vec3 | null {
+  const centre = nook.stand.offset(0.5, 0, 0.5)
+  const counts = SIDES.map(() => 0)
+  for (const p of blazes) {
+    const d = new Vec3(p.x - centre.x, 0, p.z - centre.z)
+    if (d.norm() > BUNKER_TURN_NEAR || d.norm() < 1e-6) continue
+    const i = SIDES.reduce((best, s, k) => (s.dot(d) > SIDES[best].dot(d) ? k : best), 0)
+    counts[i]++
+  }
+  let best = -1
+  for (let i = 0; i < SIDES.length; i++) {
+    if (SIDES[i].equals(nook.facing) || counts[i] === 0) continue
+    if (best < 0 || counts[i] > counts[best]) best = i
+  }
+  return best < 0 ? null : SIDES[best]
+}
+
+/**
+ * The bunker turned to face `way`: its head wall that way dug (the new slit: a block of the bunker's, or the rock,
+ * never the spawner), then the walls of the bunker facing it put (bunkerAround: the old slit walled, a visor over the
+ * new one when it can have one). Resolves the turned bunker, null when it can't be turned there.
+ */
+export async function turnBunker (bot: Bot, nook: BlazeNook, way: Vec3, signal?: AbortSignal): Promise<BlazeNook | null> {
+  const slit = nook.stand.plus(way).plus(UP)
+  const lookup: NookLookup = p => bot.blockAt(p) as NookBlock | null
+  const view: NookLookup = p => p.equals(slit) ? { name: 'air', boundingBox: 'empty' } : lookup(p)
+  const turned = bunkerAround(view, nook.stand, way, true) ?? bunkerAround(view, nook.stand, way, false)
+  const wall = bot.blockAt(slit)
+  if (turned == null || wall == null || wall.name === 'spawner' || wall.name === 'bedrock' || (wall.boundingBox === 'block' && !isWallBlock(wall as NookBlock))) return null
+  if (nookBlocks(bot) < turned.build.length) return null
+  trace('fightFromNook: the bunker turned to', way.toString(), turned.build.length, 'blocks')
+  if (wall.boundingBox === 'block') {
+    const tool = (bot as any).pathingUtil?.bestHarvestingTool?.(wall)
+    if (tool != null && bot.heldItem?.type !== tool.type) await bot.equip(tool, 'hand')
+    await dig(bot, wall as any, { signal }).catch(err => { if (isAbort(err)) throw err; trace('fightFromNook: turn:', (err as Error).message) })
+    if (bot.blockAt(slit)?.boundingBox === 'block') return null
+  }
+  await fillNook(bot, turned.build, signal, false, false)
+  return shellAgain(lookup, turned) ?? turned
 }
 
 /** the cells whose fire stands in the way into the nook: its stand and front, and the cells round the bot's feet */
@@ -1107,10 +1570,11 @@ export async function withBlocksKept<T> (bot: Bot, cells: readonly Vec3[], fn: (
  * The nook's open cells filled from inside it; resolves how many couldn't be. A cell with nothing solid beside it to
  * go against has the open cell under it filled first (the front's floor dug out: the walk there came up through it)
  */
-export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: AbortSignal, guard = true): Promise<number> {
+export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: AbortSignal, guard = true, clear = true): Promise<number> {
   let missed = 0
-  // (the blazes come out of the spawner within its 4 of a melee nook: one on the bot is fought off first)
-  await clearBlazesNear(bot, signal, guard)
+  // (the blazes come out of the spawner within its 4 of a melee nook: one on the bot is fought off first; not with
+  // `clear` false, a bunker shut again from inside: the fight's sword meets them through its slit)
+  if (clear) await clearBlazesNear(bot, signal, guard)
   const solidAt = (p: Vec3): boolean => bot.blockAt(p)?.boundingBox === 'block'
   const backed = (p: Vec3): boolean => [p.offset(0, -1, 0), p.offset(0, 1, 0), ...SIDES.map(s => p.plus(s))].some(solidAt)
   for (const cell of cells) {
@@ -1128,7 +1592,7 @@ export async function fillNook (bot: Bot, cells: readonly Vec3[], signal?: Abort
         trace('blaze nook: no block under', cell.toString(), (err as Error).message)
       }
     }
-    await clearBlazesNear(bot, signal, guard)
+    if (clear) await clearBlazesNear(bot, signal, guard)
     try {
       await placeBlock(bot, { pos: cell, item }, signal)
     } catch (err) {
@@ -1176,12 +1640,14 @@ export async function clearBlazesNear (bot: Bot, signal?: AbortSignal, guard = t
 
 /** to the nook's cell and its walls and roof put up; throws when they can't all be */
 export async function buildNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal, guard = true): Promise<void> {
-  await enterNook(bot, nook, signal)
+  await enterNook(bot, nook, signal, false)
   if (!inNook(bot, nook)) throw new SkillError('VERIFY_FAILED', `the bot is at ${bot.entity.position.toString()}, not in the nook at ${nook.stand.toString()}`)
   // (in the middle of its cell: half in a wall's, the wall's block walked the bot out and back three times, 26.3)
   await walkTo(bot, nook.stand.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal)
-  const missed = await fillNook(bot, nook.build, signal, guard)
-  if (missed > 0) throw new SkillError('CANNOT_PLACE', `${missed} of the nook's ${nook.build.length} blocks not put`)
+  // (a bunker's looked at afresh: the way in may have been dug through one of its walls)
+  const build = nook.bunker != null ? (shellAgain(p => bot.blockAt(p) as NookBlock | null, nook)?.build ?? nook.build) : nook.build
+  const missed = await fillNook(bot, build, signal, guard)
+  if (missed > 0) throw new SkillError('CANNOT_PLACE', `${missed} of the nook's ${build.length} blocks not put`)
 }
 
 /**
@@ -1220,7 +1686,7 @@ export async function sealAndHeal (bot: Bot, nook: BlazeNook, healTo: number, si
  * BLAZE_KIT=q3)
  */
 export async function openNook (bot: Bot, nook: BlazeNook, signal?: AbortSignal): Promise<void> {
-  for (const p of [nook.front[1], nook.front[0]]) {
+  for (const p of [...nook.front].reverse()) {
     const b = bot.blockAt(p)
     if (b == null || b.boundingBox !== 'block' || !NOOK_BLOCKS.includes(b.name)) continue
     const tool = (bot as any).pathingUtil?.bestHarvestingTool?.(b)

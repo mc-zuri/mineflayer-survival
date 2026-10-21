@@ -22,9 +22,11 @@ import { drinkPotion, findPotion, hasEffect } from '../skills/potion'
 import { countItems, trace, waitTicks } from '../skills/util'
 import { findBlocks } from '../core/findBlocks'
 import { withNetherSafety } from './safety'
-import { fillNook, planBlazeNooks } from './blazeFight'
-import { lightBlazeSpawner } from './spawnerLight'
+import { fillNook, planBlazeBunkers, planBlazeNooks } from './blazeFight'
+import { LIGHT_TORCHES, lightBlazeSpawner } from './spawnerLight'
 import { collectBlazeRods, findBlazeSpawner, healSealed, unreachableSpawners, SEAL_HEAL_TO, type BlazeRodsArgs, type BlazeRodsResult } from './fortressSkills'
+
+export { LIGHT_TORCHES } from './spawnerLight'
 
 /** the brew (two of BREW_TICKS in a box) is made no nearer the spawner than this: its blazes shoot from 16 off and more */
 export const BREW_CLEAR = 16
@@ -339,9 +341,6 @@ export async function brewingBox (bot: Bot, signal?: AbortSignal): Promise<Vec3 
   return feet.plus(dir)
 }
 
-/** the torches the spawner's lighting takes at the least (planSpawnerTorches' 4 light some 3 in 4 of seed 2's throne's spawns) */
-export const LIGHT_TORCHES = 4
-
 /** the brews a bot tries to their end (the makings looked for, the rods got a rod at a time, brewed or given up) */
 export const BREW_TRIES = 2
 /**
@@ -401,7 +400,8 @@ export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count
       const makings = (): boolean => countItems(bot, 'nether_wart') > 0 && (countItems(bot, 'magma_cream') > 0 || countItems(bot, 'slime_ball') > 0)
       if (countItems(bot, 'nether_wart') === 0) trace('blazeRodsWithBrew: no nether wart for fire resistance')
       // the spawner lit but for a patch by the nook first (spawnerLight: its blazes come one at a time, there)
-      if (countItems(bot, 'nether_wart') > 0 && countItems(bot, 'torch') >= LIGHT_TORCHES && !state.lit) {
+      // (not with a bunker to be had by it: the bunker lights it itself, once it's built, when it's quiet)
+      if (countItems(bot, 'nether_wart') > 0 && countItems(bot, 'torch') >= LIGHT_TORCHES && !state.lit && planBlazeBunkers(p => bot.blockAt(p) as any, spawner).length === 0) {
         state.lit = true
         const nook = planBlazeNooks(p => bot.blockAt(p) as any, spawner, { from: away })[0]
         const eye = nook != null ? nook.stand.offset(0.5, 1.62, 0.5) : away
@@ -440,8 +440,13 @@ export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count
       say(`not brewed: ${(err as Error).message}`)
     }
   }
-  // no bow and no fire resistance: no fight (the blazes' throne fought with a sword alone burned the bots)
+  // no bow and no fire resistance: no fight (the blazes' throne fought with a sword alone burned the bots), but from a
+  // bunker by the spawner (its sword meets the blazes at its slit; no nook nor camp after it: bunkerOnly)
   if (countItems(bot, 'blaze_rod') < args.count && !bowAndArrows(bot) && findPotion(bot, 'fire_resistance') == null && !hasEffect(bot, 'fire_resistance')) {
+    if (args.spawner != null && planBlazeBunkers(p => bot.blockAt(p) as any, new Vec3(args.spawner.x, args.spawner.y, args.spawner.z)).length > 0) {
+      say('no bow and none of it: the sword from a bunker only')
+      return await collectBlazeRods(bot, { ...args, bunkerOnly: true }, signal)
+    }
     say('no bow and none of it: no fight')
     throw Object.assign(new SkillError('MISSING_ITEMS', 'no bow and no fire resistance for the blazes (no magma cream or slime ball to brew it)', { rods: countItems(bot, 'blaze_rod') }), { noFireResistance: true })
   }

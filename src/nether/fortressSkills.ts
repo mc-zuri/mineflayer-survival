@@ -28,8 +28,9 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, netherStepForbidden, nookAround, nookBlocks, openNook, planBlazeNooks, putOutFireOnBot, sealAndHeal, withBlocksKept } from './blazeFight'
+import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, BUNKER_FETCH_LEAVE, blazesAbout, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, netherStepForbidden, nookAround, nookBlocks, openNook, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, sealAndHeal, shellAgain, withBlocksKept } from './blazeFight'
 import { handleFire } from '../skills/escape'
+import { lightFromBunker, litCells, spawnCells } from './spawnerLight'
 import { walkTo } from '../skills/navigate'
 
 const v3 = (p: Pos): Vec3 => new Vec3(p.x, p.y, p.z)
@@ -444,9 +445,9 @@ export const NOOK_MIN_BLOCKS = 14
 const nooks = new WeakMap<Bot, Map<string, BlazeNook>>()
 
 /** the nooks' key: the spawner, and whether the nook is the melee one by it */
-const nookKey = (spawner: Vec3, melee: boolean): string => `${spawner.toString()}${melee ? ' melee' : ''}`
+const nookKey = (spawner: Vec3, melee: boolean | 'bunker'): string => `${spawner.toString()}${melee === 'bunker' ? ' bunker' : melee ? ' melee' : ''}`
 
-function keepNook (bot: Bot, spawner: Vec3, nook: BlazeNook, melee = false): void {
+function keepNook (bot: Bot, spawner: Vec3, nook: BlazeNook, melee: boolean | 'bunker' = false): void {
   let m = nooks.get(bot)
   if (m == null) nooks.set(bot, m = new Map())
   m.set(nookKey(spawner, melee), nook)
@@ -460,11 +461,62 @@ function badNooks (bot: Bot): Vec3[] {
   return list
 }
 
+/**
+ * the blaze fight's memory of its cover forgotten (the nooks and bunkers kept and left out, the camp spots no way was
+ * found to, the lighting trips): a fresh trip to the fortress, as the integration tests' runs are
+ */
+export function resetBlazeCover (bot: Bot): void {
+  nooks.delete(bot)
+  badStands.delete(bot)
+  campFailureMaps.delete(bot)
+  lightTryMaps.delete(bot)
+}
+
 /** the nook kept for the spawner, its blocks to put again looked at afresh (null when it can't be had now) */
-function keptNook (bot: Bot, spawner: Vec3, lookup: NookLookup, melee = false): BlazeNook | null {
+function keptNook (bot: Bot, spawner: Vec3, lookup: NookLookup, melee: boolean | 'bunker' = false): BlazeNook | null {
   const kept = nooks.get(bot)?.get(nookKey(spawner, melee))
   if (kept == null) return null
-  return nookAround(lookup, kept.stand, kept.facing)
+  return shellAgain(lookup, kept)
+}
+
+/** a bunker tried after one with no kill for long stands this far from it at the least */
+export const BUNKER_APART = 4
+
+/** the bunker's lighting trips a spawner gets at the most */
+export const LIGHT_TRIES = 6
+/** the spawns left dark at which the bunker's lighting is done (planSpawnerTorches leaves DARK_PATCH by the bunker) */
+export const LIGHT_DONE = 0.3
+const lightTryMaps = new WeakMap<Bot, Map<string, number>>()
+/** the lighting trips the bot made from a bunker (lightFromBunker), per spawner */
+export function lightTries (bot: Bot): Map<string, number> {
+  let m = lightTryMaps.get(bot)
+  if (m == null) lightTryMaps.set(bot, m = new Map())
+  return m
+}
+
+/** the share of the spawner's spawns left dark by the torches about it (spawnCells, litCells) */
+export function spawnerLitShare (bot: Bot, spawner: Vec3): number {
+  const lookup: NookLookup = p => bot.blockAt(p) as any
+  const ids = ['torch', 'wall_torch'].map(n => bot.registry.blocksByName[n]?.id).filter((id): id is number => id != null)
+  const torches = findBlocks(bot, { point: spawner, matching: ids, maxDistance: SPAWN_RANGE + 4, count: 32 })
+  const lit = litCells(lookup, torches)
+  const cells = spawnCells(lookup, spawner)
+  const total = cells.reduce((n, c) => n + c.weight, 0)
+  return total > 0 ? cells.reduce((n, c) => n + (lit.has(`${c.cell.x},${c.cell.y},${c.cell.z}`) ? 0 : c.weight), 0) / total : 1
+}
+
+/** a lighting trip out of the bunker goes with no blaze this near the bot, at BUNKER_FETCH_HEALTH, few about */
+export const LIGHT_CLEAR = 8
+
+/**
+ * whether the bunker's lighting trip goes: at BUNKER_FETCH_HEALTH, no living blaze within LIGHT_CLEAR, at most
+ * BUNKER_FETCH_BLAZES about. A 26.3 bot gone out of its bunker at 15 health with two blazes in the corridor under it
+ * was punched to death 3 blocks out (seed 2's open throne, (-290, 77, -209))
+ */
+export function lightTripDue (bot: Bot): boolean {
+  const me = bot.entity.position
+  return fightHealth(bot) >= BUNKER_FETCH_HEALTH && blazesAbout(bot) <= BUNKER_FETCH_BLAZES &&
+    !Object.values(bot.entities).some(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(me) <= LIGHT_CLEAR)
 }
 
 /** shields the blaze fight carries when it can make them (the one in the off hand and a spare) */
@@ -532,6 +584,12 @@ export interface BlazeRodsArgs {
   maxTicks?: number
   /** fight from a nook built by the spawner (planBlazeNook) when one can be had (default true) */
   nook?: boolean
+  /** with no fire resistance, from a sealed bunker by the spawn volume first (planBlazeBunkers; default true) */
+  bunker?: boolean
+  /** the spawner lit from the bunker (lightFromBunker) when the bag has torches (default true) */
+  light?: boolean
+  /** the bunker's fight only: none from a nook or the camp after it (a sword alone, no fire resistance) */
+  bunkerOnly?: boolean
   /** drink fire resistance when the bot has a potion of it and the effect is off (default true) */
   fireResistance?: boolean
   /** spawners not to look for (default: the ones the bot found no way to, unreachableSpawners) */
@@ -673,6 +731,89 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     }
     return { rods: countItems(bot, 'blaze_rod'), kills, ticks }
   }
+  /**
+   * The fight from a sealed bunker by the spawn volume (planBlazeBunkers: the one built before, else the cheapest three
+   * in turn), the first rods' cover with no fire resistance: its walls take the fireballs, the sword meets the blazes
+   * at its slit and the bow those in sight through it, its rods fetched with no blaze about. Null when there's none to
+   * be had (too few blocks, no site, none built), or its fight gave no rod for long (another once first): the nooks then
+   */
+  const fightFromBunker = async (spawner: Vec3, retried = false, awayFrom?: Vec3): Promise<BlazeRodsResult | null> => {
+    if (nookBlocks(bot) < NOOK_MIN_BLOCKS) { trace('collectBlazeRods: too few blocks for a bunker,', nookBlocks(bot)); return null }
+    if (farFrom(spawner)) {
+      await travel(bot, { target: spawner, range: 16, exactY: true }, signal).catch(err => {
+        if (isAbort(err)) throw err
+        trace('collectBlazeRods: the trip to the spawner:', (err as Error).message)
+      })
+    }
+    await spareShield(bot, signal)
+    const lookup = (p: Vec3): any => bot.blockAt(p)
+    const kept = keptNook(bot, spawner, lookup, 'bunker')
+    const bad = badNooks(bot)
+    // (another after one with no kill for long: one apart from it, seeing other cells; the one beside it saw none either)
+    const planned = planBlazeBunkers(lookup, spawner, { from: bot.entity.position }, 12 + bad.length)
+      .filter(n => !bad.some(b => b.equals(n.stand)) && (awayFrom == null || n.stand.distanceTo(awayFrom) >= BUNKER_APART))
+    const candidates = kept != null ? [kept, ...planned.filter(n => !n.stand.equals(kept.stand))].slice(0, 3) : planned.slice(0, 3)
+    let bunker: BlazeNook | null = null
+    for (const c of candidates) {
+      trace('collectBlazeRods: the bunker at', c.stand.toString(), 'facing', c.facing.toString(), c.build.length, 'blocks', c.bunker?.visor != null ? 'visored' : 'no visor')
+      try {
+        await buildNook(bot, c, signal)
+        bunker = c
+        break
+      } catch (err) {
+        if (isAbort(err) || bot.health <= 0) throw err
+        trace('collectBlazeRods: the bunker not built:', (err as Error).message)
+        if (isSkillError(err, 'NO_PATH') || isSkillError(err, 'STUCK') || isSkillError(err, 'CANNOT_PLACE')) {
+          bad.push(c.stand)
+          if (kept?.stand.equals(c.stand) === true) nooks.get(bot)?.delete(nookKey(spawner, 'bunker'))
+        }
+      }
+    }
+    if (bunker == null) { trace('collectBlazeRods: no bunker by the spawner at', spawner.toString(), 'of', candidates.length); return null }
+    keepNook(bot, spawner, bunker, 'bunker')
+    // the spawner lit but for the patch by the bunker, LIGHT_TRIP_TORCHES at a time, whenever it's quiet (lightTripDue)
+    const tries = lightTries(bot)
+    const key = spawner.toString()
+    const fromBunker = bunker
+    const light = async (): Promise<boolean> => {
+      if (args.light === false || (tries.get(key) ?? 0) >= LIGHT_TRIES || countItems(bot, 'torch') === 0 || !lightTripDue(bot)) return false
+      if (spawnerLitShare(bot, spawner) <= LIGHT_DONE) return false
+      tries.set(key, (tries.get(key) ?? 0) + 1)
+      const put = await lightFromBunker(bot, fromBunker, spawner, BUNKER_FETCH_LEAVE, signal)
+      trace('collectBlazeRods:', put.length, 'torches by the spawner from the bunker')
+      return true
+    }
+    try {
+      // no kill for long (STUCK): on from the same bunker, not out of it for another, nor the nook's or the camp's fight,
+      // with no fire resistance: the walk to the next one 4 off through seed 2's throne room at (-277, 77, -159), among
+      // the blazes gathered about the first, burned the 26.3 bots, two runs of three
+      for (;;) {
+        try {
+          const fought = await fightFromNook(bot, bunker, { count, spawner, maxTicks: maxTicks - ticks, eatAt: args.eatAt ?? 14, onKill: () => { kills++ }, errand: light }, signal)
+          trace('collectBlazeRods: from the bunker,', fought.kills, 'kills,', fought.shots, 'shots,', fought.ticks, 'ticks')
+          break
+        } catch (err) {
+          if (!isSkillError(err, 'STUCK')) throw err
+          trace('collectBlazeRods: the fight from the bunker:', (err as Error).message, ': on from it')
+        }
+      }
+    } catch (err) {
+      if (isAbort(err) || isSkillError(err, 'TIMEOUT') || bot.health <= 0 || (isSkillError(err, 'MISSING_ITEMS') && (err as Error).message.includes('no food'))) throw err
+      if (isSkillError(err, 'NOT_FOUND') && (err as Error).message.includes('no blaze came')) {
+        markSpawnerUnreachable(bot, spawner)
+        throw err
+      }
+      trace('collectBlazeRods: the fight from the bunker:', (err as Error).message)
+      // a slit that wouldn't shut, or no kill for long: another bunker, once
+      if ((isSkillError(err, 'CANNOT_PLACE') || isSkillError(err, 'STUCK')) && !retried) {
+        nooks.get(bot)?.delete(nookKey(spawner, 'bunker'))
+        bad.push(bunker.stand)
+        return await fightFromBunker(spawner, true, isSkillError(err, 'STUCK') ? bunker.stand : undefined)
+      }
+      return null
+    }
+    return { rods: countItems(bot, 'blaze_rod'), kills, ticks }
+  }
   const fightForRods = async (): Promise<BlazeRodsResult> => {
     const spawner = args.spawner != null ? v3(args.spawner) : v3(await findBlazeSpawner(bot, { safety: false, exclude: args.exclude ?? unreachableSpawners(bot) }, signal))
     // a spawner the bot died by is given up (the milestone's next: the fortress's other, else another fortress), not
@@ -691,8 +832,16 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     // (from 9 off, out of the swarm the spawner keeps about it, the blazes come one or two at a time and are shot:
     // camped 5 off, among 6 of them, a diamond-armored 26.3 bot burned to death five times at one spawner)
     const standOff = args.standOff ?? BLAZE_STAND_OFF
-    // from cover first: a nook built by the spawner (blazeFight); the camp's fight below when none can be had
+    // from cover first: a sealed bunker by the spawn volume (fightFromBunker), then, none to be had, a nook built by the
+    // spawner (blazeFight); the camp's fight below when none can be had. The bow's nook, open toward the throne, was the
+    // cover with fire resistance on too: at seed 2's open throne at (-290, 77, -209) the 26.3 bots brewed it with the
+    // bunker's first rods and burned all the same, its fetches and its camp in the open among the blazes
     if (args.nook !== false) {
+      if (args.bunker !== false || args.bunkerOnly === true) {
+        const fromBunker = await fightFromBunker(spawner)
+        if (fromBunker != null) return fromBunker
+      }
+      if (args.bunkerOnly === true) throw Object.assign(new SkillError('MISSING_ITEMS', `no bunker to fight from by the spawner at ${spawner.toString()}, and no bow nor fire resistance for the blazes`, { rods: countItems(bot, 'blaze_rod'), kills, ticks }), { noFireResistance: true })
       const fought = await fightFromCover(spawner)
       if (fought != null) return fought
     }

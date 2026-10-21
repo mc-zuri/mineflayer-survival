@@ -8,10 +8,11 @@
 // next round comes the next tick while none came: with most of the volume lit they come one at a time, in the patch.
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
-import { SPAWN_RANGE, spawnWeight, type NookLookup } from './blazeFight'
+import { SPAWN_RANGE, spawnWeight, type BlazeNook, type NookLookup, bunkerKept, enterBunker, fightHealth, holdOffBlazes, openSill, withBlocksKept } from './blazeFight'
 import { placeBlock } from '../skills/placeBlock'
 import { isAbort, throwIfAborted } from '../skills/errors'
 import { countItems, trace } from '../skills/util'
+import { isAlive } from '../skills/combatUtil'
 
 /** a torch's light (Blocks.TORCH, lightLevel 14) */
 export const TORCH_LIGHT = 14
@@ -21,6 +22,8 @@ export const BLAZE_SPAWN_LIGHT = 11
 export const DARK_PATCH = 0.12
 /** the torches put at the most */
 export const SPAWNER_TORCHES = 8
+/** the torches the spawner's lighting takes at the least (planSpawnerTorches' 4 light some 3 in 4 of seed 2's throne's spawns) */
+export const LIGHT_TORCHES = 4
 
 const UP = new Vec3(0, 1, 0)
 const SIDES = [new Vec3(1, 0, 0), new Vec3(-1, 0, 0), new Vec3(0, 0, 1), new Vec3(0, 0, -1), UP, new Vec3(0, -1, 0)]
@@ -140,6 +143,57 @@ export async function lightBlazeSpawner (bot: Bot, spawner: Vec3, eye: Vec3, sig
       if (isAbort(err)) throw err
       trace('lightBlazeSpawner: no torch at', t.toString(), (err as Error).message)
     }
+  }
+  return put
+}
+
+/** the torches a lighting trip out of the bunker puts at the most (the next trip the next) */
+export const LIGHT_TRIP_TORCHES = 3
+/** a lighting trip goes back in once more blazes than this are within 16, or one within LIGHT_TRIP_NEAR */
+export const LIGHT_TRIP_BLAZES = 3
+export const LIGHT_TRIP_NEAR = 5
+
+/** the most ticks the bunker's lighting trip holds off the blazes before each torch */
+export const LIGHT_GUARD_TICKS = 200
+
+/**
+ * The spawner lit from the bunker (the first rods' cover), all but the patch of its spawns nearest the bunker's eyes:
+ * out by the sill, each torch of planSpawnerTorches put with the blazes about held off first where the bot stands
+ * (holdOffBlazes untilSafe: the shield toward one about to shoot, the sword at one in reach), the trip given up at
+ * `sealAt` health; back in after and the bunker shut again (enterBunker). The blazes then come out one at a time, in
+ * the patch in its slit's sight (BaseSpawner: a spawn tried where it's lit is a miss), and leave none to wander about
+ * it out of sight: the unlit spawner at seed 2's open throne (-290, 77, -209) made 49 within 48 of a bunker that killed
+ * 10 in its first 6000 ticks, its rods never fetched (26.3). Resolves the torches put.
+ */
+export async function lightFromBunker (bot: Bot, nook: BlazeNook, spawner: Vec3, sealAt = 10, signal?: AbortSignal, max = LIGHT_TRIP_TORCHES): Promise<Vec3[]> {
+  const lookup: NookLookup = p => bot.blockAt(p) as any
+  const plan = planSpawnerTorches(lookup, spawner, nook.stand.offset(0.5, 1.62, 0.5), Math.min(SPAWNER_TORCHES, countItems(bot, 'torch')))
+  plan.torches = plan.torches.filter(t => !['torch', 'wall_torch'].includes(bot.blockAt(t)?.name ?? '')).slice(0, max)
+  trace('lightFromBunker: at', spawner.toString(), plan.torches.length, 'torches, the spawns left', plan.unlit.toFixed(2))
+  const put: Vec3[] = []
+  if (plan.torches.length === 0) return put
+  try {
+    await openSill(bot, nook, signal)
+    await withBlocksKept(bot, [...bunkerKept(nook), spawner.floored()], async () => {
+      for (const t of plan.torches) {
+        throwIfAborted(signal)
+        if (fightHealth(bot) <= sealAt) { trace('lightFromBunker: health', bot.health, ': back in'); break }
+        // (more come about it, or one on it: back in)
+        const me = bot.entity.position
+        const blazes = Object.values(bot.entities).filter(e => e.name === 'blaze' && isAlive(bot, e as any) && e.position.distanceTo(me) <= 16)
+        if (blazes.length > LIGHT_TRIP_BLAZES || blazes.some(e => e.position.distanceTo(me) <= LIGHT_TRIP_NEAR)) { trace('lightFromBunker:', blazes.length, 'blazes about: back in'); break }
+        await holdOffBlazes(bot, { signal, maxTicks: LIGHT_GUARD_TICKS, untilSafe: true })
+        try {
+          await placeBlock(bot, { pos: t, item: 'torch', against: t.offset(0, -1, 0) }, signal)
+          put.push(t)
+        } catch (err) {
+          if (isAbort(err)) throw err
+          trace('lightFromBunker: no torch at', t.toString(), (err as Error).message)
+        }
+      }
+    })
+  } finally {
+    await enterBunker(bot, nook, signal)
   }
   return put
 }
