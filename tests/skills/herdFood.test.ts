@@ -309,3 +309,38 @@ test('tendHerd: a herd 100 off (fetched and penned where it was) is gone to only
   await tendHerd(bot, executor, signal(), () => {})
   assert.equal(tasks[0], 'back to the herd')
 })
+
+test('startHerd holding no breeding food: the farm\'s grown wheat harvested first (unbaked), then the cows seen 50 off fetched; with no farm, the wheat planned when cheap; pigs tempted with the carrots held (f5-1.21.11: \'herd: none to start yet ... 0 wheat\')', async () => {
+  const { startHerd } = await import('../../src/milestones')
+  const { rememberFarm } = await import('../../src/skills/farm')
+  const { bot, memory, cows } = homeWithCowsOff(50)
+  for (const s of bot.inventory.slots) if (s?.name === 'wheat') bot.inventory.slots[s.slot] = null
+  rememberFarm(memory, { water: new Vec3(3, 63, 3), cells: [new Vec3(4, 63, 3), new Vec3(5, 63, 3), new Vec3(2, 63, 3)], crop: 'wheat' }, 0)
+  const pen = planPen(() => ({ name: 'air', boundingBox: 'empty' }), CENTER, 9, 'west')
+  const steps: any[] = []
+  const { executor, tasks } = fakeExecutor(bot, memory, (name) => {
+    if (name === 'the herd pen') { rememberPen(memory, pen); return { pen, inside: 0, built: true } }
+    if (name === 'to the cows') { for (const c of cows) bot.entities[c.id] = c; bot.entity.position = new Vec3(48.5, 64, 0.5) }
+    if (name === 'lead the cows home') { for (const c of cows) c.position = CENTER.offset(0.5, 0, 0.5); bot.entity.position = CENTER.offset(-6, 0, 0); return 2 }
+  })
+  // (the farm grown: its harvest gives 3 wheat)
+  executor.farmCost = () => 0
+  executor.runStep = async (step: any) => { steps.push(step); bot.inventory.slots[30] = item('wheat', 3); return { gained: 3 } }
+  const lines: string[] = []
+  assert.equal(await startHerd(bot, executor, signal(), l => lines.push(l)), true, lines.join(' | '))
+  assert.equal(steps[0]?.kind, 'farm')
+  assert.deepEqual(tasks, ['the herd pen', 'to the cows', 'lead the cows home'])
+  // no farm, no wheat: planned (a hay bale's), within HERD_WHEAT_TICKS
+  const none = homeWithCowsOff(50)
+  for (const s of none.bot.inventory.slots) if (s?.name === 'wheat') none.bot.inventory.slots[s.slot] = null
+  const f = fakeExecutor(none.bot, none.memory)
+  f.executor.obtain = async (reqs: any[]) => { f.obtained.push(...reqs); none.bot.inventory.slots[30] = item('wheat', 4) }
+  await startHerd(none.bot, f.executor, signal(), () => {})
+  assert.deepEqual(f.obtained[0], { item: 'wheat', count: 4 })
+  // carrots held: pigs near led with them, no wheat got
+  const { herdFoodFirst } = await import('../../src/milestones')
+  const pigs = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('carrot', 5)] })
+  const g = fakeExecutor(pigs, new WorldMemory())
+  assert.equal(await herdFoodFirst(pigs, g.executor, signal(), () => {}), true)
+  assert.deepEqual(g.obtained, [])
+})

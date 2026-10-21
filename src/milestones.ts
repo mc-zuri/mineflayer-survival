@@ -2802,6 +2802,8 @@ export async function startHerd (bot: Bot, executor: Executor, signal: AbortSign
   const home = herdHome(bot, memory)
   if (Math.hypot(bot.entity.position.x - home.x, bot.entity.position.z - home.z) > HERD_HOME_RANGE) return false
   herdTriedAt.set(bot, now)
+  // the food to lead and breed with first (the farm's wheat, a hay bale's), when none is held
+  await herdFoodFirst(bot, executor, signal, log)
   const near = adultsNear(bot, home, HERD_LOOK_RANGE)
   const mob = chooseHerdMob(near, m => holdsBreedingFood(bot, m))
   if (mob == null) {
@@ -2825,6 +2827,35 @@ export async function startHerd (bot: Bot, executor: Executor, signal: AbortSign
   const census = noteHerd(bot, memory, herd)
   log(`herd: ${census?.adults.length ?? penned.inside} ${mob}s and ${census?.calves.length ?? 0} calves penned at ${penned.pen.center.toString()}`)
   return true
+}
+
+/** the wheat a herd's start gets when it holds no breeding food: a lead and a pair bred */
+export const HERD_START_WHEAT = 4
+/** ticks the plan for that wheat may cost (a village's hay, a farm nearly grown) */
+export const HERD_WHEAT_TICKS = 2000
+
+/**
+ * The breeding food for a herd's start, when the bot holds none of any kind's (BREEDING_FOOD: wheat for cows and
+ * sheep, carrots or potatoes for pigs, which a held one tempts with): the farm's grown plots harvested for their wheat
+ * (harvestGrownFarms, unbaked, 2 plots at the least), else HERD_START_WHEAT wheat got when the plan is cheap (a hay
+ * bale's, HERD_WHEAT_TICKS). The herd's start found none held, its wheat baked into bread, and tried no more till the
+ * next upkeep ('herd: none to start yet ... 0 wheat', f5-1.21.11 resumed from its base, t169785). Resolves whether the
+ * food is held now.
+ */
+export async function herdFoodFirst (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
+  const held = (): boolean => HERD_MOBS.some(m => breedingFoodHeld(bot, m) >= 2)
+  if (held()) return true
+  const fail = (err: unknown): void => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`herd: no wheat: ${(err as Error).message}`)
+  }
+  await harvestGrownFarms(bot, executor, signal, log, false, 2).catch(fail)
+  if (held()) return true
+  const want = [{ item: 'wheat', count: countItems(bot, 'wheat') + HERD_START_WHEAT }]
+  const plan = executor.plan(want)
+  if (plan.ok && plan.cost <= HERD_WHEAT_TICKS) await executor.obtain(want, signal).catch(fail)
+  else log(`herd: no breeding food held, the wheat would cost ${plan.ok ? `${plan.cost} ticks` : 'no plan'}`)
+  return held()
 }
 
 /** how far from home a group of animals seen (noteAnimals) is fetched for a herd when none live near it */
