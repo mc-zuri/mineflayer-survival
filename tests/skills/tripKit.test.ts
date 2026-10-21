@@ -50,6 +50,9 @@ test('tripKitItems: the pickaxes but the best, and but the best spare too with t
   assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 1 }, { name: 'stone_pickaxe', count: 1 }]), [{ name: 'stone_pickaxe', count: 1 }])
   assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 2 }]), [{ name: 'iron_pickaxe', count: 1 }])
   assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }]), [])
+  // a gate keeping 2 (the nether's NETHER_PICKAXES): the spare stays with the trip, a third goes in
+  assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 1 }], { pickaxes: 2 }), [])
+  assert.deepStrictEqual(tripKitItems([{ name: 'diamond_pickaxe', count: 1 }, { name: 'iron_pickaxe', count: 2 }], { pickaxes: 2 }), [{ name: 'iron_pickaxe', count: 1 }])
 })
 
 test('kitSpares: an iron pickaxe from 3 iron left when the bag has fewer than 3 pickaxes', () => {

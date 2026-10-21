@@ -258,7 +258,7 @@ function giveTo (bot: any, items: any[]): void {
 /** what netherGearNeeds asks for, so a test bot goes in */
 function NETHER_GEAR (): any[] {
   const { item } = require('../reflexes/fakeBot')
-  return [item('diamond_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('cooked_beef', 20), item('flint_and_steel', 1), item('shield', 1), item('bow', 1), item('arrow', 64)]
+  return [item('diamond_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('cooked_beef', 20), item('flint_and_steel', 1), item('shield', 1), item('bow', 1), item('arrow', 64), item('iron_pickaxe', 2)]
 }
 
 test('netherKit: the bot does not go in without a sword, armor, gold and food: got, else the milestone fails', async () => {
@@ -304,9 +304,10 @@ test('netherKit: a sword (stone at least), a chestplate and a shield got when mi
   }
   await netherKit(bot, executor, new AbortController().signal, () => {})
   // (then the brewing's bottles: brewKit)
-  assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate,shield', 'obtain stone_sword', 'obtain golden_boots', 'obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])
+  // (a spare iron pickaxe too: NETHER_PICKAXES)
+  assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate,iron_pickaxe,shield', 'obtain stone_sword', 'obtain golden_boots', 'obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])
   calls.length = 0
-  const armed = fakeBot({ items: [item('diamond_sword', 1), item('diamond_chestplate', 1), item('diamond_helmet', 1), item('diamond_leggings', 1), item('shield', 1), item('golden_boots', 1), item('bread', 32), item('bow', 1), item('arrow', 64), item('flint_and_steel', 1)] })
+  const armed = fakeBot({ items: [item('diamond_sword', 1), item('diamond_chestplate', 1), item('diamond_helmet', 1), item('diamond_leggings', 1), item('shield', 1), item('golden_boots', 1), item('bread', 32), item('bow', 1), item('arrow', 64), item('flint_and_steel', 1), item('diamond_pickaxe', 2)] })
   await netherKit(armed, executor, new AbortController().signal, () => {})
   // (the bottles alone)
   assert.deepStrictEqual(calls, ['obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])

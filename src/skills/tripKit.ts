@@ -167,6 +167,8 @@ export interface TripKitKeep {
   arrows?: number
   /** food points, by `nutrition` */
   food?: number
+  /** pickaxes the trip goes with, the best (the kit takes the rest) */
+  pickaxes?: number
   nutrition?: (name: string) => number
 }
 
@@ -181,7 +183,9 @@ export function tripKitItems (items: readonly ItemCount[], keep: TripKitKeep = {
   // stood 20000 ticks where the netherrack in its way couldn't be dug, 26.3), and but the best spare too when there
   // are three or more: the trip carries a spare of its own (the staircase down to the deep lava broke two, 26.3)
   const picks = PICKAXES.flatMap(p => new Array<string>(count(p)).fill(p))
-  for (const p of PICKAXES) add(p, picks.slice(picks.length >= 3 ? 2 : 1).filter(q => q === p).length)
+  // (a gate's: the trip's own `pickaxes` kept, the best, the rest the kit's)
+  const keptPicks = keep.pickaxes ?? (picks.length >= 3 ? 2 : 1)
+  for (const p of PICKAXES) add(p, picks.slice(keptPicks).filter(q => q === p).length)
   if (count('bow') >= 2) add('bow', count('bow') - 1)
   if (keep.arrows != null) add('arrow', count('arrow') - keep.arrows)
   else if (count('arrow') >= 32) add('arrow', Math.floor(count('arrow') / 2))

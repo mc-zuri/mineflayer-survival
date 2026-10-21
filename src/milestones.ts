@@ -946,6 +946,11 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   // the shield reflex holding the fresher: a bunker's fight blocks a fireball every 100 to 300 ticks, and a 1.21.11 bot
   // came out of 24000 ticks of one with no shield left, fireballs and punches through its slit unblocked (tests/
   // integration/blaze BLAZE_AT=s2fortress2)
+  // a spare iron pickaxe for the trip (NETHER_PICKAXES of iron or better), the trip kit leaving it with the bot: one
+  // pickaxe worn down on the way to the fortress was 'stopped, the iron_pickaxe has 24 uses left and no spare' twice,
+  // and the bot fought on with stone ones made from the blackstone (f7-1.21.11, seed -3768674050494303582)
+  const goodPicks = countItems(bot, ['iron_pickaxe', 'diamond_pickaxe', 'netherite_pickaxe'])
+  if (goodPicks < NETHER_PICKAXES) want.push({ item: 'iron_pickaxe', count: countItems(bot, 'iron_pickaxe') + NETHER_PICKAXES - goodPicks, optional: true })
   const shields = [...bot.inventory.items(), bot.inventory.slots[45]].filter((i): i is NonNullable<typeof i> => i?.name === 'shield')
   if (shields.length === 0) want.push({ item: 'shield', count: 1, optional: true })
   else if (shields.every(shieldWorn)) want.push({ item: 'shield', count: shields.length + 1, optional: true })
@@ -1107,6 +1112,8 @@ export async function netherSpares (bot: Bot, executor: Executor, gate: NetherGa
 export const NETHER_FOOD_TICKS = 12000
 /** the ticks a try of the nether kit spends on the gate's arrows after the rest of the gear */
 export const NETHER_ARROW_TICKS = 12000
+/** the pickaxes of iron or better the nether's trip goes with (netherKit gets the spare, the trip kit leaves it) */
+export const NETHER_PICKAXES = 2
 /** the spiders' misses in a row (the bow's string) after which the gate goes without a bow (the water bottles) */
 export const BOW_SPIDER_MISSES = 3
 /** the ticks a try of the nether kit spends on the bow (its string) after the rest of the gear */
@@ -1349,7 +1356,7 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
     const gate = netherGate(bot, executor as any)
     await netherSpares(bot, executor, gate, signal, log)
     // (kept off the portal's blocks while by it: awayFromPortals)
-    await awayFromPortals(bot, async () => await leaveTripKit(bot, executor, signal, log, undefined, { arrows: gate.bow === false ? 0 : gate.arrows, food: gate.food, nutrition: n => foodInfo(bot.registry as any, n)?.nutrition ?? 0 }))
+    await awayFromPortals(bot, async () => await leaveTripKit(bot, executor, signal, log, undefined, { arrows: gate.bow === false ? 0 : gate.arrows, food: gate.food, nutrition: n => foodInfo(bot.registry as any, n)?.nutrition ?? 0, pickaxes: NETHER_PICKAXES }))
     // (the kit took only what's over the gate: still met, the bottles' brew kit made after it again if it took them)
     await netherKit(bot, executor, signal, log)
     try {
