@@ -133,3 +133,22 @@ test('fleeHeading leans toward a place to run to (the base), never back at the t
   const behind = fleeHeading(bot, new Vec3(-3, 64, 0.5), 16, new Vec3(-40, 64, 0.5)) as number
   assert.ok(dir(behind).x >= -0.25, `toward the threat: ${dir(behind).toString()}`)
 })
+
+test('refugeSituation at the spawn of a server with spawn protection: no pillar (its blocks refused), the hole still one (the shelter walks out of the square to dig it); and the choice from it', async () => {
+  const { EventEmitter } = await import('node:events')
+  const { installSpawnProtection } = await import('../../src/skills/spawnProtection')
+  const zombie = entity({ name: 'zombie', position: new Vec3(12.5, 64, 0.5) })
+  const dirt = (p: Vec3): string => p.y < 60 ? 'stone' : p.y < 64 ? 'dirt' : 'air'
+  const bot = fakeBot({ entities: [zombie], items: [item('dirt', 16)], world: dirt })
+  bot.time = { timeOfDay: 18000 }
+  bot.game.dimension = 'overworld'
+  bot.spawnPoint = new Vec3(0, 64, 0)
+  bot._client = new EventEmitter()
+  // out of the square: the pillar of the blocks carried
+  assert.strictEqual(chooseRefuge(refugeSituation(bot, { base: null, failed: new Set() })), 'pillar')
+  installSpawnProtection(bot, 16)
+  const s = refugeSituation(bot, { base: null, failed: new Set() })
+  assert.strictEqual(s.pillarBlocks, 0)
+  assert.strictEqual(s.hole, true)
+  assert.strictEqual(chooseRefuge(s), 'hole')
+})

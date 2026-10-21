@@ -17,6 +17,7 @@ import { SCAFFOLD_ITEMS, towerUp } from '../end/skills/world'
 import { isBed } from '../core/items'
 import { dig } from '../core/actions'
 import { drownedNear, noteDrowning } from './breath'
+import { breakRefused, inSiteSquare, leaveRefusedGround, placeRefused, refusedGroundNear, useRefused } from './spawnProtection'
 
 /** how deep the hole goes: the feet three blocks down, the head two, the seal one (flush with the ground) */
 export const SHELTER_DEPTH = 3
@@ -57,6 +58,39 @@ export interface FindShelterOptions {
   digCost?: (name: string) => number
   /** columns not to take, by their surface cell (a spot the bot drowned at lately: skills/breath drownedNear) */
   avoid?: (surface: Vec3) => boolean
+  /** the server's refusals: no column with a block to dig or a seal it refuses, and the ones it may refuse dearer (shelterRefusals) */
+  refusals?: ShelterRefusals
+}
+
+/** the digs and places the server refuses the bot, as the shelter's column choice sees them (shelterRefusals) */
+export interface ShelterRefusals {
+  /** a dig of the block refused (skills/spawnProtection breakRefused) */
+  dig?: (pos: Vec3) => boolean
+  /** a block placed in the cell refused (placeRefused) */
+  place?: (pos: Vec3) => boolean
+  /** what a column costs over its dig, by its surface cell (one in the square about the spawn, its radius unknown yet) */
+  surcharge?: (surface: Vec3) => number
+}
+
+/**
+ * what a column in the square the lasting works keep out of costs over its dig while its radius isn't known (the
+ * vanilla default assumed: siteSquareRadius): one this many blocks further off, out of it, first
+ */
+export const SHELTER_SQUARE_COST = 12
+
+/**
+ * The bot's refusals for the shelter (skills/spawnProtection): no column with a block whose dig the server refuses
+ * (the spawn's square, a cell refused lately, a protected region) nor one whose seal it refuses, and a column in the
+ * square about the spawn assumed while its radius is unknown SHELTER_SQUARE_COST dearer. The bot in the browser on a
+ * server with spawn-protection stood the night at the spawn in the open and died: the night reflex's shelter took a
+ * column there every 20 ticks and its dig was refused each time.
+ */
+export function shelterRefusals (bot: Bot): ShelterRefusals {
+  return {
+    dig: (pos) => breakRefused(bot, pos),
+    place: (pos) => placeRefused(bot, pos),
+    surcharge: (surface) => inSiteSquare(bot, surface) ? SHELTER_SQUARE_COST : 0
+  }
 }
 
 /** soft ground is cheap, stone is dear and only with a pickaxe */
@@ -83,9 +117,9 @@ export function findShelterSpot (lookup: BlockLookup, from: Vec3, opts: FindShel
         const surface = start.offset(dx, dy, dz)
         if (opts.exclude?.has(vecKey(surface)) === true) continue
         if (opts.avoid?.(surface) === true) continue
-        const spot = shelterAt(lookup, surface, digCost)
+        const spot = shelterAt(lookup, surface, digCost, false, opts.refusals)
         if (spot == null) continue
-        const score = spot.cost * 4 + Math.hypot(dx, dz) + Math.abs(dy)
+        const score = spot.cost * 4 + Math.hypot(dx, dz) + Math.abs(dy) + (opts.refusals?.surcharge?.(surface) ?? 0)
         if (score < bestScore) { best = spot; bestScore = score }
       }
     }
@@ -93,19 +127,25 @@ export function findShelterSpot (lookup: BlockLookup, from: Vec3, opts: FindShel
   return best
 }
 
-/** the shelter dug down from this surface cell, if it can be; `dug`: the column may be open already (the bot in it) */
-export function shelterAt (lookup: BlockLookup, surface: Vec3, digCost: (name: string) => number, dug = false): ShelterSpot | null {
+/**
+ * the shelter dug down from this surface cell, if it can be; `dug`: the column may be open already (the bot in it);
+ * `refusals`: none with a block to dig or a seal the server refuses
+ */
+export function shelterAt (lookup: BlockLookup, surface: Vec3, digCost: (name: string) => number, dug = false, refusals: ShelterRefusals = {}): ShelterSpot | null {
   if (!isOpen(lookup(surface)) || !isOpen(lookup(surface.offset(0, 1, 0)))) return null
   let cost = 0
   for (let d = 1; d <= SHELTER_DEPTH; d++) {
-    const b = lookup(surface.offset(0, -d, 0))
+    const cell = surface.offset(0, -d, 0)
+    const b = lookup(cell)
     // dug already (the bot was cut off halfway)
     if (dug && isOpen(b)) continue
     if (!isSolid(b)) return null
     const c = digCost((b as BlockView).name)
     if (!Number.isFinite(c)) return null
+    if (refusals.dig?.(cell) === true) return null
     cost += c
   }
+  if (refusals.place?.(surface.offset(0, -1, 0)) === true) return null
   // solid ground under the floor, SHELTER_GROUND_DEPTH blocks of it: no thin crust over a cave or a ravine
   for (let d = 1; d <= SHELTER_GROUND_DEPTH; d++) {
     if (!isSolid(lookup(surface.offset(0, -SHELTER_DEPTH - d, 0)))) return null
@@ -477,7 +517,9 @@ async function digBelow (bot: Bot, toY: number, signal?: AbortSignal, column?: {
 async function placeAgainstSide (bot: Bot, pos: Vec3, item: string, signal?: AbortSignal): Promise<void> {
   const lookup = blockLookup(bot)
   const sides = [new Vec3(0, 1, 0), ...CARDINALS]
-  const against = sides.map(s => pos.plus(s)).find(p => isSolid(lookup(p)))
+  // (the server refuses a block in the cell, or a use of the block clicked: spawn protection, a claim)
+  if (placeRefused(bot, pos)) throw new SkillError('REFUSED', `${pos.toString()} is under spawn protection or refused: no seal placed`)
+  const against = sides.map(s => pos.plus(s)).find(p => isSolid(lookup(p)) && !useRefused(bot, p))
   if (against == null) throw new SkillError('CANNOT_PLACE', `nothing solid next to ${pos.toString()}`)
   const it = bot.inventory.items().find(i => i.name === item)
   if (it == null) throw new SkillError('MISSING_ITEMS', `no ${item}`)
@@ -553,6 +595,17 @@ function inWaterNow (bot: Bot): boolean {
   return [feet, feet.offset(0, 1, 0)].some(c => { const n = bot.blockAt(c)?.name; return n === 'water' || n === 'bubble_column' })
 }
 
+/** how far past the edge of the ground the server refuses the bot walks to dig its shelter out of it (leaveRefusedGround) */
+export const SHELTER_LEAVE_MARGIN = 3
+/** the columns a shelter() tries whose digs the server refuses, at most (two near the spawn teach a 1.21.11 bot its square) */
+export const SHELTER_REFUSED_TRIES = 4
+
+/** whether the server refuses a dig of one of the column's blocks still to dig, or its seal (ShelterRefusals) */
+export function columnRefused (spot: ShelterSpot, refusals: ShelterRefusals): boolean {
+  for (let d = 1; d <= SHELTER_DEPTH; d++) if (refusals.dig?.(spot.surface.offset(0, -d, 0)) === true) return true
+  return refusals.place?.(spot.seal) === true
+}
+
 /** the shelter() calls running for each bot (a task's own way out isn't raced by the night reflex's) */
 const sheltering = new WeakMap<Bot, number>()
 
@@ -596,35 +649,59 @@ async function shelterOnce (bot: Bot, opts: ShelterOptions): Promise<ShelterResu
     }
     const hasPickaxe = bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))
     const digCost = defaultDigCost(hasPickaxe)
+    // (no column the server refuses the digs or the seal of: the spawn's square, a claim; shelterRefusals)
+    const refusals = shelterRefusals(bot)
     // the hole the bot is in already (cut off before the seal went on), else the best column about
     let target: ShelterSpot | null = null
-    for (let d = 0; d <= SHELTER_DEPTH && target == null; d++) target = shelterAt(lookup, feet.offset(0, d, 0), digCost, true)
+    for (let d = 0; d <= SHELTER_DEPTH && target == null; d++) target = shelterAt(lookup, feet.offset(0, d, 0), digCost, true, refusals)
     // up a tree (a spawn on a jungle's canopy): down through the leaves to the ground first
     if (target == null && onTree(bot)) await climbDownTree(bot, signal)
     const exclude = new Set<string>()
-    for (let tries = 0; ; tries++) {
+    let walks = 0
+    let refused = 0
+    let walkedOut = false
+    for (;;) {
       // (none where the bot drowned lately: another spot 8 off and more, skills/breath drownedNear)
-      target = target ?? findShelterSpot(lookup, bot.entity.position, { radius: opts.radius, digCost, exclude, avoid: p => drownedNear(bot, p) })
-      if (target == null) throw new SkillError('NOT_FOUND', 'no ground to dig a shelter in nearby')
+      target = target ?? findShelterSpot(lookup, bot.entity.position, { radius: opts.radius, digCost, exclude, avoid: p => drownedNear(bot, p), refusals })
+      if (target == null) {
+        // none about but on ground the server refuses the digs on (the spawn's square, a protected region): out of it,
+        // SHELTER_LEAVE_MARGIN past its edge, and a look there, once
+        if (!walkedOut && refusedGroundNear(bot, bot.entity.position, opts.radius ?? 8)) {
+          walkedOut = true
+          trace('shelter: no column about', bot.entity.position.floored().toString(), 'but on refused ground: out of it')
+          if (await leaveRefusedGround(bot, SHELTER_LEAVE_MARGIN, signal)) continue
+        }
+        throw new SkillError('NOT_FOUND', 'no ground to dig a shelter in nearby')
+      }
       const t = target
       const inColumn = Math.floor(bot.entity.position.x) === t.surface.x && Math.floor(bot.entity.position.z) === t.surface.z &&
         Math.floor(bot.entity.position.y + 1e-6) <= t.surface.y && Math.floor(bot.entity.position.y + 1e-6) >= t.feet.y
-      if (inColumn) break
+      if (!inColumn) {
+        try {
+          await navigate(bot, { goal: new goals.GoalBlock(t.surface.x, t.surface.y, t.surface.z) }, signal)
+        } catch (err) {
+          // can't get there: the next best column, three times
+          if (isAbort(err) || ++walks >= 3) throw err
+          exclude.add(vecKey(t.surface))
+          target = null
+          continue
+        }
+      }
+      trace('shelter: the column at', t.surface.toString(), 'down to', t.feet.toString(), 'from', bot.entity.position.toString())
       try {
-        await navigate(bot, { goal: new goals.GoalBlock(t.surface.x, t.surface.y, t.surface.z) }, signal)
+        // the body inside the column's cell (0.6 wide in a 1 wide hole), or it stays up on the rim
+        await centreOn(bot, t.surface.offset(0.5, 0, 0.5), signal)
+        await digBelow(bot, t.feet.y, signal, t.surface)
         break
       } catch (err) {
-        // can't get there: the next best column, three times
-        if (isAbort(err) || tries >= 2) throw err
+        // a dig the server refused (put back, or the square learnt as it dug: its refusal stops the dig): the next
+        // best column, out of what it refuses, SHELTER_REFUSED_TRIES times
+        if (isAbort(err) || !(isSkillError(err, 'REFUSED') || columnRefused(t, refusals)) || ++refused >= SHELTER_REFUSED_TRIES) throw err
+        trace('shelter: the column at', t.surface.toString(), 'refused:', (err as Error).message)
         exclude.add(vecKey(t.surface))
         target = null
       }
     }
-    const centre = target.surface.offset(0.5, 0, 0.5)
-    trace('shelter: the column at', target.surface.toString(), 'down to', target.feet.toString(), 'from', bot.entity.position.toString())
-    // the body inside the column's cell (0.6 wide in a 1 wide hole), or it stays up on the rim
-    await centreOn(bot, centre, signal)
-    await digBelow(bot, target.feet.y, signal, target.surface)
     await waitUntil(bot, () => bot.entity.onGround, 20, signal)
     // the dug blocks' drops fall in with the bot (ItemEntity's 10 ticks of pickup delay)
     await waitUntil(bot, () => sealItem(bot) != null, 40, signal)

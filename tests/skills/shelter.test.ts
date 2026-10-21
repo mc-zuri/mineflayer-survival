@@ -305,3 +305,102 @@ test('shelterAt: solid ground SHELTER_GROUND_DEPTH blocks under its floor, none 
   }
   assert.match(digDownHazard(hollow, new Vec3(5, 64, 0), { x: 5, z: 0 }, toY) ?? '', /no ground under/)
 })
+
+test('findShelterSpot: no column with a block to dig or a seal the server refuses (the spawn\'s square, a claim); one in the square assumed about the spawn dearer (SHELTER_SQUARE_COST)', async () => {
+  const { SHELTER_SQUARE_COST, columnRefused } = await import('../../src/skills/shelter')
+  // the digs refused within 16 of the spawn at 0, 0 (max |dx|, |dz|), the places a block past it
+  const square = (p: Vec3): boolean => Math.max(Math.abs(p.x), Math.abs(p.z)) <= 16
+  const refusals = { dig: square, place: (p: Vec3) => Math.max(Math.abs(p.x), Math.abs(p.z)) <= 17 }
+  assert.equal(findShelterSpot(world(plains), new Vec3(0.5, 64, 0.5), { refusals }), null)
+  const edge = findShelterSpot(world(plains), new Vec3(12.5, 64, 0.5), { refusals })
+  assert.ok(edge != null && edge.surface.x >= 18, `the shelter at ${String(edge?.surface)}`)
+  // the seal alone refused: none there either
+  assert.equal(shelterAt(world(plains), new Vec3(17, 64, 0), defaultDigCost(false), false, refusals), null)
+  assert.ok(shelterAt(world(plains), new Vec3(18, 64, 0), defaultDigCost(false), false, refusals) != null)
+  assert.equal(columnRefused({ surface: new Vec3(3, 64, 0), seal: new Vec3(3, 63, 0), feet: new Vec3(3, 61, 0), cost: 3 }, refusals), true)
+  assert.equal(columnRefused({ surface: new Vec3(20, 64, 0), seal: new Vec3(20, 63, 0), feet: new Vec3(20, 61, 0), cost: 3 }, refusals), false)
+  // the square assumed (its radius unknown): a column out of it a few blocks further first, one in it when none is out
+  const surcharge = (s: Vec3): number => square(s) ? SHELTER_SQUARE_COST : 0
+  const out = findShelterSpot(world(plains), new Vec3(14.5, 64, 0.5), { refusals: { surcharge } })
+  assert.ok(out != null && out.surface.x >= 17, `the shelter at ${String(out?.surface)}`)
+  assert.deepStrictEqual(findShelterSpot(world(plains), new Vec3(0.5, 64, 0.5), { refusals: { surcharge } })?.surface, new Vec3(0, 64, 0))
+})
+
+/**
+ * A night's shelter() on plains about the world spawn at 0, 0 of a server with spawn-protection 16: a world the digs
+ * and places change, the bot dropping into each block dug, navigate's walks taken at once; the server's refusal of a
+ * dig in the square (`server`: 'silent' puts the block back, 1.21.11; 'message' says so on the action bar too, 26.3)
+ */
+async function shelterAtSpawn (option: number | 'auto', server: 'silent' | 'message'): Promise<{ result: any, dug: Vec3[], refused: Vec3[], bot: any }> {
+  const { EventEmitter } = await import('node:events')
+  const { installSpawnProtection, breakRefused } = await import('../../src/skills/spawnProtection')
+  const { SkillError } = await import('../../src/skills/errors')
+  const actions = require('../../src/core/actions')
+  const nav = require('../../src/skills/navigate')
+  const changed = new Map<string, string>()
+  const name = (p: Vec3): string => changed.get(p.toString()) ?? plains(p)
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('dirt', 8)], world: name })
+  bot.time = { timeOfDay: 18000 }
+  bot.spawnPoint = new Vec3(0, 64, 0)
+  bot._client = new EventEmitter()
+  bot.equip = async () => {}
+  bot.digTime = () => 10
+  bot.placeBlock = async (against: any, face: Vec3) => { changed.set(against.position.plus(face).toString(), 'dirt') }
+  installSpawnProtection(bot, option)
+  const dug: Vec3[] = []
+  const refused: Vec3[] = []
+  const block = (n: string, pos: Vec3): any => ({ name: n, type: bot.registry.blocksByName[n].id, stateId: bot.registry.blocksByName[n].defaultState, position: pos })
+  const realDig = actions.dig
+  const realNavigate = nav.navigate
+  actions.dig = async (b: any, target: any) => {
+    // (core dig's check: none where the server refuses it)
+    if (breakRefused(b, target.position)) throw new SkillError('REFUSED', `${String(target.position)} refused: not broken`)
+    const pos = target.position as Vec3
+    dug.push(pos)
+    if (Math.max(Math.abs(pos.x), Math.abs(pos.z)) <= 16) {
+      // the client's predicted break, and the server's block back
+      refused.push(pos)
+      if (server === 'message') bot.emit('message', { translate: 'build.spawn_protection', with: [`${pos.x}, ${pos.y}, ${pos.z}`], toString: () => `${pos.x}, ${pos.y}, ${pos.z} is under spawn protection` })
+      bot.targetDigBlock = block(target.name, pos)
+      bot.emit('blockUpdate', block(target.name, pos), block('air', pos))
+      bot.targetDigBlock = null
+      bot.emit('blockUpdate', block('air', pos), block(target.name, pos))
+      return
+    }
+    changed.set(pos.toString(), 'air')
+    bot.entity.position = bot.entity.position.offset(0, -1, 0)
+  }
+  nav.navigate = async (b: any, args: any) => {
+    const g = args.goal
+    b.entity.position = new Vec3(Math.floor(g.x) + 0.5, g.y ?? 64, Math.floor(g.z) + 0.5)
+    return {}
+  }
+  const ticker = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    const result = await shelter(bot, { torch: false, leave: false, until: () => true })
+    return { result, dug, refused, bot }
+  } finally {
+    clearInterval(ticker)
+    actions.dig = realDig
+    nav.navigate = realNavigate
+  }
+}
+
+test('shelter: at the spawn of a server with spawn protection the bot walks out of the square and digs its hole there, none tried in it once the square is known (the bot in the browser stood the night at the spawn and died, its shelter\'s digs refused every 20 ticks)', async () => {
+  const { SHELTER_LEAVE_MARGIN } = await import('../../src/skills/shelter')
+  const { SPAWN_REFUSALS, underSpawnProtection } = await import('../../src/skills/spawnProtection')
+  // the radius known (the option's): no dig in the square at all, out of it and down there
+  const known = await shelterAtSpawn(16, 'silent')
+  assert.equal(known.refused.length, 0)
+  assert.ok(known.result.dug && known.result.feet.x >= 17 + SHELTER_LEAVE_MARGIN - 1, `the hole at ${String(known.result.feet)}`)
+  assert.ok(isEnclosed((p) => known.bot.blockAt(p), known.result.feet))
+  // 1.21.11 (no message, 'auto'): two digs put back by the spawn teach it the square (SPAWN_REFUSALS), then out
+  const silent = await shelterAtSpawn('auto', 'silent')
+  assert.ok(silent.refused.length <= SPAWN_REFUSALS, `${silent.refused.length} digs refused`)
+  assert.ok(silent.result.dug && !underSpawnProtection(silent.bot, silent.result.feet), `the hole at ${String(silent.result.feet)}`)
+  assert.ok(isEnclosed((p) => silent.bot.blockAt(p), silent.result.feet))
+  // 26.3 (the action bar's 'is under spawn protection'): the first refusal teaches it
+  const told = await shelterAtSpawn('auto', 'message')
+  assert.equal(told.refused.length, 1)
+  assert.ok(told.result.dug && !underSpawnProtection(told.bot, told.result.feet), `the hole at ${String(told.result.feet)}`)
+})

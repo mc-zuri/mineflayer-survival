@@ -445,10 +445,43 @@ export async function leaveSpawnProtection (bot: Bot, margin: number, signal?: A
   return true
 }
 
+/**
+ * Whether the ground within `reach` of the cell is ground the server refuses the bot's digs and places on: the
+ * spawn's square (its radius known) or a protected region learnt from the refusals, `reach` about them
+ */
+export function refusedGroundNear (bot: Bot, pos: { x: number, y: number, z: number }, reach: number): boolean {
+  return underSpawnProtection(bot, pos, reach) || inRefusedRegion(bot, pos, reach)
+}
+
+/**
+ * Walks the bot out of the spawn's square (its radius known) or out of the protected region it's in, `margin` blocks
+ * past its edge on the side it's nearest, when it's in there or within `margin` of it: a hole dug or a block put down
+ * after goes in where the server lets it. Resolves whether it walked.
+ */
+export async function leaveRefusedGround (bot: Bot, margin: number, signal?: AbortSignal): Promise<boolean> {
+  if (await leaveSpawnProtection(bot, margin, signal)) return true
+  const state = states.get(bot)
+  if (state == null) return false
+  const pos = bot.entity.position
+  const dimension = dimensionOf(bot)
+  const region = state.regions.find(r => r.until > state.tick && r.dimension === dimension &&
+    Math.max(Math.abs(Math.floor(pos.x) - r.x), Math.abs(Math.floor(pos.z) - r.z)) <= r.radius + margin)
+  if (region == null) return false
+  const target = outOfSquareBy(new Vec3(region.x, 0, region.z), pos, region.radius, margin + 1)
+  trace('spawnProtection: out of the protected region about', region.x, region.z, 'to', target.toString())
+  await navigate(bot, { goal: new goals.GoalNearXZ(Math.floor(target.x), Math.floor(target.z), 1) }, signal)
+  return true
+}
+
 /** `point` moved to `past` blocks past the edge of the square of `radius` about the spawn (outOfSiteSquare's) */
 function outOfSiteSquareBy (bot: Bot, point: Vec3, radius: number, past: number): Vec3 | null {
   const center = spawnCenter(bot)
   if (center == null) return null
+  return outOfSquareBy(center, point, radius, past)
+}
+
+/** `point` moved to `past` blocks past the edge of the square of `radius` about `center`, along the axis it's furthest out on */
+function outOfSquareBy (center: Vec3, point: Vec3, radius: number, past: number): Vec3 {
   const dx = Math.floor(point.x) - center.x
   const dz = Math.floor(point.z) - center.z
   const out = radius + 1 + past

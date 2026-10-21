@@ -341,3 +341,35 @@ test('a home or a base\'s grid at the spawn moved out of the square, past its ed
   assert.strictEqual(boxInSiteSquare(bot, { min: { x: 18, y: 40, z: -3 }, max: { x: 25, y: 46, z: 5 } }), false)
   assert.strictEqual(boxInSiteSquare(bot, { min: { x: -40, y: 40, z: -40 }, max: { x: -20, y: 46, z: -18 } }), false)
 })
+
+test('refusedGroundNear and leaveRefusedGround: the square (its radius known) or a protected region within reach; out of the one the bot is in, the margin past its edge on its nearest side', async () => {
+  const { refusedGroundNear, leaveRefusedGround } = await import('../../src/skills/spawnProtection')
+  const nav = require('../../src/skills/navigate')
+  const real = nav.navigate
+  const goals: any[] = []
+  nav.navigate = async (b: any, args: any) => { goals.push(args.goal); b.entity.position = new Vec3(args.goal.x + 0.5, 64, args.goal.z + 0.5); return {} }
+  try {
+    // the square, radius 16 about 0, 0: the bot at 5, -3 walks out east, 16 + 1 + 3 + 1 off
+    const bot = spawnBot()
+    installSpawnProtection(bot, 16)
+    bot.entity.position = new Vec3(5.5, 64, -2.5)
+    assert.strictEqual(refusedGroundNear(bot, bot.entity.position, 0), true)
+    assert.strictEqual(refusedGroundNear(bot, new Vec3(30, 64, 0), 8), false)
+    assert.strictEqual(refusedGroundNear(bot, new Vec3(24, 64, 0), 8), true)
+    assert.strictEqual(await leaveRefusedGround(bot, 3), true)
+    assert.deepStrictEqual([goals[0].x, goals[0].z], [21, -3])
+    // out of it already: no walk
+    assert.strictEqual(await leaveRefusedGround(bot, 3), false)
+    // a region (three refusals by 300, -200) far from the spawn: out of it to the north, its nearest side
+    const far = spawnBot()
+    installSpawnProtection(far, 'auto')
+    for (const p of [new Vec3(300, 40, -200), new Vec3(303, 40, -198), new Vec3(305, 40, -201)]) refusedDig(far, p)
+    far.entity.position = new Vec3(302.5, 64, -202.5)
+    assert.strictEqual(refusedGroundNear(far, far.entity.position, 0), true)
+    assert.strictEqual(await leaveRefusedGround(far, 3), true)
+    const last = goals[goals.length - 1]
+    assert.ok(last.x === 302 && !inRefusedRegion(far, new Vec3(last.x, 64, last.z), 2), `out to ${String(last.x)}, ${String(last.z)}`)
+  } finally {
+    nav.navigate = real
+  }
+})

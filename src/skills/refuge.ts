@@ -9,7 +9,8 @@ import { goals } from '@nxg-org/mineflayer-pathfinder'
 import { SkillError, isAbort, throwIfAborted } from './errors'
 import { navigate } from './navigate'
 import { hasLineOfSight, isAlive, type Entity } from './combatUtil'
-import { armorPoints, botIsBrightOutside, defaultDigCost, findShelterSpot, isEnclosed, leaveAtDay, shelter, sleepThroughNight } from './shelter'
+import { armorPoints, botIsBrightOutside, defaultDigCost, findShelterSpot, isEnclosed, leaveAtDay, shelter, shelterRefusals, sleepThroughNight } from './shelter'
+import { placeRefused, refusedGroundNear } from './spawnProtection'
 import { bestMeleeWeapon } from './weapons'
 import { doorOpen, isHandDoor, shutDoor } from './indoors'
 import { collectBlock } from './collectBlock'
@@ -216,10 +217,14 @@ export function refugeSituation (bot: Bot, opts: { base: BaseRecord | null, fail
     ? null
     : { distance: pos.distanceTo(inside), threatDistance: Math.min(Infinity, ...threats.map(e => e.position.distanceTo(inside))) }
   const bed = night && search && findBlock(bot, { matching: blockIdsNamed(bot, isBed), maxDistance: 16 }) != null
-  const pillarBlocks = countItems(bot, SCAFFOLD_ITEMS)
-  const dirtNear = search && findBlocks(bot, { matching: blockIdsNamed(bot, n => PUNCH_GROUND.includes(n)), maxDistance: 5, count: PILLAR_HEIGHT }).length >= PILLAR_HEIGHT - pillarBlocks
+  // (no pillar where the server refuses its blocks: the spawn's square, a claim; skills/spawnProtection)
+  const pillarRefused = placeRefused(bot, pos.floored())
+  const pillarBlocks = pillarRefused ? 0 : countItems(bot, SCAFFOLD_ITEMS)
+  const dirtNear = !pillarRefused && search && findBlocks(bot, { matching: blockIdsNamed(bot, n => PUNCH_GROUND.includes(n)), maxDistance: 5, count: PILLAR_HEIGHT }).length >= PILLAR_HEIGHT - pillarBlocks
   const hasPickaxe = bot.inventory.items().some(i => i.name.endsWith('_pickaxe'))
-  const hole = night && typeof bot.blockAt === 'function' && findShelterSpot(lookup, pos, { radius: 6, digCost: defaultDigCost(hasPickaxe) }) != null
+  // (a column the server lets it dig, or ground it refuses about, which the shelter walks out of first)
+  const hole = night && typeof bot.blockAt === 'function' &&
+    (findShelterSpot(lookup, pos, { radius: 6, digCost: defaultDigCost(hasPickaxe), refusals: shelterRefusals(bot) }) != null || refusedGroundNear(bot, pos, 6))
   return {
     night,
     threats: threats.map(e => ({ name: e.name ?? '?', distance: e.position.distanceTo(pos) })),
