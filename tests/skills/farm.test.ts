@@ -490,3 +490,31 @@ test('harvestGrownFarms with least: a farm with 3 of its 14 plots grown is harve
   await harvestGrownFarms(bot, executor, new AbortController().signal, () => {}, false, MEAL_FARM_PLOTS)
   assert.equal(steps.length, 1)
 })
+
+test('a farm step from 300 blocks off goes by travel\'s hops first, then to the farm (f5-1.21.11: NO_PATH nine times from the food land)', async () => {
+  const { runFarm } = await import('../../src/executor/steps')
+  const farmModule = require('../../src/skills/farm')
+  const navModule = require('../../src/skills/navigate')
+  const travelModule = require('../../src/skills/travel')
+  const real = { harvest: farmModule.harvestFarm, nav: navModule.navigateNear, travel: travelModule.travel }
+  const water = new Vec3(0, 63, 0)
+  const memory = new WorldMemory()
+  rememberFarm(memory, { water, cells: [new Vec3(1, 63, 0)], crop: 'wheat' }, 0)
+  const bot: any = { entity: { position: new Vec3(-200, 64, -232) }, blockAt: () => ({ name: 'air' }), inventory: { items: () => [], slots: [] }, game: { dimension: 'overworld' }, time: { age: 0 }, on () {}, off () {}, removeListener () {} }
+  const calls: string[] = []
+  travelModule.travel = async (_b: any, args: any) => { calls.push(`travel ${args.target.toString()}`); bot.entity.position = new Vec3(4, 64, 4); return {} }
+  navModule.navigateNear = async () => { calls.push('near') }
+  farmModule.harvestFarm = async () => { calls.push('harvest'); return {} }
+  try {
+    await runFarm({ kind: 'farm', item: 'wheat', count: 1, crop: 'wheat', seed: 'wheat_seeds', plots: 0, cycles: 1, cost: 0 } as any, { bot, memory, signal: new AbortController().signal, log: () => {}, home: null, state: {} } as any)
+    assert.deepEqual(calls, ['travel (0, 63, 0)', 'near', 'harvest'])
+    // by the farm: no travel
+    calls.length = 0
+    await runFarm({ kind: 'farm', item: 'wheat', count: 1, crop: 'wheat', seed: 'wheat_seeds', plots: 0, cycles: 1, cost: 0 } as any, { bot, memory, signal: new AbortController().signal, log: () => {}, home: null, state: {} } as any)
+    assert.deepEqual(calls, ['near', 'harvest'])
+  } finally {
+    farmModule.harvestFarm = real.harvest
+    navModule.navigateNear = real.nav
+    travelModule.travel = real.travel
+  }
+})

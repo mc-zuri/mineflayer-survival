@@ -785,6 +785,9 @@ export const runFill: StepRunner<FillStep> = async (step, ctx) => {
   return { gained: countItems(bot, step.item) - start }
 }
 
+/** how far off its farm a farm step goes by travel's hops before the pathfinder's last goal */
+export const FARM_TRAVEL_FROM = 48
+
 /** ticks a farm step waits at its farm for half the plots to grow before it harvests what has */
 export const FARM_WAIT_TICKS = 2400
 
@@ -807,6 +810,11 @@ export const runFarm: StepRunner<FarmStep> = async (step, ctx) => {
     return { gained: countItems(bot, item) - start, replan: true }
   }
   const cells = farmCells(farm)
+  // (from far off by travel's hops first: a meal's plan from the food land 300 blocks off went for the farm by home,
+  // and the one pathfinder goal there ended short, NO_PATH, nine times over, f5-1.21.11 t192216 to t199102)
+  if (bot.entity != null && bot.entity.position.distanceTo(farm.water) > FARM_TRAVEL_FROM) {
+    await travel(bot, { target: farm.water, range: 6 }, signal).catch(err => { if (isAbort(err)) throw err })
+  }
   await navigateNear(bot, farm.water, 3, signal)
   const lookup = (p: Vec3): any => bot.blockAt(p)
   // (waited for only when half the plots are a stage short of grown or more: a 26.3 bot back from a death waited out
