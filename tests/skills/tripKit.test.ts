@@ -382,3 +382,19 @@ test('leaveTripKit with a full bag and the base near stores what the trip doesn\
   await leaveTripKit(bot, executor, new AbortController().signal, () => {})
   assert.ok(!calls.some(c => c.startsWith('store')), calls.join(' | '))
 })
+
+test('keepOutOfPortals: no path through a nether portal\'s cells, installed once (f8-1.21.11: walked into its own portal, no way back)', async () => {
+  const { keepOutOfPortals } = await import('../../src/skills/tripKit')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
+  bot.blockAt = (p: any) => ({ name: p.x === 3 && p.y >= 64 && p.y <= 66 ? 'nether_portal' : p.y < 64 ? 'stone' : 'air', position: p })
+  let settings: any = { exclusionAreasStep: [] }
+  bot.pathfinder = { get defaultMoveSettings () { return settings }, setMoveOptions: (s: any) => { settings = s } }
+  keepOutOfPortals(bot)
+  keepOutOfPortals(bot)
+  assert.equal(settings.exclusionAreasStep.length, 1)
+  const cost = settings.exclusionAreasStep[0]
+  assert.equal(cost({ position: new Vec3(3, 64, 0) }), 1e9)
+  assert.equal(cost({ position: new Vec3(2, 64, 0) }), 0)
+})

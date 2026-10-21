@@ -374,6 +374,22 @@ export function keepUnbroken (bot: Bot, cells: Vec3[]): void {
  * put back after: the trip kit's stash by the nether portal walked the bot into it, and it was in the nether with no
  * arrival portal remembered and no way back (full-1.21.11-fresh-n)
  */
+/**
+ * No path through a nether portal's cells, for good (once, createPlugin): a walk by a portal never takes the bot
+ * through it by chance; enterPortal goes in by its own last step. A 1.21.11 bot's work by home after its portal was lit
+ * walked through it (the nether kit's plans, its explores for cows), and in the nether, its arrival portal not
+ * remembered, it found no way back, five failures in a row, and play stopped (f8-1.21.11, t337332 to t367003)
+ */
+export function keepOutOfPortals (bot: Bot): void {
+  const pf = (bot as any).pathfinder
+  const settings = pf?.defaultMoveSettings
+  if (pf?.setMoveOptions == null || settings == null) return
+  if ((settings.exclusionAreasStep ?? []).some((f: any) => f.survivalPortals === true)) return
+  const portal = (block: any): number => bot.blockAt(block.position)?.name === 'nether_portal' ? 1e9 : 0
+  ;(portal as any).survivalPortals = true
+  pf.setMoveOptions({ ...settings, exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), portal] })
+}
+
 export async function awayFromPortals<T> (bot: Bot, fn: () => Promise<T>): Promise<T> {
   const pf = (bot as any).pathfinder
   if (pf?.setMoveOptions == null || pf.defaultMoveSettings == null) return await fn()
