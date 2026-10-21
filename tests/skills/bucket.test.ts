@@ -64,3 +64,47 @@ test('keepWaterSource: a renewable source at the top of the water, not one under
   for (const spot of spots) assert.notStrictEqual(name(spot.offset(0, 1, 0)), 'water', spot.toString())
   assert.ok(!spots.some(s => s.y === 60), 'the floor of the pool')
 })
+
+test('fillBucket: a fill that comes back empty marks its cell no source NO_SOURCE_TICKS long, and the next fill goes to the next source (f6-26.3: the same cell at (-20, 101, 5) eight times)', async () => {
+  const { fillBucket, fillableSource, knownNoSource, NO_SOURCE_TICKS } = await import('../../src/skills/bucket')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const ghost = new Vec3(3, 63, 0)
+  const real = new Vec3(-2, 63, 0)
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('bucket', 1)] })
+  bot.survival = { tasks: { tick: 100 } }
+  const water = (p: Vec3): boolean => p.equals(ghost) || p.equals(real)
+  bot.blockAt = (p: Vec3) => ({ name: water(p.floored()) ? 'water' : p.y < 64 ? 'stone' : 'air', position: p.floored(), boundingBox: water(p.floored()) || p.y >= 64 ? 'empty' : 'block', getProperties: () => ({ level: 0 }) })
+  bot.world = { raycast: () => null }
+  bot._client = new (require('node:events').EventEmitter)()
+  // findBlock: the nearest of the two that matches
+  bot.findBlock = (opts: any) => [ghost, real].map(p => bot.blockAt(p)).find((b: any) => opts.matching(b)) ?? null
+  const used: string[] = []
+  bot.activateItem = () => {
+    const look = used.length === 0 ? ghost : real
+    used.push(look.toString())
+    // the ghost gives nothing; the real source fills the bucket
+    if (look.equals(real)) bot.inventory.slots[9] = Object.assign(item('water_bucket', 1), { slot: 9 })
+  }
+  bot.lookAt = async () => {}
+  bot.equip = async () => {}
+  const ticks = setInterval(() => bot.emit('physicsTick'), 1)
+  try {
+    await assert.rejects(fillBucket(bot, { fluid: 'water' }), (err: any) => err.reason === 'VERIFY_FAILED')
+    assert.equal(knownNoSource(bot, ghost), true)
+    assert.equal(fillableSource(bot, bot.blockAt(ghost), 'water'), false)
+    // a block with no position (findBlock's palette look) matches on the block alone
+    assert.equal(fillableSource(bot, { name: 'water', getProperties: () => ({ level: 0 }) }, 'water'), true)
+    const got = await fillBucket(bot, { fluid: 'water' })
+    assert.deepEqual(got.pos.toArray(), real.toArray())
+    // asked for the ghost by its cell: NOT_FOUND, no use of the bucket
+    bot.inventory.slots[10] = Object.assign(item('bucket', 1), { slot: 10 })
+    const usedBefore = used.length
+    await assert.rejects(fillBucket(bot, { fluid: 'water', pos: ghost }), (err: any) => err.reason === 'NOT_FOUND' && /came back empty/.test(err.message))
+    assert.equal(used.length, usedBefore)
+    // after NO_SOURCE_TICKS it counts again
+    bot.survival.tasks.tick += NO_SOURCE_TICKS
+    assert.equal(knownNoSource(bot, ghost), false)
+  } finally {
+    clearInterval(ticks)
+  }
+})

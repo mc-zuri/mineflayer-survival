@@ -20,7 +20,7 @@ import { obsidianHazard } from '../skills/hazardCells'
 import { craft } from '../skills/craft'
 import { PARALLEL_MIN_ITEMS, smelt, smeltParallel } from '../skills/smelt'
 import { retrieveItems } from '../skills/chest'
-import { fillBucket, isSource } from '../skills/bucket'
+import { fillBucket, fillableSource } from '../skills/bucket'
 import { hunt, nearestOfType } from '../skills/hunt'
 import type { Entity } from '../skills/combatUtil'
 import { navigate, navigateNear, pickaxeForTheWay } from '../skills/navigate'
@@ -766,7 +766,8 @@ export const runFill: StepRunner<FillStep> = async (step, ctx) => {
   let failures = 0
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
-    const source = (): boolean => bot.findBlock({ matching: (b: any) => isSource(b, step.fluid), maxDistance: 32 }) != null
+    // (a source a fill came back empty from lately passed over: fillableSource)
+    const source = (): boolean => bot.findBlock({ matching: (b: any) => fillableSource(bot, b, step.fluid), maxDistance: 32 }) != null
     if (!source()) {
       ctx.log(`exploring for ${step.fluid}`)
       const found = step.fluid === 'water'

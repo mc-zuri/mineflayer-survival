@@ -101,6 +101,44 @@ export function viewSpots (bot: Bot, pos: Vec3, height: number, sees: (eye: Vec3
   return out.sort((a, b) => a.d - b.d).map(c => c.cell)
 }
 
+/** ticks a cell a bucket's fill came back empty from counts as no source (noteNoSource) */
+export const NO_SOURCE_TICKS = 6000
+
+/** the cells each bot's fills came back empty from, by `x,y,z`, till the tick they count again */
+const noSources = new WeakMap<Bot, Map<string, number>>()
+
+function bucketTick (bot: Bot): number {
+  return Number((bot as any).survival?.tasks?.tick ?? (bot as any).time?.age ?? 0)
+}
+
+/**
+ * A cell a bucket's fill came back empty from, NO_SOURCE_TICKS long: no source there as the server sees it (a ghost
+ * of a pour the client still holds, a flow the client took for a source). A 26.3 bot's water fill went to the same
+ * cell at (-20, 101, 5) eight times in a row, 'no water_bucket after using the bucket on' it each time, and its casts
+ * had no water after (f6-26.3, t227697 to t227928; again at (-19, 15, 43))
+ */
+export function noteNoSource (bot: Bot, pos: Vec3): void {
+  let map = noSources.get(bot)
+  if (map == null) noSources.set(bot, map = new Map())
+  map.set(`${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`, bucketTick(bot) + NO_SOURCE_TICKS)
+}
+
+/** whether a fill came back empty from the cell lately (noteNoSource) */
+export function knownNoSource (bot: Bot, pos: { x: number, y: number, z: number }): boolean {
+  const until = noSources.get(bot)?.get(`${Math.floor(pos.x)},${Math.floor(pos.y)},${Math.floor(pos.z)}`)
+  return until != null && bucketTick(bot) < until
+}
+
+/**
+ * A source a bucket fills from (isSource: the fluid's own block at level 0, not a waterlogged one), not one a fill came
+ * back empty from lately (knownNoSource). A findBlock's matcher: a block with no position (its section's palette
+ * asked first) matches on the block alone.
+ */
+export function fillableSource (bot: Bot, block: { name: string, position?: Vec3, getProperties?: () => Record<string, unknown>, metadata?: number } | null, fluid: Fluid): boolean {
+  if (!isSource(block, fluid)) return false
+  return block?.position == null || !knownNoSource(bot, block.position)
+}
+
 export async function fillBucket (bot: Bot, args: FillBucketArgs, signal?: AbortSignal): Promise<BucketResult> {
   throwIfAborted(signal)
   const { fluid } = args
@@ -110,8 +148,10 @@ export async function fillBucket (bot: Bot, args: FillBucketArgs, signal?: Abort
   if (args.pos != null) {
     source = blockAtOrThrow(bot, args.pos.floored())
     if (!isSource(source, fluid)) throw new SkillError('NOT_FOUND', `no ${fluid} source at ${args.pos.toString()}`)
+    if (knownNoSource(bot, args.pos)) throw new SkillError('NOT_FOUND', `no ${fluid} source at ${args.pos.toString()}: a fill came back empty from it lately`)
   } else {
-    source = bot.findBlock({ matching: (block: any) => isSource(block, fluid), maxDistance: args.maxDistance ?? 32 })
+    // (the nearest one no fill came back empty from lately: the next after one that did)
+    source = bot.findBlock({ matching: (block: any) => fillableSource(bot, block, fluid), maxDistance: args.maxDistance ?? 32 })
     if (source == null) throw new SkillError('NOT_FOUND', `no ${fluid} source nearby`)
   }
   const pos = source.position
@@ -125,7 +165,10 @@ export async function fillBucket (bot: Bot, args: FillBucketArgs, signal?: Abort
   await bot.lookAt(point, true)
   bot.activateItem()
   const ok = await waitUntil(bot, () => countItems(bot, filled) > before, 10, signal)
-  if (!ok) throw new SkillError('VERIFY_FAILED', `no ${filled} after using the bucket on ${pos.toString()}`)
+  if (!ok) {
+    noteNoSource(bot, pos)
+    throw new SkillError('VERIFY_FAILED', `no ${filled} after using the bucket on ${pos.toString()}`)
+  }
   return { pos, item: filled }
 }
 
