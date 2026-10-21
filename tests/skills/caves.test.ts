@@ -437,3 +437,27 @@ test('caveStepCost: a bot in water (a flooded cave) or at a cave out of its own 
   cells.reset()
   assert.equal(step({ position: { x: 3, y: 20, z: 0 } }), CAVE_FORBID)
 })
+
+test('navigate: a GoalBlock in a cave\'s cell under the cave rule fails NO_PATH at once, no search to its timeout (ls4b-26.3)', async () => {
+  const { navigate, forbiddenGoal } = await import('../../src/skills/navigate')
+  const bot = fakeBot({ position: new Vec3(0.5, 20, 0.5) })
+  bot.game.dimension = 'overworld'
+  bot.blockAt = (p: Vec3) => {
+    const open = p.y >= 20 && p.y <= 23 && p.x >= 2 && p.x <= 8 && Math.abs(p.z) <= 3
+    const name = open || (p.x === 0 && p.z === 0 && (p.y === 20 || p.y === 21)) ? 'air' : p.y > 70 ? 'air' : 'stone'
+    return { name, position: p, boundingBox: name === 'air' ? 'empty' : 'block' }
+  }
+  caveCells(bot)
+  for (const y of [20, 21]) bot.emit('diggingCompleted', { position: new Vec3(0, y, 0) })
+  let searched = 0
+  bot.pathfinder = { defaultMoveSettings: { exclusionAreasStep: [caveStepCost(bot)] }, goto: async () => { searched++ } }
+  const { goals } = require('@nxg-org/mineflayer-pathfinder')
+  assert.deepEqual(forbiddenGoal(bot, new goals.GoalBlock(4, 20, 0))?.toArray(), [4, 20, 0])
+  assert.equal(forbiddenGoal(bot, new goals.GoalBlock(0, 20, 0)), null)
+  assert.equal(forbiddenGoal(bot, new goals.GoalNear(4, 20, 0, 3)), null)
+  let err: any = null
+  await navigate(bot, { goal: new goals.GoalBlock(4, 20, 0) }).catch(e => { err = e })
+  assert.equal(err?.code ?? err?.reason, 'NO_PATH')
+  assert.match(String(err?.message), /step rules keep out of/)
+  assert.equal(searched, 0)
+})

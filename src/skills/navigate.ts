@@ -85,6 +85,11 @@ export const DIG_STUCK_FACTOR = 5
  * refuse them (Player.aiStep's touch picks them up).
  */
 export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSignal): Promise<NavigateResult> {
+  // a GoalBlock in a cell the step rules keep out of (a cave's under the cave rule, a hazard's left) is no way at all:
+  // failed at once, not after the search's timeout. The clean ls4 resume's walks to 50 such cells by a deep pool's
+  // lava, each a search of some 5 s to its timeout, held the bot there till its cave flooded (ls4b-26.3, t136000 on)
+  const forbidden = forbiddenGoal(bot, args.goal)
+  if (forbidden != null) throw new SkillError('NO_PATH', `the goal ${forbidden.toString()} is a cell the step rules keep out of`)
   await keepRoom(bot, signal, goalPoint(args.goal) ?? undefined).catch(err => { if (isAbort(err)) throw err })
   const tries = 1 + Math.max(0, args.unstick ?? 2)
   let ticks = 0
@@ -101,6 +106,29 @@ export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSign
       await walkTo(bot, middle, { within: 0.1, maxTicks: 20 }, signal)
     }
   }
+}
+
+/** the pathfinder's COST_INF: a step rule's cost this high keeps a move out of the cell */
+export const STEP_FORBIDDEN = 1000000
+
+/**
+ * The cell of a GoalBlock that the pathfinder's step rules (its exclusionAreasStep) keep every move out of, or null:
+ * none, or a goal of more than one cell (a GoalNear's others may be open)
+ */
+export function forbiddenGoal (bot: Bot, goal: Goal): Vec3 | null {
+  if (!(goal instanceof goals.GoalBlock)) return null
+  const rules: Array<(b: any) => number> = (bot.pathfinder as any)?.defaultMoveSettings?.exclusionAreasStep ?? []
+  if (rules.length === 0) return null
+  const g = goal as any
+  const at = new Vec3(g.x, g.y, g.z)
+  let cost = 0
+  for (const rule of rules) {
+    try {
+      cost += rule({ position: at, block: bot.blockAt(at) })
+    } catch {}
+    if (cost >= STEP_FORBIDDEN) return at
+  }
+  return null
 }
 
 /** a point of the goal where it has one (a block's, a near's, an item's), for the way the trip goes */
