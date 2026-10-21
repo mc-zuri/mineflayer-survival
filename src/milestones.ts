@@ -1260,7 +1260,14 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
   const seed = (bot as any).survival?.playOptions?.seed as Seed | undefined
   if (have() >= want || seed == null || inNether(bot)) return
   const tried = (c: { x: number, z: number }): boolean => executor.memory.getPois(RUINED_PORTAL_TRIED, { dimension: 'overworld' }).some(p => Math.hypot(p.x - c.x, p.z - c.z) < 32)
-  const portal = ruinedPortalCandidates(seed, bot.entity.position).find(c => c.distance <= RUINED_PORTAL_TRIP && !tried(c))
+  // (none in the sea: its obsidian lies on the sea's floor among its magma, read from the seed's biomes, seaPortal)
+  let portal: ReturnType<typeof ruinedPortalCandidates>[number] | undefined
+  for (const c of ruinedPortalCandidates(seed, bot.entity.position).filter(c => c.distance <= RUINED_PORTAL_TRIP && !tried(c))) {
+    const sea = await seaPortal(seed, bot.version, c)
+    if (sea == null) { portal = c; break }
+    log(`obsidian: the ruined portal at ${c.x} ${c.z} is in the ${sea}: not gone to`)
+    executor.memory.addPoi(RUINED_PORTAL_TRIED, new Vec3(c.x, 0, c.z), 'overworld')
+  }
   if (portal == null) return
   const at = new Vec3(portal.x + 8, bot.entity.position.y, portal.z + 8)
   const from = bot.entity.position.clone()
@@ -1310,6 +1317,29 @@ export function lavaPoolOrder (bot: Bot, pools: ReadonlyArray<{ x: number, y: nu
     return { p, cave, rank: (cave ? 2 : roofed ? 1 : 0), d: Math.hypot(p.x - at.x, p.y - at.y, p.z - at.z) }
   })
   return scored.filter(s => !(rule && s.cave)).sort((a, b) => a.rank - b.rank || a.d - b.d).map(s => s.p)
+}
+
+/** the biomes a ruined portal lies under water in (RuinedPortalStructure's ocean placement: on the sea's floor) */
+export const SEA_BIOMES = /(ocean|river)$/
+
+/**
+ * The sea biome a ruined portal's spot is in, read from the seed (worldgen/seedBiomes), or null: a land portal, or no
+ * seed reader. The ls4-26.3 bot's trip to the ruined portal at (64, -400) took it to the sea's floor at y 46, among the
+ * portal's magma and the drowned, and it died there of the magma or drowned in three games (t57447; resumed, t57350
+ * and t56755).
+ */
+export async function seaPortal (seed: Seed, version: string, at: { x: number, z: number }): Promise<string | null> {
+  const { openSeedBiomes } = await import('./worldgen/seedBiomes')
+  const biomes = await openSeedBiomes(seed, version).catch(() => null)
+  if (biomes == null) return null
+  try {
+    const s = await biomes.surface(Math.floor(at.x) + 8, Math.floor(at.z) + 8)
+    return SEA_BIOMES.test(s.biome) ? s.biome : null
+  } catch {
+    return null
+  } finally {
+    await biomes.dispose().catch(() => {})
+  }
 }
 
 /**
