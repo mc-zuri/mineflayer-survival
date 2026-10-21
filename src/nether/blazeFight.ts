@@ -1023,7 +1023,9 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       const b0 = bow()
       if (b0 != null && hasArrows()) {
         if (drawTarget != null && (!isAlive(bot, drawTarget) || dead.has(drawTarget.id) || !seeing.includes(drawTarget))) stopDraw()
-        const target: Entity | null = drawTarget ?? seeing.filter(b => b.position.distanceTo(me) <= shootRange).sort(near).find(b => aim(bot, b, { leadTicks: FULL_DRAW, world }) != null) ?? null
+        // (a bunker's: not one whose rod would fall where no fetch goes, while few are about: shootable)
+        const shootable = (b: Entity): boolean => nook.bunker == null || blazes.length >= BUNKER_SHOOT_ANY || rodFloor(bot, nook, b.position) != null
+        const target: Entity | null = drawTarget ?? seeing.filter(b => b.position.distanceTo(me) <= shootRange && shootable(b)).sort(near).find(b => aim(bot, b, { leadTicks: FULL_DRAW, world }) != null) ?? null
         if (target != null) {
           if (drawn === 0) {
             unblock()
@@ -1335,6 +1337,35 @@ export async function enterBunker (bot: Bot, nook: BlazeNook, signal?: AbortSign
   trace('enterBunker: shut again,', again.build.length, 'blocks')
   await walkTo(bot, nook.stand.offset(0.5, 0, 0.5), { within: 0.15, maxTicks: 20 }, signal).catch(err => { if (isAbort(err)) throw err })
   await fillNook(bot, again.build, signal, false, false)
+}
+
+/**
+ * with this many blazes about a bunker shoots any it can (the spawner's crowd thinned), with fewer only the ones whose
+ * rod would land where its fetch goes (rodFloor): of a 1.21.11 bunker's 24 rods by seed 2's open throne at (-290, 77,
+ * -209), 12 fell into the cave under it, 15 to 20 blocks down, gone
+ */
+export const BUNKER_SHOOT_ANY = 6
+/** a dead blaze's rod falls this far at the most for its floor to count (rodFloor) */
+export const ROD_FALL = 4
+
+/**
+ * The floor a blaze's rod would land on, killed where it is (LivingEntity.dropAllDeathLoot: at its feet, falling
+ * straight), when it's one the bunker's fetch goes to: a full block within ROD_FALL under it, no lava nor fire on it,
+ * within BUNKER_DROP_REACH of the stand and no lower than 3 under it (bunkerDrops); null for none
+ */
+export function rodFloor (bot: Bot, nook: BlazeNook, at: Vec3): Vec3 | null {
+  const feet = at.floored()
+  for (let dy = 0; dy <= ROD_FALL; dy++) {
+    const p = feet.offset(0, -dy, 0)
+    const b = bot.blockAt(p)
+    if (b == null) return null
+    if (b.name === 'lava' || b.name === 'fire' || b.name === 'soul_fire') return null
+    if (b.boundingBox !== 'block') continue
+    const on = p.offset(0, 1, 0)
+    if (on.y < nook.stand.y - 3 || on.offset(0.5, 0, 0.5).distanceTo(nook.stand.offset(0.5, 0, 0.5)) > BUNKER_DROP_REACH) return null
+    return on
+  }
+  return null
 }
 
 /**
