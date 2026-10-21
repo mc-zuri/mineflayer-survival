@@ -479,3 +479,22 @@ test('the cave rule\'s roof is natural rock only, and a cell with the sky open o
   assert.equal(m.candidate(new Vec3(0, 72, 3)), false)
   assert.equal(m.candidate(new Vec3(3, 72, 3)), true)
 })
+
+test('navigate: the head under water with the air low surfaces first, the way planned after; with air, or dry, it goes at once (f1-grim)', async () => {
+  const { surfaceFirst } = await import('../../src/skills/navigate')
+  const escape = require('../../src/skills/escape')
+  const real = escape.surface
+  const ups: number[] = []
+  escape.surface = async () => { ups.push(1); return { ticks: 5 } }
+  try {
+    const wet = fakeBot({ position: new Vec3(0.5, 56, 0.5), oxygen: 4, world: (p: Vec3) => p.y <= 62 ? 'water' : 'air' })
+    assert.equal(await surfaceFirst(wet), true)
+    wet.oxygenLevel = 15
+    assert.equal(await surfaceFirst(wet), false)
+    const dry = fakeBot({ position: new Vec3(0.5, 64, 0.5), oxygen: 4 })
+    assert.equal(await surfaceFirst(dry), false)
+  } finally {
+    escape.surface = real
+  }
+  assert.equal(ups.length, 1)
+})

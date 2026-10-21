@@ -90,6 +90,9 @@ export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSign
   // lava, each a search of some 5 s to its timeout, held the bot there till its cave flooded (ls4b-26.3, t136000 on)
   const forbidden = forbiddenGoal(bot, args.goal)
   if (forbidden != null) throw new SkillError('NO_PATH', `the goal ${forbidden.toString()} is a cell the step rules keep out of`)
+  // the head under water with the air low: up to it first, then the way planned from there (a way planned from under
+  // the waves went on under them, move after move 'bot is too low', and the bot drowned: f1-grim t108053 to t108690)
+  await surfaceFirst(bot, signal)
   await keepRoom(bot, signal, goalPoint(args.goal) ?? undefined).catch(err => { if (isAbort(err)) throw err })
   const tries = 1 + Math.max(0, args.unstick ?? 2)
   let ticks = 0
@@ -106,6 +109,19 @@ export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSign
       await walkTo(bot, middle, { within: 0.1, maxTicks: 20 }, signal)
     }
   }
+}
+
+/** the air (bot.oxygenLevel, 0 - 20) at or under which a walk with the head under water surfaces first (surfaceFirst) */
+export const WALK_SURFACE_AIR = 10
+
+/** up to the air first when the head is under water and the air at WALK_SURFACE_AIR or under (escape's surface) */
+export async function surfaceFirst (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  if (Number(bot.oxygenLevel ?? 20) > WALK_SURFACE_AIR) return false
+  const { headInWater, surface } = await import('./escape')
+  if (!headInWater(bot)) return false
+  trace('navigate: the head under water, air', bot.oxygenLevel, ': up to it first')
+  await surface(bot, { signal, maxTicks: 200 }).catch(err => { if (isAbort(err)) throw err })
+  return true
 }
 
 /** the pathfinder's COST_INF: a step rule's cost this high keeps a move out of the cell */
