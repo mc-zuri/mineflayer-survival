@@ -581,3 +581,29 @@ test('bunkerFetchDue: a drop in the spawn volume is fetched with no blaze in sig
     restore()
   }
 })
+
+test('enterBunker: back from a fetch, the walk in goes on whatever the blazes do (held off out there the bot burned); the first walk in is held off a blaze about to hit', async () => {
+  const { entity } = await import('../reflexes/fakeBot')
+  const { enterBunker } = await import('../../src/nether/blazeFight')
+  const gridModule = require('../../src/skills/gridWalk')
+  const realMove = gridModule.moveNear
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 64, -3.5), meta: { health: 20, flags: 1 } })
+  const { bot, b, restore } = await bunkerBot([blaze])
+  const walks: string[] = []
+  gridModule.moveNear = async (_b: unknown, to: Vec3, _r: number, signal?: AbortSignal) => {
+    walks.push(to.toString())
+    for (let i = 0; i < 10; i++) { if (signal?.aborted === true) throw signal.reason; await new Promise(resolve => setImmediate(resolve)); bot.emit('physicsTick') }
+    bot.entity.position = new Vec3(0.5, 64, 5.5)
+    return 'pathfinder'
+  }
+  const ticking = setInterval(() => { for (let k = 0; k < 20; k++) bot.emit('physicsTick') }, 1)
+  try {
+    bot.entity.position = new Vec3(0.5, 64, 2.5)
+    await enterBunker(bot, b, undefined, true)
+    assert.equal(walks.length, 1)
+  } finally {
+    clearInterval(ticking)
+    gridModule.moveNear = realMove
+    restore()
+  }
+})

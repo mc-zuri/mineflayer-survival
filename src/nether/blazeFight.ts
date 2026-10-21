@@ -1342,7 +1342,9 @@ export async function enterBunker (bot: Bot, nook: BlazeNook, signal?: AbortSign
         signal?.addEventListener('abort', onParent, { once: true })
         // (not alight or in a fire's cell: held there, it burns; a 1.21.11 bot back from a fetch held off in the throne by
         // seed 2's spawner at (-277, 77, -159) 4 times, alight, and burned to death 5 blocks from its bunker)
-        const onTick = (): void => { if (guards < ENTER_GUARDS && !cut.signal.aborted && !isOnFire(bot) && !inFireCell(bot) && walkDanger(bot)) cut.abort(new Error('a blaze about to hit')) }
+        // (the first walk in only, not one back from a fetch: held off in the throne by seed 2's open throne at (-290, 77,
+        // -209), a 1.21.11 bot was set alight and fireballed 4 blocks from its bunker)
+        const onTick = (): void => { if (!reseal && guards < ENTER_GUARDS && !cut.signal.aborted && !isOnFire(bot) && !inFireCell(bot) && walkDanger(bot)) cut.abort(new Error('a blaze about to hit')) }
         bot.on('physicsTick', onTick)
         try {
           await withBlocksKept(bot, kept, async () => await moveNear(bot, nook.stand, 0, cut.signal))
