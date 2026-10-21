@@ -3,6 +3,7 @@
 // fortress was taken off a magma block on a bridge's wall and back onto it 430 times, till it died).
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
+import { caveCells, caveRuleOn, inCaveWall } from './caves'
 
 /** ticks a cell the hazard reflex took the bot out of is kept out of (30 s) */
 export const HAZARD_LEFT_TICKS = 600
@@ -130,5 +131,60 @@ export function keepOffMagma (bot: Bot): void {
   if ((settings.exclusionAreasStep ?? []).some((f: any) => f.survivalMagma === true)) return
   const cost = magmaStepCost(bot)
   ;(cost as any).survivalMagma = true
+  pf.setMoveOptions({ ...settings, exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), cost] })
+}
+
+/**
+ * Whether obsidian in sight is no place to mine for the bot: lava within 2 of it, magma within 1 (a ruined portal's
+ * floor: the bot stands on it or beside it to mine), or, for a bot not fit for the caves (skills/caves caveRuleOn),
+ * under the rock or in a cave's wall (a ruined portal underground is a cave's, its netherrack and magma round it). A
+ * 26.3 bot's 'obsidian: 1 in sight: mining 1' went for a ruined portal's underground at y 46, stood on its magma, and
+ * burned to death there through 12 hazard reflexes (ls4-26.3, t54809 to t57447).
+ */
+export function obsidianHazard (bot: Bot, p: Vec3): boolean {
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dz = -2; dz <= 2; dz++) {
+        const name = bot.blockAt(p.offset(dx, dy, dz))?.name
+        if (name === 'lava') return true
+        if (name === 'magma_block' && Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) <= 1) return true
+      }
+    }
+  }
+  if (!caveRuleOn(bot)) return false
+  return caveCells(bot).roofed(p.floored()) || inCaveWall(bot, p)
+}
+
+
+/** the extra cost, in ticks, of a move ending with lava against the feet or the head (lavaEdgeStepCost) */
+export const LAVA_EDGE_STEP_COST = 500
+
+/**
+ * The pathfinder's step rule in the overworld: a move ending with lava in or against the body's cells (the feet's and
+ * the head's sides, over the head, under the feet) costs LAVA_EDGE_STEP_COST more, so a way stands off a pool's edge
+ * where it can (a knock, a slip, a block broken by it lets the lava in). A 26.3 bot mining a deep pool's obsidian at y
+ * -29 stood by its lava and swam into it (ls4-26.3, t188576).
+ */
+export function lavaEdgeStepCost (bot: Bot): (block: { position: { x: number, y: number, z: number } }) => number {
+  // (the classifier's lookup: the block states, no prismarine Block made for each of a search's cells)
+  const view = caveCells(bot).view
+  const lava = (x: number, y: number, z: number): boolean => view.block(new Vec3(x, y, z))?.name === 'lava'
+  return (block) => {
+    if (/nether|end/.test(String(bot.game?.dimension ?? ''))) return 0
+    const { x, y, z } = block.position
+    if (lava(x, y - 1, z) || lava(x, y, z) || lava(x, y + 1, z) || lava(x, y + 2, z)) return LAVA_EDGE_STEP_COST
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) if (lava(x + dx, y, z + dz) || lava(x + dx, y + 1, z + dz)) return LAVA_EDGE_STEP_COST
+    return 0
+  }
+}
+
+/** adds lavaEdgeStepCost to the pathfinder's step rules for good (once) */
+export function keepOffLavaEdges (bot: Bot): void {
+  const pf = bot.pathfinder as any
+  const settings = pf?.defaultMoveSettings
+  if (pf?.setMoveOptions == null || settings == null) return
+  if ((settings.exclusionAreasStep ?? []).some((f: any) => f.survivalLavaEdge === true)) return
+  const cost = lavaEdgeStepCost(bot)
+  ;(cost as any).survivalLavaEdge = true
   pf.setMoveOptions({ ...settings, exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), cost] })
 }

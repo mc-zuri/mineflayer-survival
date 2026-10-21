@@ -102,3 +102,24 @@ test('a dug route never starts in the water: a bot with no shore near is NO_PATH
   const dry = fakeBot({ position: new Vec3(0.5, 64, 0.5) })
   await outOfTheWater(dry)
 })
+
+test('a mine step for obsidian passes over the obsidian by lava (a pool\'s shore) and takes the one away from it (ls4-26.3)', async () => {
+  const { runMine } = await import('../../src/executor/steps')
+  const step = { kind: 'mine', item: 'obsidian', count: 1, block: 'obsidian', blocks: ['obsidian'], blockCount: 1, tool: 'diamond_pickaxe', dimension: 'overworld', cost: 100 } as any
+  const byLava = new Vec3(10, 64, 0)
+  const away = new Vec3(30, 64, 0)
+  const bot = botAt(true, [byLava, away])
+  bot.inventory.slots[12] = Object.assign(item('diamond_pickaxe'), { slot: 12 })
+  bot.blockAt = (p: Vec3) => {
+    const name = p.equals(byLava) || p.equals(away) ? 'obsidian' : p.x === 11 && p.y === 64 && p.z === 1 ? 'lava' : p.y < 64 ? 'stone' : 'air'
+    return { name, position: p, boundingBox: name === 'air' || name === 'lava' ? 'empty' : 'block' }
+  }
+  const seen: boolean[] = []
+  const collect = async (b: any, args: any): Promise<any> => {
+    seen.push(args.exclude(byLava), args.exclude(away))
+    b.inventory.slots[31] = Object.assign(item('obsidian', 1), { slot: 31 })
+    return { mined: 1, positions: [away], items: { obsidian: 1 }, count: 1 }
+  }
+  await stubbed('../../src/skills/collectBlock', 'collectBlock', collect, async () => await runMine(step, ctxOf(bot)))
+  assert.deepEqual(seen, [true, false])
+})

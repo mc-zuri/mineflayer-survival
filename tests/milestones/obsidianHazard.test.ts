@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { obsidianHazard } from '../../src/milestones'
+import { obsidianHazard } from '../../src/skills/hazardCells'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
 test('obsidianHazard: lava within 2, magma within 1, or under the rock for a bot not fit for the caves', () => {

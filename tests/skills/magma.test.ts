@@ -71,3 +71,18 @@ test('hotFloorDigStep: on magma walled in by netherrack (a ruined portal\'s unde
   assert.equal(sneakOnMagma(new Vec3(0, 46, 0), new Vec3(1, 45, 0)), false)
   assert.equal(sneakOnMagma(new Vec3(0, 46, 0), null), true)
 })
+
+test('lavaEdgeStepCost: a stand with lava against the feet, the head, over it or under it costs LAVA_EDGE_STEP_COST; one a block off, or in the nether, nothing', async () => {
+  const { LAVA_EDGE_STEP_COST, lavaEdgeStepCost } = await import('../../src/skills/hazardCells')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  // a lava pool at x 2 to 4, y 63 (the ground's level), z -2 to 2
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: (p: Vec3) => p.x >= 2 && p.x <= 4 && p.y === 63 && Math.abs(p.z) <= 2 ? 'lava' : p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'overworld'
+  const cost = lavaEdgeStepCost(bot)
+  assert.equal(cost({ position: { x: 3, y: 64, z: 0 } }), LAVA_EDGE_STEP_COST)
+  assert.equal(cost({ position: { x: 1, y: 63, z: 0 } }), LAVA_EDGE_STEP_COST)
+  assert.equal(cost({ position: { x: 1, y: 64, z: 0 } }), 0)
+  assert.equal(cost({ position: { x: 0, y: 63, z: 0 } }), 0)
+  bot.game.dimension = 'the_nether'
+  assert.equal(cost({ position: { x: 3, y: 64, z: 0 } }), 0)
+})

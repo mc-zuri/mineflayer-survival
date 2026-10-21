@@ -16,6 +16,7 @@ import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/err
 import { collectBlock, waterBeside } from '../skills/collectBlock'
 import { caveCells, caveRuleOn, inCaveWall } from '../skills/caves'
 import { drownedNear } from '../skills/breath'
+import { obsidianHazard } from '../skills/hazardCells'
 import { craft } from '../skills/craft'
 import { PARALLEL_MIN_ITEMS, smelt, smeltParallel } from '../skills/smelt'
 import { retrieveItems } from '../skills/chest'
@@ -341,7 +342,10 @@ async function mineBlocks (step: MineStep, ctx: StepContext, muted: (tool: WornT
   // and a block near where the drowning reflex took the bot up from lately: the same target under the water again was
   // a dive again, 35 surfacings of a 1.21.11 bot's 'mine 16 cobblestone' by a pond at y 56 (ls3-1.21.11, t1071 on)
   const drowned = (pos: Vec3): boolean => drownedNear(bot, pos)
-  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || ctx.unreachable?.has(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos) || caveWall(pos) || drowned(pos)
+  // and obsidian by lava or magma (a pool's shore, a ruined portal's floor), or under the rock for a bot not fit for
+  // the caves (obsidianHazard): a 26.3 bot's 'mine 3 obsidian' at a deep pool at y -29 walked into its lava (ls4-26.3)
+  const lavaSide = step.blocks.includes('obsidian') ? (pos: Vec3): boolean => obsidianHazard(bot, pos) : () => false
+  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || ctx.unreachable?.has(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos) || caveWall(pos) || drowned(pos) || lavaSide(pos)
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     const subs = blockSubstitutes(step)
