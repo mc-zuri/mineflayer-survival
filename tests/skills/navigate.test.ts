@@ -211,3 +211,40 @@ test('navigate: a goto short of its goal (the pathfinder\'s GoalNotReachedError)
   assert.match(b.err.message, /the pathfinder failed: Goto: 5 moves in a row failed/)
   assert.deepStrictEqual(b.kinds, ['goto_failed'])
 })
+
+test('navigate: a bot on its way down lands first, the search made from where it comes to rest; one on the ground or in the water searches at once (f9-1.21.11, t325062: 30 plans failed noPath in the tick it fell in)', async () => {
+  const { landFirst, LAND_TICKS } = await import('../../src/skills/navigate')
+  const bot = pathBot('searching')
+  try {
+    // mid-jump off a ledge over a stream: down 0.71 a tick, landing 3 ticks on
+    bot.entity.onGround = false
+    bot.entity.velocity = new Vec3(0.05, -0.71, -0.05)
+    let ticks = 0
+    const onTick = (): void => { if (++ticks === 3) { bot.entity.onGround = true; bot.entity.velocity = new Vec3(0, -0.078, 0) } }
+    bot.on('physicsTick', onTick)
+    assert.strictEqual(await landFirst(bot), true)
+    assert.ok(ticks >= 3 && ticks < LAND_TICKS, String(ticks))
+    // on the ground, in the water, or on the way up: at once
+    ticks = 0
+    assert.strictEqual(await landFirst(bot), false)
+    bot.entity.onGround = false
+    bot.entity.isInWater = true
+    assert.strictEqual(await landFirst(bot), false)
+    bot.entity.isInWater = false
+    bot.entity.velocity = new Vec3(0, 0.42, 0)
+    assert.strictEqual(await landFirst(bot), false)
+    assert.strictEqual(ticks, 0)
+    bot.off('physicsTick', onTick)
+    // navigate's search waits for it: no goto while it falls
+    bot.entity.velocity = new Vec3(0, -0.5, 0)
+    const gotos: number[] = []
+    let fell = 0
+    const onFall = (): void => { if (++fell === 5) { bot.entity.onGround = true; bot.entity.velocity = new Vec3(0, 0, 0) } }
+    bot.on('physicsTick', onFall)
+    const realGoto = bot.pathfinder.goto
+    bot.pathfinder.goto = async (g: any) => { gotos.push(fell); return await realGoto(g) }
+    await assert.rejects(navigate(bot, { goal: new goals.GoalBlock(50, 64, 0), planTicks: 10, stuckTicks: 10 }), (err: unknown) => isSkillError(err, 'NO_PATH'))
+    assert.ok(gotos.length > 0 && gotos[0] >= 5, gotos.join(','))
+    bot.off('physicsTick', onFall)
+  } finally { bot.stop() }
+})

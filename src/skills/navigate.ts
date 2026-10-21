@@ -90,6 +90,8 @@ export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSign
   // lava, each a search of some 5 s to its timeout, held the bot there till its cave flooded (ls4b-26.3, t136000 on)
   const forbidden = forbiddenGoal(bot, args.goal)
   if (forbidden != null) throw new SkillError('NO_PATH', `the goal ${forbidden.toString()} is a cell the step rules keep out of`)
+  // on the way down (a fall, a jump's end): landed first, the search from where the bot comes to rest
+  await landFirst(bot, signal)
   // the head under water with the air low: up to it first, then the way planned from there (a way planned from under
   // the waves went on under them, move after move 'bot is too low', and the bot drowned: f1-grim t108053 to t108690)
   await surfaceFirst(bot, signal)
@@ -105,6 +107,25 @@ export async function navigate (bot: Bot, args: NavigateArgs, signal?: AbortSign
     if (wet && !isAbort(err)) noteWetFail(bot)
     throw err
   }
+}
+
+/** the ticks a walk waits at most for a bot on its way down to land (landFirst) */
+export const LAND_TICKS = 40
+
+/**
+ * Waits for a bot on its way down (off the ground, out of the water, falling) to land: on the ground or in the water,
+ * LAND_TICKS at most. Whether it was falling. A search from the air found no path at once, and none waited a tick: a
+ * 1.21.11 bot mid-jump off a ledge over a stream had every search of its re-equip's 30 plans fail 'noPath' in the one
+ * tick it was falling in (the event loop held 6661 ms, 15 oak logs and the base's chest left out of reach), and it
+ * went on bare (f9-1.21.11, t325062)
+ */
+export async function landFirst (bot: Bot, signal?: AbortSignal): Promise<boolean> {
+  const e: any = bot.entity
+  const falling = (): boolean => e.onGround === false && e.isInWater !== true && e.isInLava !== true && (e.velocity?.y ?? 0) < 0 && (bot as any).vehicle == null
+  if (e == null || !falling()) return false
+  trace('navigate: on the way down at', e.position.toString(), ': landed first')
+  await waitUntil(bot, () => !falling(), LAND_TICKS, signal)
+  return true
 }
 
 /** walks from the water failed in a row, by bot (their count and the tick of the last) */
