@@ -223,6 +223,30 @@ describe(`a ${REALTIME ? 'real-time' : 'lockstep'} ${VERSION} server with GrimAC
     await navigateNear(bot, at(0, 0, 0), 1)
   })
 
+  step('respawn', async () => {
+    // a pickaxe held in a slot other than the first, a death, the respawn's new player (slot 0 on the server and in
+    // the client: mineflayer c2bc9037), then a pickaxe crafted and the stone dug with it. Grim times a dig by the item
+    // in the hand as its inventory has it, which its Fabric build synced from the dead player's emptied inventory after
+    // a respawn: every dig by hand, 'diff=6350ms', the break cancelled (grimls-2 after a drowning; GrimAC 7f2b78e14)
+    await give('stone_pickaxe', 1)
+    const pick = bot.inventory.items().find(i => i.name === 'stone_pickaxe')
+    if (pick != null && pick.slot !== 39) await bot.moveSlotItem(pick.slot, 39)
+    bot.setQuickBarSlot(3)
+    await waitTicks(bot, 5)
+    const respawned = new Promise(resolve => bot.once('respawn', resolve))
+    await run(`kill ${USERNAME}`)
+    await respawned
+    assert.ok(await waitUntil(bot, () => bot.health > 0, 100))
+    assert.strictEqual(bot.quickBarSlot, 0)
+    await waitTicks(bot, 20)
+    await give('oak_log', 3)
+    await craft(bot, { item: 'wooden_pickaxe', count: 1 })
+    const p = bot.entity.position.floored()
+    await fill(p.offset(2, 0, 0), p.offset(2, 1, 1), 'stone')
+    const got = await collectBlock(bot, { names: ['stone'], count: 3 })
+    assert.ok(got.count >= 3, `mined ${got.mined}, ${got.count} gained`)
+  })
+
   it('no Grim alerts at all', { skip: REPORT }, () => {
     assert.deepStrictEqual(alerts.map(a => `${a.check} ${a.verbose}`), [])
   })
