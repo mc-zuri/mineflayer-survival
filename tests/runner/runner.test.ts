@@ -1691,3 +1691,53 @@ test('the upkeep between trips tends the farm before the herd (keepFarm: started
     milestones.tendHerd = realHerd
   }
 })
+
+test('a meal goes to the home\'s food first (a grown farm harvested and baked) and to no food land nor hunt once fed by it; with none at home, the food land and the meal\'s plans (f5-1.21.11: meals hunted 170 blocks off)', async () => {
+  const milestones = require('../../src/milestones')
+  const { mealGoals } = await import('../../src/planner/progression')
+  const { ownedInventory } = await import('../../src/executor/executor')
+  const realHarvest = milestones.harvestGrownFarms
+  const realTend = milestones.tendHerd
+  try {
+    const bot = fakeBot()
+    bot.food = 8
+    const runner: any = new Runner(bot, { log: () => {}, handlers: {} })
+    const calls: string[] = []
+    runner.upForFood = async () => { calls.push('up') }
+    runner.toFoodLand = async () => { calls.push('food land') }
+    runner.executor.obtain = async () => { calls.push('obtain') }
+    runner.executor.farmCost = () => 0
+    let yieldBread = 5
+    milestones.harvestGrownFarms = async () => { calls.push('harvest'); bot.give('bread', yieldBread); return yieldBread }
+    const meal = (): any => mealGoals(bot.food, ownedInventory(bot))
+    // no farm: the food land and the meal's plans
+    await runner.getMeal(meal(), new AbortController().signal)
+    assert.deepEqual(calls, ['up', 'food land', 'obtain'])
+    // a farm grown by home: harvested and baked, 5 bread: no food land, no plan
+    bot.survival.memory.addPoi('farm', { x: 10, y: 63, z: 10 }, 'overworld', JSON.stringify({ crop: 'wheat', cells: [[11, 63, 10]], sown: 0 }))
+    calls.length = 0
+    await runner.getMeal(meal(), new AbortController().signal)
+    assert.deepEqual(calls, ['up', 'harvest'])
+    // the harvest gave nothing: on to the food land after it
+    bot.give('bread', -5)
+    yieldBread = 0
+    calls.length = 0
+    await runner.getMeal(meal(), new AbortController().signal)
+    assert.deepEqual(calls, ['up', 'harvest', 'food land', 'obtain'])
+    // a farm not grown yet (its growing ahead): not gone to
+    runner.executor.farmCost = () => 30000
+    calls.length = 0
+    await runner.getMeal(meal(), new AbortController().signal)
+    assert.deepEqual(calls, ['up', 'food land', 'obtain'])
+    // a herd of 5 out of sight, 100 off (2 beyond its breeders, as remembered): its surplus slaughtered and cooked first
+    bot.survival.memory.addPoi('herd', { x: 100, y: 64, z: 0 }, 'overworld', JSON.stringify({ mob: 'cow', adults: 5, calves: 0, bred: null }))
+    bot.entities = {}
+    milestones.tendHerd = async () => { calls.push('herd'); bot.give('cooked_beef', 2); return 16 }
+    calls.length = 0
+    await runner.getMeal(meal(), new AbortController().signal)
+    assert.deepEqual(calls, ['up', 'herd'])
+  } finally {
+    milestones.harvestGrownFarms = realHarvest
+    milestones.tendHerd = realTend
+  }
+})

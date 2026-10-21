@@ -12,7 +12,7 @@ import { TaskError } from './core/errors'
 import { isBed } from './core/items'
 import { Inventory, type ItemCount } from './core/inventory'
 import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './core/memory'
-import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, HUNGRY_FOOD, MILESTONES, STARVING_FOOD, foodGoals, mealGoals, milestonesAhead, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
+import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, HUNGRY_FOOD, MEAL_POINTS, MILESTONES, STARVING_FOOD, foodGoals, mealGoals, milestonesAhead, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { carriesWeapon, comeUp, dayPhase, nightAction, nightGeared, nightGoals, topUpPlaces } from './planner/schedule'
 import { describeLevel, markAt, STOCK_RESERVE_SLOTS, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
@@ -32,7 +32,9 @@ import { SPAWNER_POI } from './skills/spawnerFarm'
 import { keepWaterBucket, waterBucketEmpty } from './skills/bucket'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
-import { MILESTONE_HANDLERS, harvestGrownFarms, keepCaneFarm, keepFarm, tendHerd } from './milestones'
+import { FARM_RANGE, HERD_TRIP, MILESTONE_HANDLERS, harvestGrownFarms, keepCaneFarm, keepFarm, tendHerd } from './milestones'
+import { knownFarms } from './skills/farm'
+import { herdFromMemory, herdSupply } from './skills/herd'
 import { knownCaneFarm } from './skills/caneFarm'
 import { EPOCHS, EPOCH_HANDLERS, isEpoch, nextEpoch } from './epochs'
 import { TRIP_KIT, keepUnbroken, takeTripKit } from './skills/tripKit'
@@ -962,13 +964,7 @@ export class Runner {
         if (meal != null) {
           this.log(`hungry (food ${this.bot.food ?? 0}, ${ownedInventory(this.bot).foodPoints()} points carried): a meal first`)
           try {
-            await this.foodWorking(async () => await this.untilDusk(signal, async (s) => {
-              await this.upForFood(s)
-              await this.toFoodLand(s)
-              await this.withinTicks(MEAL_TICKS, s, async (t) => {
-                await this.executor.obtain(meal, t, { unseenFactor: HUNGRY_FIND_FACTOR })
-              })
-            }))
+            await this.foodWorking(async () => await this.untilDusk(signal, async (s) => await this.getMeal(meal, s)))
           } catch (err) {
             if (stopped()) return this.stop(null, 'aborted', err)
             // (cut for the bot's food: starving, the work given up for it, no failure counted)
@@ -1792,13 +1788,7 @@ export class Runner {
       }
       this.log(`starving (food ${food}): food is the only work till the bar is over ${HUNGRY_FOOD}`)
       try {
-        await this.foodWorking(async () => {
-          await this.upForFood(signal)
-          await this.toFoodLand(signal)
-          await this.withinTicks(MEAL_TICKS, signal, async (t) => {
-            await this.executor.obtain(meal, t, { unseenFactor: HUNGRY_FIND_FACTOR })
-          })
-        })
+        await this.foodWorking(async () => await this.getMeal(meal, signal))
       } catch (err) {
         if (signal.aborted || TaskError.is(err, 'DIED') || this.bot.health <= 0) throw err
         this.log(`no food yet: ${(err as Error).message}`)
@@ -1807,6 +1797,64 @@ export class Runner {
     } finally {
       this.feeding = false
     }
+  }
+
+  /**
+   * A meal (mealGoals' `meal`): up to the surface first (upForFood), then the home's food when it has some to give
+   * (homeFoodFirst: a grown farm harvested and baked, the herd's surplus slaughtered and cooked), then, still hungry,
+   * the food land and the meal's own plans within MEAL_TICKS. The meal went to the food land and its hunts first: a
+   * 1.21.11 bot's meals explored 170 blocks off for cows and chickens and died there, or starved on the way (f5-1.21.11,
+   * seed 671229120248951486, t120754, t144131 to t193129)
+   */
+  async getMeal (meal: ObtainRequest[], signal: AbortSignal): Promise<void> {
+    await this.upForFood(signal)
+    if (await this.homeFoodFirst(MEAL_POINTS, signal)) {
+      meal = mealGoals(this.bot.food ?? 20, ownedInventory(this.bot)) ?? []
+      if (meal.length === 0) {
+        this.log('a meal from the home food')
+        return
+      }
+    }
+    await this.toFoodLand(signal)
+    await this.withinTicks(MEAL_TICKS, signal, async (t) => {
+      await this.executor.obtain(meal, t, { unseenFactor: HUNGRY_FIND_FACTOR })
+    })
+  }
+
+  /**
+   * The home's food now: a farm the bot sowed grown within FARM_RANGE (the walk to it short of its growing left), or
+   * the herd's surplus (herdSupply: adults beyond its BREEDERS_KEPT, as seen or remembered) within HERD_TRIP
+   */
+  homeFoodNow (): { farm: boolean, herd: boolean } {
+    const bot = this.bot
+    if (bot.entity == null || normalizeDimension(bot.game?.dimension) !== 'overworld') return { farm: false, herd: false }
+    const farm = knownFarms(this.memory, 'overworld').some(f => {
+      const walk = bot.entity.position.distanceTo(f.water)
+      const cost = this.executor.farmCost(f.crop)
+      return walk <= FARM_RANGE && cost != null && cost <= walk * 5 + 1
+    })
+    const herd = herdFromMemory(this.memory, bot.entity.position)
+    const supply = herd != null ? herdSupply(bot, this.memory, herd.mob, Number((bot.time as any)?.age ?? 0)) : undefined
+    return { farm, herd: supply != null && supply.surplus > 0 && supply.distance <= HERD_TRIP }
+  }
+
+  /**
+   * The home's food first, when it has some (homeFoodNow): the grown farm harvested and its wheat baked
+   * (harvestGrownFarms), the herd's surplus slaughtered and cooked for `want` points (tendHerd). Resolves whether there
+   * was any to go for.
+   */
+  async homeFoodFirst (want: number, signal: AbortSignal): Promise<boolean> {
+    const home = this.homeFoodNow()
+    if (!home.farm && !home.herd) return false
+    this.log(`the home's food first:${home.farm ? ' the farm grown' : ''}${home.herd ? ' the herd surplus' : ''}`)
+    if (home.farm) {
+      await harvestGrownFarms(this.bot, this.executor, signal, this.log).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        this.log(`farm: ${(err as Error).message}`)
+      })
+    }
+    if (home.herd && mealGoals(this.bot.food ?? 20, ownedInventory(this.bot)) != null) await this.tendHerdFor(want, signal)
+    return true
   }
 
   /** the meal due now (mealGoals), in the overworld, once the last one that came to nothing has waited its retry */
