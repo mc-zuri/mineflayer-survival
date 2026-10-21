@@ -37,7 +37,7 @@ import { herdSpares, herdSupply, noteAnimals } from '../skills/herd'
 import { noteVillage } from '../skills/village'
 import { digDepotNook, dumpPit, lavaThrow, pitThrow, rememberAround } from './explore'
 import { noteSpawners, SPAWNER_POI } from '../skills/spawnerFarm'
-import { farmCells, grownPlots, knownFarms } from '../skills/farm'
+import { farmCells, grownPlots, growingLeft, knownFarms } from '../skills/farm'
 import { GROW_TICKS } from '../core/crops'
 import type { Diagnostics } from '../diagnostics'
 import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
@@ -634,7 +634,12 @@ export class Executor {
     if (farm == null) return undefined
     const walk = Math.ceil(this.bot.entity.position.distanceTo(farm.water) * WALK_TICKS_PER_BLOCK)
     const cells = farmCells(farm)
-    if (typeof this.bot.blockAt === 'function' && grownPlots(p => this.bot.blockAt(p) as any, cells, crop).length * 2 >= cells.length) return walk
+    if (typeof this.bot.blockAt === 'function') {
+      if (grownPlots(p => this.bot.blockAt(p) as any, cells, crop).length * 2 >= cells.length) return walk
+      // the farm's chunks loaded: what's left of its growing read off its crops' ages, not the sowing's
+      const left = growingLeft(p => this.bot.blockAt(p) as any, cells, crop)
+      if (left != null) return walk + left
+    }
     const age = Number((this.bot.time as any)?.age ?? 0)
     return walk + Math.max(0, farm.sown + GROW_TICKS - age)
   }

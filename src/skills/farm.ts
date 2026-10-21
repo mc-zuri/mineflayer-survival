@@ -3,7 +3,7 @@
 import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
 import { Vec3 } from 'vec3'
-import { FARM_PLOTS, GROWN_AGE, isGrown, type FarmRecord } from '../core/crops'
+import { FARM_PLOTS, GROW_TICKS, GROWN_AGE, isGrown, type FarmRecord } from '../core/crops'
 import type { WorldMemory } from '../core/memory'
 import { SkillError, isAbort, throwIfAborted } from './errors'
 import { collectBlock } from './collectBlock'
@@ -152,6 +152,27 @@ export function nearlyGrownPlots (lookup: Lookup, cells: readonly Vec3[], crop: 
     if (b?.name !== crop) return false
     return grown == null || isGrown(b) || Number((b as any).getProperties?.().age ?? 0) >= grown - 1
   })
+}
+
+/**
+ * Ticks till half a farm's plots have grown, read off its crops' ages (the plot at the middle of them by age: its stages
+ * left at GROW_TICKS / GROWN_AGE a stage, CropBlock.randomTick's average; a bare plot at age 0); null when a plot's
+ * chunk isn't loaded (its crop unknown). A farm sown long ago may not have grown: its random ticks come only within the
+ * simulation distance of a player, and in the light (CropBlock: a brightness of 9 at the least). A 1.21.11 bot's farm
+ * counted grown by its sowing's age was gone to for a starving meal and gave 'nothing grown' (f5-1.21.11, t145711).
+ */
+export function growingLeft (lookup: Lookup, cells: readonly Vec3[], crop: string): number | null {
+  const grown = GROWN_AGE[crop]
+  if (grown == null || cells.length === 0) return null
+  const ages: number[] = []
+  for (const c of cells) {
+    const b = lookup(c.offset(0, 1, 0))
+    if (b == null) return null
+    ages.push(b.name === crop ? Math.min(grown, Number(b.getProperties?.().age ?? 0)) : 0)
+  }
+  ages.sort((a, b) => b - a)
+  const middle = ages[Math.ceil(ages.length / 2) - 1]
+  return Math.round((grown - middle) * GROW_TICKS / grown)
 }
 
 async function holdItem (bot: Bot, name: string): Promise<void> {

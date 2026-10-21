@@ -422,3 +422,32 @@ test('keepFarm between trips: no farm, its start tried by home, again only after
   assert.equal(steps[0].kind, 'farm')
   assert.ok(obtained.some(r => r.item === 'bread' && r.count === 1), JSON.stringify(obtained))
 })
+
+test('growingLeft and the farm\'s cost: what is left of the growing read off its crops\' ages when its chunks are loaded, not the sowing\'s age (f5-1.21.11: a farm sown 65000 ticks before, not grown, gone to for a starving meal)', async () => {
+  const { growingLeft } = await import('../../src/skills/farm')
+  const { Executor } = await import('../../src/executor/executor')
+  const { GROW_TICKS } = await import('../../src/core/crops')
+  const cells = [new Vec3(0, 63, 0), new Vec3(1, 63, 0), new Vec3(2, 63, 0), new Vec3(3, 63, 0)]
+  const ages = [7, 3, 2, 1]
+  const lookup = (p: Vec3): any => {
+    const i = cells.findIndex(c => c.x === p.x && c.z === p.z)
+    if (i >= 0 && p.y === 64) return ages[i] < 0 ? { name: 'air' } : { name: 'wheat', getProperties: () => ({ age: ages[i]! }) }
+    return { name: p.y === 63 ? 'farmland' : 'air' }
+  }
+  // the plot at the middle by age, 3: 4 stages left
+  assert.equal(growingLeft(lookup, cells, 'wheat'), Math.round(4 * GROW_TICKS / 7))
+  // a chunk not loaded: not known
+  assert.equal(growingLeft(() => null, cells, 'wheat'), null)
+  // the farm's cost: sown long ago, but its crops young
+  const memory = new WorldMemory()
+  rememberFarm(memory, { water: new Vec3(0, 63, 1), cells, crop: 'wheat' }, 0)
+  const self: any = { memory, bot: { entity: { position: new Vec3(0, 64, 1) }, game: { dimension: 'overworld' }, time: { age: 100000 }, blockAt: lookup } }
+  const cost = Executor.prototype.farmCost.call(self, 'wheat') as number
+  assert.ok(cost >= Math.round(4 * GROW_TICKS / 7), String(cost))
+  // half grown: the walk
+  ages.splice(0, 4, 7, 7, 2, 1)
+  assert.ok((Executor.prototype.farmCost.call(self, 'wheat') as number) < 10)
+  // out of the loaded chunks: by the sowing's age (grown by now)
+  self.bot.blockAt = () => null
+  assert.ok((Executor.prototype.farmCost.call(self, 'wheat') as number) < 10)
+})
