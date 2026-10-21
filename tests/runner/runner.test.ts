@@ -677,6 +677,8 @@ test('after a death the basics lacking are made again in order: stone tools (a s
   const inv = (items: Record<string, number>) => ({ count: (n: string) => items[n] ?? 0 })
   assert.deepEqual(reequipGoals(inv({ dirt: 3 })).map(g => g.item), ['stone_pickaxe', 'stone_sword', 'stone_shovel', 'stone_axe', 'shield', 'iron_pickaxe', 'bucket', 'iron_sword', 'iron_chestplate'])
   assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), ['stone_shovel', 'stone_axe'])
+  // a wooden pickaxe is none: a stone one made (f9-1.21.11, the rekit's wooden pickaxe for the way in)
+  assert.deepEqual(reequipGoals(inv({ wooden_pickaxe: 1, stone_sword: 1 })).map(g => g.item).slice(0, 2), ['stone_pickaxe', 'stone_shovel'])
   // any axe will do
   for (const axe of ['wooden_axe', 'iron_axe', 'diamond_axe']) assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, [axe]: 1, iron_shovel: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), [], axe)
   assert.deepEqual(reequipGoals(inv({ diamond_pickaxe: 1, diamond_sword: 1, iron_shovel: 1, stone_axe: 1, water_bucket: 1, iron_chestplate: 1, shield: 1 })).map(g => g.item), [])

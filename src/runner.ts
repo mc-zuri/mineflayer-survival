@@ -137,7 +137,10 @@ export function reequipGoals (inv: { count: (name: string) => number, countAny?:
   const out: ObtainRequest[] = []
   const picks = ['netherite_pickaxe', 'diamond_pickaxe', 'iron_pickaxe']
   const swords = ['netherite_sword', 'diamond_sword', 'iron_sword']
-  if (any([...picks, 'stone_pickaxe', 'wooden_pickaxe']) === 0) out.push({ item: 'stone_pickaxe', count: 1 })
+  // (a wooden one isn't one: the rekit's pickaxe for the way into the base is wood when no stone is carried, and no
+  // stone one was made after it; a 1.21.11 bot back from a death went 100000 ticks with a wooden pickaxe at times and
+  // no stone one, f9-1.21.11 t313911 to t411859)
+  if (any([...picks, 'stone_pickaxe']) === 0) out.push({ item: 'stone_pickaxe', count: 1 })
   if (any([...swords, 'stone_sword']) === 0) out.push({ item: 'stone_sword', count: 1 })
   // (the dirt and gravel of the way back dug with a shovel, not the pickaxe worn by them)
   if (any(['stone_shovel', 'copper_shovel', 'iron_shovel', 'diamond_shovel', 'netherite_shovel']) === 0) out.push({ item: 'stone_shovel', count: 1 })
