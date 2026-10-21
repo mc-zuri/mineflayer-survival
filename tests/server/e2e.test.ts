@@ -26,6 +26,8 @@ describe('pnpm e2e', () => {
     assert.throws(() => parseArgs(['--fast']), /unknown option --fast/)
     assert.strictEqual(d.foodEvery, 0)
     assert.strictEqual(parseArgs(['--food-every', '500']).foodEvery, 500)
+    assert.strictEqual(parseArgs(['--save-world', 'w']).saveWorld, 'w')
+    assert.strictEqual(d.saveWorld, undefined)
   })
 
   test('the food line: the bar, its saturation, the health and the food points carried at a tick', () => {

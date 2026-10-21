@@ -9,7 +9,7 @@
 //
 //   pnpm e2e [--seed 2] [--max-ticks 3000000] [--until <milestone>] [--resume <checkpoint dir>] [--stage dragon]
 //            [--checkpoints <dir>] [--version 1.21.11] [--username player] [--server-log <file>] [--realtime] [--grim]
-//            [--food-every <ticks>]
+//            [--food-every <ticks>] [--save-world <dir>]
 //
 // --seed random: a seed of its own (logged). --realtime: no lockstep mod, the server and the bot each on their 50 ms.
 // --grim: a server with GrimAC, each of its flags counted by check and logged, the bot's actions at the start of its
@@ -44,6 +44,8 @@ export interface E2EOptions {
   grim: boolean
   /** a food line (the bar, its saturation, the health and the food points carried) every this many game ticks; 0 none */
   foodEvery: number
+  /** a directory the world is copied into at the end of the run (save-all flush first), to look at after */
+  saveWorld?: string
 }
 
 /** a random world seed: a signed 64-bit number, as level-seed takes it (WorldOptions.parseSeed) */
@@ -84,6 +86,7 @@ export function parseArgs (argv: string[]): E2EOptions {
       case '--realtime': opts.realtime = true; break
       case '--grim': opts.grim = true; break
       case '--food-every': opts.foodEvery = Number(value()); break
+      case '--save-world': opts.saveWorld = value(); break
       default: throw new Error(`unknown option ${argv[i]}`)
     }
   }
@@ -344,6 +347,11 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
     ])
     connection.off()
     await checkpointing
+    if (opts.saveWorld != null && lost == null) {
+      await server.command('save-all flush')
+      copyWorld(path.join(server.dir, 'world'), opts.saveWorld)
+      log(`the world copied to ${opts.saveWorld}`)
+    }
     const ticks = b.lockstep.ticks - k0
     const wallMs = Date.now() - wall0
     log(`play stopped: ${result.reason}${result.stoppedAt != null ? ` at ${result.stoppedAt}` : ''}${result.error != null ? `: ${(result.error as Error).message}` : ''}`)
