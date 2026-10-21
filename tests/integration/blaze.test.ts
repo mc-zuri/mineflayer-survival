@@ -18,7 +18,7 @@
 // least the gate lets in since it asks for the iron armor, a bow, 64 arrows and 120 food points; freshK
 // full-26.3-fresh-k's bag). BLAZE_AT=s2fortress2: that fortress's other spawner, (-290, 77, -209).
 // BLAZE_KIT=runIron what a whole game brings (iron armor with BLAZE_ENCHANT on it, a diamond sword, a bow, 64 arrows,
-// 120 food points); BLAZE_FIRE_RES=n potions of fire resistance added to any kit; BLAZE_EFFECT="fire_resistance 180"
+// 160 food points); BLAZE_FIRE_RES=n potions of fire resistance added to any kit; BLAZE_EFFECT="fire_resistance 180"
 // an effect on at each run's start.
 // BLAZE_HURT_LOG=1 logs each hurt: what hurt the bot, where it stood, its health, whether its shield was up.
 import { describe, it, before, after } from 'node:test'
@@ -121,12 +121,12 @@ const KITS: Record<string, Array<[string, number]>> = {
   // what a whole game brings from its iron, diamonds and enchanting milestones: a diamond sword, iron armor (golden
   // boots for the piglins) with BLAZE_ENCHANT on the helmet, chestplate and leggings (say protection:2; none unset), a
   // shield, a bow (BLAZE_BOW_ENCHANT, say power:1), BLAZE_ARROWS arrows (default 64), BLAZE_FOOD cooked porkchops
-  // (default 15: the gear gate's 120 food points)
+  // (default 20: the gear gate's 160 food points, NETHER_FOOD_POINTS)
   runIron: [
     ['diamond_sword', 1],
     ...['iron_helmet', 'iron_chestplate', 'iron_leggings'].map((n): [string, number] => [process.env.BLAZE_ENCHANT != null ? `${n}[enchantments={${process.env.BLAZE_ENCHANT}}]` : n, 1]),
     ['golden_boots', 1], ['shield', 1], [process.env.BLAZE_BOW_ENCHANT != null ? `bow[enchantments={${process.env.BLAZE_BOW_ENCHANT}}]` : 'bow', 1],
-    ['arrow', Number(process.env.BLAZE_ARROWS ?? 64)], ['cooked_porkchop', Number(process.env.BLAZE_FOOD ?? 15)], ['iron_pickaxe', 1], ['netherrack', 64]
+    ['arrow', Number(process.env.BLAZE_ARROWS ?? 64)], ['cooked_porkchop', Number(process.env.BLAZE_FOOD ?? 20)], ['iron_pickaxe', 1], ['netherrack', 64]
   ]
 }
 // BLAZE_FIRE_RES=n: n potions of fire resistance in the bag as well (the piglins' barter, or brewed)

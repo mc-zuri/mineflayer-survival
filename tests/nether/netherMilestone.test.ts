@@ -258,7 +258,7 @@ function giveTo (bot: any, items: any[]): void {
 /** what netherGearNeeds asks for, so a test bot goes in */
 function NETHER_GEAR (): any[] {
   const { item } = require('../reflexes/fakeBot')
-  return [item('diamond_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('cooked_beef', 16), item('flint_and_steel', 1), item('shield', 1), item('bow', 1), item('arrow', 64)]
+  return [item('diamond_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('cooked_beef', 20), item('flint_and_steel', 1), item('shield', 1), item('bow', 1), item('arrow', 64)]
 }
 
 test('netherKit: the bot does not go in without a sword, armor, gold and food: got, else the milestone fails', async () => {
@@ -269,11 +269,11 @@ test('netherKit: the bot does not go in without a sword, armor, gold and food: g
   assert.deepStrictEqual(netherGearNeeds(ownedInventory(bare)).map(r => r.unit === 'nutrition' ? 'food' : r.item), ['stone_sword', 'iron_chestplate', 'iron_helmet', 'iron_leggings', 'golden_boots', 'shield', 'flint_and_steel', 'bow', 'arrow', 'food'])
   assert.deepStrictEqual(netherGearNeeds(ownedInventory(fakeBot({ items: NETHER_GEAR() }))), [])
   // 4 ingots do for the boots (made by the kit)
-  assert.deepStrictEqual(netherGearNeeds(ownedInventory(fakeBot({ items: [item('iron_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('gold_ingot', 4), item('bread', 24), item('shield', 1), item('flint_and_steel', 1), item('bow', 1), item('arrow', 64)] }))), [])
+  assert.deepStrictEqual(netherGearNeeds(ownedInventory(fakeBot({ items: [item('iron_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('gold_ingot', 4), item('bread', 32), item('shield', 1), item('flint_and_steel', 1), item('bow', 1), item('arrow', 64)] }))), [])
   // a sword alone, no bow: the bow and its arrows asked for (a throne's blazes aren't fought with the sword alone)
-  assert.deepStrictEqual(netherGearNeeds(ownedInventory(fakeBot({ items: [item('iron_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('cooked_beef', 16), item('shield', 1), item('flint_and_steel', 1)] }))).map(r => r.item), ['bow', 'arrow'])
+  assert.deepStrictEqual(netherGearNeeds(ownedInventory(fakeBot({ items: [item('iron_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('cooked_beef', 20), item('shield', 1), item('flint_and_steel', 1)] }))).map(r => r.item), ['bow', 'arrow'])
   // a bow with few arrows: the arrows asked for too
-  assert.deepStrictEqual(netherGearNeeds(ownedInventory(fakeBot({ items: [item('iron_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('cooked_beef', 16), item('shield', 1), item('flint_and_steel', 1), item('bow', 1), item('arrow', 16)] }))).map(r => r.item), ['arrow'])
+  assert.deepStrictEqual(netherGearNeeds(ownedInventory(fakeBot({ items: [item('iron_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('cooked_beef', 20), item('shield', 1), item('flint_and_steel', 1), item('bow', 1), item('arrow', 16)] }))).map(r => r.item), ['arrow'])
   // 40 food points (the gate's before): more asked for
   assert.ok(netherGearNeeds(ownedInventory(fakeBot({ items: [item('iron_sword', 1), item('iron_chestplate', 1), item('iron_helmet', 1), item('iron_leggings', 1), item('golden_boots', 1), item('cooked_beef', 5), item('shield', 1), item('bow', 1), item('arrow', 64)] }))).some(r => r.unit === 'nutrition'))
   // nothing comes of the gathering: no going in
@@ -288,7 +288,7 @@ test('netherKit: the bot does not go in without a sword, armor, gold and food: g
 test('netherKit: a sword (stone at least), a chestplate and a shield got when missing, and golden boots made, before the nether', async () => {
   const { netherKit } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ items: [item('stone_pickaxe', 1), item('gold_ingot', 8), item('cooked_beef', 16), item('bow', 1), item('arrow', 64), item('flint_and_steel', 1)] })
+  const bot = fakeBot({ items: [item('stone_pickaxe', 1), item('gold_ingot', 8), item('cooked_beef', 20), item('bow', 1), item('arrow', 64), item('flint_and_steel', 1)] })
   const calls: string[] = []
   const executor: any = {
     memory: new WorldMemory(),
@@ -306,7 +306,7 @@ test('netherKit: a sword (stone at least), a chestplate and a shield got when mi
   // (then the brewing's bottles: brewKit)
   assert.deepStrictEqual(calls, ['obtain iron_sword,iron_chestplate,shield', 'obtain stone_sword', 'obtain golden_boots', 'obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])
   calls.length = 0
-  const armed = fakeBot({ items: [item('diamond_sword', 1), item('diamond_chestplate', 1), item('diamond_helmet', 1), item('diamond_leggings', 1), item('shield', 1), item('golden_boots', 1), item('bread', 24), item('bow', 1), item('arrow', 64), item('flint_and_steel', 1)] })
+  const armed = fakeBot({ items: [item('diamond_sword', 1), item('diamond_chestplate', 1), item('diamond_helmet', 1), item('diamond_leggings', 1), item('shield', 1), item('golden_boots', 1), item('bread', 32), item('bow', 1), item('arrow', 64), item('flint_and_steel', 1)] })
   await netherKit(armed, executor, new AbortController().signal, () => {})
   // (the bottles alone)
   assert.deepStrictEqual(calls, ['obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])
@@ -331,7 +331,7 @@ test('netherKit: short of the food, the farm grown by the base is harvested and 
     runStep: async (step: any) => { calls.push(`${step.kind} ${step.crop}`); giveTo(bot, [item('wheat', 60)]) },
     obtain: async (reqs: any[]) => {
       calls.push(`obtain ${reqs.map(r => r.unit === 'nutrition' ? 'food' : r.item).join(',')}`)
-      if (reqs.some(r => r.item === 'bread')) giveTo(bot, [item('bread', 24)])
+      if (reqs.some(r => r.item === 'bread')) giveTo(bot, [item('bread', 32)])
     },
     task: async (name: string) => { calls.push(name) }
   }
@@ -348,7 +348,7 @@ test('netherGate: 80 food points with a farm or a herd known, else 120, the play
   const { Vec3 } = await import('vec3')
   const memory = new WorldMemory()
   const bot = fakeBot({ items: [] })
-  assert.deepStrictEqual(netherGate(bot, { memory }), { food: 120, arrows: 64, bow: true })
+  assert.deepStrictEqual(netherGate(bot, { memory }), { food: 160, arrows: 64, bow: true })
   rememberFarm(memory, { crop: 'wheat', water: new Vec3(5, 63, 0), cells: [new Vec3(4, 63, 0)] } as any, 0)
   assert.equal(netherGate(bot, { memory }).food, 80)
   bot.survival = { playOptions: { netherFood: 60 } }
@@ -1246,4 +1246,12 @@ test('backToOverworld: through the portal from the nether; out of it already (th
   } finally {
     skills.returnOverworld = real
   }
+})
+
+test('blazeFightFood: the gate food from the tick budget of the blaze fight, 160 points for its 24000 ticks (120 ran out in a long bunker fight), 120 at the least', async () => {
+  const { blazeFightFood, NETHER_FOOD_POINTS, NETHER_FOOD_POINTS_LEAST, BLAZE_FIGHT_TICKS } = await import('../../src/milestones')
+  assert.equal(blazeFightFood(BLAZE_FIGHT_TICKS), 160)
+  assert.equal(blazeFightFood(12000), 80)
+  assert.equal(NETHER_FOOD_POINTS, 160)
+  assert.equal(NETHER_FOOD_POINTS_LEAST, 120)
 })

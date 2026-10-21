@@ -1150,7 +1150,23 @@ const SWORDS = ['netherite_sword', 'diamond_sword', 'iron_sword', 'stone_sword',
  * iron with a bow, 64 arrows and 80 points ran out of food in the hall's nook under seed 2's throne at (-277, 77, -159)
  * two runs of three, 3 to 5 rods got; with 120, two of three still, tests/integration/blaze BLAZE_KIT gateIronBow, gate2)
  */
-export const NETHER_FOOD_POINTS = 120
+export const NETHER_FOOD_POINTS_LEAST = 120
+/**
+ * the blaze fight's ticks (collectBlazeRods' maxTicks) and the food points it eats a tick at the most: a bunker's fight
+ * by seed 2's open throne at (-290, 77, -209) lost up to 171 health in 24000 ticks, healed at about 1.5 food points
+ * (FoodData's exhaustion: 6 a health point, 4 a point) a health point, a cooked porkchop's 8 points and 12.8 of
+ * saturation 20.8 of them; 15 porkchops (120 points) ran out at 24000 ticks, 'no food left to heal on' (1.21.11)
+ */
+export const BLAZE_FIGHT_TICKS = 24000
+export const BLAZE_FIGHT_FOOD_A_TICK = 160 / 24000
+
+/** the food points a blaze fight of `ticks` takes at the most (blazeFightFood: its tick budget's) */
+export function blazeFightFood (ticks = BLAZE_FIGHT_TICKS): number {
+  return Math.ceil(ticks * BLAZE_FIGHT_FOOD_A_TICK)
+}
+
+/** the gate's food: the blaze fight's (blazeFightFood), NETHER_FOOD_POINTS_LEAST at the least */
+export const NETHER_FOOD_POINTS = Math.max(NETHER_FOOD_POINTS_LEAST, blazeFightFood())
 /**
  * the arrows the bow goes into the nether with at the least: the blazes are shot from the nook (a full draw of a plain
  * bow takes 3 or so a blaze, the misses lost in the throne, and 8 rods are 16 kills or so; with 16 a 26.3 bot shot 3
