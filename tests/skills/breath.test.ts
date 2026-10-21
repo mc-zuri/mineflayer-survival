@@ -118,3 +118,21 @@ test('waterUnderBreakCost: no block broken with water under it (a flooded cave\'
   bot.entity.position = new Vec3(0.5, 46, 0.5)
   assert.equal(cost({ position: { x: 0, y: 49, z: 0 } }), 0)
 })
+
+test('a death by drowning is kept in the memory (DROWNED_POI) DROWNED_DEATH_TICKS long, DROWNED_DEATH_RADIUS round: the flooded cave 12 off the first death kept off 29000 ticks on (f3-26.3)', async () => {
+  const { DROWNED_DEATH_TICKS, drownedForGoodNear, noteDrowning, clearDrownings } = await import('../../src/skills/breath')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const memory = new WorldMemory()
+  const bot: any = new (require('node:events').EventEmitter)()
+  bot.game = { dimension: 'overworld' }
+  bot.survival = { tasks: { tick: 70031 }, memory }
+  memory.now = 70031
+  noteDrowning(bot, new Vec3(-15, 47, 119), true)
+  // 29000 ticks on, a game resumed (the in-memory marks gone), 12 off
+  clearDrownings(bot)
+  bot.survival.tasks.tick += 29000
+  memory.now += 29000
+  assert.equal(drownedForGoodNear(bot, new Vec3(-27, 47, 108)), true)
+  memory.now += DROWNED_DEATH_TICKS
+  assert.equal(drownedForGoodNear(bot, new Vec3(-27, 47, 108)), false)
+})

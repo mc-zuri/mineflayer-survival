@@ -105,15 +105,38 @@ export function noteDrowning (bot: Bot, at: Vec3, forGood = false): boolean {
   const near = (d: { at: Vec3 }): boolean => Math.max(Math.abs(d.at.x - spot.x), Math.abs(d.at.y - spot.y), Math.abs(d.at.z - spot.z)) <= DROWNED_RADIUS
   const repeat = forGood || list.some(d => near(d) && now - d.tick <= DROWNED_REPEAT_WINDOW)
   list.push({ at: spot, tick: now, until: now + (repeat ? DROWNED_REPEAT_TICKS : DROWNED_TICKS) })
+  // a death by drowning kept in the memory, for longer and further round (DROWNED_DEATH_TICKS, DROWNED_DEATH_RADIUS)
+  if (forGood) (bot as any).survival?.memory?.addPoi?.(DROWNED_POI, spot, String(bot.game?.dimension ?? 'overworld'))
   return repeat
 }
 
 function spotsNear (bot: Bot, pos: { x: number, y: number, z: number }, radius: number): Array<{ at: Vec3, tick: number, until: number }> {
-  const list = drownings.get(bot)
-  if (list == null || list.length === 0) return []
+  const list = drownings.get(bot) ?? []
   const now = nowTick(bot)
-  return list.filter(d => now - d.tick >= 0 && now <= d.until && Math.max(Math.abs(d.at.x - pos.x), Math.abs(d.at.y - pos.y), Math.abs(d.at.z - pos.z)) <= radius)
+  const out = list.filter(d => now - d.tick >= 0 && now <= d.until && Math.max(Math.abs(d.at.x - pos.x), Math.abs(d.at.y - pos.y), Math.abs(d.at.z - pos.z)) <= radius)
+  // and the deaths by drowning the memory keeps (saved with a game's save, DROWNED_POI): DROWNED_DEATH_RADIUS round,
+  // DROWNED_DEATH_TICKS long, whatever `radius`
+  const memory = (bot as any).survival?.memory
+  if (memory?.getPois != null) {
+    for (const p of memory.getPois(DROWNED_POI, { dimension: String(bot.game?.dimension ?? 'overworld') })) {
+      const age = Number(memory.now ?? 0) - Number(p.seen ?? 0)
+      if (age < 0 || age > DROWNED_DEATH_TICKS) continue
+      if (Math.max(Math.abs(p.x - pos.x), Math.abs(p.y - pos.y), Math.abs(p.z - pos.z)) > Math.max(radius, DROWNED_DEATH_RADIUS)) continue
+      out.push({ at: new Vec3(p.x, p.y, p.z), tick: now - age, until: now + DROWNED_DEATH_TICKS - age })
+    }
+  }
+  return out
 }
+
+/** the memory's point of a death by drowning (noteDrowning forGood): kept with a game's save */
+export const DROWNED_POI = 'drowned'
+/**
+ * how far round, and how long, a spot the bot drowned at is left for good: a 26.3 bot drowned twice in the same flooded
+ * cave at y 47, the second 12 blocks from the first and 29000 ticks after it, the first's mark gone by then (8 round,
+ * 24000 long) (f3-26.3, t70031 and t99395)
+ */
+export const DROWNED_DEATH_RADIUS = 16
+export const DROWNED_DEATH_TICKS = 120000
 
 /** whether `pos` is within `radius` of a spot the bot drowned at lately (kept off: DROWNED_TICKS, DROWNED_REPEAT_TICKS) */
 export function drownedNear (bot: Bot, pos: { x: number, y: number, z: number }, radius = DROWNED_RADIUS): boolean {
