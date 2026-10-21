@@ -1,7 +1,8 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { deadlyStep, edgeAhead, fleeHeading, stepCost, steerToward } from '../../src/skills/steer'
+import { HEADWAY_TICKS, Headway, deadlyStep, edgeAhead, fleeHeading, fleeRoute, fleeWay, jumpRoom, lineCost, stepCost, steerToward } from '../../src/skills/steer'
+import { LS3B_CREEPER_1, LS3B_CREEPER_2, bodyGets, gridBlocks, gridWorld } from './fleeTerrain'
 import { fakeBot } from '../reflexes/fakeBot'
 
 test('fleeHeading runs away from the threat, around lava and walls', () => {
@@ -91,4 +92,80 @@ test('fleeHeading: in a tunnel shut behind the bot, the way at the threat is non
   const bot2 = fakeBot({ position: new Vec3(4.5, 64, 0.5), world: tunnel })
   const h = fleeHeading(bot2, new Vec3(1.5, 64, 0.5))
   assert.ok(h != null && -Math.sin(h) > 0.9, String(h))
+})
+
+/** a fake bot on a grid's ground, its leaves and logs full blocks */
+function gridBot (world: (p: Vec3) => string, position: Vec3): any {
+  const bot = fakeBot({ position, world })
+  bot.blockAt = gridBlocks(world)
+  return bot
+}
+
+// ls3b-1.21.11's first creeper death (t327032): the bot up its pillar out of a cave at (159, 67, 322), the leaves over
+// it there dug, by an oak's trunk at (157, 69..72, 321) and another oak's canopy low over z 322 on (y 70)
+const SHAFT = { '159,68,322': 'air', '159,67,322': 'cobblestone', '159,70,322': 'air' }
+
+test('fleeHeading takes the body\'s way, not its middle\'s: no line past a trunk\'s corner under low leaves, nor a step up under a canopy (ls3b-1.21.11, two creeper deaths)', () => {
+  const w1 = gridWorld(LS3B_CREEPER_1, SHAFT)
+  // where it died, pressed to the trunk, the creeper 2.5 off: the old line (west-southwest, between the trunk and the
+  // leaves at the head) is none, nor any other away from it
+  const wedged = gridBot(w1, new Vec3(158.3, 69, 321.68))
+  const creeper = new Vec3(160.55, 69, 320.65)
+  const wsw = 5 * Math.PI / 8
+  assert.equal(bodyGets(gridBlocks(w1), wedged.entity.position, wsw, 2), false, 'the body gets past the corner')
+  assert.equal(lineCost(wedged, new Vec3(158.3, 69, 321.68), -Math.sin(wsw), -Math.cos(wsw)), Infinity)
+  assert.equal(fleeHeading(wedged, creeper), null)
+  // a step back, on the pillar's top: north-west, a way the body gets along
+  const atPillar = gridBot(w1, new Vec3(159.5, 69, 321.79))
+  const h = fleeHeading(atPillar, creeper)
+  assert.ok(h != null && bodyGets(gridBlocks(w1), atPillar.entity.position, h, 3), String(h))
+  // the second (t439660): in a hollow under an oak's leaves at y 66, every step up out of it one its jump can't take
+  const w2 = gridWorld(LS3B_CREEPER_2)
+  const hollow = gridBot(w2, new Vec3(27.7, 64, 203.3))
+  assert.equal(jumpRoom(hollow, hollow.entity.position), false)
+  assert.equal(fleeHeading(hollow, new Vec3(26.44, 64, 205.82)), null)
+  assert.equal(fleeHeading(hollow, new Vec3(22.1, 64, 205.5)), null)
+  // and on open ground the way's straight on as before
+  const open = gridBot(w2, new Vec3(30.5, 66, 196.5))
+  assert.equal(jumpRoom(open, open.entity.position), true)
+  const away = fleeHeading(open, new Vec3(27.5, 66, 196.5))
+  assert.ok(away != null && -Math.sin(away) > 0.7, String(away))
+})
+
+test('fleeRoute: out of the hollow under the canopy along it, then up where the leaves end; none past a creeper\'s fuse (ls3b-1.21.11, t439660)', () => {
+  const w2 = gridWorld(LS3B_CREEPER_2)
+  const blocks = gridBlocks(w2)
+  const from = new Vec3(27.7, 64, 203.3)
+  // the first creeper west of it at (22.1, 64, 205.5): a step south-east along the hollow, then east out of it
+  const route = fleeRoute(blocks, from, [new Vec3(22.1, 64, 205.5)], { keepOff: 2.5 })
+  assert.ok(route != null && route.length > 2, JSON.stringify(route))
+  const end = route[route.length - 1]
+  assert.ok(Math.hypot(end.x + 0.5 - 22.1, end.z + 0.5 - 205.5) >= Math.hypot(27.7 - 22.1, 203.3 - 205.5) + 2)
+  // each of its steps one the body takes (the cell's middle to the next's)
+  let at = from
+  for (const c of route) {
+    const to = c.offset(0.5, 0, 0.5)
+    const heading = Math.atan2(-(to.x - at.x), -(to.z - at.z))
+    assert.ok(bodyGets(blocks, at, heading, Math.hypot(to.x - at.x, to.z - at.z)), `stuck from ${at.toString()} to ${to.toString()}`)
+    at = to
+  }
+  // the bot steers along it (fleeWay's next cell), the straight lines none
+  const bot = gridBot(w2, from)
+  const way = fleeWay(bot, new Vec3(22.1, 64, 205.5), undefined, { keepOff: 2.5 })
+  assert.ok(way != null && 'cell' in way && way.cell.equals(route[0]), JSON.stringify(way))
+  // the second, 2.8 off to the south: the hollow's ways out all pass it within 2.5, no route (cornered)
+  assert.equal(fleeRoute(blocks, from, [new Vec3(26.44, 64, 205.82)], { keepOff: 2.5 }), null)
+  // in a tunnel shut behind the bot, none either
+  const tunnel = (p: Vec3): string => (p.z === 0 && (p.y === 64 || p.y === 65) && p.x >= 0 && p.x < 12) ? 'air' : 'stone'
+  assert.equal(fleeRoute(p => fakeBot({ world: tunnel }).blockAt(p), new Vec3(0.5, 64, 0.5), [new Vec3(8.5, 64, 0.5)]), null)
+})
+
+test('Headway: a run that got less than HEADWAY_BLOCKS across in HEADWAY_TICKS got nowhere', () => {
+  const h = new Headway()
+  // a sprint from a stand (its speed building up to 0.28 a tick)
+  for (let t = 0; t <= HEADWAY_TICKS + 4; t++) assert.equal(h.update(new Vec3(Math.min(t, 6) * 0.05 * t, 64, 0)), false, `a sprint, tick ${t}`)
+  h.reset()
+  let stuck = false
+  for (let t = 0; t <= HEADWAY_TICKS; t++) stuck = h.update(new Vec3(0.05 * (t % 2), 64, 0))
+  assert.equal(stuck, true, 'jumping in place')
 })

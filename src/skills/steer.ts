@@ -126,11 +126,80 @@ export const FLEE_TOWARD = -0.25
 export const FLEE_LEAN = 2
 
 /**
+ * a hair under half the player's width (EntityType.PLAYER 0.6): the body's sides along a flee's line, where a gap its
+ * middle fits but its body doesn't (a trunk's corner under a canopy) is no way
+ */
+export const BODY_HALF = 0.29
+
+/** the points a flee's line is looked at, half a block apart: a corner cut between two is a corner the body hits */
+const FLEE_SAMPLES = [0.5, 1, 1.5, 2, 2.5, 3]
+
+/**
+ * The feet's cell height of the bot on the ground, or of the ground it's jumping from or falling to within 2 blocks
+ * (a bot mid-jump against a trunk is looked at from the cell it jumped from, not the one its feet are in for the tick)
+ */
+export function groundFeetY (bot: Bot): number {
+  const pos = bot.entity.position
+  const y = Math.floor(pos.y + 1e-3)
+  if (bot.entity.onGround) return y
+  for (let d = 0; d <= 2; d++) {
+    if (isSolid(bot, new Vec3(pos.x, y - d - 1, pos.z)) && isPassable(bot, new Vec3(pos.x, y - d, pos.z))) return y - d
+  }
+  return y
+}
+
+/**
+ * Whether the bot's body at `at` (its feet's height) has the room to jump: the cells over its head (feet + 2) under
+ * each of its corners open. A leaf or a block there stops the jump short (Entity.move's collision), and a step up of
+ * one block can't be taken: two 1.21.11 bots fled creepers under low oak canopies, jumping in place at a step, and
+ * were blown up (ls3b-1.21.11, t327032 at (158, 70, 321) and t439660 at (27, 64, 203))
+ */
+export function jumpRoom (bot: Bot, at: Vec3): boolean {
+  const y = Math.floor(at.y + 1e-3) + 2
+  for (const dx of [-BODY_HALF, BODY_HALF]) {
+    for (const dz of [-BODY_HALF, BODY_HALF]) {
+      if (!isPassable(bot, new Vec3(at.x + dx, y, at.z + dz))) return false
+    }
+  }
+  return true
+}
+
+/** whether the column at `feet` is a step up (its feet's cell a block to climb) */
+function isStepUp (bot: Bot, feet: Vec3): boolean {
+  return !isPassable(bot, feet.floored())
+}
+
+/**
+ * The cost of the body's way along a flee's line from `from` (the bot's feet on the ground) to `step` blocks on, in
+ * the direction (dx, dz): each half block's point and the body's sides there (BODY_HALF) safe (stepCost), a step up
+ * only with the room to jump before it (jumpRoom). Infinity when the body can't go that way.
+ */
+export function lineCost (bot: Bot, from: Vec3, dx: number, dz: number, steps = 3): number {
+  let cost = 0
+  for (const k of FLEE_SAMPLES) {
+    if (k > steps) break
+    const center = from.offset(dx * k, 0, dz * k)
+    for (const side of [0, BODY_HALF, -BODY_HALF]) {
+      // (the body's side, square to the line)
+      const p = center.offset(-dz * side, 0, dx * side)
+      const c = stepCost(bot, p)
+      if (c === Infinity) return Infinity
+      if (isStepUp(bot, p) && !jumpRoom(bot, from.offset(dx * (k - 0.5), 0, dz * (k - 0.5)))) return Infinity
+      if (side === 0 && Number.isInteger(k)) cost += c
+    }
+  }
+  return cost
+}
+
+/**
  * The heading (mineflayer yaw) that leads furthest from the threat over safe ground, or null if every way is shut;
- * with `toward` (the base, a lit place), the ways nearer it are the better by FLEE_LEAN, still never back at the threat
+ * with `toward` (the base, a lit place), the ways nearer it are the better by FLEE_LEAN, still never back at the threat.
+ * The way is the body's (lineCost: its width, the room to jump a step), not its middle's: a line between a trunk and a
+ * canopy's low leaves its middle passed and its body didn't kept a bot jumping in place by a creeper (ls3b-1.21.11)
  */
 export function fleeHeading (bot: Bot, threat: Vec3, samples = 16, toward?: Vec3): number | null {
   const pos = bot.entity.position
+  const from = new Vec3(pos.x, groundFeetY(bot), pos.z)
   const away = new Vec3(pos.x - threat.x, 0, pos.z - threat.z)
   const len = Math.hypot(away.x, away.z)
   const ax = len > 1e-6 ? away.x / len : 1
@@ -147,8 +216,7 @@ export function fleeHeading (bot: Bot, threat: Vec3, samples = 16, toward?: Vec3
     // never at the threat: in a tunnel shut behind it, the one open way led a 26.3 bot fleeing a creeper toward it,
     // into its blast (nether-26.3-q3); none open but that way is no way (cornered)
     if (dx * ax + dz * az < FLEE_TOWARD) continue
-    let cost = 0
-    for (let step = 1; step <= 3 && cost !== Infinity; step++) cost += stepCost(bot, pos.offset(dx * step, 0, dz * step))
+    const cost = lineCost(bot, from, dx, dz)
     if (cost === Infinity) continue
     const score = (dx * ax + dz * az) * 3 + (dx * tx + dz * tz) * FLEE_LEAN - cost
     if (score > bestScore) {
@@ -159,18 +227,189 @@ export function fleeHeading (bot: Bot, threat: Vec3, samples = 16, toward?: Vec3
   return best
 }
 
-/** Runs from the threat this tick (leaning toward `toward`, when given: fleeHeading); false when there's no safe way. */
-export function steerAway (bot: Bot, threat: Vec3, toward?: Vec3): boolean {
-  const heading = fleeHeading(bot, threat, 16, toward)
-  if (heading == null) {
-    bot.clearControlStates()
-    return false
+/** a block lookup (bot.blockAt's, or a test's) */
+export type SteerLookup = (pos: Vec3) => { name: string, boundingBox: string } | null
+
+/** how far across a flee's route looks (fleeRoute), and the most cells it opens */
+export const FLEE_ROUTE_RADIUS = 8
+export const FLEE_ROUTE_NODES = 800
+/** how much further from the threats than the bot is the route's end must be (else there's no route) */
+export const FLEE_ROUTE_GAIN = 2
+/** the nearest a route's cells may pass a threat (or the bot's distance now, if it's nearer) */
+export const FLEE_ROUTE_KEEP_OFF = 2.5
+/** the extra cost of a cell in the water on a route (a swim's a third of a sprint) */
+export const FLEE_ROUTE_WATER_COST = 3
+
+export interface FleeRouteOptions {
+  /** how far across (default FLEE_ROUTE_RADIUS) */
+  radius?: number
+  /** the most cells opened (default FLEE_ROUTE_NODES) */
+  maxNodes?: number
+  /**
+   * the nearest its cells may pass a threat (default FLEE_ROUTE_KEEP_OFF, or less when the bot is nearer: a step past
+   * a zombie at its side is a way out); a creeper's is FLEE_ROUTE_KEEP_OFF whatever (a run past its fuse at 2 blocks
+   * is a death: its blast is cut off with blocks instead, evadeCreeper)
+   */
+  keepOff?: number
+}
+
+const DIRS: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
+
+/**
+ * A short route on foot away from the threats when no straight line is (fleeHeading null): the cells the body can walk
+ * (the feet's and the head's open, a full block or the water under them, no danger), a step to the side or a diagonal
+ * one (both its sides open: no corner cut), a step up with the room to jump (the feet + 2 open where it's taken from),
+ * a drop of 3 at most; never nearer a threat than `keepOff` (FleeRouteOptions). Its end is the cell furthest from the threats
+ * (less its cost), FLEE_ROUTE_GAIN further than the bot at least; null when there's none. A bot under an oak's low
+ * leaves in a hollow, each step out of it one the canopy stopped its jump at, had its way out a step along the hollow
+ * first, then up where the leaves end (ls3b-1.21.11, t439660). Returns the cells after `from`, in order.
+ */
+export function fleeRoute (lookup: SteerLookup, from: Vec3, threats: readonly Vec3[], opts: FleeRouteOptions = {}): Vec3[] | null {
+  const radius = opts.radius ?? FLEE_ROUTE_RADIUS
+  const maxNodes = opts.maxNodes ?? FLEE_ROUTE_NODES
+  const start = from.floored()
+  const passable = (p: Vec3): boolean => { const b = lookup(p); return b == null || (b.boundingBox === 'empty' && !isDangerBlock(b.name)) }
+  const solid = (p: Vec3): boolean => { const b = lookup(p); return b != null && b.boundingBox === 'block' && !isDangerBlock(b.name) }
+  const water = (p: Vec3): boolean => lookup(p)?.name === 'water'
+  const clear = (p: Vec3): boolean => passable(p) && passable(p.offset(0, 1, 0))
+  const threatDistance = (p: Vec3): number => {
+    let d = Infinity
+    for (const t of threats) d = Math.min(d, Math.hypot(p.x + 0.5 - t.x, p.z + 0.5 - t.z))
+    return d
   }
-  void bot.look(heading, 0, true)
+  const startDistance = threatDistance(start)
+  const keepOff = opts.keepOff ?? Math.min(FLEE_ROUTE_KEEP_OFF, startDistance - 0.25)
+  /** where a body stepping into the open column at `n` lands: its feet's cell (a drop of 3 at most), or null */
+  const landing = (n: Vec3): { at: Vec3, extra: number } | null => {
+    for (let d = 0; d <= 3; d++) {
+      const feet = n.offset(0, -d, 0)
+      if (d > 0 && !passable(feet)) return null
+      if (water(feet) || water(feet.offset(0, -1, 0))) return { at: feet, extra: FLEE_ROUTE_WATER_COST }
+      const under = lookup(feet.offset(0, -1, 0))
+      if (under != null && isDangerBlock(under.name)) return null
+      if (solid(feet.offset(0, -1, 0))) return { at: feet, extra: d * 0.5 }
+    }
+    return null
+  }
+  const key = (p: Vec3): string => `${p.x},${p.y},${p.z}`
+  const cost = new Map<string, number>([[key(start), 0]])
+  const parent = new Map<string, Vec3 | null>([[key(start), null]])
+  const open: Vec3[] = [start]
+  let opened = 0
+  let best: Vec3 | null = null
+  let bestScore = -Infinity
+  while (open.length > 0 && opened < maxNodes) {
+    // (the cheapest open cell next: a small Dijkstra)
+    let bi = 0
+    for (let i = 1; i < open.length; i++) if ((cost.get(key(open[i])) ?? Infinity) < (cost.get(key(open[bi])) ?? Infinity)) bi = i
+    const c = open.splice(bi, 1)[0]
+    opened++
+    const cc = cost.get(key(c)) ?? 0
+    if (c !== start) {
+      const score = threatDistance(c) - cc * 0.2
+      if (score > bestScore) { bestScore = score; best = c }
+    }
+    for (const [dx, dz] of DIRS) {
+      const diagonal = dx !== 0 && dz !== 0
+      const n = c.offset(dx, 0, dz)
+      if (Math.abs(n.x - start.x) > radius || Math.abs(n.z - start.z) > radius) continue
+      // a diagonal step only with both its sides open (the body would catch on the corner)
+      if (diagonal && (!clear(c.offset(dx, 0, 0)) || !clear(c.offset(0, 0, dz)))) continue
+      let next: { at: Vec3, extra: number } | null = null
+      if (clear(n)) next = landing(n)
+      else if (!diagonal && solid(n) && clear(n.offset(0, 1, 0)) && passable(c.offset(0, 2, 0))) next = { at: n.offset(0, 1, 0), extra: 1 }
+      if (next == null) continue
+      if (threatDistance(next.at) < keepOff) continue
+      const nc = cc + (diagonal ? Math.SQRT2 : 1) + next.extra
+      const k = key(next.at)
+      if (nc >= (cost.get(k) ?? Infinity)) continue
+      cost.set(k, nc)
+      parent.set(k, c)
+      open.push(next.at)
+    }
+  }
+  if (best == null || threatDistance(best) < startDistance + FLEE_ROUTE_GAIN) return null
+  const route: Vec3[] = []
+  for (let p: Vec3 | null = best; p != null && key(p) !== key(start); p = parent.get(key(p)) ?? null) route.unshift(p)
+  return route
+}
+
+/** the bot's blocks, for fleeRoute */
+export function steerLookup (bot: Bot): SteerLookup {
+  return p => bot.blockAt(p) as any
+}
+
+/** a way away this tick: a heading along a straight line (fleeHeading), or the middle of the next cell of a route (fleeRoute) */
+export type FleeWay = { heading: number } | { cell: Vec3 }
+
+/**
+ * The way to run from the threat this tick: the straight line's heading (fleeHeading), else (or with `route`, the line
+ * got the bot nowhere: Headway) the next cell of a route out (fleeRoute); null when there's neither (cornered)
+ */
+export function fleeWay (bot: Bot, threat: Vec3, toward?: Vec3, opts: { route?: boolean, keepOff?: number } = {}): FleeWay | null {
+  if (opts.route !== true) {
+    const heading = fleeHeading(bot, threat, 16, toward)
+    if (heading != null) return { heading }
+  }
+  const pos = bot.entity.position
+  const route = fleeRoute(steerLookup(bot), new Vec3(pos.x, groundFeetY(bot), pos.z), [threat], { keepOff: opts.keepOff })
+  if (route == null || route.length === 0) return null
+  // (the first cell whose middle the bot isn't at yet)
+  const next = route.find(c => Math.hypot(c.x + 0.5 - pos.x, c.z + 0.5 - pos.z) > 0.3) ?? route[route.length - 1]
+  return { cell: next }
+}
+
+/** Runs along the way this tick, sprinting (jumping a step, swimming up in water). */
+export function steerAlong (bot: Bot, way: FleeWay): void {
+  if ('cell' in way) {
+    steerToward(bot, way.cell.offset(0.5, 0, 0.5), { sprint: true })
+    return
+  }
+  void bot.look(way.heading, 0, true)
   bot.setControlState('forward', true)
   bot.setControlState('back', false)
   bot.setControlState('sprint', true)
   const e = bot.entity as any
   bot.setControlState('jump', (e.isCollidedHorizontally === true && bot.entity.onGround) || e.isInWater === true || e.isInLava === true)
+}
+
+/**
+ * Runs from the threat this tick (leaning toward `toward`, when given: fleeHeading; by a route with `route`: fleeWay);
+ * false when there's no safe way.
+ */
+export function steerAway (bot: Bot, threat: Vec3, toward?: Vec3, opts: { route?: boolean, keepOff?: number } = {}): boolean {
+  const way = fleeWay(bot, threat, toward, opts)
+  if (way == null) {
+    bot.clearControlStates()
+    return false
+  }
+  steerAlong(bot, way)
   return true
+}
+
+/** ticks and blocks of a run's headway (Headway): less than HEADWAY_BLOCKS across in HEADWAY_TICKS is none (a sprint from a stand covers some 1.5, a swim 0.8) */
+export const HEADWAY_TICKS = 8
+export const HEADWAY_BLOCKS = 0.7
+
+/**
+ * A run's headway: whether the bot got anywhere across over the last `ticks` ticks it ran. None is a way that isn't one (the body caught on a corner, a jump stopped by a ceiling): the flee
+ * takes a route next, and then counts as cornered.
+ */
+export class Headway {
+  private readonly at: Vec3[] = []
+  constructor (readonly ticks = HEADWAY_TICKS, readonly blocks = HEADWAY_BLOCKS) {}
+
+  /** the bot's place this tick of the run; true when it got less than `blocks` across in the last `ticks` */
+  update (pos: Vec3): boolean {
+    this.at.push(pos.clone())
+    if (this.at.length > this.ticks + 1) this.at.shift()
+    if (this.at.length <= this.ticks) return false
+    const first = this.at[0]
+    return Math.hypot(pos.x - first.x, pos.z - first.z) < this.blocks
+  }
+
+  /** a new count (a tick the bot didn't run, a new way) */
+  reset (): void {
+    this.at.length = 0
+  }
 }

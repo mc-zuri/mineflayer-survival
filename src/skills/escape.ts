@@ -4,7 +4,7 @@ import { isAbort } from './errors'
 import { type Block, blockReach, trace, withinReach } from './util'
 import { Vec3 } from 'vec3'
 import { creeperSwelling, lowerShield, raiseShield, SwellCounter } from './fight'
-import { isDangerBlock, steerAway, steerToward, fleeHeading } from './steer'
+import { FLEE_ROUTE_KEEP_OFF, HEADWAY_TICKS, Headway, fleeWay, isDangerBlock, steerAlong, steerToward } from './steer'
 import { type Entity, distanceToBox, entityBox, eyePosition, isAlive, type SkillOptions, TaskError, throwIfAborted, waitTicks, waitUntil, yawPitchOf } from './combatUtil'
 import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { hotFloorCell, noteHazardLeft } from './hazardCells'
@@ -976,8 +976,42 @@ export interface EvadeResult {
 export const FLEE_MEMORY = 60
 
 /**
+ * A run's headway kept (Headway): the way got the bot nowhere, a route (fleeRoute) for 2 * HEADWAY_TICKS next; nowhere
+ * on that route either, or a third time, it's cornered. Two 1.21.11 bots ran from creepers along lines their bodies
+ * couldn't take (a trunk's corner under low leaves, a step up under a canopy), jumping in place for 76 and 98 ticks,
+ * and were blown up (ls3b-1.21.11, t327032 and t439660)
+ */
+export class RunHeadway {
+  private readonly headway = new Headway()
+  private routeUntil = -1
+  private stucks = 0
+  /** no way the run gets along */
+  jammed = false
+
+  /** whether the run takes a route this tick (`t`, the run's) */
+  routing (t: number): boolean {
+    return t < this.routeUntil
+  }
+
+  /** the bot's place after a tick it ran; jammed once it got nowhere on a route or three times */
+  ran (bot: Bot, t: number): void {
+    if (!this.headway.update(bot.entity.position)) return
+    this.stucks++
+    if (this.routing(t) || this.stucks >= 3) this.jammed = true
+    else this.routeUntil = t + 2 * HEADWAY_TICKS
+    this.headway.reset()
+  }
+
+  /** a tick it didn't run (the shield up, a swing): no count */
+  stood (): void {
+    this.headway.reset()
+  }
+}
+
+/**
  * Gets clear of a creeper: sprints away past its blast (and past the 7 blocks it stops swelling at), or, cornered or
- * about to be caught by the blast, faces it with the shield up (explosions are blocked from the front).
+ * about to be caught by the blast, faces it with the shield up (explosions are blocked from the front). Cornered is
+ * no way out (fleeWay: no line nor route that keeps FLEE_ROUTE_KEEP_OFF off it) or a run that got nowhere (RunHeadway).
  */
 export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreeperOptions = {}): Promise<EvadeResult> {
   const safe = opts.safeDistance ?? 7.5
@@ -986,6 +1020,7 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
   const maxTicks = opts.maxTicks ?? 200
   const counter = new SwellCounter()
   counter.swell = opts.swell ?? 0
+  const run = new RunHeadway()
   let blocked = false
   let blocking = false
   try {
@@ -997,17 +1032,21 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
       const distance = bot.entity.position.distanceTo(creeper.position)
       if (distance >= safe && !swelling) return { outcome: 'away', blocked, ticks: t }
       const hasShield = bot.inventory.slots[45]?.name === 'shield' || bot.inventory.items().some(i => i.name === 'shield')
-      const cornered = fleeHeading(bot, creeper.position) == null
+      const way = run.jammed ? null : fleeWay(bot, creeper.position, undefined, { route: run.routing(t), keepOff: FLEE_ROUTE_KEEP_OFF })
+      const cornered = way == null
       if (hasShield && distance < blockDistance && (swell >= blockAtSwell || cornered)) {
+        run.stood()
         bot.clearControlStates()
         const { yaw, pitch } = yawPitchOf(creeper.position.offset(0, 1, 0).minus(eyePosition(bot)))
         void bot.look(yaw, pitch, true)
         if (!blocking) blocking = await raiseShield(bot)
         blocked = blocked || blocking
-      } else if (cornered && !hasShield) {
+      } else if (way == null) {
         // nowhere to run and no shield (a tunnel): hit it, each hit's knockback putting it back from the bot (its
         // fuse runs within 7 of it, SwellGoal; a kill stops it); stood still, a 26.3 bot at y 11 was blown up
         // (nether-26.3-q3)
+        run.stood()
+        if (blocking) { lowerShield(bot); blocking = false }
         bot.clearControlStates()
         const weapon = bestMeleeWeapon(bot, 'creeper')
         if (weapon != null && bot.heldItem?.type !== weapon.type) await bot.equip(weapon, 'hand')
@@ -1017,7 +1056,8 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
         if (distanceToBox(eyePosition(bot), entityBox(creeper)) <= 2.9 && strength.scale(0.5) >= 1) strength.attack(creeper)
       } else {
         if (blocking) { lowerShield(bot); blocking = false }
-        steerAway(bot, creeper.position)
+        steerAlong(bot, way)
+        run.ran(bot, t)
       }
       await waitTicks(bot, 1, opts.signal)
     }
@@ -1028,12 +1068,16 @@ export async function evadeCreeper (bot: Bot, creeper: Entity, opts: EvadeCreepe
   }
 }
 
-/** Runs from the threats until none is within distance (leaning toward `toward`, the base say, when given: fleeHeading). */
+/**
+ * Runs from the threats until none is within distance (leaning toward `toward`, the base say, when given: fleeHeading);
+ * NO_PATH 'cornered' with no way (fleeWay) or a run that got nowhere (RunHeadway)
+ */
 export async function fleeFrom (bot: Bot, threats: () => Entity[], opts: SkillOptions & { distance?: number, maxTicks?: number, toward?: Vec3 } = {}): Promise<{ ticks: number }> {
   const distance = opts.distance ?? 16
   const maxTicks = opts.maxTicks ?? 300
   // each threat kept FLEE_MEMORY ticks after it was last among `threats` (out of sight behind a tree or a rise)
   const seen = new Map<number, { e: Entity, at: number }>()
+  const run = new RunHeadway()
   try {
     for (let t = 0; t < maxTicks; t++) {
       throwIfAborted(opts.signal)
@@ -1041,7 +1085,13 @@ export async function fleeFrom (bot: Bot, threats: () => Entity[], opts: SkillOp
       const near = [...seen.values()].filter(s => t - s.at <= FLEE_MEMORY).map(s => s.e).filter(e => isAlive(bot, e) && bot.entities[e.id] != null && e.position.distanceTo(bot.entity.position) < distance)
       if (near.length === 0) return { ticks: t }
       const centroid = near.reduce((sum, e) => sum.plus(e.position), new Vec3(0, 0, 0)).scaled(1 / near.length)
-      if (!steerAway(bot, centroid, opts.toward)) throw new TaskError('NO_PATH', 'cornered')
+      const way = run.jammed ? null : fleeWay(bot, centroid, opts.toward, { route: run.routing(t) })
+      if (way == null) {
+        bot.clearControlStates()
+        throw new TaskError('NO_PATH', run.jammed ? 'cornered: the run got nowhere' : 'cornered')
+      }
+      steerAlong(bot, way)
+      run.ran(bot, t)
       await waitTicks(bot, 1, opts.signal)
     }
     throw new TaskError('TIMEOUT', 'still chased')

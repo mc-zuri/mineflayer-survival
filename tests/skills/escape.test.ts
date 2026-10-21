@@ -161,6 +161,38 @@ test('evadeCreeper cornered with no shield (a tunnel): hits the creeper as the s
   assert.ok(hits >= 2, `${hits} hits`)
 })
 
+test('evadeCreeper: a run that gets nowhere (the body caught where its line said open) takes a route, then counts as cornered: the sword (ls3b-1.21.11, t327032: jumping in place 29 ticks by a trunk till the blast)', async () => {
+  const { evadeCreeper } = await import('../../src/skills/escape')
+  const { entity, item } = await import('../reflexes/fakeBot')
+  // open ground; the bot's body held where it is each tick (the trunk's corner the line's middle passed)
+  const creeper = entity({ name: 'creeper', position: new Vec3(2.6, 64, 0.5), meta: { swell_dir: 1 } })
+  const bot = fakeBot({ items: [item('iron_sword')], entities: [creeper] })
+  bot.heldItem = bot.inventory.slots[9]
+  bot.equip = async () => {}
+  let hits = 0
+  let firstHit = -1
+  let t = 0
+  bot.attack = () => { hits++; if (firstHit < 0) firstHit = t }
+  bot.waitForTicks = async () => { t++; bot.emit('physicsTick') }
+  // (the sword long charged, as in a game)
+  const { attackStrengthOf } = await import('../../src/skills/weapons')
+  for (let i = 0; i < 20; i++) { attackStrengthOf(bot); bot.emit('physicsTick') }
+  await evadeCreeper(bot, creeper as any, { maxTicks: 40 }).catch(() => {})
+  // 8 ticks of the line, 8 of a route, then the sword: within the fuse's 30
+  assert.ok(firstHit >= 0 && firstHit <= 20, `first hit at ${firstHit}`)
+  assert.ok(hits >= 1, `${hits} hits`)
+  // a bot that runs is let run
+  const creeper2 = entity({ name: 'creeper', position: new Vec3(2.6, 64, 0.5), meta: { swell_dir: 1 } })
+  const runner = fakeBot({ items: [item('iron_sword')], entities: [creeper2] })
+  let ran = 0
+  runner.attack = () => { ran = -1000 }
+  runner.equip = async () => {}
+  runner.waitForTicks = async () => { if (runner.controls.forward === true) { runner.entity.position = runner.entity.position.offset(-0.28, 0, 0); ran++ } }
+  const res = await evadeCreeper(runner, creeper2 as any, { maxTicks: 60 }).catch(err => err)
+  assert.ok(ran > 15, `ran ${ran}`)
+  assert.ok(runner.entity.position.x < -4, String(res))
+})
+
 /** a world of named cells from a function, water and air (and seagrass) empty, the rest solid */
 function cells (name: (p: Vec3) => string): CellLookup {
   return p => {
