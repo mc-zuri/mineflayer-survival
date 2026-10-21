@@ -334,3 +334,43 @@ test('buildAPortal: no lava nor obsidian known, a lava search down at the next s
   assert.deepEqual(searched, ['0 0', '48 0'])
   assert.ok(lines.some(l => /looking for lava under 48 0/.test(l)), lines.join('\n'))
 })
+
+test('obsidianAtHome: a lava fill during which the hazard reflex goes off is given up, its source left a while, the next filled (f6-26.3: five hazards in 850 ticks at one source, burned to death)', async () => {
+  const { obsidianAtHome, homeLavaSources } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const hot = new Vec3(6, 40, 0)
+  const cool = new Vec3(9, 40, 0)
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe', 1), item('water_bucket', 1), item('bucket', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.survival = { tasks: { tick: 10 } }
+  bot.findBlocks = (opts: any) => opts.matching === bot.registry.blocksByName.lava.id ? [hot, cool] : []
+  bot.blockAt = (p: Vec3) => ({ name: p.equals(hot) || p.equals(cool) ? 'lava' : p.y < 64 ? 'stone' : 'air', position: p, getProperties: () => ({ level: 0 }) })
+  const bucket = require('../../src/skills/bucket')
+  const scoop = require('../../src/skills/lavaScoop')
+  const obsidian = require('../../src/nether/obsidian')
+  const real = { fill: bucket.fillBucket, scoop: scoop.scoopByTunnel, pit: obsidian.obsidianInPit }
+  const setSlot = (slot: number, name: string): void => { bot.inventory.slots[slot] = Object.assign(item(name, 1), { slot }) }
+  const calls: string[] = []
+  bucket.fillBucket = async (_b: any, args: any, s: AbortSignal) => {
+    calls.push(`fill ${args.pos.toString()}`)
+    if (args.pos.equals(hot)) {
+      // alight by it: the hazard reflex goes off, and the fill would go on back to it
+      bot.emit('reflex', 'hazard')
+      await new Promise((_resolve, reject) => { if (s.aborted) reject(s.reason); s.addEventListener('abort', () => reject(s.reason), { once: true }) })
+    }
+    setSlot(11, 'lava_bucket')
+  }
+  scoop.scoopByTunnel = async (_b: any, p: any) => { calls.push(`scoop ${p.toString()}`); throw new Error('no stand') }
+  obsidian.obsidianInPit = async () => { setSlot(11, 'bucket'); setSlot(20, 'obsidian'); return true }
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (_name: string, fn: any, s: AbortSignal) => await fn(s), obtain: async () => {} }
+  try {
+    assert.equal(await obsidianAtHome(bot, executor, 1, new AbortController().signal, () => {}, { home: { x: 0, z: 0 }, range: 160 }), true)
+  } finally {
+    bucket.fillBucket = real.fill
+    scoop.scoopByTunnel = real.scoop
+    obsidian.obsidianInPit = real.pit
+  }
+  // the hot source given up (no scoop of it either), the cool one filled
+  assert.deepEqual(calls, [`fill ${hot.toString()}`, `fill ${cool.toString()}`])
+  assert.deepEqual(homeLavaSources(bot, { home: { x: 0, z: 0 }, range: 160 }).map(p => p.toString()), [cool.toString()])
+})

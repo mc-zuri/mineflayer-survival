@@ -59,7 +59,7 @@ import { endermenFromCover, forgetCover } from './nether/endermanCover'
 import { NetherBiomeSource } from './worldgen/netherBiomes'
 import { blazeRodsWithBrew, resetBrewTries } from './nether/brewing'
 import { waterBottles } from './skills/brew'
-import { fillBottles, fillBucket } from './skills/bucket'
+import { fillBottles, fillBucket, knownNoSource, noteNoSource } from './skills/bucket'
 import { scoopByTunnel, scoopStands } from './skills/lavaScoop'
 import { ruinedPortalCandidates } from './worldgen/placement'
 import { openSeedBiomes, type SeedBiomes } from './worldgen/seedBiomes'
@@ -1535,6 +1535,37 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
  */
 export const OBSIDIAN_HOME_RANGE = 160
 
+/**
+ * Runs a trip for a lava source's bucket, given up (NO_PATH, `hazard`) once the hazard reflex goes off during it (the
+ * bot alight, by the lava), the source marked for no fill a while (noteNoSource): the trip resumed after the reflex
+ * went straight back to the burning spot. A 26.3 bot's fill at a lava source at y -2 by a lush cave had the hazard
+ * reflex take it off the fire five times in 850 ticks and the fill walk it back each time, health 8 to 0, burned to
+ * death (f6-26.3 traced resume, t191454 to t192301).
+ */
+export async function givenUpOnHazard<T> (bot: Bot, source: Vec3, signal: AbortSignal, fn: (s: AbortSignal) => Promise<T>): Promise<T> {
+  const ctrl = new AbortController()
+  const onOuter = (): void => ctrl.abort(signal.reason)
+  if (signal.aborted) onOuter()
+  signal.addEventListener('abort', onOuter, { once: true })
+  let hot = false
+  const onReflex = (name: string): void => {
+    if (name !== 'hazard' || ctrl.signal.aborted) return
+    hot = true
+    noteNoSource(bot, source)
+    ctrl.abort(Object.assign(new SkillError('NO_PATH', `a hazard by the lava at ${source.toString()}: given up`), { hazard: true }))
+  }
+  bot.on('reflex' as any, onReflex)
+  try {
+    return await fn(ctrl.signal)
+  } catch (err) {
+    if (hot && !signal.aborted) throw Object.assign(new SkillError('NO_PATH', `a hazard by the lava at ${source.toString()}: given up`), { hazard: true })
+    throw err
+  } finally {
+    bot.off('reflex' as any, onReflex)
+    signal.removeEventListener('abort', onOuter)
+  }
+}
+
 /** the heights round home's column its lava is looked for at too (homeLavaSources), besides round the bot */
 export const HOME_LAVA_SCAN_YS = [0, -50]
 /** how far across from home a bot is at home for obsidianAtHome's lava */
@@ -1571,6 +1602,8 @@ export function homeLavaSources (bot: Bot, bound: ObsidianBound): Vec3[] {
   }
   return found
     .filter(p => isLavaSource({ name: 'lava', properties: (bot.blockAt(p) as any)?.getProperties?.() } as any))
+    // (none given up on lately: a hazard by it, a fill that came back empty, givenUpOnHazard / noteNoSource)
+    .filter(p => !knownNoSource(bot, p))
     // (one by a cave kept when a scoop sealed in the rock reaches it: scoopStands with the cave's cells)
     .filter(p => withinBound(bound, p) && !deepDarkNear(bot, p) && !(rule && cells.beside([p]).length > 0 && scoopStands(get, p, q => cells.isCave(q)).length === 0))
     .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
@@ -1629,18 +1662,20 @@ export async function obsidianAtHome (bot: Bot, executor: Executor, count: numbe
         const caveSide = cells != null && cells.beside([source]).length > 0
         if (!caveSide) {
           try {
-            await executor.task('lava for a cast at home', async (s) => await fillBucket(bot, { fluid: 'lava', pos: source }, s), signal)
+            await givenUpOnHazard(bot, source, signal, async (g) => await executor.task('lava for a cast at home', async (s) => await fillBucket(bot, { fluid: 'lava', pos: source }, s), g))
             filled = countItems(bot, 'lava_bucket') > before
             if (filled) break
           } catch (err) {
             quiet(err)
             log(`obsidian: the lava at ${source.toString()}: ${(err as Error).message}`)
+            // (and no scoop of it by a tunnel either)
+            if ((err as any)?.hazard === true) continue
           }
         }
         // no spot near sees it (a source in the rock, under a ledge): a tunnel to a stand by it, the bucket filled
         // through its top (scoopByTunnel)
         try {
-          await executor.task('lava for a cast at home, by a tunnel', async (s) => await scoopByTunnel(bot, source, s, caveSide ? q => cells.isCave(q) : undefined), signal)
+          await givenUpOnHazard(bot, source, signal, async (g) => await executor.task('lava for a cast at home, by a tunnel', async (s) => await scoopByTunnel(bot, source, s, caveSide ? q => cells.isCave(q) : undefined), g))
           filled = countItems(bot, 'lava_bucket') > before
           if (filled) break
         } catch (err) {
