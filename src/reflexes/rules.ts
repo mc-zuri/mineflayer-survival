@@ -811,6 +811,10 @@ function cachedRefuge (ctx: ReflexContext, near: Entity[]): DoorRefuge | null {
   return refuge
 }
 
+/** each bot's tick its flight from a silverfish nest failed (fleeNest), and the ticks the fight is let be after */
+const nestFails = new WeakMap<Bot, number>()
+export const NEST_RETRY_TICKS = 300
+
 export const hostilesReflex: Reflex = {
   name: 'hostiles',
   priority: 60,
@@ -864,6 +868,22 @@ export const hostilesReflex: Reflex = {
       }
     }
     if (near.length === 0 && wither == null) return null
+    // silverfish: away from their nest (fleeNest), not walled in nor fought among its infested blocks, a hurt one
+    // calling the rest out (f5-26.3: slain by 9 in iron); cornered, or the flight failed lately, fought where it stands
+    if (!nether && near.some(e => e.name === 'silverfish') && !cornered && ctx.tick - (nestFails.get(bot) ?? -Infinity) > NEST_RETRY_TICKS) {
+      return {
+        name: 'hostiles',
+        priority: config.hostiles.priority,
+        detail: 'flee the silverfish nest',
+        run: async (signal) => {
+          const { fleeNest } = await import('../skills/silverfish')
+          await fleeNest(bot, { signal }).catch(err => {
+            if (!signal.aborted) nestFails.set(bot, ctx.tick)
+            noteCornered(bot, ctx.tick, err)
+          })
+        }
+      }
+    }
     if (sealDue(bot, near, config, ctx.tick)) {
       return {
         name: 'hostiles',

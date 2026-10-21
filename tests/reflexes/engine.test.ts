@@ -281,3 +281,16 @@ test('a reflex whose check throws is passed over that tick, the others still che
   }
   assert.deepEqual(errors, ['broken'])
 })
+
+test('silverfish about: the hostiles reflex flees their nest (fleeNest), not a seal nor a fight among its infested blocks (f5-26.3); a zombie alone is fought', () => {
+  const fish = entity({ name: 'silverfish', position: new Vec3(2.5, 64, 0.5), meta: { health: 8 } })
+  const bot = fakeBot({ items: [item('iron_sword'), item('cobblestone', 64)], entities: [fish] })
+  const engine = new ReflexEngine(bot, { reflexes: [] })
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'flee the silverfish nest')
+  engine.stop()
+  const zombie = entity({ name: 'zombie', position: new Vec3(2.5, 64, 0.5), meta: { health: 20 } })
+  const bot2 = fakeBot({ items: [item('iron_sword')], entities: [zombie] })
+  const engine2 = new ReflexEngine(bot2, { reflexes: [] })
+  assert.strictEqual(hostilesReflex.check(engine2.context())?.detail, 'fight zombie')
+  engine2.stop()
+})

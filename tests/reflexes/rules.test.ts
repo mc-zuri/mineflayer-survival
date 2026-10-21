@@ -475,9 +475,9 @@ test('hostiles reflex: with fists only, the ones that shoot, more than one, and 
     assert.strictEqual(check(hostilesReflex, { entities: [mob(name, 3)], items: [item('stone_pickaxe')] }), 'flee', name)
     assert.strictEqual(check(hostilesReflex, { entities: [mob(name, 3)], items: [item('stone_sword')] }), `fight ${name}`, name)
   }
-  // the fist's fights: a lone spider, a silverfish
+  // the fist's fight: a lone spider (a silverfish is fled with its nest, whatever the bot holds: fleeNest, f5-26.3)
   assert.strictEqual(check(hostilesReflex, { entities: [mob('spider', 3)] }), 'fight spider')
-  assert.strictEqual(check(hostilesReflex, { entities: [mob('silverfish', 2)] }), 'fight silverfish')
+  assert.strictEqual(check(hostilesReflex, { entities: [mob('silverfish', 2)] }), 'flee the silverfish nest')
   // an axe is a weapon; a pickaxe's hits a second are no better than the fist's (3 at 1.2 a second, 1 at 4)
   assert.strictEqual(check(hostilesReflex, { entities: [mob('skeleton', 6)], items: [item('stone_axe')] }), 'fight skeleton')
   assert.strictEqual(check(hostilesReflex, { entities: [mob('skeleton', 6)], items: [item('stone_pickaxe')] }), 'flee')
