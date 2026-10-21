@@ -102,3 +102,21 @@ test('shoot: with a calm mob by the way of the arrow it comes back no sooner tha
   const r = await shot
   assert.strictEqual(r.shots, 0)
 })
+
+test('aim: a blaze whose middle and top are out of the shooter\'s sight (a bunker\'s visor, a ledge over the line) is shot at near its feet', () => {
+  // a block at (0, 65, 4) over the line to the blaze 8 off: its middle, top and quarter hidden, its feet seen
+  const solid = (p: Vec3): boolean => p.x >= 0 && p.x < 1 && p.y >= 65 && p.y < 66 && p.z >= 4 && p.z < 5
+  const world = {
+    clip: (from: Vec3, to: Vec3) => {
+      const d = to.minus(from)
+      for (let t = 0; t <= 1; t += 0.002) { const p = from.plus(d.scaled(t)); if (solid(p)) return p }
+      return null
+    }
+  }
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 64, 8.5) })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), entities: [blaze] })
+  const solution = aim(bot, blaze, { world })
+  assert.ok(solution != null)
+  assert.ok(solution.aimPoint.y < 64.3, String(solution.aimPoint.y))
+  assert.ok(arrowHits(arrowStart(bot), solution.yaw, solution.pitch, entityBox(blaze), { world }).hit != null)
+})

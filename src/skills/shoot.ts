@@ -65,12 +65,16 @@ function targetPoint (target: Entity | Vec3): Vec3 {
   return target.position.offset(0, (target.height ?? 1) / 2, 0)
 }
 
-/** the points to try aiming at: the given one, or the middle and then near the top (a line over a ledge, a spike's rim) */
+/**
+ * the points to try aiming at: the given one, or the middle and then near the top (a line over a ledge, a spike's
+ * rim), then a quarter up and near the feet (a blaze under a slit's visor or over its sill, its middle out of the
+ * slit's sight: one 3 to 5 off seen through a 26.3 bot's slit by seed 2's throne was never shot at, 4000 ticks)
+ */
 function aimPoints (target: Entity | Vec3, offset?: Vec3): Vec3[] {
   if (target instanceof Vec3) return [target]
   if (offset != null) return [target.position.plus(offset)]
   const h = target.height ?? 1
-  return [targetPoint(target), target.position.offset(0, h - Math.min(0.2, h / 4), 0)]
+  return [targetPoint(target), target.position.offset(0, h - Math.min(0.2, h / 4), 0), target.position.offset(0, h / 4, 0), target.position.offset(0, Math.min(0.2, h / 4), 0)]
 }
 
 /**
