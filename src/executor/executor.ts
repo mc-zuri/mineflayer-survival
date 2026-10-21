@@ -330,7 +330,7 @@ export class Executor {
     // and the cane columns in sight, for the paper's plans (the enchanting's books)
     let nextCaneCheck = 0
     bot.on('physicsTick', () => {
-      if (this.tasks.tick < nextCaneCheck || bot.entity == null || typeof bot.blockAt !== 'function') return
+      if (this.tasks.tick < nextCaneCheck || bot.entity == null || typeof bot.blockAt !== 'function' || typeof bot.findBlocks !== 'function') return
       nextCaneCheck = this.tasks.tick + CANE_CHECK_TICKS
       rememberCanes(bot, this.memory)
     })
