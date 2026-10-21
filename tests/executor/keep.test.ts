@@ -395,3 +395,20 @@ test('the tools beyond the spare quota are junk to a room, after the junk drops,
   assert.ok(!junkToToss(stacks, 12, { registry }).some(t => t.name.endsWith('_pickaxe')))
   assert.equal(defaultKeep('bucket'), 3)
 })
+
+test('lastResort: a room with nothing else to throw throws the stone beyond the scaffold\'s reserve and the wood beyond the needs, kept or not; never food, torches, arrows or a valuable (f6-26.3: the nether kit with no room 20000 ticks)', async () => {
+  const { lastResortItem } = await import('../../src/executor/keep')
+  const registry = minecraftData('26.3')
+  const stacks = [
+    { name: 'cobblestone', count: 64 }, { name: 'cobblestone', count: 64 }, { name: 'oak_log', count: 21 }, { name: 'jungle_log', count: 1 },
+    { name: 'melon_slice', count: 64 }, { name: 'torch', count: 18 }, { name: 'coal', count: 31 }, { name: 'arrow', count: 40 }, { name: 'bow', count: 1 }
+  ]
+  const keep = (name: string): number | null => ({ cobblestone: 128, oak_log: 64, jungle_log: 64, torch: 64, arrow: Infinity } as Record<string, number>)[name] ?? defaultKeep(name, registry)
+  const scaffold = { items: ['cobblestone'], keep: 64 }
+  // the keep rule's: nothing
+  assert.deepEqual(junkToToss(stacks, 4, { keep, registry, anything: true, scaffold }), [])
+  // the last resort: a stack of the cobblestone (the reserve's left), the logs but the needed one
+  const toss = junkToToss(stacks, 4, { keep, registry, anything: true, lastResort: true, scaffold, needed: { jungle_log: 1 } })
+  assert.deepEqual(toss, [{ name: 'cobblestone', count: 64 }, { name: 'oak_log', count: 21 }])
+  assert.ok(lastResortItem('oak_planks') && lastResortItem('cobblestone') && !lastResortItem('melon_slice') && !lastResortItem('torch'))
+})

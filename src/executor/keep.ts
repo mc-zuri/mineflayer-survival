@@ -439,7 +439,7 @@ export function splitInventory (items: readonly ItemCount[], opts: SplitOptions 
  * `splitInventory` would store. Never what's kept or needed, nor a valuable (isValuable) or an enchanted stack, whatever
  * the room it takes: fewer stacks than asked for then, nor the building blocks `scaffold` keeps. Each entry is one stack.
  */
-export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number, enchanted?: boolean }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean, scaffold?: ScaffoldKeep, spareTools?: boolean } = {}): Array<{ name: string, count: number }> {
+export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number, enchanted?: boolean }>, slots: number, opts: SplitOptions & { anything?: boolean, surplus?: (name: string) => boolean, scaffold?: ScaffoldKeep, spareTools?: boolean, lastResort?: boolean } = {}): Array<{ name: string, count: number }> {
   const needed = opts.needed ?? {}
   // (spareTools: the tools beyond the spare quota go after the junk drops, spareToolsBeyond)
   const beyond = opts.spareTools === true ? spareToolsBeyond(stacks.filter(s => s.enchanted !== true), opts.protect?.farming === true) : new Map<string, number>()
@@ -465,7 +465,9 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number,
     for (const s of candidates) {
       if (out.length >= slots) return
       const total = left.get(s.name) ?? 0
-      const keep = Math.max(keepRule(s.name, opts.registry) ?? 0, needed[s.name] ?? 0, guarded[s.name] ?? 0)
+      // (the last resort's stone and wood: what the keep rule keeps of them goes too, LAST_RESORT)
+      const ruled = opts.lastResort === true && lastResortItem(s.name) ? 0 : keepRule(s.name, opts.registry) ?? 0
+      const keep = Math.max(ruled, needed[s.name] ?? 0, guarded[s.name] ?? 0)
       // a stack may go when what's left of the item without it still covers what's kept
       if (total - s.count < Math.min(keep, total)) continue
       // and the building blocks left cover the pathfinder's bridges and towers (the dirt and andesite are, with no
@@ -479,7 +481,18 @@ export function junkToToss (stacks: ReadonlyArray<{ name: string, count: number,
   }
   pick(name => JUNK.has(name) || TOSS_FIRST.has(name) || beyond.has(name) || opts.surplus?.(name) === true ||
     (opts.anything === true && (keepRule(name, opts.registry) ?? 0) !== Infinity))
+  if (opts.lastResort === true) pick(lastResortItem)
   return out
+}
+
+/**
+ * What a room with nothing else to throw throws of what the keep rule keeps (junkToToss's lastResort): the common
+ * stone beyond the scaffold's reserve, the logs and planks beyond what the work needs; never food, torches, arrows or a
+ * valuable. A 26.3 nether kit found no room for its bow, arrows and food for 20000 ticks, the bag all kept
+ * (f6-26.3, t208021 to t229884)
+ */
+export function lastResortItem (name: string): boolean {
+  return COMMON_STONE.has(name) || /_(log|wood|stem|hyphae|planks)$/.test(name) || name === 'bamboo_block'
 }
 
 /** times a part stack of the same count is thrown for room within THROW_LOOP_TICKS before making room loops */

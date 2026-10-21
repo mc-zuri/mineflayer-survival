@@ -1046,6 +1046,9 @@ export class Executor {
       }
       if (!force || emptySlots(this.bot) >= this.options.minFreeSlots) return
       await this.tossJunk(needed, true, run, toward)
+      // the last resort, the work never left for want of a slot: the stone beyond the scaffold's reserve and the wood
+      // beyond the work's needs, kept or not (lastResortItem)
+      if (emptySlots(this.bot) === 0) await this.tossJunk(needed, 'lastResort', run, toward)
       if (emptySlots(this.bot) === 0) {
         throw new TaskError('INVENTORY_FULL', 'no room: nothing to throw away but what is kept or valuable, and no chest near to put it in')
       }
@@ -1094,14 +1097,14 @@ export class Executor {
    * THROW_AWAY_RANGE blocks off from where it stands (walkOff) and throws them all there, into a pit dug off its way
    * back. Whether there's room now.
    */
-  private async tossJunk (needed: Record<string, number>, anything: boolean, run: RoomRunner, toward?: Vec3, away = false): Promise<{ room: boolean, looping: Array<{ name: string, count: number }> }> {
+  private async tossJunk (needed: Record<string, number>, anything: boolean | 'lastResort', run: RoomRunner, toward?: Vec3, away = false): Promise<{ room: boolean, looping: Array<{ name: string, count: number }> }> {
     const lava = (): { yaw: number, pitch: number } | null => lavaThrow(p => this.bot.blockAt(p) as any, this.bot.entity.position, (this.bot.entity as any).eyeHeight ?? 1.62)
     // with lava in reach, LAVA_ROOM more slots: what burns is gone for good, and the work about a lava lake (its
     // obsidian) turns the lava it would be thrown into later
     const want = this.options.minFreeSlots + 2 + (lava() != null ? LAVA_ROOM : 0) - emptySlots(this.bot)
     if (want <= 0) return { room: true, looping: [] }
     const stacks = this.bot.inventory.items().map(i => ({ name: i.name, count: i.count, enchanted: isEnchanted(i) }))
-    const pick = (from: typeof stacks): Array<{ name: string, count: number }> => junkToToss(from, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything, surplus: name => this.isSurplus(name), scaffold: this.scaffoldKeep(), protect: this.protect(), spareTools: true })
+    const pick = (from: typeof stacks): Array<{ name: string, count: number }> => junkToToss(from, want, { keep: this.options.keep, registry: this.bot.registry, needed, anything: anything !== false, lastResort: anything === 'lastResort', surplus: name => this.isSurplus(name), scaffold: this.scaffoldKeep(), protect: this.protect(), spareTools: true })
     let toss = pick(stacks)
     const looping = this.throws.looping(toss, this.tasks.tick, name => this.bot.registry.itemsByName[name]?.stackSize ?? 64)
     let forChest: Array<{ name: string, count: number }> = []

@@ -1215,3 +1215,28 @@ test('a worn tool\'s replacement is held to its budget (wearReplaceBudget, a ref
   assert.ok(lines.some(l => /no new pickaxe of .*: out of its \d+ ticks/.test(l)), lines.join('\n'))
   assert.ok(ticks < 4 * wearReplaceBudget(30000), String(ticks))
 })
+
+test('a forced room with nothing else to throw throws the last resort\'s wood and stone beyond the reserve, not INVENTORY_FULL (f6-26.3: the nether kit\'s \'no room\' for 20000 ticks)', async () => {
+  const valuables = [
+    'enchanting_table', 'anvil', 'diamond', 'crafting_table', 'furnace', 'white_bed', 'iron_ingot', 'gold_ingot', 'raw_iron',
+    'raw_gold', 'lapis_lazuli', 'redstone', 'emerald', 'obsidian', 'ender_eye', 'ender_pearl', 'blaze_rod', 'book', 'bookshelf',
+    'iron_block', 'diamond_pickaxe', 'diamond_sword', 'diamond_axe', 'iron_shovel', 'diamond_helmet', 'iron_boots', 'bow',
+    'crossbow', 'shield', 'flint_and_steel', 'shears', 'coal', 'golden_apple', 'totem_of_undying'
+  ]
+  const bot = fakeBot({ ...Object.fromEntries(valuables.map(n => [n, 1])), oak_log: 21, torch: 30 })
+  bot.tossed = []
+  bot.toss = async (type: number, _meta: unknown, n: number) => { const name = registry.items[type].name; bot.tossed.push(name); bot.take(name, n) }
+  bot.blockAt = () => null
+  bot._client = new EventEmitter()
+  bot.entity.yaw = 0
+  bot.entities = {}
+  bot.look = async () => {}
+  const ex = new Executor(bot, { runners: {}, keep: name => name === 'oak_log' ? 64 : name === 'torch' ? 64 : null })
+  const ticking = setInterval(() => bot.emit('physicsTick'), 2)
+  try {
+    await ex.makeRoom({}, undefined, true)
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.deepEqual(bot.tossed, ['oak_log'])
+})
