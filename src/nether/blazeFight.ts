@@ -1019,7 +1019,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // for 20000 ticks with their rods left on the throne (26.3 runs mag-b and mag-d: 0 rods)
       // (a bunker's: with few blazes about, healed, out of it by the sill: bunkerFetchDue)
       const drop = nook.bunker != null
-        ? (drawn === 0 ? bunkerDrops(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES && bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof, e.position, opts.spawner)) : undefined)
+        ? (drawn === 0 ? bunkerDrops(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES && bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof, e.position)) : undefined)
         : drawn === 0 && fetchWanted(fightHealth(bot), sealAt, proof, () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)))
           ? dropsNear(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES)
           : undefined
@@ -1541,7 +1541,7 @@ export function fetchThreats (bot: Bot, points: readonly Vec3[]): Entity[] {
  * blazes that see the bot or the drop (fetchThreats), none within DROP_CLEAR of the drop, BUNKER_FETCH_CROWD about at
  * the most. Fire resistant, BUNKER_FETCH_PROOF_BLAZES that see it (only their punches hurt then).
  */
-export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true, proof = false, drop?: Vec3, spawner?: Vec3): boolean {
+export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true, proof = false, drop?: Vec3): boolean {
   const b = nook.bunker
   if (b == null || health < BUNKER_FETCH_HEALTH) return false
   const at = drop ?? b.sill.offset(0.5, 0, 0.5)
@@ -1549,9 +1549,9 @@ export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet
   const close = Object.values(bot.entities).some(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(at) <= DROP_CLEAR)
   if (close || blazesAbout(bot) > BUNKER_FETCH_CROWD) return false
   if (proof) return seen <= BUNKER_FETCH_PROOF_BLAZES
-  // (a drop in the spawn volume, where the spawner's next ones come out on the bot: none in sight at all)
-  const most = spawner != null && inSpawnVolume(spawner, at.floored()) ? 0 : BUNKER_FETCH_SEEN
-  return seen <= most && !fireballNear(bot) && quiet()
+  // (a drop in the spawn volume counts as any other: with none to be in sight there, a bunker by seed 2's open throne at
+  // (-290, 77, -209), whose kills' rods lie on the throne, fetched 0 to 4 times a run for 20 before, and 0 to 6 rods)
+  return seen <= BUNKER_FETCH_SEEN && !fireballNear(bot) && quiet()
 }
 
 /**
