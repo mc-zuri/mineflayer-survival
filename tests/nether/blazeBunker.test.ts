@@ -527,3 +527,24 @@ test('rodFloor: a blaze over the floor by the bunker drops its rod where the fet
     restore()
   }
 })
+
+test('walkDanger: a charged blaze that sees the bot, one at its side, or a fireball coming stops the walk into the bunker; a calm one off, or a charged one behind a wall, not', async () => {
+  const { entity } = await import('../reflexes/fakeBot')
+  const { walkDanger } = await import('../../src/nether/blazeFight')
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 64, -6.5), meta: { health: 20, flags: 0 } })
+  const { bot, restore } = await bunkerBot([blaze])
+  try {
+    assert.equal(walkDanger(bot), false)
+    blaze.metadata[16] = 1
+    assert.equal(walkDanger(bot), true)
+    // behind the bunker's back wall
+    blaze.position = new Vec3(0.5, 64, 9.5)
+    assert.equal(walkDanger(bot), false)
+    // calm, at its side through the slit's opening: within 2.5 and seeing it
+    blaze.metadata[16] = 0
+    blaze.position = new Vec3(0.5, 64.5, 3.4)
+    assert.equal(walkDanger(bot), true)
+  } finally {
+    restore()
+  }
+})

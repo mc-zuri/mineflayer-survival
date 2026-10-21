@@ -1319,7 +1319,31 @@ export async function enterBunker (bot: Bot, nook: BlazeNook, signal?: AbortSign
   const b = nook.bunker
   if (b == null) return await enterNook(bot, nook, signal, reseal)
   if (!inNook(bot, nook)) {
-    const go = async (kept: Vec3[]): Promise<void> => { await withBlocksKept(bot, kept, async () => await moveNear(bot, nook.stand, 0, signal)) }
+    // (the walk cut off while a blaze is about to hit the bot, held off where it stands behind the shield, then on:
+    // walkDanger, ENTER_GUARDS times at the most)
+    const go = async (kept: Vec3[]): Promise<void> => {
+      for (let guards = 0; ; guards++) {
+        const cut = new AbortController()
+        const onParent = (): void => cut.abort(signal?.reason)
+        signal?.addEventListener('abort', onParent, { once: true })
+        // (not alight or in a fire's cell: held there, it burns; a 1.21.11 bot back from a fetch held off in the throne by
+        // seed 2's spawner at (-277, 77, -159) 4 times, alight, and burned to death 5 blocks from its bunker)
+        const onTick = (): void => { if (guards < ENTER_GUARDS && !cut.signal.aborted && !isOnFire(bot) && !inFireCell(bot) && walkDanger(bot)) cut.abort(new Error('a blaze about to hit')) }
+        bot.on('physicsTick', onTick)
+        try {
+          await withBlocksKept(bot, kept, async () => await moveNear(bot, nook.stand, 0, cut.signal))
+          return
+        } catch (err) {
+          if (signal?.aborted === true || !cut.signal.aborted) throw err
+        } finally {
+          bot.off('physicsTick', onTick)
+          signal?.removeEventListener('abort', onParent)
+        }
+        trace('enterBunker: a blaze about to hit on the way in: held off')
+        bot.clearControlStates()
+        await holdOffBlazes(bot, { signal, maxTicks: NOOK_GUARD_TICKS, untilSafe: true })
+      }
+    }
     await go(bunkerKept(nook)).catch(async err => {
       if (isAbort(err) || !(isSkillError(err, 'NO_PATH') || isSkillError(err, 'STUCK'))) throw err
       trace('enterBunker: no way in by the sill:', (err as Error).message)
@@ -1366,6 +1390,26 @@ export function rodFloor (bot: Bot, nook: BlazeNook, at: Vec3): Vec3 | null {
     return on
   }
   return null
+}
+
+/** the walk into a bunker is held off a blaze about to hit this many times at the most (enterBunker) */
+export const ENTER_GUARDS = 2
+
+/**
+ * Whether a blaze is about to hit the bot where it walks: a small fireball coming (fireballIncoming), a charged one
+ * that sees it within 16 (its volley), or one that sees it within 2.5 (BlazeAttackGoal hits within 2). A 26.3 bot's
+ * way into its bunker at seed 2's throne at (-277, 77, -159) went on through 3 blazes' fireballs and punches, its
+ * shield down, 20 health to 7.8 in 90 ticks, and it died at the next bunker's door
+ */
+export function walkDanger (bot: Bot): boolean {
+  const me = bot.entity.position
+  return Object.values(bot.entities).some(e => {
+    if (e.name === SMALL_FIREBALL) return fireballIncoming(bot, e, 16)
+    if (e.name !== 'blaze' || !isAlive(bot, e)) return false
+    const d = e.position.distanceTo(me)
+    if (d > 16) return false
+    return (d <= 2.5 || blazeCharged(bot, e)) && blazeSeesBot(bot, e)
+  })
 }
 
 /**
