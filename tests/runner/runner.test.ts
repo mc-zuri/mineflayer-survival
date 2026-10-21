@@ -1092,6 +1092,60 @@ test('a food restock that gets nothing gives up after RESTOCK_TICKS of its own (
   assert.ok(explored >= RESTOCK_TICKS - 5 && explored <= RESTOCK_TICKS + 5, String(explored))
 })
 
+test('a food restock in the nether goes back to the overworld first (restockFrom), then restocks there; none from the End (f6-1.21.11: the nether explored for a pig among the blazes, fireballed)', async () => {
+  const { restockFrom } = await import('../../src/runner')
+  assert.equal(restockFrom('overworld'), 'here')
+  assert.equal(restockFrom('minecraft:the_nether'), 'overworld')
+  assert.equal(restockFrom('the_end'), 'none')
+  const portal = require('../../src/nether/portalTravel')
+  const realReturn = portal.returnOverworld
+  const bot = fakeBot()
+  bot.waitForTicks = async () => {}
+  const worked: string[] = []
+  const lines: string[] = []
+  let back = 0
+  portal.returnOverworld = async () => { back++; bot.game.dimension = 'overworld'; return {} }
+  const give = (items: Record<string, number>): MilestoneHandler => async ({ milestone }) => {
+    worked.push(milestone.id)
+    for (const [n, c] of Object.entries(items)) bot.give(n, c)
+  }
+  let ironTries = 0
+  const handlers = {
+    wood: give({ wooden_pickaxe: 1, crafting_table: 1 }),
+    stone: give({ stone_pickaxe: 1, stone_sword: 1, stone_axe: 1, furnace: 1, coal: 16 }),
+    food: give({ cooked_beef: 8 }),
+    iron: async () => {
+      worked.push('iron')
+      // the first time, in the nether with 1 beef (8 points) left, under the restock's mark
+      if (ironTries++ === 0) { bot.give('cooked_beef', -7); bot.game.dimension = 'the_nether'; return }
+      give({ iron_pickaxe: 1, iron_sword: 1, iron_helmet: 1, iron_chestplate: 1, iron_leggings: 1, iron_boots: 1, shield: 1, bucket: 1 })({ milestone: { id: 'iron' } } as any)
+      worked.pop()
+    }
+  }
+  const dims: string[] = []
+  const explore = async (_step: any, ctx: any): Promise<any> => {
+    dims.push(String(bot.game.dimension))
+    for (;;) {
+      if (ctx.signal.aborted) throw ctx.signal.reason
+      bot.emit('physicsTick')
+      await Promise.resolve()
+    }
+  }
+  const runners = { kill: explore, mine: explore, fish: explore, farm: explore }
+  const runner = new Runner(bot, { handlers, until: 'iron', skip: ['base'], log: l => lines.push(l), executor: { runners, log: () => {}, maxStepFailures: 30 } })
+  try {
+    const result = await runner.play()
+    assert.equal(result.reason, 'until')
+  } finally {
+    portal.returnOverworld = realReturn
+  }
+  assert.equal(back, 1)
+  assert.ok(lines.some(l => /food low \(8 points\) in the nether: back to the overworld for it/.test(l)), lines.join(' | '))
+  assert.ok(lines.some(l => /food low \(8 points\): getting more before going on/.test(l)), lines.join(' | '))
+  // the restock's steps all in the overworld
+  assert.ok(dims.length > 0 && dims.every(d => d === 'overworld'), dims.join(' '))
+})
+
 test('failureBackoff: a milestone failing at once waits before its next try, doubled each fast failure in a row; one that worked a while not (ls-1.21.11: 5 failures in 180 ticks, the game stopped)', async () => {
   const { failureBackoff, FAILURE_BACKOFF_TICKS, FAST_FAILURE_TICKS } = await import('../../src/runner')
   assert.equal(failureBackoff(1, 45), FAILURE_BACKOFF_TICKS)

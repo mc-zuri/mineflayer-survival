@@ -41,6 +41,7 @@ import { REFUGE_TRIES, chooseRefuge, describeSituation, findBaseDoor, inBounds, 
 import { bestMeleeWeapon } from './skills/weapons'
 import { followWay, wayLength } from './skills/wayDown'
 import { overland } from './end/strongholdSkills'
+import { returnOverworld } from './nether/portalTravel'
 import { unstick } from './executor/explore'
 import { slimeBallsShort, toSlimeChunk } from './skills/slimeChunk'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
@@ -551,6 +552,17 @@ export function restockGoals (state: ProgressState, reached: readonly MilestoneI
   return foodGoals(state.inventory, FOOD_POINTS)
 }
 
+/**
+ * Where a restock (restockGoals) goes from a dimension: 'here' in the overworld, its animals and farms; from the nether
+ * 'overworld', back through the portal first (none of them there: a 1.21.11 bot low on food after its blaze fight by
+ * a fortress went exploring the nether for a pig or a cow among the blazes and was fireballed, f6-1.21.11, t564149 at
+ * (80, 62, 192)); none from the End
+ */
+export function restockFrom (dimension: string | undefined): 'here' | 'overworld' | 'none' {
+  const d = normalizeDimension(dimension)
+  return d === 'overworld' ? 'here' : d === 'the_nether' ? 'overworld' : 'none'
+}
+
 /** ticks the milestones' needs (keep.ts milestoneNeeds, planned) hold before they're planned again */
 export const MILESTONE_NEEDS_TICKS = 1200
 
@@ -971,7 +983,24 @@ export class Runner {
           if (this.mealDue() != null) this.mealRetryAt = this.bot.survival.tasks.tick + MEAL_RETRY_TICKS
           continue
         }
-        const restock = this.bot.survival.tasks.tick >= this.restockRetryAt ? restockGoals(state, reachedIds) : null
+        const restockAt = restockFrom(this.bot.game?.dimension)
+        const restock = this.bot.survival.tasks.tick >= this.restockRetryAt && restockAt !== 'none' ? restockGoals(state, reachedIds) : null
+        if (restock != null && restockAt === 'overworld') {
+          this.log(`food low (${state.inventory.foodPoints()} points) in the nether: back to the overworld for it`)
+          try {
+            await returnOverworld(this.bot, {}, signal)
+          } catch (err) {
+            if (stopped()) return this.stop('food', 'aborted', err)
+            if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+              this.log(`died going back for food: ${(err as Error).message}`)
+              await this.recover(signal)
+              continue
+            }
+            this.restockRetryAt = this.bot.survival.tasks.tick + RESTOCK_RETRY_TICKS
+            this.log(`not back to the overworld for food: ${(err as Error).message}`)
+          }
+          continue
+        }
         if (restock != null) {
           try {
             this.log(`food low (${state.inventory.foodPoints()} points): getting more before going on`)
