@@ -13,7 +13,7 @@ import { fish, fishingSpotFor, iceHoleFor } from '../skills/fish'
 import { FISHING } from '../planner/sources'
 import { farmCells, grownPlots, harvestFarm, knownFarms, nearlyGrownPlots, plantFarm, rememberFarm, SEED_OF, sow } from '../skills/farm'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
-import { collectBlock, waterBeside } from '../skills/collectBlock'
+import { COLUMN_PLANTS, collectBlock, columnHarvestTarget, waterBeside } from '../skills/collectBlock'
 import { caveCells, caveRuleOn, inCaveWall } from '../skills/caves'
 import { drownedNear } from '../skills/breath'
 import { obsidianHazard } from '../skills/hazardCells'
@@ -352,7 +352,15 @@ async function mineBlocks (step: MineStep, ctx: StepContext, muted: (tool: WornT
   // and obsidian by lava or magma (a pool's shore, a ruined portal's floor), or under the rock for a bot not fit for
   // the caves (obsidianHazard): a 26.3 bot's 'mine 3 obsidian' at a deep pool at y -29 walked into its lava (ls4-26.3)
   const lavaSide = step.blocks.includes('obsidian') ? (pos: Vec3): boolean => obsidianHazard(bot, pos) : () => false
-  const exclude = (pos: Vec3): boolean => ctx.protect?.(pos) === true || ctx.unreachable?.has(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos) || caveWall(pos) || drowned(pos) || lavaSide(pos)
+  const excludeAt = (pos: Vec3): boolean => ctx.protect?.(pos) === true || ctx.unreachable?.has(pos) === true || unripe(pos) || submerged(pos) || underRoof(pos) || (!deep && pos.y < startY - SHALLOW_DEPTH) || tooDeep(pos) || caveWall(pos) || drowned(pos) || lavaSide(pos)
+  // a column plant (sugar cane, cactus, bamboo) is judged at the block collectBlock cuts (its second from the bottom:
+  // keepBase, so it grows back), and one of a single block has none to cut. Judged at the block found, a cane column at
+  // y 63 to 66 with the step begun at y 74 was near by its top (at the depth bound) and none of it collectBlock's to
+  // take (its cut at y 64, under it): 'mine 3 sugar_cane' failed 'broke 0 of 3 blocks: no more sugar_cane found' 15
+  // times with no exploring, and the enchanting milestone five times in 2100 ticks (f3-1.21.11, t129093 to t131193)
+  const exclude = step.blocks.some(b => COLUMN_PLANTS.has(b))
+    ? (pos: Vec3): boolean => { const cut = cutAt(lookup, pos); return cut == null || excludeAt(cut) }
+    : excludeAt
   while (countItems(bot, step.item) < target) {
     throwIfAborted(signal)
     const subs = blockSubstitutes(step)
@@ -393,6 +401,14 @@ async function mineBlocks (step: MineStep, ctx: StepContext, muted: (tool: WornT
     if (isSub && substituted >= step.blockCount) return { gained: countItems(bot, step.item) - start, replan: true }
   }
   return { gained: countItems(bot, step.item) - start }
+}
+
+/**
+ * The block a mine step breaks for the block at `pos`: a column plant's (COLUMN_PLANTS) second from the bottom
+ * (columnHarvestTarget: the bottom one kept to grow back), null for a column of one; any other block itself
+ */
+export function cutAt (lookup: (pos: Vec3) => { name: string } | null, pos: Vec3): Vec3 | null {
+  return COLUMN_PLANTS.has(lookup(pos)?.name ?? '') ? columnHarvestTarget(lookup, pos) : pos
 }
 
 /** sows the farmland under crops just harvested (of the blocks `names`) again with their seed, when it's held */
