@@ -37,6 +37,12 @@ let runs = 0
 
 const BLOCKS: Record<string, string> = { C: 'cobblestone', '#': 'grass_block', W: 'oak_log', L: 'oak_leaves[persistent=true]', '.': 'air', '~': 'water' }
 
+/** the air over x0..x1, z0..z1 from the grass up to y 120 (a 26.3 superflat's structures over it are a roof, the cave rule's): fills of 32768 blocks at most */
+async function clearAbove (x0: number, z0: number, x1: number, z1: number): Promise<void> {
+  const layers = Math.max(1, Math.floor(32768 / ((x1 - x0 + 1) * (z1 - z0 + 1))))
+  for (let y = GRASS + 1; y <= 120; y += layers) await run(`fill ${x0} ${y} ${z0} ${x1} ${Math.min(120, y + layers - 1)} ${z1} minecraft:air`)
+}
+
 interface Case {
   name: string
   grid: Grid | null
@@ -123,6 +129,7 @@ async function fresh (c: Case): Promise<{ at: Vec3, creepers: Vec3[] }> {
   const oz = 0
   for (const cmd of ['time set 18000', 'kill @e[type=!player]', `clear ${USER}`, `effect clear ${USER}`, `forceload add ${ox - 16} -16 ${ox + 48} 48`,
     `fill ${ox - 8} ${GRASS + 1} ${oz - 8} ${ox + 40} ${GRASS + 10} ${oz + 40} minecraft:air`]) await run(cmd)
+  await clearAbove(ox - 6, oz - 6, ox + 28, oz + 28)
   const to = c.grid != null ? await build(c.grid, c.extra ?? {}, ox, oz) : (p: Vec3) => new Vec3(p.x + ox + 8, GRASS + 1 + p.y, p.z + oz + 8)
   const at = to(c.bot)
   await run(`tp ${USER} ${at.x} ${at.y} ${at.z} 0 0`)

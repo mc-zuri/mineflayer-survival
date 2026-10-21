@@ -40,6 +40,12 @@ async function waitFor (predicate: () => boolean, ticks: number): Promise<boolea
   return predicate()
 }
 
+/** the air over x0..x1, z0..z1 from the grass up to y 120 (a 26.3 superflat's structures over it are a roof, the cave rule's): fills of 32768 blocks at most */
+async function clearAbove (x0: number, z0: number, x1: number, z1: number): Promise<void> {
+  const layers = Math.max(1, Math.floor(32768 / ((x1 - x0 + 1) * (z1 - z0 + 1))))
+  for (let y = GRASS + 1; y <= 120; y += layers) await run(`fill ${x0} ${y} ${z0} ${x1} ${Math.min(120, y + layers - 1)} ${z1} minecraft:air`)
+}
+
 interface Case { name: string, bot: Vec3 }
 // (in the pond's coordinates: its west edge at x 0, its middle at (4.5, 4.5))
 const CASES_ALL: Case[] = [
@@ -54,9 +60,9 @@ async function fresh (c: Case): Promise<Vec3> {
   const ox = 64 * runs++
   const oz = 0
   for (const cmd of ['time set 6000', 'kill @e[type=!player]', `clear ${USER}`, `effect clear ${USER}`, `forceload add ${ox - 16} -16 ${ox + 32} 32`,
-    `fill ${ox - 12} ${GRASS + 1} ${oz - 12} ${ox + 20} ${GRASS + 10} ${oz + 20} minecraft:air`,
     `fill ${ox - 12} ${GRASS} ${oz - 12} ${ox + 20} ${GRASS} ${oz + 20} minecraft:grass_block`,
     `fill ${ox} ${GRASS - 2} ${oz} ${ox + 8} ${GRASS} ${oz + 8} minecraft:water`]) await run(cmd)
+  await clearAbove(ox - 12, oz - 12, ox + 20, oz + 20)
   const at = c.bot.offset(ox, 0, oz)
   await run(`tp ${USER} ${at.x} ${at.y} ${at.z} -90 0`)
   await waitFor(() => bot.entity.position.distanceTo(at) < 1 && bot.inventory.items().length === 0, 200)
