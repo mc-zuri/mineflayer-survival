@@ -135,6 +135,9 @@ export function reequipGoals (inv: { count: (name: string) => number, countAny?:
   const swords = ['netherite_sword', 'diamond_sword', 'iron_sword']
   if (any([...picks, 'stone_pickaxe', 'wooden_pickaxe']) === 0) out.push({ item: 'stone_pickaxe', count: 1 })
   if (any([...swords, 'stone_sword']) === 0) out.push({ item: 'stone_sword', count: 1 })
+  // (a shield early: 6 planks and an iron ingot, and a mounted spear's charge, an arrow, a creeper's blast taken on it;
+  // a 26.3 bot re-kitting with no shield was speared from 12.4 to 2.1 in one charge, f7-26.3)
+  if (any(['shield']) === 0) out.push({ item: 'shield', count: 1 })
   if (any(picks) === 0) out.push({ item: 'iron_pickaxe', count: 1 })
   if (any(['bucket', 'water_bucket', 'lava_bucket']) === 0) out.push({ item: 'bucket', count: 1 })
   if (any(swords) === 0) out.push({ item: 'iron_sword', count: 1 })

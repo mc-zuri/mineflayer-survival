@@ -26,6 +26,7 @@ import { countItems } from '../skills/util'
 import { caveCells, caveOpenings, caveRuleOn, inCaveWall, leaveCave, liquidOpenings, sealCaveOpenings } from '../skills/caves'
 import { noteDrowning } from '../skills/breath'
 import { lavaAdvancing, watchAdvancingLava } from '../skills/lavaFlow'
+import { SPEAR_GUARD, guardSpear, spearThreats } from '../skills/spear'
 import { pillarFits, pillarRefuge, pillarRefugeFrom } from '../skills/pillar'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
@@ -928,7 +929,9 @@ export const hostilesReflex: Reflex = {
     const wither = witherToShoot(ctx)
     // (the trident drowned in sight within TRIDENT_KEEP_OFF, past the scan's 16 too)
     const tridents = nether ? [] : tridentsInSight(bot)
-    if (near.length === 0 && wither == null && tridents.length === 0) return null
+    // (a spear holder in sight within SPEAR_GUARD and 4, past the reflex's range too: guardSpear's)
+    const spear = nether ? undefined : spearThreats(bot).find(e => distance(bot, e) <= SPEAR_GUARD + 4 && hasLineOfSight(bot, e))
+    if (near.length === 0 && wither == null && tridents.length === 0 && spear == null) return null
     const cornered = wasCornered(bot, ctx.tick) && bestMeleeWeapon(bot) != null
     // in the water with hostiles about: to dry ground first (toShore), the fight after: a 1.21.11 bot fought a drowned
     // off the shore into the sea, and drowned and was impaled there (ls3b-1.21.11, t401692)
@@ -1008,6 +1011,16 @@ export const hostilesReflex: Reflex = {
     })
     // a strong neutral (a polar bear, an iron golem) hitting the bot hurt, or more than one: away, not a trade of
     // hits; cornered, fought (its swings on the shield, fight's meleeGuard)
+    // a mob with a spear in sight within SPEAR_GUARD and 4 (a mounted one's charge, 26.x): met before the rest, the
+    // shield up to it and the swings as it passes, or a block on its line, or a step aside (guardSpear)
+    if (spear != null) {
+      return {
+        name: 'hostiles',
+        priority: config.hostiles.priority,
+        detail: `${hasShield(bot) ? 'shield' : 'dodge'} spear ${spear.name ?? ''}`,
+        run: async (signal) => await guardSpear(bot, spear, { signal })
+      }
+    }
     if (strongNeutralFleeDue(bot, attacking) && !wasCornered(bot, ctx.tick)) return fleeAttackers(`flee ${attacking.find(e => STRONG_NEUTRALS.has(e.name ?? ''))?.name ?? 'attacker'}`)
     if (near.length === 0 && wither == null) return attacking.length > 0 ? fleeAttackers('flee attacker') : null
     // silverfish: away from their nest (fleeNest), not walled in nor fought among its infested blocks, a hurt one
