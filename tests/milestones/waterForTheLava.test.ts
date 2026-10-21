@@ -136,3 +136,59 @@ test('obsidianAtHome: a source no spot sees (in the rock) scooped by a tunnel to
   }
   assert.deepEqual(calls, ['fill', 'scoop', 'cast'])
 })
+
+test('homeBucketsToCraft: up to 3 buckets in all, no more than the casts left, 3 iron ingots each of the ones held', async () => {
+  const { homeBucketsToCraft, HOME_CAST_BUCKETS } = await import('../../src/milestones')
+  assert.equal(HOME_CAST_BUCKETS, 3)
+  assert.equal(homeBucketsToCraft(1, 10, 20), 2)
+  assert.equal(homeBucketsToCraft(1, 10, 3), 1)
+  assert.equal(homeBucketsToCraft(1, 10, 2), 0)
+  assert.equal(homeBucketsToCraft(1, 2, 20), 1)
+  assert.equal(homeBucketsToCraft(1, 1, 20), 0)
+  assert.equal(homeBucketsToCraft(3, 10, 20), 0)
+})
+
+test('obsidianAtHome: 2 more buckets crafted of the iron held, 3 buckets of lava a trip, 3 casts a trip home: the frame\'s 10 in 4 trips, not 10 (f3-1.21.11)', async () => {
+  const { obsidianAtHome } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const lava = [new Vec3(6, 40, 0), new Vec3(7, 40, 0), new Vec3(8, 40, 0)]
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe', 1), item('water_bucket', 1), item('bucket', 1), item('iron_ingot', 9)], world: p => p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'overworld'
+  bot.findBlocks = (opts: any) => opts.matching === bot.registry.blocksByName.lava.id ? lava.slice() : []
+  bot.blockAt = (p: Vec3) => ({ name: lava.some(l => l.equals(p)) ? 'lava' : p.y < 64 ? 'stone' : 'air', position: p, getProperties: () => ({ level: 0 }) })
+  const bucket = require('../../src/skills/bucket')
+  const obsidian = require('../../src/nether/obsidian')
+  const real = { fill: bucket.fillBucket, pit: obsidian.obsidianInPit }
+  const slots = bot.inventory.slots
+  const take = (name: string): void => { const i = slots.findIndex((s: any) => s?.name === name); assert.ok(i >= 0, `no ${name}`); if (slots[i].count > 1) slots[i].count--; else slots[i] = null }
+  const give = (name: string): void => { const i = slots.findIndex((s: any, j: number) => j >= 9 && s == null); slots[i] = Object.assign(item(name, 1), { slot: i }) }
+  const fills: number[] = []
+  let trip = 0
+  let obsidianCount = 0
+  bucket.fillBucket = async () => { take('bucket'); give('lava_bucket'); fills.push(trip) }
+  obsidian.obsidianInPit = async () => {
+    take('lava_bucket'); give('bucket')
+    obsidianCount++
+    const i = slots.findIndex((s: any) => s?.name === 'obsidian')
+    if (i >= 0) slots[i].count = obsidianCount; else give('obsidian')
+    if (bot.inventory.slots.filter((s: any) => s?.name === 'lava_bucket').length === 0) trip++
+    return true
+  }
+  const asked: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    task: async (_name: string, fn: any) => await fn(new AbortController().signal),
+    obtain: async (reqs: any[]) => { asked.push(`${reqs[0].count} ${reqs[0].item}`); while (slots.filter((s: any) => s?.name === 'bucket').length < reqs[0].count) { take('iron_ingot'); take('iron_ingot'); take('iron_ingot'); give('bucket') } }
+  }
+  try {
+    assert.equal(await obsidianAtHome(bot, executor, 10, new AbortController().signal, () => {}, { home: { x: 0, z: 0 }, range: 160 }, 14), true)
+  } finally {
+    bucket.fillBucket = real.fill
+    obsidian.obsidianInPit = real.pit
+  }
+  assert.deepEqual(asked, ['3 bucket'])
+  assert.equal(obsidianCount, 10)
+  // 3, 3, 3 and 1: 4 trips
+  assert.deepEqual(fills, [0, 0, 0, 1, 1, 1, 2, 2, 2, 3])
+})

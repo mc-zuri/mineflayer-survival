@@ -1475,17 +1475,30 @@ export async function obsidianAtHome (bot: Bot, executor: Executor, count: numbe
   if (!(await waterForTheLava(bot, executor, signal, log))) return false
   if (countItems(bot, ['bucket', 'lava_bucket']) === 0) await executor.obtain([{ item: 'bucket', count: 1 }], signal).catch(quiet)
   if (countItems(bot, ['bucket', 'lava_bucket']) === 0) return false
+  // more buckets for more lava a trip, of the iron held (homeBucketsToCraft)
+  const extra = homeBucketsToCraft(countItems(bot, ['bucket', 'lava_bucket']), count - have(), countItems(bot, 'iron_ingot'))
+  if (extra > 0) {
+    log(`obsidian: ${extra} more bucket${extra > 1 ? 's' : ''} for the lava`)
+    await executor.obtain([{ item: 'bucket', count: countItems(bot, 'bucket') + extra }], signal).catch(quiet)
+  }
   const home = bound.home != null ? new Vec3(bound.home.x, bot.entity.position.y, bound.home.z) : bot.entity.position.clone()
+  // the empty buckets a trip fills with lava (one kept for the water when its bucket is empty)
+  const fillable = (): number => countItems(bot, 'bucket') - (countItems(bot, 'water_bucket') === 0 ? 1 : 0)
   for (let trip = 0; trip < trips && have() < count; trip++) {
     throwIfAborted(signal)
-    if (countItems(bot, 'lava_bucket') === 0) {
-      const sources = homeLavaSources(bot, bound).slice(0, HOME_CAST_SOURCES)
-      if (sources.length === 0) { log('obsidian: no lava near home to carry to a cast'); return false }
+    // a bucket of lava each empty one, as many as casts are left, from the sources near (tried a trip once each)
+    const tried = new Set<string>()
+    while (fillable() > 0 && countItems(bot, 'lava_bucket') < count - have()) {
+      throwIfAborted(signal)
+      const sources = homeLavaSources(bot, bound).filter(p => !tried.has(p.toString())).slice(0, HOME_CAST_SOURCES)
+      if (sources.length === 0) break
       let filled = false
       for (const source of sources) {
+        tried.add(source.toString())
+        const before = countItems(bot, 'lava_bucket')
         try {
           await executor.task('lava for a cast at home', async (s) => await fillBucket(bot, { fluid: 'lava', pos: source }, s), signal)
-          filled = countItems(bot, 'lava_bucket') > 0
+          filled = countItems(bot, 'lava_bucket') > before
           if (filled) break
         } catch (err) {
           quiet(err)
@@ -1495,14 +1508,18 @@ export async function obsidianAtHome (bot: Bot, executor: Executor, count: numbe
         // through its top (scoopByTunnel)
         try {
           await executor.task('lava for a cast at home, by a tunnel', async (s) => await scoopByTunnel(bot, source, s), signal)
-          filled = countItems(bot, 'lava_bucket') > 0
+          filled = countItems(bot, 'lava_bucket') > before
           if (filled) break
         } catch (err) {
           quiet(err)
           log(`obsidian: the lava at ${source.toString()} by a tunnel: ${(err as Error).message}`)
         }
       }
-      if (!filled) return false
+      if (!filled) break
+    }
+    if (countItems(bot, 'lava_bucket') === 0) {
+      log(trip === 0 && tried.size === 0 ? 'obsidian: no lava near home to carry to a cast' : 'obsidian: no lava near home scooped')
+      return false
     }
     // back home with it, up to the surface there, the pit dug in the rock by the bot
     if (Math.hypot(bot.entity.position.x - home.x, bot.entity.position.z - home.z) > 16 || bot.entity.position.y < SURFACE_MIN_Y) {
@@ -1511,15 +1528,34 @@ export async function obsidianAtHome (bot: Bot, executor: Executor, count: numbe
         await overland(bot, { target: home, range: 8 }, s)
       }, signal).catch(quiet)
     }
-    await refillWater(bot, signal)
-    const before = have()
-    await executor.task('a cast at home', async (s) => await obsidianInPit(bot, obsidianLookup(bot), [], s), signal).catch(err => {
-      quiet(err)
-      log(`obsidian: the cast at home: ${(err as Error).message}`)
-    })
-    log(`obsidian: ${have() > before ? 'one' : 'none'} cast at home, ${have()} of ${count}`)
+    // a cast a bucket carried
+    while (countItems(bot, 'lava_bucket') > 0 && have() < count) {
+      throwIfAborted(signal)
+      await refillWater(bot, signal)
+      const before = have()
+      const lava = countItems(bot, 'lava_bucket')
+      await executor.task('a cast at home', async (s) => await obsidianInPit(bot, obsidianLookup(bot), [], s), signal).catch(err => {
+        quiet(err)
+        log(`obsidian: the cast at home: ${(err as Error).message}`)
+      })
+      log(`obsidian: ${have() > before ? 'one' : 'none'} cast at home, ${have()} of ${count}`)
+      if (have() === before && countItems(bot, 'lava_bucket') >= lava) break
+    }
   }
   return have() >= count
+}
+
+/** the buckets of lava a trip for the casts at home carries at most */
+export const HOME_CAST_BUCKETS = 3
+
+/**
+ * The buckets to craft for the casts at home: up to HOME_CAST_BUCKETS in all (the empty and lava ones held), no more
+ * than the casts left, 3 iron ingots each of the ingots held (no trip for iron). A trip a bucket was a walk into the
+ * rock and back home each block, 10 for a portal frame (f3-1.21.11, t192905 on).
+ */
+export function homeBucketsToCraft (held: number, castsLeft: number, ironIngots: number): number {
+  const want = Math.min(HOME_CAST_BUCKETS, castsLeft) - held
+  return Math.max(0, Math.min(want, Math.floor(ironIngots / 3)))
 }
 
 /** the enchanting's tries at its obsidian within OBSIDIAN_HOME_RANGE before its trips go past it */
