@@ -868,6 +868,32 @@ export function attackingNow (ctx: ReflexContext): Entity[] {
   }).sort((a, b) => distance(bot, a) - distance(bot, b))
 }
 
+/** ticks a mob's hit makes it one to fight back in the water (hitInReach), and how near it must be */
+export const HIT_BACK_TICKS = 40
+export const HIT_BACK_REACH = 3.5
+
+/**
+ * Whether a mob (a hostile, or a neutral of the retaliate list) that hit the bot within HIT_BACK_TICKS is within
+ * HIT_BACK_REACH: the hostiles reflex's way to the shore gives way to its fight (unless the air's low under water).
+ * A 26.3 bot in iron with a diamond sword and a shield walked 285 ticks for the shore at night while a zombie hit it 11
+ * times, 13.6 to 0 health (f7-26.3, seed 1912499065551014666)
+ */
+export function hitInReach (bot: Bot, attackers: ReadonlyMap<number, number> | undefined, tick: number): boolean {
+  if (attackers == null || bot.entity == null) return false
+  for (const [id, at] of attackers) {
+    if (tick - at < 0 || tick - at > HIT_BACK_TICKS) continue
+    const e = bot.entities[id]
+    if (e == null || e === bot.entity || !isAlive(bot, e)) continue
+    if (distance(bot, e) <= HIT_BACK_REACH) return true
+  }
+  return false
+}
+
+/** the head under water with the air at the drowning reflex's mark or under */
+export function airLowUnderWater (bot: Bot, config: ReflexConfig): boolean {
+  return headInWater(bot) && bot.oxygenLevel <= config.drowning.air
+}
+
 /** whether the strong neutrals attacking the bot (STRONG_NEUTRALS) are fled from: hurt to STRONG_FIGHT_HEALTH, or more than one */
 export function strongNeutralFleeDue (bot: Bot, attacking: readonly Entity[]): boolean {
   const strong = attacking.filter(e => STRONG_NEUTRALS.has(e.name ?? ''))
@@ -891,17 +917,34 @@ export const hostilesReflex: Reflex = {
     const cornered = wasCornered(bot, ctx.tick) && bestMeleeWeapon(bot) != null
     // in the water with hostiles about: to dry ground first (toShore), the fight after: a 1.21.11 bot fought a drowned
     // off the shore into the sea, and drowned and was impaled there (ls3b-1.21.11, t401692)
-    if (!nether && (near.length > 0 || tridents.length > 0) && bodyInWater(bot, bot.entity.position) && ctx.tick - (shoreFails.get(bot) ?? -Infinity) > SHORE_RETRY_TICKS) {
+    // (not with a mob hitting the bot in reach and air enough: fought back where it is, hitInReach)
+    if (!nether && (near.length > 0 || tridents.length > 0) && bodyInWater(bot, bot.entity.position) && ctx.tick - (shoreFails.get(bot) ?? -Infinity) > SHORE_RETRY_TICKS &&
+      !(hitInReach(bot, ctx.attackers, ctx.tick) && !airLowUnderWater(bot, config))) {
       return {
         name: 'hostiles',
         priority: config.hostiles.priority,
         detail: 'to shore',
         run: async (signal) => {
           const { toShore } = await import('../executor/explore')
-          const out = await toShore(bot, signal).catch(err => { if (signal.aborted) throw err; return false })
-          if (!out) {
-            shoreFails.set(bot, ctx.tick)
-            throw new SkillError('NO_PATH', 'no way out of the water to dry ground')
+          // (given up once a mob hits it in reach, air enough: the reflex fights it next, watched each tick)
+          const pressed = new AbortController()
+          const onAbort = (): void => pressed.abort(signal.reason)
+          signal.addEventListener('abort', onAbort, { once: true })
+          let tick = ctx.tick
+          const watch = (): void => {
+            tick++
+            if (hitInReach(bot, ctx.attackers, tick) && !airLowUnderWater(bot, config)) pressed.abort(new SkillError('ABORTED', 'a mob at the bot: fought back first'))
+          }
+          bot.on('physicsTick', watch)
+          try {
+            const out = await toShore(bot, pressed.signal).catch(err => { if (pressed.signal.aborted) throw err; return false })
+            if (!out) {
+              shoreFails.set(bot, ctx.tick)
+              throw new SkillError('NO_PATH', 'no way out of the water to dry ground')
+            }
+          } finally {
+            bot.off('physicsTick', watch)
+            signal.removeEventListener('abort', onAbort)
           }
         }
       }

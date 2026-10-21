@@ -1056,3 +1056,23 @@ test('hostiles reflex: a trident drowned the keep-off can\'t get away from (corn
   assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'hold off drowned')
   engine.stop()
 })
+
+test('hostiles reflex in the water: a mob that hit the bot within HIT_BACK_TICKS in reach is fought back, not walked from to the shore; with the head under and the air low, to the shore (f7-26.3: 285 ticks to the shore under a zombie\'s 11 hits)', async () => {
+  const { HIT_BACK_TICKS, hitInReach } = await import('../../src/reflexes/rules')
+  const sea = (p: Vec3): string => p.x >= 3 ? (p.y <= 63 && p.y >= 58 ? 'water' : p.y < 58 ? 'stone' : 'air') : (p.y < 64 ? 'stone' : 'air')
+  const kit = { items: [item('diamond_sword')], position: new Vec3(6.5, 63, 0.5), world: sea }
+  const zombie = entity({ name: 'zombie', position: new Vec3(7.5, 63, 1.5) })
+  const hit = (ago: number) => (engine: ReflexEngine): void => { (engine as any).tick = 100; (engine as any).attackers.set(zombie.id, 100 - ago) }
+  // not hit lately: to the shore first
+  assert.strictEqual(check(hostilesReflex, { ...kit, entities: [zombie] }), 'to shore')
+  // hit 10 ticks ago from 1.4: fought back
+  assert.strictEqual(check(hostilesReflex, { ...kit, entities: [zombie] }, {}, hit(10)), 'fight zombie')
+  // hit long ago: to the shore
+  assert.strictEqual(check(hostilesReflex, { ...kit, entities: [zombie] }, {}, hit(HIT_BACK_TICKS + 20)), 'to shore')
+  // the head under water at low air: to the shore all the same
+  assert.strictEqual(check(hostilesReflex, { ...kit, position: new Vec3(6.5, 61, 0.5), oxygen: 4, entities: [entity({ name: 'zombie', position: new Vec3(7.5, 61, 1.5), id: zombie.id })] }, {}, hit(10)), 'to shore')
+  const bot = fakeBot({ ...kit, entities: [zombie] })
+  assert.strictEqual(hitInReach(bot, new Map([[zombie.id, 90]]), 100), true)
+  zombie.position = new Vec3(12.5, 63, 0.5)
+  assert.strictEqual(hitInReach(bot, new Map([[zombie.id, 90]]), 100), false)
+})
