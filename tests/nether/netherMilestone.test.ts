@@ -83,13 +83,24 @@ test('a portal\'s frame from the obsidian in sight first (the caves\' lava met b
   const { Vec3 } = await import('vec3')
   const calls: string[] = []
   const { item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1), item('flint_and_steel', 1)] })
+  // (a bot fit for the caves: the obsidian's under the rock)
+  const prot = [{ name: 'protection', lvl: 1 }]
+  const kit = { armor: { head: item('iron_helmet', 1, prot), torso: item('iron_chestplate', 1, prot), legs: item('iron_leggings'), feet: item('iron_boots') } }
+  const bot = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1), item('flint_and_steel', 1), item('diamond_sword', 1, [{ name: 'sharpness', lvl: 1 }]), item('cooked_beef', 10)], ...kit })
   bot.game.dimension = 'overworld'
   const obsidian = bot.registry.blocksByName.obsidian.id
   bot.findBlocks = (opts: any) => opts.matching === obsidian ? Array.from({ length: 12 }, (_, i) => new Vec3(i, -52, 3)) : []
   const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async () => { calls.push('obtain') }, task: async (name: string) => { calls.push(name) } }
   await buildAPortal(bot, executor, new AbortController().signal, () => {})
   assert.equal(calls[0], 'mine the obsidian')
+  // not fit for the caves (plain iron): the obsidian under the rock isn't gone for (f1-1.21.11's frame at y -56)
+  const plain = fakeBot({ position: new Vec3(0.5, -50, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1), item('flint_and_steel', 1)] })
+  plain.game.dimension = 'overworld'
+  plain.findBlocks = bot.findBlocks
+  const plainCalls: string[] = []
+  const e2: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async () => { plainCalls.push('obtain') }, task: async (name: string) => { plainCalls.push(name) } }
+  await buildAPortal(plain, e2, new AbortController().signal, () => {}).catch(() => {})
+  assert.ok(!plainCalls.includes('mine the obsidian'), plainCalls.join(', '))
 })
 
 test('a portal with no bucket gets one first; with no lava near to try it walks legs for lava, not five instant failures', async () => {

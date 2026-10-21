@@ -39,7 +39,7 @@ import { TRIP_KIT, awayFromPortals, kitSpares, stashTripKit, type TripKitKeep } 
 import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
 import { obsidianHazard } from './skills/hazardCells'
-import { caveCells, caveRuleOn } from './skills/caves'
+import { caveCells, caveRuleOn, inCaveWall } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
@@ -637,7 +637,9 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   // obsidian there already in the loaded chunks (where the caves' lava met their water, a ruined portal): mined
   // (none with lava against it: the bot mining a lake's lid falls into the lava under it)
   const lavaNext = (p: Vec3): boolean => [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0], [0, 1, 0]].some(([dx, dy, dz]) => bot.blockAt(p.offset(dx, dy, dz))?.name === 'lava')
-  const natural = (bot.findBlocks?.({ matching: bot.registry.blocksByName.obsidian.id, maxDistance: 64, count: PORTAL_OBSIDIAN * 4 }) ?? []).filter(p => !lavaNext(p))
+  // (and none under the rock or in a cave's wall for a bot not fit for the caves)
+  const caveSide = (p: Vec3): boolean => caveRuleOn(bot) && (caveCells(bot).roofed(p.floored()) || inCaveWall(bot, p))
+  const natural = (bot.findBlocks?.({ matching: bot.registry.blocksByName.obsidian.id, maxDistance: 64, count: PORTAL_OBSIDIAN * 4 }) ?? []).filter(p => !lavaNext(p) && !caveSide(p))
   if (natural.length > 0 && natural.length >= PORTAL_OBSIDIAN - count('obsidian')) {
     log(`a portal frame: ${natural.length} obsidian in sight: mining it`)
     try {
@@ -650,7 +652,10 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
     }
   }
   // the pools not tried first, then those tried once (after a death or with a bucket refilled the second goes)
-  const pools = nearestLavaPools(bot).map(p => ({ p, n: tries(p) })).filter(t => t.n < POOL_TRIES).sort((a, b) => a.n - b.n).map(t => t.p)
+  // (in lavaPoolOrder's order within each: under the sky first, then in the rock, none in a cave under the cave rule: a
+  // 1.21.11 bot not cave-ready went for the frame to a pool at y -56 in a cave, and drowned in a flooded gap by it,
+  // f1-1.21.11 t166473 to t171272)
+  const pools = lavaPoolOrder(bot, nearestLavaPools(bot)).map(p => ({ p, n: tries(p) })).filter(t => t.n < POOL_TRIES).sort((a, b) => a.n - b.n).map(t => t.p)
   for (const pool of pools.slice(0, 4)) {
     const at = new Vec3(pool.x, pool.y, pool.z)
     log(`a portal frame: the lava pool at ${pool.x.toFixed(0)} ${pool.y.toFixed(0)} ${pool.z.toFixed(0)}`)
