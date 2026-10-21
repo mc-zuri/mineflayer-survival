@@ -192,3 +192,54 @@ test('obsidianAtHome: 2 more buckets crafted of the iron held, 3 buckets of lava
   // 3, 3, 3 and 1: 4 trips
   assert.deepEqual(fills, [0, 0, 0, 1, 1, 1, 2, 2, 2, 3])
 })
+
+test('obsidianAtHome: no cast poured without a water bucket at hand, one got first; none to be had, the lava kept and no cast (f3-1.21.11, t203692)', async () => {
+  const { obsidianAtHome } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const lava = [new Vec3(6, 40, 0)]
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe', 1), item('water_bucket', 1), item('lava_bucket', 1)], world: p => lava.some(l => l.equals(p)) ? 'lava' : p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'overworld'
+  bot.findBlocks = () => []
+  const obsidian = require('../../src/nether/obsidian')
+  const real = obsidian.obsidianInPit
+  const slots = bot.inventory.slots
+  const swap = (from: string, to: string): void => { const i = slots.findIndex((s: any) => s?.name === from); slots[i] = Object.assign(item(to, 1), { slot: i }) }
+  let casts = 0
+  // the cast's water lost (not picked up again by the pit): the lava and the water both poured, no obsidian
+  obsidian.obsidianInPit = async () => { casts++; swap('lava_bucket', 'bucket'); swap('water_bucket', 'bucket'); return false }
+  const asked: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (_name: string, fn: any) => await fn(new AbortController().signal), obtain: async (reqs: any[]) => { asked.push(String(reqs[0].item)); throw new Error('no plan') } }
+  const lines: string[] = []
+  // a second lava bucket held: its cast waits for a water bucket
+  slots[30] = Object.assign(item('lava_bucket', 1), { slot: 30 })
+  try {
+    assert.equal(await obsidianAtHome(bot, executor, 4, new AbortController().signal, l => { lines.push(l) }, { home: { x: 0, z: 0 }, range: 160 }), false)
+  } finally {
+    obsidian.obsidianInPit = real
+  }
+  assert.equal(casts, 1)
+  assert.ok(asked.includes('water_bucket'), asked.join(', '))
+  assert.equal(countLava(bot), 1)
+  assert.ok(lines.some(l => /no water bucket/.test(l)), lines.join('\n'))
+})
+
+function countLava (bot: any): number {
+  return bot.inventory.slots.filter((s: any) => s?.name === 'lava_bucket').length
+}
+
+test('buildAPortal: no trip to a lava pool without a water bucket, none to be had (f3-1.21.11: 4 pools at y -58, \'no water bucket to cast the frame with\' at each)', async () => {
+  const { buildAPortal } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  // a pool of 16 sources under the sky 20 blocks off
+  const lava: Vec3[] = []
+  for (let x = 20; x < 24; x++) for (let z = 0; z < 4; z++) lava.push(new Vec3(x, 63, z))
+  const isLava = (p: Vec3): boolean => lava.some(l => l.equals(p))
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe', 1), item('bucket', 1), item('flint_and_steel', 1)] })
+  bot.game.dimension = 'overworld'
+  bot.blockAt = (p: Vec3) => ({ name: isLava(p) ? 'lava' : p.y < 64 ? 'stone' : 'air', position: p, boundingBox: isLava(p) || p.y >= 64 ? 'empty' : 'block', getProperties: () => ({ level: 0 }) })
+  bot.findBlocks = (opts: any) => opts.matching === bot.registry.blocksByName.lava.id ? lava.slice() : []
+  const calls: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async () => { throw new Error('no plan') }, task: async (name: string) => { calls.push(name) } }
+  await buildAPortal(bot, executor, new AbortController().signal, () => {}).catch(() => {})
+  assert.ok(!calls.includes('to the lava'), calls.join(', '))
+})

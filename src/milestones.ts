@@ -785,6 +785,10 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   // f1-1.21.11 t166473 to t171272)
   const pools = lavaPoolOrder(bot, nearestLavaPools(bot)).filter(p => withinBound(bound, p)).map(p => ({ p, n: tries(p) })).filter(t => t.n < POOL_TRIES).sort((a, b) => a.n - b.n).map(t => t.p)
   for (const pool of pools.slice(0, 4)) {
+    // no trip to a pool without a water bucket (its cast and its shore's obsidian both pour one): a 1.21.11 bot's
+    // was lost at a cast at home, and it went on down to 4 pools at y -58 for its frame, 'no water bucket to cast the
+    // frame with' at each (f3-1.21.11, t203692 to t229847)
+    if (!(await waterForTheLava(bot, executor, signal, log))) break
     const at = new Vec3(pool.x, pool.y, pool.z)
     log(`a portal frame: the lava pool at ${pool.x.toFixed(0)} ${pool.y.toFixed(0)} ${pool.z.toFixed(0)}`)
     const before = executor.memory.getPois('lava_tried', { dimension: 'overworld' }).find(t => Math.hypot(t.x - at.x, t.z - at.z) < 16 && Math.abs(t.y - at.y) < 16)
@@ -1528,10 +1532,10 @@ export async function obsidianAtHome (bot: Bot, executor: Executor, count: numbe
         await overland(bot, { target: home, range: 8 }, s)
       }, signal).catch(quiet)
     }
-    // a cast a bucket carried
+    // a cast a bucket carried, each with a water bucket at hand (none poured without one: the lava lost in the pit)
     while (countItems(bot, 'lava_bucket') > 0 && have() < count) {
       throwIfAborted(signal)
-      await refillWater(bot, signal)
+      if (!(await waterForTheLava(bot, executor, signal, log))) return false
       const before = have()
       const lava = countItems(bot, 'lava_bucket')
       await executor.task('a cast at home', async (s) => await obsidianInPit(bot, obsidianLookup(bot), [], s), signal).catch(err => {
