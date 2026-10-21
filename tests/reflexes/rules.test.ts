@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { dropsReflex, armorReflex, creeperReflex, drowningReflex, eatReflex, emergencyEatReflex, hazardReflex, hostilesReflex, nightChoice, nightReflex, totemReflex, type NightChoiceInputs } from '../../src/reflexes/rules'
+import { CREEPER_CHASE_TICKS, noteEvaded, dropsReflex, armorReflex, creeperReflex, drowningReflex, eatReflex, emergencyEatReflex, hazardReflex, hostilesReflex, nightChoice, nightReflex, totemReflex, type NightChoiceInputs } from '../../src/reflexes/rules'
 import { ReflexEngine } from '../../src/reflexes/engine'
 import { DEFAULT_REFLEX_CONFIG, type ReflexConfigInput } from '../../src/reflexes/config'
 import type { Reflex } from '../../src/reflexes/types'
@@ -88,7 +88,8 @@ test('hostiles reflex: creepers are shot from a distance, fought only with a shi
   assert.strictEqual(check(hostilesReflex, { entities: [creeper(6)] }), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: [creeper(6)], items: [item('bow'), item('arrow', 16)] }), 'shoot creeper')
   assert.strictEqual(check(hostilesReflex, { entities: [creeper(4)], items: [item('bow'), item('arrow', 16)] }), 'flee')
-  assert.strictEqual(check(hostilesReflex, { entities: [creeper(4), entity({ name: 'zombie', position: at(5) })], items: [item('stone_sword')] }), 'fight zombie')
+  // (no other mob fought with a creeper in range: the creeper first, here fled)
+  assert.strictEqual(check(hostilesReflex, { entities: [creeper(4), entity({ name: 'zombie', position: at(5) })], items: [item('stone_sword')] }), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: [creeper(4)], offhand: item('shield') }), 'fight creeper')
 })
 
@@ -700,7 +701,8 @@ test('hostiles reflex: hurt to sealHealth among two zombies down a tunnel, with 
   assert.strictEqual(check(hostilesReflex, { entities: [zombies[0]], ...kit(), health: 9 }, sealOnly), 'fight zombie')
   assert.strictEqual(check(hostilesReflex, { entities: [zombies[0]], ...kit(), health: 5 }, sealOnly), 'seal in')
   assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(3), health: 9 }), 'fight zombie')
-  assert.strictEqual(check(hostilesReflex, { entities: [...zombies, entity({ name: 'creeper', position: at(5) })], ...kit(), health: 9 }, sealOnly), 'fight zombie')
+  // (a creeper about: no box, its blast takes it; and the creeper first, no zombie fought by it: fled)
+  assert.strictEqual(check(hostilesReflex, { entities: [...zombies, entity({ name: 'creeper', position: at(5) })], ...kit(), health: 9 }, sealOnly), 'flee')
   assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), health: 9 }, { hostiles: { sealHealth: 0, wallIn: false } }), 'fight zombie')
   assert.strictEqual(check(hostilesReflex, { entities: zombies, ...kit(), world: undefined, health: 9 }), 'fight zombie')
   // the fight's until: the health falling to it ends the fight, the box next
@@ -1161,4 +1163,53 @@ test('hostiles reflex at the spawn of a server with spawn protection: no pillar 
   const tunnelKit = { items: [item('diamond_sword'), item('cobblestone', 64)], world: tunnel, health: 9 }
   assert.strictEqual(check(hostilesReflex, { entities: zombies, ...tunnelKit }, sealOnly), 'seal in')
   assert.notStrictEqual(check(hostilesReflex, { entities: zombies, ...tunnelKit }, sealOnly, protect), 'seal in')
+})
+
+test('hostiles reflex: a creeper in range is seen to before any other mob, a zombie at the bot not fought within the blast: shot from range, fought with the shield, else fled (f9-1.21.11, t305885)', () => {
+  for (const version of ['1.21.11', '26.3']) {
+    const creeper = (x: number): any => entity({ name: 'creeper', position: at(x), version })
+    const zombie = (x: number): any => entity({ name: 'zombie', position: at(-x), version })
+    const kit = { items: [item('diamond_sword', 1, undefined, version), item('bow', 1, undefined, version), item('arrow', 11, undefined, version)], offhand: item('shield', 1, undefined, version), version }
+    // the zombie nearer: the creeper all the same, shot from 7.5
+    assert.strictEqual(check(hostilesReflex, { ...kit, entities: [creeper(7.5), zombie(1.5)] }), 'shoot creeper', version)
+    // too near to shoot: the shield's fight with it, not the zombie's
+    assert.strictEqual(check(hostilesReflex, { ...kit, entities: [creeper(4), zombie(1.5)] }), 'fight creeper', version)
+    // no creeper in range: the zombie
+    assert.strictEqual(check(hostilesReflex, { ...kit, entities: [creeper(12), zombie(1.5)] }), 'fight zombie', version)
+    // neither bow nor shield: away from them both
+    assert.strictEqual(check(hostilesReflex, { items: [item('diamond_sword', 1, undefined, version)], entities: [creeper(6), zombie(1.5)], version }), 'flee', version)
+  }
+})
+
+test('hostiles reflex: a creeper the creeper reflex ran from, after the bot out of range, is shot or kept off before the work goes on; with a shield alone met in range; let be past CREEPER_CHASE_TICKS (f9-1.21.11, t305885)', () => {
+  for (const version of ['1.21.11', '26.3']) {
+    const creeper = entity({ name: 'creeper', position: at(12), version })
+    const evaded = (tick: number) => (e: ReflexEngine): void => { e.tick = tick; noteEvaded((e as any).bot, creeper, 100) }
+    const bow = [item('bow', 1, undefined, version), item('arrow', 11, undefined, version)]
+    // not one it ran from: nothing (out of range)
+    assert.strictEqual(check(hostilesReflex, { items: bow, entities: [creeper], version }), null, version)
+    assert.strictEqual(check(hostilesReflex, { items: bow, entities: [creeper], version }, {}, evaded(150)), 'shoot creeper', version)
+    assert.strictEqual(check(hostilesReflex, { items: [item('iron_sword', 1, undefined, version)], entities: [creeper], version }, {}, evaded(150)), 'keep off creeper', version)
+    assert.strictEqual(check(hostilesReflex, { items: [item('iron_sword', 1, undefined, version)], offhand: item('shield', 1, undefined, version), entities: [creeper], version }, {}, evaded(150)), null, version)
+    assert.strictEqual(check(hostilesReflex, { items: bow, entities: [creeper], version }, {}, evaded(100 + CREEPER_CHASE_TICKS + 1)), null, version)
+    // past its follow range, or out of sight behind a wall: let be
+    const far = entity({ name: 'creeper', position: at(17), version })
+    assert.strictEqual(check(hostilesReflex, { items: bow, entities: [far], version }, {}, (e) => { e.tick = 150; noteEvaded((e as any).bot, far, 100) }), null, version)
+    assert.strictEqual(check(hostilesReflex, { items: bow, entities: [creeper], world: (p) => p.y < 64 ? 'stone' : p.x === 5 && p.y <= 66 ? 'stone' : 'air', version }, {}, evaded(150)), null, version)
+  }
+})
+
+test('creeper reflex: its run notes the creeper for the hostiles reflex (chasingCreeper)', async () => {
+  const { chasingCreeper } = await import('../../src/reflexes/rules')
+  const creeper = entity({ name: 'creeper', position: at(2.2) })
+  const bot = fakeBot({ entities: [creeper] })
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const task = creeperReflex.check(engine.context())
+  assert.ok(task != null)
+  const ctrl = new AbortController()
+  ctrl.abort(new Error('stop'))
+  await task.run(ctrl.signal).catch(() => {})
+  creeper.position = at(10)
+  assert.strictEqual(chasingCreeper(engine.context())?.id, creeper.id)
+  engine.stop()
 })

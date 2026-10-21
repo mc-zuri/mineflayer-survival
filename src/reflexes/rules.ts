@@ -373,6 +373,44 @@ export function threateningCreeper (ctx: ReflexContext): Entity | null {
   return best
 }
 
+/**
+ * ticks a creeper the creeper reflex ran from stays one the hostiles reflex sees to before the work goes on
+ * (chasingCreeper), and how far off: Creeper's FOLLOW_RANGE 16, past which it lets its target go
+ * (TargetGoal.canContinueToUse)
+ */
+export const CREEPER_CHASE_TICKS = 600
+export const CREEPER_FOLLOW_RANGE = 16
+const evadedCreepers = new WeakMap<Bot, Map<number, number>>()
+
+/** the creeper reflex ran from this creeper at this tick (chasingCreeper) */
+export function noteEvaded (bot: Bot, creeper: Entity, tick: number): void {
+  let m = evadedCreepers.get(bot)
+  if (m == null) evadedCreepers.set(bot, m = new Map())
+  m.set(creeper.id, tick)
+  for (const [id, at] of m) if (bot.entities[id] == null || tick - at > CREEPER_CHASE_TICKS) m.delete(id)
+}
+
+/**
+ * The nearest creeper the creeper reflex ran from within CREEPER_CHASE_TICKS, alive within CREEPER_FOLLOW_RANGE in the
+ * bot's sight: after it, not let be. The evade ends 7.5 off, and the work went on toward it, the hostiles reflex fought
+ * a zombie by it, and it came on again, seven times in 280 ticks till it blew a 1.21.11 bot in iron up (f9-1.21.11,
+ * t305885)
+ */
+export function chasingCreeper (ctx: ReflexContext): Entity | null {
+  const { bot } = ctx
+  const evaded = evadedCreepers.get(bot)
+  if (evaded == null || evaded.size === 0) return null
+  let best: Entity | null = null
+  for (const [id, at] of evaded) {
+    const e = bot.entities[id]
+    if (e == null || ctx.tick - at < 0 || ctx.tick - at > CREEPER_CHASE_TICKS || !isAlive(bot, e)) continue
+    const d = distance(bot, e)
+    if (d > CREEPER_FOLLOW_RANGE || Math.abs(e.position.y - bot.entity.position.y) > ctx.config.hostiles.maxDy || !hasLineOfSight(bot, e)) continue
+    if (best == null || d < distance(bot, best)) best = e
+  }
+  return best
+}
+
 /** Away from a creeper whose fuse started (Creeper.DATA_SWELL_DIR) or that came within 3 blocks; the shield if cornered. */
 export const creeperReflex: Reflex = {
   name: 'creeper',
@@ -391,14 +429,15 @@ export const creeperReflex: Reflex = {
       name: 'creeper',
       priority: config.creeper.priority,
       detail: 'evade creeper',
-      run: async (signal) => await evadeCreeper(bot, creeper, {
+      // (seen to after the run by the hostiles reflex while it follows: chasingCreeper)
+      run: async (signal) => { noteEvaded(bot, creeper, ctx.tick); return await evadeCreeper(bot, creeper, {
         signal,
         safeDistance: config.creeper.safeDistance,
         blockAtSwell: config.creeper.blockAtSwell,
         blockDistance: config.creeper.blockDistance,
         maxTicks: config.creeper.maxTicks,
         swell: ctx.swell.get(creeper.id) ?? 0
-      })
+      }) }
     }
   }
 }
@@ -992,7 +1031,9 @@ export const hostilesReflex: Reflex = {
     const tridents = nether ? [] : tridentsInSight(bot)
     // (a spear holder in sight within SPEAR_GUARD and 4, past the reflex's range too: guardSpear's)
     const spear = nether ? undefined : spearThreats(bot).find(e => distance(bot, e) <= SPEAR_GUARD + 4 && hasLineOfSight(bot, e))
-    if (near.length === 0 && wither == null && tridents.length === 0 && spear == null) return null
+    // (a creeper the creeper reflex ran from, after the bot past the reflex's range: chasingCreeper)
+    const chasing = nether ? null : chasingCreeper(ctx)
+    if (near.length === 0 && wither == null && tridents.length === 0 && spear == null && chasing == null) return null
     const cornered = wasCornered(bot, ctx.tick) && bestMeleeWeapon(bot) != null
     // in the water with hostiles about: to dry ground first (toShore), the fight after: a 1.21.11 bot fought a drowned
     // off the shore into the sea, and drowned and was impaled there (ls3b-1.21.11, t401692)
@@ -1083,6 +1124,31 @@ export const hostilesReflex: Reflex = {
       }
     }
     if (strongNeutralFleeDue(bot, attacking) && !wasCornered(bot, ctx.tick)) return fleeAttackers(`flee ${attacking.find(e => STRONG_NEUTRALS.has(e.name ?? ''))?.name ?? 'attacker'}`)
+    // a creeper shot from where the bot is, the draw put away once it comes within a block of the shot's distance or
+    // its fuse starts (the bot free to run: a drawn bow slows it to a fifth)
+    const shootCreeper = (creeper: Entity): UrgentTask => {
+      const tooNear = (): boolean => !isAlive(bot, creeper) || distance(bot, creeper) < config.hostiles.shootCreepersFrom - 1 || creeperSwelling(bot, creeper)
+      return {
+        name: 'hostiles',
+        priority: config.hostiles.priority,
+        detail: 'shoot creeper',
+        run: async (signal) => await shoot(bot, creeper, { signal, maxShots: 3, until: tooNear, cutDraw: tooNear })
+      }
+    }
+    // a creeper the creeper reflex ran from, still after the bot out of the reflex's range (chasingCreeper): seen to
+    // before the work and the other mobs, shot with a bow, else kept off past its follow range; with a shield and no
+    // bow it's met when it comes in range (fought with the shield up)
+    if (chasing != null && !near.some(e => e.name === 'creeper')) {
+      if (hasBowAndArrows(bot) && distance(bot, chasing) >= config.hostiles.shootCreepersFrom) return shootCreeper(chasing)
+      if (!hasShield(bot) && !wasCornered(bot, ctx.tick)) {
+        return {
+          name: 'hostiles',
+          priority: config.hostiles.priority,
+          detail: 'keep off creeper',
+          run: async (signal) => await fleeFrom(bot, () => isAlive(bot, chasing) ? [chasing] : [], { signal, distance: CREEPER_FOLLOW_RANGE }).catch(err => noteCornered(bot, ctx.tick, err))
+        }
+      }
+    }
     if (near.length === 0 && wither == null) return attacking.length > 0 ? fleeAttackers('flee attacker') : null
     // silverfish: away from their nest (fleeNest), not walled in nor fought among its infested blocks, a hurt one
     // calling the rest out (f5-26.3: slain by 9 in iron); cornered, or the flight failed lately, fought where it stands
@@ -1212,12 +1278,13 @@ export const hostilesReflex: Reflex = {
       .filter(e => !fruitlessLetBe(ctx, e))
     if (fightable.length === 0) return attacking.length > 0 ? fleeAttackers('flee attacker') : null
     // creepers: shot from a distance when there's a bow; melee only with a shield to take the blast
-    const target = fightable.find(e => {
-      if (e.name !== 'creeper') return true
-      if (hasBowAndArrows(bot) && distance(bot, e) >= config.hostiles.shootCreepersFrom) return true
-      // (and cornered, no way to run: hit, its knockback keeps it from the 3 blocks its fuse starts at, SwellGoal)
-      return hasShield(bot) || cornered
-    })
+    // (and cornered, no way to run: hit, its knockback keeps it from the 3 blocks its fuse starts at, SwellGoal)
+    const takeOn = (e: Entity): boolean => (hasBowAndArrows(bot) && distance(bot, e) >= config.hostiles.shootCreepersFrom) || hasShield(bot) || cornered
+    // a creeper in range goes first, before any other mob: none is fought within its blast's reach. A zombie's fight
+    // took a 1.21.11 bot back to the creeper it had just run from, seven times in 280 ticks, till it blew up 2.9 off
+    // (f9-1.21.11, t305885)
+    const creeperInRange = fightable.find(e => e.name === 'creeper')
+    const target = creeperInRange != null ? (takeOn(creeperInRange) ? creeperInRange : undefined) : fightable[0]
     if (target == null) {
       // only creepers it can't take on: keep away (past their follow range, Creeper's FOLLOW_RANGE 16)
       return {
@@ -1228,6 +1295,7 @@ export const hostilesReflex: Reflex = {
       }
     }
     const useBow = target.name === 'creeper' && hasBowAndArrows(bot) && distance(bot, target) >= config.hostiles.shootCreepersFrom
+    if (useBow) return shootCreeper(target)
     // a blaze, with a shield: held off where the bot stands (holdOffBlazes: the shield up before its shots, the bow
     // between), not closed in on: fight() chased them over a fortress's throne under the others' fireballs
     if (target.name === 'blaze' && hasShield(bot)) {
@@ -1247,10 +1315,11 @@ export const hostilesReflex: Reflex = {
       const now = hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => (isHostile(bot, e) || provoked(ctx, e)) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange) })
       const tick = ctx.tick + elapsed++
       // (a strong neutral's fight turned once the bot is hurt to STRONG_FIGHT_HEALTH: the flee next)
+      // (and another mob's once a creeper comes in range: the creeper first)
       return (now.length > 0 && (fightTurned(bot, now, config, tick) || sealDue(bot, now, config, tick) || caveWallInDue(bot, now, config, tick) || pillarDue(bot, now, config, tick))) ||
-        strongNeutralFleeDue(bot, attackingNow({ ...ctx, tick }))
+        strongNeutralFleeDue(bot, attackingNow({ ...ctx, tick })) || (target.name !== 'creeper' && now.some(e => e.name === 'creeper'))
     }
-    if (nether && !useBow) {
+    if (nether) {
       const f = netherFightsOf(bot)
       const anchor = f.anchors.get(target.id)?.at ?? bot.entity.position.clone()
       f.anchors.set(target.id, { at: anchor, tick: ctx.tick })
@@ -1280,13 +1349,11 @@ export const hostilesReflex: Reflex = {
     return {
       name: 'hostiles',
       priority: config.hostiles.priority,
-      detail: `${useBow ? 'shoot' : 'fight'} ${target.name ?? ''}`,
-      run: async (signal) => useBow
-        ? await shoot(bot, target, { signal, maxShots: 3 })
-        : (noteFight(bot, target), await fight(bot, target, { signal, ...meleeOptions(target, config), dry, until: () => turned() || (dry && bodyInWater(bot, bot.entity.position)) || fruitlessLetBe(ctx, target) }).catch(err => {
-          if (TaskError.is(err, 'TIMEOUT')) noteUnkilled(bot, target, ctx.tick)
-          throw err
-        }))
+      detail: `fight ${target.name ?? ''}`,
+      run: async (signal) => (noteFight(bot, target), await fight(bot, target, { signal, ...meleeOptions(target, config), dry, until: () => turned() || (dry && bodyInWater(bot, bot.entity.position)) || fruitlessLetBe(ctx, target) }).catch(err => {
+        if (TaskError.is(err, 'TIMEOUT')) noteUnkilled(bot, target, ctx.tick)
+        throw err
+      }))
     }
   }
 }
