@@ -1107,6 +1107,8 @@ export async function netherSpares (bot: Bot, executor: Executor, gate: NetherGa
 export const NETHER_FOOD_TICKS = 12000
 /** the ticks a try of the nether kit spends on the gate's arrows after the rest of the gear */
 export const NETHER_ARROW_TICKS = 12000
+/** the spiders' misses in a row (the bow's string) after which the gate goes without a bow (the water bottles) */
+export const BOW_SPIDER_MISSES = 3
 /** the ticks a try of the nether kit spends on the bow (its string) after the rest of the gear */
 export const NETHER_BOW_TICKS = 12000
 
@@ -1235,7 +1237,10 @@ export function netherGate (bot: Bot, executor: Pick<Executor, 'memory'> & { sig
   const noChickens = chickensMissed.has(bot)
   const arrows = fireRes >= NETHER_FIRE_POTIONS ? NETHER_ARROWS_FIRE_RESISTANT : noChickens ? NETHER_ARROWS_NO_FEATHERS : NETHER_ARROWS
   // no bow held and no spider found for its string: none asked for
-  const bow = bot.inventory.items().some(i => i.name === 'bow') || countItems(bot, 'string') >= 3 || (executor.sightings?.misses('spider') ?? 0) === 0
+  // (the spiders missed BOW_SPIDER_MISSES times in a row, each try's hunt of NETHER_BOW_TICKS: once was the bowless
+  // gate's for good, and 1.21.11 bots went in with the sword alone, a bunker of no kill in 2818 ticks, f6-1.21.11 and
+  // f7-1.21.11)
+  const bow = bot.inventory.items().some(i => i.name === 'bow') || countItems(bot, 'string') >= 3 || (executor.sightings?.misses('spider') ?? 0) < BOW_SPIDER_MISSES
   return { food, arrows, bow }
 }
 

@@ -425,11 +425,15 @@ test('netherKit: no bow got within its budget (no spider found for the string), 
   const gear = NETHER_GEAR().filter((i: any) => i.name !== 'bow' && i.name !== 'arrow')
   // a spider missed already: no bow asked for
   const memory = new WorldMemory()
-  assert.equal(netherGate(fakeBot({ items: gear }), { memory, sightings: { misses: (n: string) => n === 'spider' ? 1 : 0 } }).bow, false)
+  assert.equal(netherGate(fakeBot({ items: gear }), { memory, sightings: { misses: (n: string) => n === 'spider' ? 3 : 0 } }).bow, false)
   assert.equal(netherGate(fakeBot({ items: [...gear, item('bow', 1)] }), { memory, sightings: { misses: () => 1 } }).bow, true)
+  // missed fewer than BOW_SPIDER_MISSES times: the bow still asked for
+  const { BOW_SPIDER_MISSES } = await import('../../src/milestones')
+  assert.equal(netherGate(fakeBot({ items: gear }), { memory, sightings: { misses: (n: string) => n === 'spider' ? BOW_SPIDER_MISSES - 1 : 0 } }).bow, true)
   const bot = fakeBot({ items: gear })
   bot.game.dimension = 'overworld'
-  const missed: string[] = []
+  // (missed twice before: this try's miss the third)
+  const missed: string[] = new Array(BOW_SPIDER_MISSES - 1).fill('spider')
   const asked: string[] = []
   const executor: any = {
     memory,
@@ -442,7 +446,7 @@ test('netherKit: no bow got within its budget (no spider found for the string), 
     task: async () => {}
   }
   const err: any = await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e)
-  assert.deepStrictEqual(missed, ['spider'])
+  assert.deepStrictEqual(missed, new Array(BOW_SPIDER_MISSES).fill('spider'))
   assert.equal(asked[0], 'bow')
   // no arrows asked for after; the bottles (none to be had here) keep it out
   assert.ok(!asked.includes('arrow'), asked.join(' | '))
@@ -1172,7 +1176,7 @@ test('netherKit: no bow to be had, the water bottles held: ready with no slime b
   const water = (): any => { const p = item('potion'); p.componentMap = new Map([['potion_contents', { type: 'potion_contents', data: { potionId: 0, customEffects: [] } }]]); return p }
   const bare = NETHER_GEAR().filter((i: any) => i.name !== 'bow' && i.name !== 'arrow')
   const memory = new WorldMemory()
-  const executor: any = { memory, tasks: { tick: 0 }, sightings: { misses: (n: string) => n === 'spider' ? 1 : 0, missing: () => {} }, obtain: async () => {}, task: async () => {} }
+  const executor: any = { memory, tasks: { tick: 0 }, sightings: { misses: (n: string) => n === 'spider' ? 3 : 0, missing: () => {} }, obtain: async () => {}, task: async () => {} }
   const bot = fakeBot({ items: [...bare, water(), water(), water()] })
   bot.game.dimension = 'overworld'
   assert.equal(await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e), null)
@@ -1312,7 +1316,7 @@ test('netherKit: the gear all held but no bow to be had, the water bottles are g
   const executor: any = {
     memory: new WorldMemory(),
     tasks: { tick: 0 },
-    sightings: { misses: (n: string) => n === 'spider' ? 1 : 0, missing: () => {} },
+    sightings: { misses: (n: string) => n === 'spider' ? 3 : 0, missing: () => {} },
     obtain: async (reqs: any[]) => { asked.push(reqs.map(r => r.item).join(',')) },
     task: async (name: string) => { if (name === 'fill the water bottles') throw new Error('no spot found to see the water from') }
   }
