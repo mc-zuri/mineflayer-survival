@@ -384,6 +384,22 @@ export async function blazeRodsWithBrew (bot: Bot, args: BlazeRodsArgs & { count
     else if (state.tries >= BREW_TRIES) say(`${BREW_TRIES} brews tried`)
     else say(countItems(bot, 'magma_cream') > 0 ? 'brewing it: the magma cream held' : countItems(bot, 'slime_ball') > 0 ? 'brewing it: a slime ball for the cream' : 'no magma cream or slime ball: the cubes about looked for')
   }
+  // a bunker to be had by the spawner (planBlazeBunkers): the rods from it, no wart nor cream sought and no brew. Its
+  // walls take the fireballs; the brew's trips out of it cost the bots: 26.3 bots out of their bunkers by seed 2's
+  // throne spawners at (-277, 77, -159) and (-290, 77, -209) for the brew with their first rods were held off by the
+  // hostiles reflex among the blazes at the door, or found no way back to where they came in, and burned, 4 runs of 6,
+  // where the bunker's fight alone took all 8 rods in the others
+  if (brewWanted(bot) && state.tries < BREW_TRIES) {
+    const at = args.spawner ?? await findBlazeSpawner(bot, { exclude: args.exclude ?? unreachableSpawners(bot) }, signal).catch(err => { if (isAbort(err)) throw err; return null })
+    if (at != null) {
+      const spawner = new Vec3(at.x, at.y, at.z)
+      args = { ...args, spawner }
+      if (planBlazeBunkers(p => bot.blockAt(p) as any, spawner).length > 0) {
+        say('a bunker to be had by the spawner: the rods from it, no brew')
+        state.tries = BREW_TRIES
+      }
+    }
+  }
   if (brewWanted(bot) && state.tries < BREW_TRIES) {
     const away = args.away ?? bot.entity.position.clone()
     try {
