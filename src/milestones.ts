@@ -1301,6 +1301,26 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
   }
 }
 
+/**
+ * A water bucket in the bag before a trip to the lava for its obsidian: the bucket filled again at water near
+ * (refillWater), else a water bucket planned (a bucket and the water: the executor's obtain); resolves whether one is
+ * held. A 26.3 bot's hazard reflex poured its water bucket in the lava at a deep pool's shore, and with none left
+ * ('no water bucket to make obsidian with') it went on mining the pool's obsidian at y -29 and swam into the lava
+ * (ls4-26.3, t188337 to t188576).
+ */
+export async function waterForTheLava (bot: Bot, executor: Pick<Executor, 'obtain'>, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
+  if (countItems(bot, 'water_bucket') > 0) return true
+  await refillWater(bot, signal)
+  if (countItems(bot, 'water_bucket') > 0) return true
+  await executor.obtain([{ item: 'water_bucket', count: 1 }], signal).catch(err => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`obsidian: no water bucket: ${(err as Error).message}`)
+  })
+  if (countItems(bot, 'water_bucket') > 0) return true
+  log('obsidian: no water bucket: no trip to the lava')
+  return false
+}
+
 export async function obsidianFromPools (bot: Bot, executor: Executor, count: number, signal: AbortSignal, log: (line: string) => void): Promise<boolean> {
   const have = (): number => countItems(bot, 'obsidian')
   if (have() >= count) return true
@@ -1317,6 +1337,8 @@ export async function obsidianFromPools (bot: Bot, executor: Executor, count: nu
     for (const pool of nearestLavaPools(bot).slice(0, 3)) {
       if (have() >= count) break
       const at = new Vec3(pool.x, pool.y, pool.z)
+      // no trip to the lava without the water to make the obsidian with (waterForTheLava)
+      if (!(await waterForTheLava(bot, executor, signal, log))) return have() >= count
       log(`obsidian: from the lava at ${at.floored().toString()}`)
       try {
         await executor.task('to the lava', async (s) => await moveNear(bot, at, 5, s).catch(async err => {
