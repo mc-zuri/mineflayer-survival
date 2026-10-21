@@ -382,3 +382,27 @@ test('tunnelTo: a dug way that would open into a cave is turned from under the c
   assert.equal(err?.code ?? err?.reason, 'NO_PATH')
   assert.equal(dug, 0)
 })
+
+test('tunnelTo with caves false (a way off the lava): the cave rule\'s turns left out, the step toward the cave dug', async () => {
+  const { tunnelTo } = await import('../../src/skills/tunnel')
+  const bot = fakeBot({ position: new Vec3(0.5, 20, 0.5), world: (p: Vec3) => (p.x >= 2 && p.x <= 8 && p.y >= 19 && p.y <= 23 && Math.abs(p.z) <= 3) || (p.x === 0 && p.z === 0 && (p.y === 20 || p.y === 21)) ? 'air' : p.y > 70 ? 'air' : 'stone' })
+  bot.game.dimension = 'overworld'
+  caveCells(bot)
+  // (the fake bot's blocks dug as stone is)
+  const blockAt = bot.blockAt
+  bot.blockAt = (p: Vec3) => ({ ...blockAt(p), diggable: true })
+  const actions = require('../../src/core/actions')
+  const realDig = actions.dig
+  let dug = 0
+  actions.dig = async () => { dug++; throw new Error('stop here') }
+  try {
+    await tunnelTo(bot, { target: new Vec3(10, 20, 0), range: 1, caves: false }).catch(() => {})
+    assert.ok(dug > 0)
+    // (and with the rule, none: the same way turned from)
+    dug = 0
+    await tunnelTo(bot, { target: new Vec3(10, 20, 0), range: 1 }).catch(() => {})
+    assert.equal(dug, 0)
+  } finally {
+    actions.dig = realDig
+  }
+})

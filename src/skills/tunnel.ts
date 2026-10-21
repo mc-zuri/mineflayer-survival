@@ -22,6 +22,11 @@ export interface TunnelArgs {
   until?: () => boolean
   /** a step with no floor that can't be given one may drop this far onto safe ground (default 4) */
   maxDrop?: number
+  /**
+   * the cave rule's turns (caveStep: no step into a cave or opening onto one for a bot not fit for the caves; default
+   * true); false for a way out of a hazard, where any way off it is the better
+   */
+  caves?: boolean
 }
 
 export interface TunnelResult {
@@ -89,7 +94,7 @@ export async function tunnelTo (bot: Bot, args: TunnelArgs, signal?: AbortSignal
       if (LIQUID.has(name(floor))) { trace('tunnelTo: liquid floor', dir.toString()); continue }
       // (nor into a cave, opening one or over one, for a bot not fit for the caves: round it in the rock, caveStep; the
       // ls4-26.3 game's dug ways to its deep lava pools for obsidian came out in their caves, 5 of its 17 cave entries)
-      const cave = caveStep(bot, { open: clear, floor })
+      const cave = args.caves === false ? null : caveStep(bot, { open: clear, floor })
       if (cave != null) { trace('tunnelTo: turns from', dir.toString(), cave); continue }
       // open the cells
       let ok = true

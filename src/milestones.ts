@@ -697,7 +697,9 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
             log(`buckets: ${(err as Error).message}`)
           })
         }
-        await executor.task('off the lava', async (s) => await tunnelTo(bot, { target: away, range: 2 }, s), signal).catch(err => {
+        // (any way off it: the cave rule's turns left out, the deep pool's cavern all round: a 26.3 bot's way off a deep
+        // pool at y -59 turned from its cave on every side, 'no safe step', and the bot burned there, ls4-26.3 resumed)
+        await executor.task('off the lava', async (s) => await tunnelTo(bot, { target: away, range: 2, caves: false }, s), signal).catch(err => {
           if (signal.aborted || TaskError.is(err, 'DIED')) throw err
           log(`a portal frame: off the lava: ${(err as Error).message}`)
         })
