@@ -107,3 +107,30 @@ test('cane found exploring on a river\'s bank 12 under where the step began on a
   assert.equal(out.gained, 3)
   assert.deepEqual(cuts, [false])
 })
+
+test('a mine step for sugar cane with none near explores the shores first (ctx.caneShores), the spiral only after they ran out', async () => {
+  const { runMine } = await import('../../src/executor/steps')
+  for (const shoreHas of [true, false]) {
+    const bot = botWith(64, { 20: [63, 3] })
+    const column = bot.findBlocks
+    let atShore = false
+    bot.findBlocks = (opts: any) => atShore && shoreHas ? column(opts) : []
+    const calls: string[] = []
+    const ctx = ctxOf(bot)
+    ctx.caneShores = async (found: () => boolean) => { calls.push('shores'); atShore = true; return found() }
+    const collect = async (b: any): Promise<any> => {
+      calls.push('collect')
+      const c = item('sugar_cane', 3)
+      c.slot = 30
+      b.inventory.slots[30] = c
+      return { mined: 2, positions: [new Vec3(20, 64, 0)], items: { sugar_cane: 3 }, count: 3 }
+    }
+    let err: any = null
+    await stubbed([
+      ['../../src/skills/collectBlock', 'collectBlock', collect],
+      ['../../src/executor/explore', 'exploreForBlocks', async () => { calls.push('spiral'); return false }]
+    ], async () => await runMine(caneStep, ctx)).catch(e => { err = e })
+    assert.deepEqual(calls, shoreHas ? ['shores', 'collect'] : ['shores', 'spiral'])
+    assert.equal(err?.code, shoreHas ? undefined : 'NOT_FOUND')
+  }
+})

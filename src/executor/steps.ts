@@ -83,6 +83,11 @@ export interface StepContext {
    * by the next steps a while (Executor.unreachable)
    */
   unreachable?: { note: (positions: readonly Vec3[]) => void, has: (pos: Vec3) => boolean }
+  /**
+   * explores the shores for sugar cane, resolving whether `found` came to hold (the executor's: exploreCaneShores with
+   * its biome survey and the seed)
+   */
+  caneShores?: (found: () => boolean, signal: AbortSignal) => Promise<boolean>
 }
 
 export interface StepOutcome {
@@ -193,6 +198,8 @@ async function findBlocks (bot: Bot, names: string[], ctx: StepContext, alternat
   // (the other food that grows noted on the way: none of it seen is the land's, Executor.noteMissing)
   const remember = maxRadius != null ? SIGHTED_BLOCKS : undefined
   if (!food) {
+    // the cane along the shores first (the river's, the beach's, the swamp's): it grows by water only
+    if (names.includes('sugar_cane') && ctx.caneShores != null && await ctx.caneShores(() => near(names), ctx.signal)) return names
     ctx.state.explore ??= { leg: 0 }
     if (await exploreForBlocks(bot, { names: all, memory: ctx.memory, center: ctx.home ?? undefined, exclude, maxRadius, progress: ctx.state.explore, room: ctx.room, remember }, ctx.signal)) {
       if (near(names)) return names

@@ -44,6 +44,8 @@ import { WALK_TICKS_PER_BLOCK } from '../planner/sources'
 import { withNetherSafety } from '../nether/safety'
 import { travel } from '../skills/travel'
 import { rememberCanes } from '../skills/caneFarm'
+import { exploreCaneShores } from './caneShores'
+import type { Seed } from '../worldgen/random'
 
 /** ticks between the looks for a village about the bot */
 export const VILLAGE_CHECK_TICKS = 400
@@ -104,6 +106,8 @@ export interface ExecutorOptions {
    * stored, stashed, put in a depot or thrown away (default nothing)
    */
   milestoneNeeds?: () => Readonly<Record<string, number>>
+  /** the world's seed, when play was given it: its biomes read for the shores an exploring for cane goes to */
+  seed?: Seed
 }
 
 /**
@@ -249,11 +253,12 @@ export class Executor {
   readonly biomes: BiomeSurvey
   /** explorations' progress kept across the plans (StepContext.progress) */
   private readonly exploreProgress = new Map<string, { leg: number }>()
-  readonly options: Required<Omit<ExecutorOptions, 'memory' | 'tasks' | 'runners' | 'hooks' | 'log' | 'home'>>
+  readonly options: Required<Omit<ExecutorOptions, 'memory' | 'tasks' | 'runners' | 'hooks' | 'log' | 'home' | 'seed'>>
   private readonly runners: Record<PlanStep['kind'], StepRunner<any>>
   private readonly hooks: ExecutorHooks
   private readonly logFn: (line: string) => void
   private readonly home: () => Vec3 | null
+  private readonly seed: Seed | undefined
   /** the tool replacement in progress (it obtains with this executor: no replacing within it) */
   private replacing = false
   private makingRoom = false
@@ -295,6 +300,7 @@ export class Executor {
     this.hooks = opts.hooks ?? {}
     this.logFn = opts.log ?? (line => trace('executor:', line))
     this.home = opts.home ?? (() => null)
+    this.seed = opts.seed
     this.unreachable = new UnreachableBlocks(() => this.tasks.tick)
     this.sightings = new Sightings(bot, () => this.tasks.tick, pos => outOfTheWay(bot, pos), () => herdSpares(bot, this.memory), () => {
       const at = bot.entity?.position
@@ -827,6 +833,7 @@ export class Executor {
         progress: key => this.exploreProgress.get(key) ?? this.exploreProgress.set(key, { leg: 0 }).get(key) as { leg: number },
         forgetProgress: key => { this.exploreProgress.delete(key) },
         toolMuted: tool => this.wornMuted(tool),
+        caneShores: async (found, s) => await exploreCaneShores(this.bot, { survey: this.biomes, memory: this.memory, home: this.home(), found, seed: this.seed, log: line => this.log(line) }, s),
         unreachable: {
           note: positions => {
             this.unreachable.note(positions, normalizeDimension(this.bot.game?.dimension))

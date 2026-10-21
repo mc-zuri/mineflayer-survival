@@ -592,6 +592,8 @@ export class Runner {
       log: this.log,
       home: () => this.home(),
       milestoneNeeds: () => this.milestoneNeeds(),
+      // (the seed's biomes, for the shores the cane is explored for along)
+      seed: options.seed,
       ...options.executor,
       // the stock's working set carried, the rest stored at the base
       keep: options.executor?.keep ?? (this.stock != null ? stockKeepRule(this.stock) : undefined),
