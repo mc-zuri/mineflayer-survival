@@ -195,3 +195,32 @@ test('caves reflex: a hole that took no block (a mob in it) is let be CAVE_HOLE_
     engine.stop()
   }
 })
+
+test('drowning reflex: out of the water once its surfacing got the head out; not with the head still under (no air found: no walk under the water)', async () => {
+  const { drowningReflex } = await import('../../src/reflexes/rules')
+  const escape = require('../../src/skills/escape')
+  const explore = require('../../src/executor/explore')
+  const realSurface = escape.surface
+  const realShore = explore.toShore
+  const shores: boolean[] = []
+  explore.toShore = async () => { shores.push(true); return true }
+  try {
+    for (const found of [false, true]) {
+      // the feet and the head in the water; a surfacing that finds air gets the head out (the water at the feet only)
+      let headUnder = true
+      const bot = fakeBot({ position: new Vec3(0.5, 20, 0.5), oxygen: 2, world: (p: Vec3) => p.y === 20 || p.y === 19 || (headUnder && p.y === 21) ? 'water' : p.y < 19 ? 'stone' : 'air' })
+      bot.game.dimension = 'overworld'
+      escape.surface = async () => { if (!found) throw new Error('no air within reach'); headUnder = false; return { ticks: 10 } }
+      const engine = new ReflexEngine(bot, { enabled: false })
+      const task = drowningReflex.check(engine.context())
+      engine.stop()
+      assert.ok(task != null)
+      shores.length = 0
+      await task.run(new AbortController().signal).catch(() => {})
+      assert.deepEqual(shores, found ? [true] : [], found ? 'surfaced: to the shore' : 'no air: no walk under the water')
+    }
+  } finally {
+    escape.surface = realSurface
+    explore.toShore = realShore
+  }
+})

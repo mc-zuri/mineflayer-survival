@@ -206,10 +206,12 @@ export const drowningReflex: Reflex = {
         try {
           return await surface(bot, { signal, recoverTo: config.drowning.recoverTo, searchRadius: config.drowning.searchRadius, maxTicks: config.drowning.maxTicks })
         } finally {
-          // and out of the water, surfaced or not, not left there for the work to sink back (a 1.21.11 bot's smelt in
-          // a lake took it down three times after its surfacings, and it drowned: grimls-2, t83874 to t85228)
+          // and out of the water once the head's out of it, not left there for the work to sink back (a 1.21.11 bot's
+          // smelt in a lake took it down three times after its surfacings, and it drowned: grimls-2, t83874 to
+          // t85228); not with the head still under (a surfacing that found no air: toShore's walk of up to 1200 ticks
+          // under the water, the reflex not going again meanwhile)
           const { inWater, toShore } = await import('../executor/explore')
-          if (!signal.aborted && bot.health > 0 && inWater(bot)) await toShore(bot, signal).catch(err => { if (signal.aborted) throw err })
+          if (!signal.aborted && bot.health > 0 && inWater(bot) && !headInWater(bot)) await toShore(bot, signal).catch(err => { if (signal.aborted) throw err })
         }
       }
     }
