@@ -25,8 +25,11 @@ function breaksInTheWay (bot: Bot, b: Block): boolean {
 }
 
 /**
- * digs the block through the crosshair (digInSight); resolves when it is gone. An infested block (isInfested) is never
- * dug, the target or one in the crosshair's way: its silverfish, and the nest it wakes
+ * digs the block through the crosshair (digInSight); resolves when it is gone and the server kept the break. An
+ * infested block (isInfested) is never dug, the target or one in the crosshair's way: its silverfish, and the nest it
+ * wakes. A break the server put back (the pathfinder's DigRefusedError: digInSight waits for the server's answer while
+ * the block is the client's prediction, mineflayer's _isBlockPredicted) fails REFUSED: the dig of a non-instant block
+ * resolved on the client's predicted break, and a caller took a log under spawn protection for dug
  */
 export async function dig (bot: Bot, block: Block, options: DigOptions = {}): Promise<void> {
   if (isInfested(block.name)) throw new Error(`${block.name} at ${String(block.position)} is infested: not broken (a silverfish in it)`)
@@ -34,7 +37,12 @@ export async function dig (bot: Bot, block: Block, options: DigOptions = {}): Pr
   // it refused lately
   if (breakRefused(bot, block.position)) throw new SkillError('REFUSED', `${block.name} at ${String(block.position)} is under spawn protection or refused: not broken`)
   const inTheWay = options.digObstruction ?? ((b: Block) => breaksInTheWay(bot, b))
-  await digInSight(bot, block as any, { signal: options.signal, digObstruction: ((b: Block) => !isInfested(b.name) && inTheWay(b)) as any })
+  try {
+    await digInSight(bot, block as any, { signal: options.signal, digObstruction: ((b: Block) => !isInfested(b.name) && inTheWay(b)) as any })
+  } catch (err) {
+    if ((err as Error)?.name === 'DigRefusedError') throw new SkillError('REFUSED', `${(err as Error).message} (refused)`, undefined, { cause: err })
+    throw err
+  }
 }
 
 // prismarine-world's BlockFace of a face's direction (0 down, 1 up, 2 north, 3 south, 4 west, 5 east)

@@ -213,6 +213,20 @@ test('a dig in the square is refused (REFUSED) before it starts; out of it, dug'
   assert.strictEqual(digs, 0)
 })
 
+test("a dig whose break the server put back (the pathfinder's DigRefusedError, after its answer) fails REFUSED, not resolved; collectBlock's failure is REFUSED", async () => {
+  const bot = protectedBot({ items: [item('stone_pickaxe')] })
+  const refused = (): Error => Object.assign(new Error('the dig of the stone at (40, 63, 0) was refused: the block is back after the server answered'), { name: 'DigRefusedError' })
+  bot.dig = async () => { throw refused() }
+  await assert.rejects(dig(bot, { name: 'stone', position: new Vec3(40, 63, 0) } as any), (err: any) => err.reason === 'REFUSED' && /was refused/.test(err.message) && err.cause?.name === 'DigRefusedError')
+  // another failure as it was
+  bot.dig = async () => { throw new Error('no dig of the stone held the crosshair') }
+  await assert.rejects(dig(bot, { name: 'stone', position: new Vec3(40, 63, 0) } as any), (err: any) => err.reason !== 'REFUSED' && /crosshair/.test(err.message))
+  bot.dig = async () => { throw refused() }
+  bot.entity.position = new Vec3(40.5, 64, 1.5)
+  bot.pathingUtil = { refresh: () => {}, bestHarvestingTool: () => null }
+  await assert.rejects(collectBlock(bot, { positions: [new Vec3(40, 63, 0)], pickup: false, anyTool: true }), (err: any) => err.reason === 'REFUSED' && /was refused/.test(err.message))
+})
+
 test('nothing placed against a block in the square (REFUSED), nor placed in it by placeBlock', async () => {
   const bot = protectedBot()
   await assert.rejects(placeAgainst(bot, { name: 'stone', position: new Vec3(16, 63, 0) } as any, new Vec3(1, 0, 0)), (err: any) => err.reason === 'REFUSED')

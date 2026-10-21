@@ -2,7 +2,7 @@
 import type { Bot } from 'mineflayer'
 import { Vec3 } from 'vec3'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
-import { SkillError, isAbort, throwIfAborted } from './errors'
+import { SkillError, isAbort, isSkillError, throwIfAborted } from './errors'
 import type { TaskError } from '../core/errors'
 import { harvestToolFor } from './equipBest'
 import { navigate } from './navigate'
@@ -280,7 +280,8 @@ export async function collectBlock (bot: Bot, args: CollectBlockArgs, signal?: A
       try {
         await digBlock(bot, current, signal)
       } catch (err) {
-        lastFailure = new SkillError('VERIFY_FAILED', `digging ${block.name} at ${pos.toString()} failed: ${(err as Error).message}`, undefined, { cause: err })
+        // (a break the server put back: REFUSED, as one known before the dig)
+        lastFailure = isSkillError(err, 'REFUSED') ? err : new SkillError('VERIFY_FAILED', `digging ${block.name} at ${pos.toString()} failed: ${(err as Error).message}`, undefined, { cause: err })
         continue
       }
     }
