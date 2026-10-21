@@ -53,7 +53,8 @@ describe(`the home's food on a ${DEFAULT_VERSION} server`, { timeout: 30 * 60 * 
     })
     bot = await connectLockstepBot(server, { username: USERNAME })
     await bot.waitForChunksToLoad()
-    bot.loadPlugin(createPlugin({ reflexes: false }))
+    // (the server's spawn protection off: the farm by the spawn)
+    bot.loadPlugin(createPlugin({ reflexes: false, spawnProtection: 0 }))
     origin = new Vec3(Math.floor(bot.entity.position.x), GROUND + 1, Math.floor(bot.entity.position.z))
     await run('kill @e[type=cow]')
     await run('time set 1000')
@@ -136,7 +137,7 @@ describe(`the home's food on a ${DEFAULT_VERSION} server`, { timeout: 30 * 60 * 
     assert.ok(Math.hypot(pen.center.x - origin.x, pen.center.z - origin.z) <= 24, `the pen at ${pen.center.toString()}, not by home`)
     assert.ok(cows().filter(e => inPen(pen, e.position)).length >= 2, lines.join('\n'))
     // bred in the pen
-    const bred = await breedAnimals(bot, { mob: 'cow', pairs: 1, radius: 16 })
+    const bred = await breedAnimals(bot, { mob: 'cow', pairs: 1, radius: 32 })
     assert.strictEqual(bred.fed, 2)
     assert.ok(await waitUntil(bot, () => cows().length >= 3, 400), 'no calf')
   })

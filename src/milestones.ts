@@ -2692,7 +2692,8 @@ export async function growFarms (bot: Bot, executor: Executor, signal: AbortSign
   for (const farm of knownFarms(executor.memory, dimension)) {
     if (farm.crop !== 'wheat' || bot.entity.position.distanceTo(farm.water) > FARM_GROW_RANGE) continue
     const plots = Math.min(FARM_TARGET_PLOTS - farm.cells.length, countItems(bot, 'wheat_seeds'))
-    if (plots <= 0 || plotCells(pos => bot.blockAt(pos) as any, farm.water, plots).length === 0) continue
+    // (the square about the spawn passed over, as plantFarm does: siteLookup)
+    if (plots <= 0 || plotCells(siteLookup(bot, pos => bot.blockAt(pos) as any), farm.water, plots).length === 0) continue
     if (!bot.inventory.items().some(i => i.name.endsWith('_hoe'))) {
       const plan = executor.plan([{ item: '#hoes', count: 1 }])
       if (!plan.ok || plan.cost > FARM_START_TICKS) continue
@@ -2723,7 +2724,8 @@ export async function farmSpring (bot: Bot, executor: Executor, signal: AbortSig
   const lookup = (pos: Vec3): any => bot.blockAt(pos)
   const farms = knownFarms(executor.memory, dimension).filter(f => bot.entity.position.distanceTo(f.water) <= FARM_GROW_RANGE)
   if (farms.some(f => isSpring(lookup, f.water))) return true
-  const farm = farms[0]
+  // (not by the spawn's square: no dig there, siteLookup)
+  const farm = farms.find(f => [f.water, ...springCells(f.water)].every(c => siteLookup(bot, (p: Vec3) => p)(c) != null))
   if (farm == null || countItems(bot, 'water_bucket') === 0) return false
   const ok = await executor.task('a spring of the farm water', async (s) => await makeFarmSpring(bot, farm.water, s), signal).catch(err => {
     if (signal.aborted || TaskError.is(err, 'DIED')) throw err
