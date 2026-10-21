@@ -871,3 +871,33 @@ test('hostiles reflex by the water: a drowned in it past WATER_FIGHT_REACH let b
   // and with a drowned at it in the water too
   assert.strictEqual(check(hostilesReflex, { items: sword, position: new Vec3(6.5, 63, 0.5), entities: [drowned(8)], world: sea }), 'to shore')
 })
+
+test('hostiles reflex: hurt to sealHealth among melee mobs on an open floor (no box of SEAL_MAX_BLOCKS), the bot pillars up out of their reach; not with a spider, a skeleton or a creeper among them, with one at it already, short of blocks, under a low roof, over sealHealth, or again at once (ls4-26.3, t386611: four zombies on a cave floor at y -58, fled, cornered, slain)', async () => {
+  const { pillarFits } = await import('../../src/skills/pillar')
+  const zombie = (x: number, z = 0.5): any => entity({ name: 'zombie', position: new Vec3(0.5 + x, 64, z) })
+  const kit = [item('iron_sword'), item('cobblestone', 64)]
+  const four = [zombie(3), zombie(-3), zombie(0, 3.5), zombie(0, -2.5)]
+  assert.strictEqual(check(hostilesReflex, { health: 8, items: kit, entities: four }), 'pillar up')
+  // one at the bot already (within PILLAR_CLEAR): fought first, its hits put it back
+  assert.notStrictEqual(check(hostilesReflex, { health: 8, items: kit, entities: [...four.slice(1), zombie(1.5)] }), 'pillar up')
+  // full health: two zombies fought as before; four (more than maxFight, fled before) pillared up from too
+  assert.notStrictEqual(check(hostilesReflex, { health: 18, items: kit, entities: four.slice(0, 2) }), 'pillar up')
+  assert.strictEqual(check(hostilesReflex, { health: 18, items: kit, entities: four }), 'pillar up')
+  // a spider climbs after it; a skeleton shoots it up there; a creeper's blast
+  for (const other of ['spider', 'skeleton', 'creeper']) {
+    assert.notStrictEqual(check(hostilesReflex, { health: 8, items: kit, entities: [...four.slice(0, 3), entity({ name: other, position: new Vec3(3.5, 64, 3.5) })] }), 'pillar up', other)
+  }
+  // a lone zombie: not (one is fought, or fled)
+  assert.notStrictEqual(check(hostilesReflex, { health: 8, items: kit, entities: [zombie(3)] }), 'pillar up')
+  // two blocks of cobblestone, or a roof 4 over the floor
+  assert.notStrictEqual(check(hostilesReflex, { health: 8, items: [item('iron_sword'), item('cobblestone', 2)], entities: four }), 'pillar up')
+  const lowRoof = (p: Vec3): string => p.y < 64 || p.y >= 68 ? 'stone' : 'air'
+  assert.strictEqual(pillarFits(fakeBot({ items: kit, world: lowRoof })), false)
+  assert.strictEqual(pillarFits(fakeBot({ items: kit, world: (p: Vec3) => p.y < 64 || p.y >= 69 ? 'stone' : 'air' })), true)
+  // again at the same cell at once: not (it came down and they were back)
+  const bot = fakeBot({ health: 8, items: kit, entities: four })
+  const engine = new ReflexEngine(bot, { enabled: false })
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'pillar up')
+  assert.notStrictEqual(hostilesReflex.check(engine.context())?.detail, 'pillar up')
+  engine.stop()
+})
