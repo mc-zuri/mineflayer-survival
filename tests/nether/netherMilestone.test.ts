@@ -925,16 +925,30 @@ test('a portal with a diamond pickaxe and the seed known goes to the nearest rui
     obtain: async () => { throw new Error('stop here') },
     task: async (name: string) => { calls.push(name) }
   }
-  await buildAPortal(bot, executor, new AbortController().signal, () => {}).catch(() => {})
-  const nearest = ruinedPortalCandidates('2', { x: 0.5, z: 0.5 })[0]
+  // (no seed reader: the sea's portals are tests/worldgen/seaPortal.test.ts's)
+  const seedBiomes = require('../../src/worldgen/seedBiomes')
+  const realOpen = seedBiomes.openSeedBiomes
+  seedBiomes.openSeedBiomes = async () => null
+  try {
+    await buildAPortal(bot, executor, new AbortController().signal, () => {}).catch(() => {})
+  } finally {
+    seedBiomes.openSeedBiomes = realOpen
+  }
+  const land = ruinedPortalCandidates('2', { x: 0.5, z: 0.5 })
+  const nearest = land[0]
   assert.ok(calls.includes('to a ruined portal'), calls.join(', '))
   assert.ok(!calls.slice(0, calls.indexOf('to a ruined portal')).includes('to the lava'), calls.join(', '))
   // noted, and not gone to again
   assert.ok(executor.memory.getPois(RUINED_PORTAL_TRIED).some((p: any) => p.x === nearest.x && p.z === nearest.z))
   calls.length = 0
-  await buildAPortal(bot, executor, new AbortController().signal, () => {}).catch(() => {})
+  seedBiomes.openSeedBiomes = async () => null
+  try {
+    await buildAPortal(bot, executor, new AbortController().signal, () => {}).catch(() => {})
+  } finally {
+    seedBiomes.openSeedBiomes = realOpen
+  }
   // the next time, the next candidate (the first is noted as gone to)
-  const second = ruinedPortalCandidates('2', { x: 0.5, z: 0.5 })[1]
+  const second = land[1]
   assert.equal(calls.filter(c => c === 'to a ruined portal').length, 1, calls.join(', '))
   assert.ok(executor.memory.getPois(RUINED_PORTAL_TRIED).some((p: any) => p.x === second.x && p.z === second.z))
 })
@@ -943,11 +957,11 @@ test('naturalObsidian passes over obsidian in water (an ocean ruined portal) or 
   const { naturalObsidian } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
-  // obsidian at x 3, 5 and 7 on the ground; water over the one at 5, lava beside the one at 7
-  const world = (p: any): string => p.y === 63 && [3, 5, 7].includes(p.x) && p.z === 0 ? 'obsidian' : (p.x === 5 && p.y === 64 && p.z === 0) ? 'water' : (p.x === 8 && p.y === 63 && p.z === 0) ? 'lava' : p.y < 64 ? 'stone' : 'air'
+  // obsidian at x 1, 7 and 13 on the ground; water over the one at 7, lava beside the one at 13
+  const world = (p: any): string => p.y === 63 && [1, 7, 13].includes(p.x) && p.z === 0 ? 'obsidian' : (p.x === 7 && p.y === 64 && p.z === 0) ? 'water' : (p.x === 14 && p.y === 63 && p.z === 0) ? 'lava' : p.y < 64 ? 'stone' : 'air'
   const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe', 1)], world })
   bot.game.dimension = 'overworld'
-  bot.findBlocks = () => [new Vec3(3, 63, 0), new Vec3(5, 63, 0), new Vec3(7, 63, 0)]
+  bot.findBlocks = () => [new Vec3(1, 63, 0), new Vec3(7, 63, 0), new Vec3(13, 63, 0)]
   const logs: string[] = []
   const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async () => {} }
   await naturalObsidian(bot, executor, 10, new AbortController().signal, (l: string) => logs.push(l))
@@ -964,7 +978,15 @@ test('naturalObsidian: a ruined portal that was in the sea is left for the shore
   bot.findBlocks = () => []
   const calls: string[] = []
   const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (name: string) => { calls.push(name) } }
-  await naturalObsidian(bot, executor, 10, new AbortController().signal, () => {})
+  // (no seed reader: a portal the seed's biomes didn't show in the sea)
+  const seedBiomes = require('../../src/worldgen/seedBiomes')
+  const realOpen = seedBiomes.openSeedBiomes
+  seedBiomes.openSeedBiomes = async () => null
+  try {
+    await naturalObsidian(bot, executor, 10, new AbortController().signal, () => {})
+  } finally {
+    seedBiomes.openSeedBiomes = realOpen
+  }
   assert.deepEqual(calls, ['to a ruined portal', 'to the shore', 'back from the sea'])
 })
 
