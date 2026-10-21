@@ -2,7 +2,7 @@ import type { Bot } from 'mineflayer'
 import type { Item } from 'prismarine-item'
 import type { Vec3 } from 'vec3'
 import { attackStrengthOf, bestMeleeWeapon, sweepSpared } from './weapons'
-import { edgeAhead, steerAway, steerToward } from './steer'
+import { creeperKeepOff, edgeAhead, steerAway, steerToward } from './steer'
 import { onDripstone } from './hazardCells'
 import { entityUnderCrosshair } from '../core/actions'
 import { motionTrackerOf } from './motion'
@@ -559,7 +559,8 @@ export async function fight (bot: Bot, target: Entity, opts: FightOptions = {}):
         blocking = false
       }
       if (wantRetreat) {
-        steerAway(bot, target.position)
+        // (back from a swelling creeper, never past it: creeperKeepOff)
+        steerAway(bot, target.position, undefined, { keepOff: creeperKeepOff(bot.entity.position, target.position) })
         await waitTicks(bot, 1, signal)
         continue
       }

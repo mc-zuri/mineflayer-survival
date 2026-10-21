@@ -253,6 +253,19 @@ export interface FleeRouteOptions {
   keepOff?: number
 }
 
+/** how much nearer than it is now a route away from a creeper may pass it (creeperKeepOff) */
+export const CREEPER_ROUTE_SLACK = 0.5
+
+/**
+ * The nearest a route away from a creeper at `creeper` may pass it: no nearer than the bot is now (less
+ * CREEPER_ROUTE_SLACK), FLEE_ROUTE_KEEP_OFF at least. A route out of a nook past the creeper at its mouth, 2.5 off, was
+ * a run through the blast's reach: 13 of damage where the sword's hits from the nook took 0 to 5
+ * (tests/integration/creeperTerrain 'nook')
+ */
+export function creeperKeepOff (from: Vec3, creeper: Vec3): number {
+  return Math.max(FLEE_ROUTE_KEEP_OFF, Math.hypot(from.x - creeper.x, from.z - creeper.z) - CREEPER_ROUTE_SLACK)
+}
+
 const DIRS: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]]
 
 /**

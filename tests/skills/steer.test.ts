@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
 import { Vec3 } from 'vec3'
-import { HEADWAY_TICKS, Headway, deadlyStep, edgeAhead, fleeHeading, fleeRoute, fleeWay, jumpRoom, lineCost, stepCost, steerToward } from '../../src/skills/steer'
+import { HEADWAY_TICKS, Headway, creeperKeepOff, deadlyStep, edgeAhead, fleeHeading, fleeRoute, fleeWay, jumpRoom, lineCost, stepCost, steerToward } from '../../src/skills/steer'
 import { LS3B_CREEPER_1, LS3B_CREEPER_2, bodyGets, gridBlocks, gridWorld } from './fleeTerrain'
 import { fakeBot } from '../reflexes/fakeBot'
 
@@ -168,4 +168,25 @@ test('Headway: a run that got less than HEADWAY_BLOCKS across in HEADWAY_TICKS g
   let stuck = false
   for (let t = 0; t <= HEADWAY_TICKS; t++) stuck = h.update(new Vec3(0.05 * (t % 2), 64, 0))
   assert.equal(stuck, true, 'jumping in place')
+})
+
+test('creeperKeepOff: a route away from a creeper never passes it nearer than the bot is now (a nook\'s mouth past it: 13 of damage, tests/integration/creeperTerrain \'nook\')', () => {
+  // a nook a cell across at (0, 64, 0), open to the east only, on open stone ground; the creeper 5.8 off, its sword's
+  // knockback back from the mouth
+  const nook = (p: Vec3): string => {
+    if (p.y < 64) return 'stone'
+    if (p.y > 66) return 'air'
+    if (p.x >= -1 && p.x <= 1 && p.z >= -1 && p.z <= 1) return (p.x === 0 && p.z === 0 && p.y < 66) || (p.x === 1 && p.z === 0 && p.y < 66) ? 'air' : 'stone'
+    return 'air'
+  }
+  const blocks = (p: Vec3): any => fakeBot({ world: nook }).blockAt(p)
+  const from = new Vec3(0.5, 64, 0.5)
+  const creeper = new Vec3(6.3, 64, 0.5)
+  // the plain route keeps 2.5 off: out of the mouth and past it, within its blast's reach
+  assert.ok(fleeRoute(blocks, from, [creeper], { keepOff: 2.5 }) != null)
+  // the creeper's: none (cornered: the sword from the nook, or its sight cut)
+  assert.equal(creeperKeepOff(from, creeper), 5.8 - 0.5)
+  assert.equal(fleeRoute(blocks, from, [creeper], { keepOff: creeperKeepOff(from, creeper) }), null)
+  // nearer than FLEE_ROUTE_KEEP_OFF already: that much
+  assert.equal(creeperKeepOff(from, new Vec3(2.5, 64, 0.5)), 2.5)
 })

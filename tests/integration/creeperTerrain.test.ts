@@ -8,9 +8,13 @@
 //   jumping at the trunk);
 // - 'hollow': in a hollow under an oak's leaves at y 66, at (27.7, 64, 203.3), an iron chestplate only, a diamond
 //   pickaxe in hand, an iron sword and 64 cobblestone; two creepers from the west and the south (t439660);
-// - 'open': open superflat ground, the 'trunk' kit, a creeper from the east.
+// - 'open': open superflat ground, the 'trunk' kit, a creeper from the east;
+// - 'nook': a nook of cobblestone a cell across, shut but for its east side, the bot in it with the 'trunk' kit (no
+//   shield), a creeper 3.3 off at its open side: cornered, fought with the sword;
+// - 'nookBare': the nook with no sword (the stone pickaxe in hand, the cobblestone): cornered, its sight cut with the
+//   blocks carried.
 // Each run is a pass when the bot is alive 400 ticks on with the creepers gone (blown up, killed) or out of reach.
-// CREEPER_RUNS=n repeats each (default 2); CREEPER_CASES picks some (trunk,hollow,open).
+// CREEPER_RUNS=n repeats each (default 2); CREEPER_CASES picks some (trunk,hollow,open,nook,nookBare).
 import { after, before, describe, test } from 'node:test'
 import assert from 'node:assert'
 import type { Bot } from 'mineflayer'
@@ -23,7 +27,7 @@ import { NightLog, summary } from './nightLog'
 
 const USER = 'creeperbot'
 const RUNS = Number(process.env.CREEPER_RUNS ?? 2)
-const CASES = (process.env.CREEPER_CASES ?? 'trunk,hollow,open').split(',')
+const CASES = (process.env.CREEPER_CASES ?? 'trunk,hollow,open,nook,nookBare').split(',')
 // the superflat's grass
 const GRASS = -61
 
@@ -31,7 +35,7 @@ let server: TestServer
 let bot: Bot
 let runs = 0
 
-const BLOCKS: Record<string, string> = { '#': 'grass_block', W: 'oak_log', L: 'oak_leaves[persistent=true]', '.': 'air', '~': 'water' }
+const BLOCKS: Record<string, string> = { C: 'cobblestone', '#': 'grass_block', W: 'oak_log', L: 'oak_leaves[persistent=true]', '.': 'air', '~': 'water' }
 
 interface Case {
   name: string
@@ -46,12 +50,27 @@ interface Case {
   carried: Array<[string, number]>
 }
 
+/** a nook a cell across at (1, 1, 1), shut but for its east side ('C' cobblestone) */
+const NOOK: Grid = {
+  x0: 0,
+  y0: 0,
+  z0: 0,
+  layers: [
+    ['###', '###', '###'],
+    ['CCC', 'C..', 'CCC'],
+    ['CCC', 'C..', 'CCC'],
+    ['CCC', 'CCC', 'CCC']
+  ]
+}
+
 const TRUNK_KIT = { worn: { 'armor.head': 'iron_helmet', 'armor.chest': 'iron_chestplate', 'armor.legs': 'iron_leggings' }, hand: 'stone_pickaxe', carried: [['iron_sword', 1], ['cobblestone', 64], ['cooked_beef', 4]] as Array<[string, number]> }
 
 const CASES_ALL: Case[] = [
   { name: 'trunk', grid: LS3B_CREEPER_1, extra: { '159,68,322': 'air', '159,67,322': 'cobblestone', '159,70,322': 'air' }, bot: new Vec3(159.5, 69, 321.8), creepers: [new Vec3(165.5, 69, 316.5)], ...TRUNK_KIT },
   { name: 'hollow', grid: LS3B_CREEPER_2, bot: new Vec3(27.7, 64, 203.3), creepers: [new Vec3(19.5, 64, 206.5), new Vec3(26.5, 64, 210.5)], worn: { 'armor.chest': 'iron_chestplate' }, hand: 'diamond_pickaxe', carried: [['iron_sword', 1], ['cobblestone', 64], ['cooked_beef', 4]] },
-  { name: 'open', grid: null, bot: new Vec3(0.5, 0, 0.5), creepers: [new Vec3(8.5, 0, 0.5)], ...TRUNK_KIT }
+  { name: 'open', grid: null, bot: new Vec3(0.5, 0, 0.5), creepers: [new Vec3(8.5, 0, 0.5)], ...TRUNK_KIT },
+  { name: 'nook', grid: NOOK, bot: new Vec3(1.5, 1, 1.5), creepers: [new Vec3(4.8, 1, 1.5)], ...TRUNK_KIT },
+  { name: 'nookBare', grid: NOOK, bot: new Vec3(1.5, 1, 1.5), creepers: [new Vec3(4.8, 1, 1.5)], ...TRUNK_KIT, carried: [['cobblestone', 64], ['cooked_beef', 4]] }
 ]
 
 async function run (cmd: string): Promise<string[]> {
