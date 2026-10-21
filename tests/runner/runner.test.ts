@@ -1827,6 +1827,31 @@ test('the farm watch: by day, the bot within 32 of its farm with 3 plots ripe, t
   }
 })
 
+test('the farm watch leaves a bare bot be (the wood done, no pickaxe): its re-equip first, the round not cut for the farm; with a pickaxe again, cut (f9-1.21.11, t314801: the way to the base for its kit cut for the farm)', async () => {
+  const { FARM_WATCH_EVERY } = await import('../../src/runner')
+  const bot = fakeBot()
+  const runner: any = new Runner(bot, { log: () => {}, handlers: {} })
+  runner.reached.push({ id: 'wood', title: '', tick: 0, wallMs: 0 })
+  const cells = [[10, 63, 0], [11, 63, 0], [12, 63, 0]]
+  bot.survival.memory.addPoi('farm', { x: 10, y: 63, z: 1 }, 'overworld', JSON.stringify({ crop: 'wheat', cells, sown: 0 }))
+  bot.blockAt = (p: any) => cells.some(([x, y, z]) => x === p.x && y + 1 === p.y && z === p.z) ? { name: 'wheat', getProperties: () => ({ age: 7 }) } : { name: 'air' }
+  Object.defineProperty(runner, 'tick', { get: () => 10000 })
+  const off = runner.watchFarm()
+  const look = (): void => { for (let i = 0; i < FARM_WATCH_EVERY; i++) bot.emit('physicsTick') }
+  try {
+    runner.roundCtrl = new AbortController()
+    look()
+    assert.equal(runner.roundCtrl.signal.aborted, false)
+    assert.equal(runner.farmDue, false)
+    bot.give('wooden_pickaxe', 1)
+    look()
+    assert.equal(runner.roundCtrl.signal.aborted, true)
+    assert.equal(runner.farmDue, true)
+  } finally {
+    off()
+  }
+})
+
 test('back by home after a trip: the farm 60 off with 3 plots ripe harvested first, whatever the upkeep\'s cadence or the hour; none ripe, not', async () => {
   const bot = fakeBot()
   const runner: any = new Runner(bot, { log: () => {}, handlers: {} })

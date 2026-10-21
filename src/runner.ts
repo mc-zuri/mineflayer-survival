@@ -1850,15 +1850,19 @@ export class Runner {
   /**
    * The farm watch: every FARM_WATCH_EVERY ticks by day, the bot within FARM_PASS_RANGE of a farm of its own with
    * MEAL_FARM_PLOTS of its plots or more ripe (farmRipeNear) and FARM_PASS_TICKS since the last, the round of work cut
-   * (a milestone's, the stock's, whatever it is: no failure counted) and the farm harvested first (harvestPassing). The
-   * farm's upkeep ran between trips only, and a long milestone (the enchanting, 50000 ticks a try) went by its ripe
-   * wheat by home day after day while the bot's meals were hunted for (f5-1.21.11 resumed from its base)
+   * (a milestone's, the stock's, whatever it is: no failure counted) and the farm harvested first (harvestPassing); not
+   * while the bot is bare (bareForWork: its re-equip first). The farm's upkeep ran between trips only, and a long
+   * milestone (the enchanting, 50000 ticks a try) went by its ripe wheat by home day after day while the bot's meals
+   * were hunted for (f5-1.21.11 resumed from its base)
    */
   watchFarm (): () => void {
     let n = 0
     const tick = (): void => {
       if (++n % FARM_WATCH_EVERY !== 0 || this.feeding || this.harvestingFarm || this.farmDue) return
       if (this.tick - this.farmCutAt < FARM_PASS_TICKS || dayPhase(this.bot.time?.timeOfDay ?? 0) !== 'day') return
+      // (not a bare bot's work: its re-equip after a death, the kit and the basics, comes first; a 1.21.11 bot's way
+      // to the base for its kit was cut for the farm by it, and it went on bare, f9-1.21.11 t314801)
+      if (bareForWork(this.bot, this.reached.map(r => r.id))) return
       const round = this.roundCtrl
       if (round == null || round.signal.aborted || !this.farmRipeNear()) return
       this.farmDue = true
