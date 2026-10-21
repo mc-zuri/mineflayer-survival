@@ -700,6 +700,8 @@ export async function holdOffArcher (bot: Bot, archer: Entity, opts: { signal?: 
         try {
           const res = await shoot(bot, archer, { signal: opts.signal, maxShots: 1 })
           shots += res.shots
+          // (none loosed, a calm mob by the arrow's way: the bow let be a while, the shield and the sword meanwhile)
+          if (res.shots === 0) noArc = ticks
         } catch (err) {
           if (isAbort(err)) throw err
           noArc = ticks

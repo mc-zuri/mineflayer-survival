@@ -85,3 +85,20 @@ test('shoot: no draw with a zombified piglin in the arrow\'s way; one already dr
   assert.ok(events.lastIndexOf('release') < events.lastIndexOf('draw'), events.join(' '))
   assert.ok(ticks >= 22 + SPARED_HOLD_TICKS - 2, `${ticks} ticks`)
 })
+
+test('shoot: with a calm mob by the way of the arrow it comes back no sooner than the next tick, never at once (a caller looping on it held the game)', async () => {
+  const { shoot } = await import('../../src/skills/shoot')
+  const skeleton = entity({ id: 8, name: 'skeleton', position: new Vec3(10.5, 64, 0.5) })
+  const piglin = entity({ id: 9, name: 'zombified_piglin', position: new Vec3(5.5, 64, 0.5) })
+  const bot: any = fakeBot({ position: new Vec3(0.5, 64, 0.5), entities: [skeleton, piglin], items: [item('bow'), item('arrow', 16)] })
+  bot.heldItem = bot.inventory.items()[0]
+  bot.world = { ...(bot.world ?? {}), raycast: () => null }
+  bot.waitForTicks = async (n: number) => await new Promise<void>(resolve => { let k = 0; const f = (): void => { if (++k >= n) { bot.off('physicsTick', f); resolve() } }; bot.on('physicsTick', f) })
+  let done = false
+  const shot = shoot(bot, skeleton as any, { maxShots: 1 }).then(r => { done = true; return r })
+  for (let i = 0; i < 5; i++) await new Promise(resolve => setImmediate(resolve))
+  assert.strictEqual(done, false)
+  bot.emit('physicsTick')
+  const r = await shot
+  assert.strictEqual(r.shots, 0)
+})

@@ -99,8 +99,10 @@ export async function shoot (bot: Bot, target: Entity | Vec3, opts: ShootOptions
       throwIfAborted(signal)
       if (isEntity && !isAlive(bot, target)) return { shots, hit: shots > 0, solution }
       if (opts.until?.() === true) return { shots, hit: false, solution }
-      // no draw with a calm mob by the arrow's way (sparedInLine)
-      if (sparedInLine(bot, target) != null) return { shots, hit: false, solution }
+      // no draw with a calm mob by the arrow's way (sparedInLine), a tick gone by first: a caller looping on the shot
+      // went round with no tick between, and the game stopped (the nether's holdOffArcher at a skeleton with a
+      // zombified piglin by the way: the event loop held 20 minutes, 26.3)
+      if (sparedInLine(bot, target) != null) { await waitTicks(bot, 1, signal); return { shots, hit: false, solution } }
       if (!hasArrows(bot) && bot.game.gameMode !== 'creative') throw new TaskError('MISSING_ITEMS', 'out of arrows')
       bot.clearControlStates()
       bot.deactivateItem()
