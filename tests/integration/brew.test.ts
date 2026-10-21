@@ -92,4 +92,20 @@ describe(`brewing on a ${DEFAULT_VERSION} server`, { timeout: 10 * 60 * 1000 }, 
     assert.strictEqual(waterBottles(bot), 2)
     assert.strictEqual(countItems(bot, 'water_bucket'), 1)
   })
+
+  it('with the water near shut in stone (no spot to see it from), fills the bottles at the water its bucket pours (f3k-run5, f4-run2: the bowless gate failed for good)', async () => {
+    await run(`fill ${xyz(origin.offset(-8, 0, -8))} ${xyz(origin.offset(8, 6, 8))} air`)
+    await run(`fill ${xyz(origin.offset(-8, -1, -8))} ${xyz(origin.offset(8, -1, 8))} grass_block`)
+    // a source 5 off in a box of stone: found by findBlock, never seen
+    await run(`fill ${xyz(origin.offset(4, -2, -1))} ${xyz(origin.offset(6, 1, 1))} stone`)
+    await run(`setblock ${xyz(origin.offset(5, -1, 0))} water`)
+    await run(`clear ${USERNAME}`)
+    await run(`tp ${USERNAME} ${origin.x + 0.5} ${origin.y} ${origin.z + 0.5}`)
+    await run(`give ${USERNAME} glass_bottle 3`)
+    await run(`give ${USERNAME} water_bucket 1`)
+    assert.ok(await waitUntil(bot, () => countItems(bot, 'glass_bottle') === 3 && countItems(bot, 'water_bucket') === 1, 100), 'the items given')
+    assert.strictEqual(await fillBottles(bot, { maxDistance: 8 }), 3)
+    assert.strictEqual(waterBottles(bot), 3)
+    assert.strictEqual(countItems(bot, 'water_bucket'), 1)
+  })
 })

@@ -129,6 +129,9 @@ export async function fillBucket (bot: Bot, args: FillBucketArgs, signal?: Abort
   return { pos, item: filled }
 }
 
+/** the water sources fillBottles finds no way to see before it pours the water bucket carried */
+export const FILL_SOURCE_TRIES = 2
+
 export interface FillBottlesArgs {
   /** bottles to fill (default: every glass bottle carried) */
   count?: number
@@ -146,13 +149,20 @@ export async function fillBottles (bot: Bot, args: FillBottlesArgs = {}, signal?
   const want = args.count ?? countItems(bot, 'glass_bottle')
   const water = (): number => bot.inventory.items().filter(i => i.name === 'potion' && potionOf(i) === 0).length
   let filled = 0
-  // no water near: the water bucket's poured by the bot for the while, and taken back up after
+  // no water near (or none the bot can get to see): the water bucket's poured by the bot for the while, and taken back
+  // up after
   let poured: Vec3 | null = null
+  // the sources there was no way to see (a pond under an overhang, a spring in a cliff: 'no spot found to see' it), not
+  // gone for again: two 1.21.11 bots with a water bucket in the bag failed the nether's bowless gate for good so
+  // (f3k-run5's (-272, 59, 12), f4-run2's (89, 51, -21))
+  const unseen = new Set<string>()
   try {
     while (filled < want) {
       const bottle = findInventoryItem(bot, 'glass_bottle')
       if (bottle == null) break
-      const source = bot.findBlock({ matching: (block: any) => isSource(block, 'water'), maxDistance: args.maxDistance ?? 32 })
+      const source: Block | null = unseen.size >= FILL_SOURCE_TRIES && poured == null
+        ? null
+        : bot.findBlock({ matching: (block: any) => isSource(block, 'water'), useExtraInfo: (block: any) => !unseen.has(block.position.toString()), maxDistance: args.maxDistance ?? 32 } as any)
       if (source == null) {
         const cell: Vec3 | null = poured == null && findInventoryItem(bot, 'water_bucket') != null ? findPlacementNear(p => bot.blockAt(p), bot.entity.position) : null
         if (cell == null) throw new SkillError('NOT_FOUND', 'no water source nearby to fill the bottles at')
@@ -160,8 +170,15 @@ export async function fillBottles (bot: Bot, args: FillBottlesArgs = {}, signal?
         poured = cell
         continue
       }
-      const pos = source.position
-      const point = await approachToSee(bot, pos, eye => surfacePoints(pos).find(p => canSee(bot, p, undefined, eye)) ?? null, signal)
+      const pos: Vec3 = source.position
+      let point: Vec3
+      try {
+        point = await approachToSee(bot, pos, eye => surfacePoints(pos).find(p => canSee(bot, p, undefined, eye)) ?? null, signal)
+      } catch (err) {
+        if (isAbort(err) || (poured != null && pos.equals(poured))) throw err
+        unseen.add(pos.toString())
+        continue
+      }
       const before = water()
       await settleInventory(bot, signal)
       await bot.equip(bottle, 'hand')
