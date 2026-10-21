@@ -25,6 +25,7 @@ import { sealItem } from '../skills/shelter'
 import { countItems } from '../skills/util'
 import { caveCells, caveOpenings, caveRuleOn, inCaveWall, leaveCave, liquidOpenings, sealCaveOpenings } from '../skills/caves'
 import { noteDrowning } from '../skills/breath'
+import { lavaAdvancing, watchAdvancingLava } from '../skills/lavaFlow'
 import { pillarFits, pillarRefuge, pillarRefugeFrom } from '../skills/pillar'
 
 /** A hostile mob (minecraft-data's entity type 'hostile', vanilla's MobCategory.MONSTER) still alive. */
@@ -140,14 +141,26 @@ export const wardenReflex: Reflex = {
   }
 }
 
-/** Out of lava and fire. */
+/**
+ * Out of lava and fire, and away from lava about to flow into the bot's cells (lavaAdvancing: a flow come up to it, a
+ * dig that let a pool in) before it touches the bot: in it, the fire's ticks are already on (Entity.lavaHurt)
+ */
 export const hazardReflex: Reflex = {
   name: 'hazard',
   priority: 90,
   check (ctx) {
     const { bot, config } = ctx
     if (!config.hazard.enabled) return null
-    if (!inHazard(bot)) return null
+    watchAdvancingLava(bot)
+    if (!inHazard(bot)) {
+      if (!lavaAdvancing(bot)) return null
+      return {
+        name: 'hazard',
+        priority: config.hazard.priority,
+        detail: 'advancing lava',
+        run: async (signal) => await escapeHazard(bot, { signal, searchRadius: config.hazard.searchRadius, waterRadius: config.hazard.waterRadius, maxTicks: config.hazard.maxTicks })
+      }
+    }
     // (the fire's cells left to a task that handles them, the blaze fight's: handleFire; lava never)
     if (fireHandled(bot) && inFireOnly(bot)) return null
     return {

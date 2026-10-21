@@ -9,6 +9,7 @@ import { type Entity, distanceToBox, entityBox, eyePosition, hasLineOfSight, isA
 import { boxInCell } from './placement'
 import { attackStrengthOf, bestMeleeWeapon } from './weapons'
 import { hotFloorCell, noteHazardLeft } from './hazardCells'
+import { advancingLavaAt, lavaNear } from './lavaFlow'
 
 // The escapes the reflexes run: out of lava and fire, up for air, away from a creeper or a crowd.
 
@@ -368,7 +369,10 @@ export interface EscapeHazardOptions extends SkillOptions {
 
 const inTheNether = (bot: Bot): boolean => /nether/.test(String(bot.game?.dimension ?? ''))
 
-/** Gets out of lava or fire onto safe ground (swimming up in lava), then to water if still burning and near. */
+/**
+ * Gets out of lava or fire, or from lava about to flow into the bot's cells (advancingLavaAt), onto safe ground the lava
+ * flows into next neither (swimming up in lava), then to water if still burning and near.
+ */
 export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): Promise<{ ticks: number }> {
   const radius = opts.searchRadius ?? 6
   const maxTicks = opts.maxTicks ?? 200
@@ -390,7 +394,8 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
       const swimmingOff = !bot.entity.onGround && (nameAt(bot, here) === 'water' || nameAt(bot, here.offset(0, 1, 0)) === 'water') &&
         ![0, -1, -2, -3].some(dy => /^(magma_block|bubble_column)$/.test(nameAt(bot, here.offset(0, dy, 0)) ?? ''))
       if (!inHazard(bot) && swimmingOff && hotTicks > 0) return { ticks: t }
-      if (!inHazard(bot) && bot.entity.onGround && isSafeStand(bot, here)) {
+      // (out where no lava flows in next: advancingLavaAt)
+      if (!inHazard(bot) && bot.entity.onGround && isSafeStand(bot, here) && !advancingLavaAt(bot)) {
         // out; still burning with water close: put it out (Entity.updateInWaterStateAndDoFluidPushing clears the fire)
         const waterRadius = opts.waterRadius ?? 6
         // the water poured scooped up again (the bucket's the portal's and the next fall's)
@@ -492,8 +497,11 @@ export async function escapeHazard (bot: Bot, opts: EscapeHazardOptions = {}): P
       if (target == null || t % 10 === 0 || !isSafeStand(bot, target)) {
         // the near ground first, then any within farRadius: in the nether's lava sea none was within 6 and the bot
         // swam up in place for 200 ticks till it burned (26.3)
-        target = nearestSpot(bot, radius, p => isSafeStand(bot, p) && !p.equals(here)) ??
-          (t % 40 === 0 ? nearestSpot(bot, opts.farRadius ?? 16, p => isSafeStand(bot, p) && !p.equals(here)) : target)
+        // (never a stand the lava beside it flows into next: advancingLavaAt)
+        // (nor one with lava beside or over it: lavaNear; but with none else, a stand out of the lava itself)
+        const stand = (p: Vec3): boolean => isSafeStand(bot, p) && !p.equals(here) && !advancingLavaAt(bot, p.offset(0.5, 0, 0.5)) && !lavaNear(bot, p)
+        const anyStand = (p: Vec3): boolean => isSafeStand(bot, p) && !p.equals(here)
+        target = nearestSpot(bot, radius, stand) ?? (t % 40 === 0 ? nearestSpot(bot, opts.farRadius ?? 16, stand) : null) ?? nearestSpot(bot, radius, anyStand) ?? target
       }
       // in the overworld's lava with a water bucket: the water poured where the bot is (the lava's cell taken by it,
       // the sources about set to obsidian, the burning put out), once. A 26.3 bot at a deep pool's shore swam in the
