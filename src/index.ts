@@ -6,7 +6,7 @@ import { ReflexEngine, type ReflexEngineOptions } from './reflexes'
 import { play, type MilestoneHandler, type PlayOptions, type PlayResult } from './runner'
 import { keepHeadAboveWater } from './skills/breath'
 import { countRest } from './skills/shelter'
-import { keepOffDripstone, keepOutOfHazardsLeft } from './skills/hazardCells'
+import { keepOffDripstone, keepOffMagma, keepOutOfHazardsLeft } from './skills/hazardCells'
 import { openSky } from './executor/explore'
 import type { MilestoneId } from './planner/progression'
 import { Diagnostics, type DiagnosticsOptions } from './diagnostics'
@@ -113,6 +113,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     keepOutOfHazardsLeft(bot)
     // no walk or drop onto a stalagmite (impaled, PointedDripstoneBlock.fallOn)
     keepOffDripstone(bot)
+    // no walk onto a magma block (MagmaBlock.stepOn) when there's a way round
+    keepOffMagma(bot)
     // the deep dark's sculk seen kept off (its sensors and shriekers: the warden) and looked for every 100 ticks
     installSculkAvoidance(bot)
     watchDangers(bot)

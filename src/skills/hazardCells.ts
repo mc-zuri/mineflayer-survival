@@ -101,3 +101,34 @@ export function keepOutOfHazardsLeft (bot: Bot): void {
   // (a respawn or another dimension: the cells were another world's)
   bot.on('respawn', () => clearHazardsLeft(bot))
 }
+
+/**
+ * the extra cost, in ticks, of a move ending on a magma block for a bot not sneaking (magmaStepCost): a walk round
+ * goes first, short of a wall (a bot on a magma floor walks off it)
+ */
+export const MAGMA_STEP_COST = 1000
+
+/**
+ * The pathfinder's step rule: a move ending on a magma block (its feet over one: MagmaBlock.stepOn burns a player that
+ * isn't stepping carefully, Entity.isSteppingCarefully: sneaking) costs MAGMA_STEP_COST, but for a bot sneaking. A 26.3
+ * bot's walk to a ruined portal's obsidian underground was taken back onto the magma among its netherrack after each
+ * of 12 hazard reflexes, and it burned to death there (ls4-26.3, t54809 to t57447).
+ */
+export function magmaStepCost (bot: Bot): (block: { position: { x: number, y: number, z: number } }) => number {
+  return (block) => {
+    const p = block.position
+    if (bot.blockAt(new Vec3(p.x, p.y - 1, p.z))?.name !== 'magma_block') return 0
+    return bot.getControlState?.('sneak') === true ? 0 : MAGMA_STEP_COST
+  }
+}
+
+/** adds magmaStepCost to the pathfinder's step rules for good (once) */
+export function keepOffMagma (bot: Bot): void {
+  const pf = bot.pathfinder as any
+  const settings = pf?.defaultMoveSettings
+  if (pf?.setMoveOptions == null || settings == null) return
+  if ((settings.exclusionAreasStep ?? []).some((f: any) => f.survivalMagma === true)) return
+  const cost = magmaStepCost(bot)
+  ;(cost as any).survivalMagma = true
+  pf.setMoveOptions({ ...settings, exclusionAreasStep: [...(settings.exclusionAreasStep ?? []), cost] })
+}
