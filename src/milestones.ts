@@ -47,6 +47,7 @@ import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
 import { extendFarm, farmCells, farmCensus, FARM_MIN_PLOTS, FARM_REACH, farmHoleSite, findFarmSite, grownPlots, knownFarms, plantFarm, plotCells, rememberFarm, SEED_OF } from './skills/farm'
+import { siteLookup } from './skills/spawnProtection'
 import { describeRequest, ownedInventory, type Executor } from './executor/executor'
 import { NETHER_SCAFFOLD_KEEP } from './executor/keep'
 import { heldFor, type ObtainRequest } from './planner/obtain'
@@ -2607,7 +2608,8 @@ export async function startFarm (bot: Bot, executor: Executor, signal: AbortSign
   const dimension = normalizeDimension(bot.game?.dimension)
   if (dimension !== 'overworld' || knownFarms(executor.memory, dimension).length > 0) return false
   const home = executor.memory.base != null ? new Vec3(executor.memory.base.x, executor.memory.base.y, executor.memory.base.z) : bot.entity.position
-  const lookup = (pos: Vec3): any => bot.blockAt(pos)
+  // (none in the square about the spawn a server keeps: spawn protection)
+  const lookup = siteLookup(bot, (pos: Vec3): any => bot.blockAt(pos))
   // (a water with FARM_MIN_PLOTS of plot ground by it at the least: a farm of one plot is none)
   let site = findFarmSite(lookup, home, 24, FARM_PLOTS, FARM_MIN_PLOTS)
   // no water near: a hole dug and filled from the water bucket held (the herd's wheat farm on 26.3 had none), the

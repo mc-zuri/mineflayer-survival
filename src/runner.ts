@@ -53,6 +53,10 @@ import { RANGED_HOSTILES } from './reflexes/rules'
 import { blockIdsNamed, findBlock } from './core/findBlocks'
 import type { Seed } from './worldgen'
 import { foodLandOf, seekFoodLand } from './executor/foodLand'
+import { outOfSiteSquare } from './skills/spawnProtection'
+
+/** a home at the world spawn is moved this far past the square about it a server keeps (spawn protection) */
+export const HOME_PAST_SQUARE = 8
 
 export interface MilestoneContext {
   bot: Bot
@@ -750,8 +754,9 @@ export class Runner {
     const land = foodLandOf(this.memory)
     if (land != null && (base == null || this.foodWork > 0)) return land
     if (base != null) return new Vec3(base.x, base.y, base.z)
+    // (out of the square about the spawn a server keeps: spawn protection, its farm and pen out of it)
     const spawn = (this.bot as any).spawnPoint as Vec3 | undefined
-    return spawn ?? null
+    return spawn == null ? null : outOfSiteSquare(this.bot, spawn, HOME_PAST_SQUARE)
   }
 
   load (): void {

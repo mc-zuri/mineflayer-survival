@@ -275,7 +275,8 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
       await giveKit(server, b, opts.username, stage)
       fs.writeFileSync(saveFile, stageSave(stage.from))
     }
-    b.loadPlugin(createPlugin())
+    // (the harness servers keep no spawn protection: spawn-protection=0, no square about the spawn kept)
+    b.loadPlugin(createPlugin({ spawnProtection: 0 }))
     log(`the advancement check at the start: ${(await server.command(`execute if entity @a[name=${opts.username},advancements={minecraft:end/kill_dragon=true}]`)).join(' | ')}`)
     const k0 = b.lockstep.ticks
     let lastK = k0

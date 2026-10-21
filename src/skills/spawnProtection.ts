@@ -392,25 +392,72 @@ export function installSpawnProtection (bot: Bot, option: SpawnProtectionOption 
 }
 
 /**
- * Walks the bot out of the square and `margin` blocks past it (the side it's nearest), when the radius is known and
- * it's in there: the block the work places by it (a crafting table, a furnace) goes down outside. Resolves whether it
- * walked.
+ * The square the bot's lasting works (the base, the farm, the pen, the mine's way down) keep out of: the radius known;
+ * else, while none is known and the bot is no op, the vanilla default SPAWN_PROTECTION_RADIUS assumed (the server never
+ * tells its spawn-protection: a server.properties setting, no gamerule; the client knows only the world spawn); with
+ * the option a number, that (0: none). Null when there's none, or out of the spawn's dimension.
  */
-export async function leaveSpawnProtection (bot: Bot, margin: number, signal?: AbortSignal): Promise<boolean> {
+export function siteSquareRadius (bot: Bot): number | null {
   const state = states.get(bot)
-  const center = spawnCenter(bot)
-  if (state?.radius == null || center == null || !underSpawnProtection(bot, bot.entity.position, margin)) return false
+  if (state == null || !inSpawnDimension(bot, state)) return null
+  if (state.radius != null && state.radius > 0 && !(state.opLevel > 0 && state.option === 'auto')) return state.radius
+  if (state.option === 'auto') return state.opLevel > 0 ? null : SPAWN_PROTECTION_RADIUS
+  return state.option > 0 ? state.option : null
+}
+
+/** whether the cell is in the square the lasting works keep out of (siteSquareRadius) and `margin` about it */
+export function inSiteSquare (bot: Bot, pos: { x: number, z: number }, margin = 0): boolean {
+  const radius = siteSquareRadius(bot)
+  return radius != null && spawnDistance(bot, pos) <= radius + margin
+}
+
+/**
+ * `point` moved out of the square the lasting works keep out of, to `past` blocks past its edge, along the axis it's
+ * furthest out on (east from the spawn itself); as it is when it's out that far already
+ */
+export function outOfSiteSquare (bot: Bot, point: Vec3, past: number): Vec3 {
+  const radius = siteSquareRadius(bot)
+  if (radius == null || spawnDistance(bot, point) > radius + past) return point
+  return outOfSiteSquareBy(bot, point, radius, past) ?? point
+}
+
+/**
+ * A lookup for the site choices (a farm's water and plots, a pen's ground) that sees nothing in the square the lasting
+ * works keep out of and `margin` about it
+ */
+export function siteLookup<T> (bot: Bot, lookup: (pos: Vec3) => T | null, margin = 1): (pos: Vec3) => T | null {
+  return (pos) => inSiteSquare(bot, pos, margin) ? null : lookup(pos)
+}
+
+/**
+ * Walks the bot out of the square and `margin` blocks past it (the side it's nearest), when the radius is known and
+ * it's in there: the block the work places by it (a crafting table, a furnace) goes down outside. With `site`, out of
+ * the square the lasting works keep out of (siteSquareRadius: the default assumed): the mine's way down starts out of
+ * it. Resolves whether it walked.
+ */
+export async function leaveSpawnProtection (bot: Bot, margin: number, signal?: AbortSignal, opts: { site?: boolean } = {}): Promise<boolean> {
+  const state = states.get(bot)
+  const radius = opts.site === true ? siteSquareRadius(bot) : state?.radius
+  const inside = opts.site === true ? inSiteSquare(bot, bot.entity.position, margin) : underSpawnProtection(bot, bot.entity.position, margin)
+  if (radius == null || !inside) return false
   const pos = bot.entity.position
-  const dx = Math.floor(pos.x) - center.x
-  const dz = Math.floor(pos.z) - center.z
-  const out = state.radius + margin + 2
-  // (along the axis it's furthest out on, or east from the spawn itself)
-  const target = Math.abs(dx) >= Math.abs(dz)
-    ? new Vec3(center.x + (dx < 0 ? -out : out), pos.y, Math.floor(pos.z))
-    : new Vec3(Math.floor(pos.x), pos.y, center.z + (dz < 0 ? -out : out))
+  const target = outOfSiteSquareBy(bot, pos, radius, margin + 1)
+  if (target == null) return false
   trace('spawnProtection: out of the square to', target.toString())
-  await navigate(bot, { goal: new goals.GoalNearXZ(target.x, target.z, 1) }, signal)
+  await navigate(bot, { goal: new goals.GoalNearXZ(Math.floor(target.x), Math.floor(target.z), 1) }, signal)
   return true
+}
+
+/** `point` moved to `past` blocks past the edge of the square of `radius` about the spawn (outOfSiteSquare's) */
+function outOfSiteSquareBy (bot: Bot, point: Vec3, radius: number, past: number): Vec3 | null {
+  const center = spawnCenter(bot)
+  if (center == null) return null
+  const dx = Math.floor(point.x) - center.x
+  const dz = Math.floor(point.z) - center.z
+  const out = radius + 1 + past
+  return Math.abs(dx) >= Math.abs(dz)
+    ? new Vec3(center.x + (dx < 0 ? -out : out), point.y, Math.floor(point.z))
+    : new Vec3(Math.floor(point.x), point.y, center.z + (dz < 0 ? -out : out))
 }
 
 /**

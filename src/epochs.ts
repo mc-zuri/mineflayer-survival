@@ -18,6 +18,7 @@ import { normalizeDimension } from './core/memory'
 import { FARM_PLOTS } from './core/crops'
 import { makeWaterHole } from './skills/caneFarm'
 import { boneMealFarm, extendFarm, farmCells, farmHoleSite, farmPlots, findFarmSite, grownPlots, harvestFarm, knownFarms, plantFarm } from './skills/farm'
+import { siteLookup } from './skills/spawnProtection'
 import { bestRod, fish, fishingSpotFor, mendingBooks } from './skills/fish'
 import { ANVIL_BLOCKS, applyBooks, repairItem } from './skills/anvil'
 import { bestElytra, durabilityLeft, equipChestplate } from './skills/elytra'
@@ -166,12 +167,12 @@ export const farmEpochHandler: MilestoneHandler = async ({ bot, executor, signal
     const farms = knownFarms(executor.memory, dimension).sort((a, b) => a.water.distanceTo(at) - b.water.distanceTo(at))
     let center = farms[0]?.water ?? at
     let radius = farms.length > 0 ? 1 : 24
-    if (findFarmSite(pos => bot.blockAt(pos) as any, center, radius, want) == null) {
+    if (findFarmSite(siteLookup(bot, pos => bot.blockAt(pos) as any), center, radius, want) == null) {
       center = at
       radius = 24
-      if (findFarmSite(pos => bot.blockAt(pos) as any, center, radius, want) == null && countItems(bot, 'water_bucket') > 0) {
+      if (findFarmSite(siteLookup(bot, pos => bot.blockAt(pos) as any), center, radius, want) == null && countItems(bot, 'water_bucket') > 0) {
         // (where the plot ground is about it: farmHoleSite, not the cane farm's podzol)
-        const hole = farmHoleSite(pos => bot.blockAt(pos) as any, at, 16)
+        const hole = farmHoleSite(siteLookup(bot, pos => bot.blockAt(pos) as any), at, 16)
         if (hole != null) await executor.task('a water hole for the farm', async (s) => await makeWaterHole(bot, at, s, hole), signal).catch(err => { if (fatal(signal, err)) throw err })
       }
     }

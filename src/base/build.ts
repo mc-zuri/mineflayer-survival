@@ -19,6 +19,7 @@ import { type BlockGetter, type Vec, BlockRegistry, blockRegistry, posKey } from
 import { generateBlueprint, planBuild, SHELL_MATERIALS, type Blueprint, type BlueprintOptions, type Placement } from './blueprint'
 import { checkStorageSafety, type SafetyReport } from './safety'
 import { selectSite, siteCandidates, type SiteScore } from './siteSelection'
+import { inSiteSquare, outOfSiteSquare } from '../skills/spawnProtection'
 import { BASE_POI, baseRecord } from './pois'
 import { keepUnbroken } from '../skills/tripKit'
 
@@ -228,6 +229,15 @@ export function inTheWay (blueprint: Blueprint, world: BlockGetter, registry: Bl
   return planBuild(blueprint, world, registry).dig.filter(c => BlockRegistry.nameOf(world(c.x, c.y, c.z)) !== own.get(posKey(c.x, c.y, c.z)))
 }
 
+/** whether a box (a blueprint's bounds) meets the square about the spawn the lasting works keep out of, or a block about it */
+export function boxInSiteSquare (bot: Bot, box: { min: Vec, max: Vec }): boolean {
+  // (the box's nearest column to the spawn)
+  const spawn = (bot as any).spawnPoint as Vec | undefined
+  if (spawn == null) return false
+  const near = { x: Math.min(Math.max(Math.floor(spawn.x), box.min.x), box.max.x), z: Math.min(Math.max(Math.floor(spawn.z), box.min.z), box.max.z) }
+  return inSiteSquare(bot, near, 1)
+}
+
 /** chooses the site: the best siteSelection score of a grid of candidates around `around` */
 export function chooseSite (bot: Bot, blueprintOptions: BlueprintOptions, around: Vec, opts: { radius?: number, step?: number, depths?: number[] } = {}): SiteScore | null {
   const world = botWorld(bot)
@@ -235,6 +245,9 @@ export function chooseSite (bot: Bot, blueprintOptions: BlueprintOptions, around
   const candidates = siteCandidates(around, opts.radius ?? 24, opts.step ?? 8, opts.depths ?? [10, 14, 18])
     // the floor's shell must stay above the bedrock layers
     .filter(c => c.y - (blueprintOptions.thickness ?? 2) > minY + 5)
+    // and the whole of it out of the square about the spawn a server keeps (spawn protection: no block broken or placed
+    // there by a player no op; 16 assumed while none is known)
+    .filter(c => !boxInSiteSquare(bot, generateBlueprint({ ...blueprintOptions, origin: c }).bounds))
   if (candidates.length === 0) return null
   return selectSite(world, candidates, { ...blueprintOptions, version: bot.version })[0] ?? null
 }
@@ -310,7 +323,9 @@ export async function buildBase (bot: Bot, opts: BuildBaseOptions): Promise<Buil
   let origin = opts.origin
   if (origin == null) {
     const spawn = (bot as any).spawnPoint as Vec3 | undefined
-    const around = opts.around ?? (spawn != null && spawn.distanceTo(bot.entity.position) < 128 ? spawn : bot.entity.position.floored())
+    // (the grid's middle moved out of the square about the spawn a server keeps by the grid's radius: its nearest
+    // candidates by the square, spawn protection)
+    const around = opts.around ?? outOfSiteSquare(bot, spawn != null && spawn.distanceTo(bot.entity.position) < 128 ? spawn : bot.entity.position.floored(), opts.radius ?? 24)
     // the candidates' depths count down from the surface there
     site = chooseSite(bot, bpOptions, around, opts)
     if (site == null) throw new TaskError('NOT_FOUND', 'no site for the base')

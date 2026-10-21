@@ -9,6 +9,7 @@ import type { WorldMemory } from '../core/memory'
 import { normalizeDimension } from '../core/memory'
 import { findBlocks } from '../core/findBlocks'
 import { SkillError, isAbort, isSkillError, throwIfAborted } from '../skills/errors'
+import { leaveSpawnProtection } from '../skills/spawnProtection'
 import { collectBlock } from '../skills/collectBlock'
 import { navigate, walkTo } from '../skills/navigate'
 import { settlePickups } from '../skills/pickupDrops'
@@ -1307,6 +1308,8 @@ async function routeRoom (bot: Bot, args: DigRouteArgs, signal?: AbortSignal, ne
  */
 export async function descendTo (bot: Bot, y: number, args: DigRouteArgs = {}, signal?: AbortSignal): Promise<boolean> {
   await outOfTheWater(bot, signal)
+  // the way down starts out of the square about the spawn a server keeps (spawn protection: its digs refused)
+  await leaveSpawnProtection(bot, 1, signal, { site: true }).catch(err => { if (isAbort(err)) throw err })
   let dir = facingDir(bot.entity.yaw)
   const lookup = lookupOf(bot)
   const maxSteps = args.maxSteps ?? 400

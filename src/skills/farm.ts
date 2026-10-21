@@ -6,6 +6,7 @@ import { Vec3 } from 'vec3'
 import { FARM_PLOTS, GROW_TICKS, GROWN_AGE, isGrown, type FarmRecord } from '../core/crops'
 import type { WorldMemory } from '../core/memory'
 import { SkillError, isAbort, throwIfAborted } from './errors'
+import { siteLookup } from './spawnProtection'
 import { collectBlock } from './collectBlock'
 import { navigateToReach } from './navigate'
 import { pickupDrops } from './pickupDrops'
@@ -306,7 +307,8 @@ export async function plantFarm (bot: Bot, args: { seed: string, center?: Vec3, 
   const seeds = countItems(bot, args.seed)
   if (seeds === 0) throw new SkillError('MISSING_ITEMS', `no ${args.seed}`)
   const plots = Math.min(args.plots ?? FARM_PLOTS, seeds)
-  const lookup: Lookup = pos => bot.blockAt(pos) as any
+  // (no water nor plot in the square about the spawn a server keeps: spawn protection)
+  const lookup: Lookup = siteLookup(bot, pos => bot.blockAt(pos) as any)
   // (a farm's own water: its block's plots not made yet, the farm sown further)
   const site = args.water != null
     ? { water: args.water, cells: plotCells(lookup, args.water, plots) }

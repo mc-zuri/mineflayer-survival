@@ -8,12 +8,14 @@ import { Vec3 } from 'vec3'
 import {
   SPAWN_INFER_RANGE, SPAWN_PROTECTION_COST, SPAWN_PROTECTION_RADIUS, installSpawnProtection, keepOffSpawnProtection,
   REFUSED_CELL_TICKS, REGION_RANGE, REGION_TICKS, breakRefused, inRefusedRegion, placeRefused,
-  placeUnderSpawnProtection, spawnProtectionMessage, spawnProtectionState, underSpawnProtection, usableOutside
+  placeUnderSpawnProtection, spawnProtectionMessage, spawnProtectionState, underSpawnProtection, usableOutside,
+  inSiteSquare, outOfSiteSquare, siteLookup, siteSquareRadius
 } from '../../src/skills/spawnProtection'
 import { dig, placeAgainst } from '../../src/core/actions'
 import { collectBlock } from '../../src/skills/collectBlock'
 import { placeBlock } from '../../src/skills/placeBlock'
 import { stepProtect } from '../../src/executor/executor'
+import { boxInSiteSquare } from '../../src/base/build'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
 const STONE = { type: 1, stateId: 1, name: 'stone' }
@@ -288,4 +290,46 @@ test(`REGION_REFUSALS refusals within REGION_RANGE of each other lately are a pr
   for (const x of [300, 301, 302]) refusedDig(op, new Vec3(x, 40, -200))
   assert.strictEqual(spawnProtectionState(op)?.regions.length, 0)
   assert.strictEqual(breakRefused(op, new Vec3(301, 40, -200)), true)
+})
+
+// The lasting works (the base, the farm, the pen, the mine's way down) keep out of the square while its radius is
+// unknown: the server never tells it, and a base planned at the spawn (build.ts' grid about it) was under it.
+
+test('the lasting works\' square: the default assumed for a bot no op while none is known, none for an op, the option\'s number (0 none), the learnt radius once known', () => {
+  const auto = spawnBot()
+  installSpawnProtection(auto, 'auto')
+  assert.strictEqual(siteSquareRadius(auto), SPAWN_PROTECTION_RADIUS)
+  assert.strictEqual(inSiteSquare(auto, new Vec3(16, 0, -16)), true)
+  assert.strictEqual(inSiteSquare(auto, new Vec3(17, 0, 0)), false)
+  // (the digs aren't kept from it till a refusal says so)
+  assert.strictEqual(underSpawnProtection(auto, new Vec3(1, 64, 1)), false)
+  auto.emit('message', message('-30, 64, 2'), 'game_info')
+  assert.strictEqual(siteSquareRadius(auto), 30)
+  const op = spawnBot()
+  installSpawnProtection(op, 'auto')
+  op._client.emit('entity_status', { entityId: op.entity.id, entityStatus: 28 })
+  assert.strictEqual(siteSquareRadius(op), null)
+  const none = spawnBot()
+  installSpawnProtection(none, 0)
+  assert.strictEqual(siteSquareRadius(none), null)
+  const set = spawnBot()
+  installSpawnProtection(set, 5)
+  assert.strictEqual(siteSquareRadius(set), 5)
+  set.game.dimension = 'the_nether'
+  assert.strictEqual(siteSquareRadius(set), null)
+})
+
+test('a home or a base\'s grid at the spawn moved out of the square, past its edge; one out of it already as it is; the site lookups see nothing in it; a base\'s box by it is in it', () => {
+  const bot = spawnBot(new Vec3(0, 64, 0))
+  installSpawnProtection(bot, 'auto')
+  assert.deepStrictEqual(outOfSiteSquare(bot, new Vec3(0, 64, 0), 8), new Vec3(SPAWN_PROTECTION_RADIUS + 9, 64, 0))
+  assert.deepStrictEqual(outOfSiteSquare(bot, new Vec3(3, 70, -10), 8), new Vec3(3, 70, -(SPAWN_PROTECTION_RADIUS + 9)))
+  const far = new Vec3(60, 64, 60)
+  assert.strictEqual(outOfSiteSquare(bot, far, 8), far)
+  const lookup = siteLookup(bot, (p: Vec3) => ({ name: 'water', position: p }))
+  assert.strictEqual(lookup(new Vec3(17, 63, 0)), null)
+  assert.strictEqual(lookup(new Vec3(18, 63, 0))?.name, 'water')
+  assert.strictEqual(boxInSiteSquare(bot, { min: { x: 17, y: 40, z: -3 }, max: { x: 25, y: 46, z: 5 } }), true)
+  assert.strictEqual(boxInSiteSquare(bot, { min: { x: 18, y: 40, z: -3 }, max: { x: 25, y: 46, z: 5 } }), false)
+  assert.strictEqual(boxInSiteSquare(bot, { min: { x: -40, y: 40, z: -40 }, max: { x: -20, y: 46, z: -18 } }), false)
 })

@@ -11,6 +11,7 @@ import { isFree, isSolid } from './placement'
 import { countItems, findInventoryItem, trace, waitTicks, waitUntil, type Block } from './util'
 import { BREEDING_FOOD } from './husbandry'
 import { dig } from '../core/actions'
+import { siteLookup } from './spawnProtection'
 import { itemTags } from '../core/tags'
 import type { WorldMemory } from '../core/memory'
 
@@ -695,10 +696,12 @@ export async function herdPen (bot: Bot, args: HerdPenArgs, signal?: AbortSignal
     protectPen(bot, pen)
   } else {
     const size = args.size ?? 9
-    let site: { center: Vec3, side: Side } | null = choosePenSite(p => bot.blockAt(p) as any, args.home, size)
+    // (out of the square about the spawn a server keeps: spawn protection)
+    const lookup = siteLookup(bot, p => bot.blockAt(p) as any, 2)
+    let site: { center: Vec3, side: Side } | null = choosePenSite(lookup, args.home, size)
     // (no flat ground: a small pen's flattened, flatPenSite)
     if (site == null && size <= PEN_FLATTEN_SIZE) {
-      const flat = flatPenSite(p => bot.blockAt(p) as any, args.home, size)
+      const flat = flatPenSite(lookup, args.home, size)
       if (flat != null) {
         trace('herdPen: the ground flattened at', flat.center.toString(), flat.digs.length, 'dug,', flat.fills.length, 'filled')
         await flattenPenGround(bot, flat, signal)
