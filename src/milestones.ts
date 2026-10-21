@@ -40,7 +40,7 @@ import { pickupDrops } from './skills/pickupDrops'
 import { countItems, waitTicks } from './skills/util'
 import { obsidianHazard } from './skills/hazardCells'
 import { deepDarkNear } from './skills/danger'
-import { caveCells, caveRuleOn, inCaveWall } from './skills/caves'
+import { CaveCells, caveCells, caveRuleOn, inCaveWall } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
@@ -611,8 +611,19 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
       log(`a portal frame: a diamond pickaxe: ${(err as Error).message}`)
     })
   }
+  // within OBSIDIAN_HOME_RANGE of home (the base's, else here), as the enchanting table's
+  const base = executor.memory.base
+  const bound: ObsidianBound = { home: base != null && base.dimension === 'overworld' ? base : bot.entity.position.clone(), range: OBSIDIAN_HOME_RANGE }
   // the obsidian in the world first (in sight, a ruined portal's): no lava worked for what's there
-  await naturalObsidian(bot, executor, PORTAL_OBSIDIAN, signal, log)
+  await naturalObsidian(bot, executor, PORTAL_OBSIDIAN, signal, log, bound)
+  if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
+  // then cast at home, a bucket of lava a trip, before any pool's shore: a 1.21.11 bot not fit for the caves went for
+  // its frame to pools at y -58 and -22, found no site to cast by them, and swam into the second's lava (f3-1.21.11,
+  // t156157 to t178951)
+  await obsidianAtHome(bot, executor, PORTAL_OBSIDIAN, signal, log, bound, PORTAL_OBSIDIAN + 4).catch(err => {
+    if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+    log(`a portal frame: the casts at home: ${(err as Error).message}`)
+  })
   if (count('obsidian') >= PORTAL_OBSIDIAN) return await placeFromObsidian()
   const tries = (p: { x: number, y: number, z: number }): number => {
     const poi = executor.memory.getPois('lava_tried', { dimension: 'overworld' }).find(t => Math.hypot(t.x - p.x, t.z - p.z) < 16 && Math.abs(t.y - p.y) < 16)
@@ -662,7 +673,7 @@ export async function buildAPortal (bot: Bot, executor: Executor, signal: AbortS
   // (in lavaPoolOrder's order within each: under the sky first, then in the rock, none in a cave under the cave rule: a
   // 1.21.11 bot not cave-ready went for the frame to a pool at y -56 in a cave, and drowned in a flooded gap by it,
   // f1-1.21.11 t166473 to t171272)
-  const pools = lavaPoolOrder(bot, nearestLavaPools(bot)).map(p => ({ p, n: tries(p) })).filter(t => t.n < POOL_TRIES).sort((a, b) => a.n - b.n).map(t => t.p)
+  const pools = lavaPoolOrder(bot, nearestLavaPools(bot)).filter(p => withinBound(bound, p)).map(p => ({ p, n: tries(p) })).filter(t => t.n < POOL_TRIES).sort((a, b) => a.n - b.n).map(t => t.p)
   for (const pool of pools.slice(0, 4)) {
     const at = new Vec3(pool.x, pool.y, pool.z)
     log(`a portal frame: the lava pool at ${pool.x.toFixed(0)} ${pool.y.toFixed(0)} ${pool.z.toFixed(0)}`)
@@ -1345,7 +1356,7 @@ export function homeLavaSources (bot: Bot, bound: ObsidianBound): Vec3[] {
  * a 26.3 bot's enchanting table went for its obsidian to a pool some 1000 blocks from home in the deep dark, where a
  * warden killed it (f2-26.3, t83894 to t87920). Resolves whether `count` are held.
  */
-export async function obsidianAtHome (bot: Bot, executor: Executor, count: number, signal: AbortSignal, log: (line: string) => void, bound: ObsidianBound): Promise<boolean> {
+export async function obsidianAtHome (bot: Bot, executor: Executor, count: number, signal: AbortSignal, log: (line: string) => void, bound: ObsidianBound, trips = HOME_CAST_TRIPS): Promise<boolean> {
   const have = (): number => countItems(bot, 'obsidian')
   const quiet = (err: unknown): void => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err }
   if (have() >= count) return true
@@ -1354,7 +1365,7 @@ export async function obsidianAtHome (bot: Bot, executor: Executor, count: numbe
   if (countItems(bot, ['bucket', 'lava_bucket']) === 0) await executor.obtain([{ item: 'bucket', count: 1 }], signal).catch(quiet)
   if (countItems(bot, ['bucket', 'lava_bucket']) === 0) return false
   const home = bound.home != null ? new Vec3(bound.home.x, bot.entity.position.y, bound.home.z) : bot.entity.position.clone()
-  for (let trip = 0; trip < HOME_CAST_TRIPS && have() < count; trip++) {
+  for (let trip = 0; trip < trips && have() < count; trip++) {
     throwIfAborted(signal)
     if (countItems(bot, 'lava_bucket') === 0) {
       const sources = homeLavaSources(bot, bound).slice(0, HOME_CAST_SOURCES)
@@ -1414,7 +1425,11 @@ export const POOL_CAVE_RADIUS = 3
  * t183218 to t188576).
  */
 export function lavaPoolOrder (bot: Bot, pools: ReadonlyArray<{ x: number, y: number, z: number }>): Array<{ x: number, y: number, z: number }> {
-  const cells = caveCells(bot)
+  // (the cave's cells by a pool taken lit or not: the lava lights its own cave, and a lava lake's cavern read as no
+  // cave's by its cells' light; a 1.21.11 bot not fit for the caves went to such pools at y -58 and -22 and swam into
+  // the second's lava, f3-1.21.11 t178951)
+  const lit = caveCells(bot)
+  const cells = new CaveCells({ block: lit.view.block, dug: lit.view.dug })
   const rule = caveRuleOn(bot)
   const inCave = (p: { x: number, y: number, z: number }): boolean => {
     const c = new Vec3(Math.floor(p.x), Math.floor(p.y), Math.floor(p.z))

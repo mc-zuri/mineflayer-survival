@@ -925,7 +925,8 @@ test('a portal with a diamond pickaxe and the seed known goes to the nearest rui
   const { ruinedPortalCandidates } = await import('../../src/worldgen/placement')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const { Vec3 } = await import('vec3')
-  const bot = fakeBot({ position: new Vec3(0.5, 70, 0.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1), item('flint_and_steel', 1)] })
+  // (by seed 2's ruined portal at (304, 96), home: the next ones are past OBSIDIAN_HOME_RANGE)
+  const bot = fakeBot({ position: new Vec3(290.5, 70, 90.5), items: [item('water_bucket', 1), item('diamond_pickaxe', 1), item('flint_and_steel', 1)] })
   bot.game.dimension = 'overworld'
   bot.survival = { ...(bot.survival ?? {}), playOptions: { seed: '2' } }
   bot.findBlocks = () => []
@@ -945,7 +946,7 @@ test('a portal with a diamond pickaxe and the seed known goes to the nearest rui
   } finally {
     seedBiomes.openSeedBiomes = realOpen
   }
-  const land = ruinedPortalCandidates('2', { x: 0.5, z: 0.5 })
+  const land = ruinedPortalCandidates('2', { x: 290.5, z: 90.5 })
   const nearest = land[0]
   assert.ok(calls.includes('to a ruined portal'), calls.join(', '))
   assert.ok(!calls.slice(0, calls.indexOf('to a ruined portal')).includes('to the lava'), calls.join(', '))
@@ -958,10 +959,10 @@ test('a portal with a diamond pickaxe and the seed known goes to the nearest rui
   } finally {
     seedBiomes.openSeedBiomes = realOpen
   }
-  // the next time, the next candidate (the first is noted as gone to)
-  const second = land[1]
-  assert.equal(calls.filter(c => c === 'to a ruined portal').length, 1, calls.join(', '))
-  assert.ok(executor.memory.getPois(RUINED_PORTAL_TRIED).some((p: any) => p.x === second.x && p.z === second.z))
+  // the next time, none: the first is noted as gone to, the next past OBSIDIAN_HOME_RANGE of home
+  const { OBSIDIAN_HOME_RANGE } = await import('../../src/milestones')
+  assert.ok(land[1].distance > OBSIDIAN_HOME_RANGE)
+  assert.equal(calls.filter(c => c === 'to a ruined portal').length, 0, calls.join(', '))
 })
 
 test('naturalObsidian passes over obsidian in water (an ocean ruined portal) or by lava', async () => {
@@ -1192,4 +1193,33 @@ test('the way into the nether run again after the portal took the bot (a reflex 
   }
   await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }).catch(() => {})
   assert.equal(ran, 'fine')
+})
+
+test('a portal frame\'s obsidian cast at home before any pool (obsidianAtHome, 10 trips of a bucket each), then the frame built (f3-1.21.11)', async () => {
+  const { buildAPortal } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const lava = new Vec3(6, 40, 0)
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('water_bucket', 1), item('bucket', 1), item('diamond_pickaxe', 1), item('flint_and_steel', 1)], world: (p: any) => p.x === 6 && p.y === 40 && p.z === 0 ? 'lava' : p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'overworld'
+  bot.findBlocks = (opts: any) => opts.matching === bot.registry.blocksByName.lava.id ? [lava] : []
+  const calls: string[] = []
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async () => {}, task: async (name: string, fn: any) => { calls.push(name); if (name !== 'build a nether portal' && name !== 'up to the surface') return await fn(new AbortController().signal) } }
+  const bucket = require('../../src/skills/bucket')
+  const obsidian = require('../../src/nether/obsidian')
+  const realFill = bucket.fillBucket
+  const realPit = obsidian.obsidianInPit
+  let made = 0
+  const setSlot = (slot: number, name: string, n = 1): void => { bot.inventory.slots[slot] = Object.assign(item(name, n), { slot }) }
+  bucket.fillBucket = async () => { setSlot(10, 'lava_bucket') }
+  obsidian.obsidianInPit = async () => { setSlot(10, 'bucket'); made++; setSlot(25, 'obsidian', made); return true }
+  try {
+    await buildAPortal(bot, executor, new AbortController().signal, () => {})
+  } finally {
+    bucket.fillBucket = realFill
+    obsidian.obsidianInPit = realPit
+  }
+  assert.equal(made, 10)
+  assert.ok(!calls.includes('to the lava'), calls.join(', '))
+  assert.equal(calls[calls.length - 1], 'build a nether portal')
 })
