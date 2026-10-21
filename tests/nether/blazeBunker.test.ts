@@ -463,3 +463,27 @@ test('bunkerFires: the fires in front of the slit within reach that the eyes see
     restore()
   }
 })
+
+test('fightFromNook in a bunker: a charged blaze whose shot line reaches the bot is a danger though the ray to its eyes says it sees nothing (a fence in the way): the shield up, no errand out', async () => {
+  const { entity } = await import('../reflexes/fakeBot')
+  const { fightFromNook, blazeSeesBot } = await import('../../src/nether/blazeFight')
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 66.5, -3.5), meta: { health: 20, flags: 1 } })
+  const { bot, b, restore } = await bunkerBot([blaze])
+  // the ray from its eyes (feet + 1.53) taken as blocked, its fireball's (feet + 1.4) not
+  const ray = bot.world.raycast
+  bot.world.raycast = (from: Vec3, dir: Vec3, range: number) => Math.abs(from.y - (blaze.position.y + 1.53)) < 1e-6 ? { position: from.floored(), intersect: from.plus(dir.scaled(0.5)), boundingBox: 'block', name: 'nether_brick_fence' } : ray(from, dir, range)
+  let errands = 0
+  const ac = new AbortController()
+  try {
+    assert.equal(blazeSeesBot(bot, blaze), false)
+    const done = fightFromNook(bot, b, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 3000, errand: async () => { errands++; return false } }, ac.signal).catch(err => err)
+    await ticks(bot, 20)
+    assert.equal(errands, 0)
+    assert.equal(bot.usingHeldItem, true)
+    ac.abort()
+    await ticks(bot, 5)
+    await done
+  } finally {
+    restore()
+  }
+})

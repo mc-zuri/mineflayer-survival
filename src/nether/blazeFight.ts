@@ -837,7 +837,10 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // shoot none for 4000 ticks, by seed 2's open throne at (-290, 77, -209), 26.3)
       const reaches = (from: Vec3): boolean => nook.bunker == null || fireballReaches(bot, from)
       const fireball = proof ? undefined : Object.values(bot.entities).find(e => e.name === SMALL_FIREBALL && fireballIncoming(bot, e, 24) && reaches(e.position))
-      const danger = proof ? [] : seeing.filter(b => volleys.dangerous(b.id, tick) && reaches(b.position.offset(0, FIREBALL_SPAWN_HEIGHT, 0))).sort(near)
+      // (a bunker's: any charged blaze whose shot's line reaches it, seen or not: the client's ray from its eyes to the
+      // bot's, through a fence's cell, isn't the server's; 26.3 bots in their bunker by seed 2's throne at (-277, 77,
+      // -159) took fireball after fireball with the shield down from blazes behind its fence they 'didn't see', and burned)
+      const danger = proof ? [] : (nook.bunker != null ? blazes : seeing).filter(b => volleys.dangerous(b.id, tick) && reaches(b.position.offset(0, FIREBALL_SPAWN_HEIGHT, 0))).sort(near)
 
       // fire in the nook (a fireball's on the floor by the feet), or on a bunker's sill: out at once
       for (const p of [nook.stand, nook.stand.plus(UP), ...(nook.bunker != null ? [nook.bunker.slit] : [])]) {
