@@ -59,6 +59,7 @@ import { NetherBiomeSource } from './worldgen/netherBiomes'
 import { blazeRodsWithBrew, resetBrewTries } from './nether/brewing'
 import { waterBottles } from './skills/brew'
 import { fillBottles, fillBucket } from './skills/bucket'
+import { scoopByTunnel } from './skills/lavaScoop'
 import { ruinedPortalCandidates } from './worldgen/placement'
 import { openSeedBiomes, type SeedBiomes } from './worldgen/seedBiomes'
 import type { Seed } from './worldgen/random'
@@ -1459,7 +1460,8 @@ export function homeLavaSources (bot: Bot, bound: ObsidianBound): Vec3[] {
 
 /**
  * Obsidian cast at home, a bucket of lava at a time: the lava scooped from a source near (homeLavaSources: in the rock,
- * the bot's way to it the cave rule's, never into the cave), carried back to home and poured in a pit dug in the rock
+ * the bot's way to it the cave rule's, never into the cave; one no spot near sees scooped from a tunnel to it,
+ * scoopByTunnel), carried back to home and poured in a pit dug in the rock
  * there, the water over it, the obsidian mined with the diamond pickaxe (nether/obsidian obsidianInPit); up to
  * HOME_CAST_TRIPS trips. A water bucket and an empty one are got first. No trip far off, none to a deep pool's shore:
  * a 26.3 bot's enchanting table went for its obsidian to a pool some 1000 blocks from home in the deep dark, where a
@@ -1488,6 +1490,16 @@ export async function obsidianAtHome (bot: Bot, executor: Executor, count: numbe
         } catch (err) {
           quiet(err)
           log(`obsidian: the lava at ${source.toString()}: ${(err as Error).message}`)
+        }
+        // no spot near sees it (a source in the rock, under a ledge): a tunnel to a stand by it, the bucket filled
+        // through its top (scoopByTunnel)
+        try {
+          await executor.task('lava for a cast at home, by a tunnel', async (s) => await scoopByTunnel(bot, source, s), signal)
+          filled = countItems(bot, 'lava_bucket') > 0
+          if (filled) break
+        } catch (err) {
+          quiet(err)
+          log(`obsidian: the lava at ${source.toString()} by a tunnel: ${(err as Error).message}`)
         }
       }
       if (!filled) return false

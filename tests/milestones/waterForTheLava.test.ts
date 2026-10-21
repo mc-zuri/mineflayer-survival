@@ -108,3 +108,31 @@ test('obsidianAtHome: a bucket of lava scooped from a source near (none in the d
   assert.equal(obsidianCount, 4)
   assert.deepEqual([...new Set(scooped)], ['(6, 40, 0)'])
 })
+
+test('obsidianAtHome: a source no spot sees (in the rock) scooped by a tunnel to it (scoopByTunnel), the cast at home made (f3-1.21.11, t195365)', async () => {
+  const { obsidianAtHome } = await import('../../src/milestones')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const lava = [new Vec3(6, 40, 0)]
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('diamond_pickaxe', 1), item('water_bucket', 1), item('bucket', 1)], world: p => lava.some(l => l.equals(p)) ? 'lava' : p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'overworld'
+  bot.findBlocks = (opts: any) => opts.matching === bot.registry.blocksByName.lava.id ? lava.slice() : []
+  const bucket = require('../../src/skills/bucket')
+  const scoop = require('../../src/skills/lavaScoop')
+  const obsidian = require('../../src/nether/obsidian')
+  const real = { fill: bucket.fillBucket, scoop: scoop.scoopByTunnel, pit: obsidian.obsidianInPit }
+  const setSlot = (slot: number, name: string, count = 1): void => { bot.inventory.slots[slot] = Object.assign(item(name, count), { slot }) }
+  const calls: string[] = []
+  const { SkillError } = await import('../../src/skills/errors')
+  bucket.fillBucket = async (_b: any, args: any) => { calls.push('fill'); throw new SkillError('NO_PATH', `no spot found to see ${args.pos.toString()} from`) }
+  scoop.scoopByTunnel = async () => { calls.push('scoop'); setSlot(11, 'lava_bucket') }
+  obsidian.obsidianInPit = async () => { calls.push('cast'); setSlot(11, 'bucket'); setSlot(20, 'obsidian', 1); return true }
+  const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, task: async (_name: string, fn: any) => await fn(new AbortController().signal), obtain: async () => {} }
+  try {
+    assert.equal(await obsidianAtHome(bot, executor, 1, new AbortController().signal, () => {}, { home: { x: 0, z: 0 }, range: 160 }), true)
+  } finally {
+    bucket.fillBucket = real.fill
+    scoop.scoopByTunnel = real.scoop
+    obsidian.obsidianInPit = real.pit
+  }
+  assert.deepEqual(calls, ['fill', 'scoop', 'cast'])
+})
