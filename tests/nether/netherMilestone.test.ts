@@ -122,7 +122,7 @@ test('a portal with no bucket gets one first; with no lava near to try it walks 
 test('the blaze rods wanted are fixed before the task: a restart with rods got meanwhile wants no more than the first', async () => {
   const { netherHandler } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ items: [item('ender_eye', 0)] })
+  const bot = fakeBot({ items: [item('cooked_beef', 8), item('ender_eye', 0)] })
   bot.game.dimension = 'the_nether'
   ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
   let rods: any = null
@@ -145,7 +145,7 @@ test('the blaze rods wanted are fixed before the task: a restart with rods got m
 test('in the nether with few blocks the milestone mines netherrack for its bridges before the fortress', async () => {
   const { netherHandler, NETHER_BLOCKS } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ items: [item('cobblestone', 8)] })
+  const bot = fakeBot({ items: [item('cooked_beef', 8), item('cobblestone', 8)] })
   bot.game.dimension = 'the_nether'
   ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
   const calls: string[] = []
@@ -311,6 +311,22 @@ test('netherKit: a sword (stone at least), a chestplate and a shield got when mi
   await netherKit(armed, executor, new AbortController().signal, () => {})
   // (the bottles alone)
   assert.deepStrictEqual(calls, ['obtain glass_bottle,crafting_table,cobblestone', 'fill the water bottles'])
+})
+
+test('netherKit in the nether: nothing gathered; short of NETHER_STAY_FOOD food points, back to the overworld, not ready; with them, on (f7-1.21.11: spiders and cows hunted in the nether, the rods fought with 24 points)', async () => {
+  const { netherKit, NETHER_STAY_FOOD } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  for (const [beef, back] of [[3, true], [Math.ceil(NETHER_STAY_FOOD / 8), false]] as Array<[number, boolean]>) {
+    const bot = fakeBot({ items: [item('iron_sword', 1), item('cooked_beef', beef)] })
+    bot.game.dimension = 'the_nether'
+    const tasks: string[] = []
+    const asked: any[] = []
+    const executor: any = { memory: new WorldMemory(), tasks: { tick: 0 }, obtain: async (r: any[]) => { asked.push(...r) }, task: async (name: string) => { tasks.push(name) } }
+    const err: any = await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e)
+    assert.deepStrictEqual(asked, [], 'nothing gathered')
+    assert.deepStrictEqual(tasks, back ? ['back to the overworld'] : [])
+    assert.equal(err?.notReady === true, back, String(err))
+  }
 })
 
 test('netherKit: a worn shield (SHIELD_WORN or less left) has another got, the fresh one not', async () => {
@@ -587,7 +603,7 @@ test('the blaze rods: a spawner there\'s no way to is left for another of the fo
   const fortressSkills = require('../../src/nether/fortressSkills')
   const { SkillError } = await import('../../src/skills/errors')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ items: [item('ender_eye', 0), item('bow', 1), item('arrow', 64)] })
+  const bot = fakeBot({ items: [item('cooked_beef', 8), item('ender_eye', 0), item('bow', 1), item('arrow', 64)] })
   bot.game.dimension = 'the_nether'
   bot.findBlocks = () => []
   ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
@@ -1114,7 +1130,7 @@ test('the blaze rods with no bow and no fire resistance to be had: from a bunker
   const { netherHandler } = await import('../../src/milestones')
   const fortressSkills = require('../../src/nether/fortressSkills')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
-  const bot = fakeBot({ items: [item('ender_eye', 0), item('diamond_sword', 1)] })
+  const bot = fakeBot({ items: [item('cooked_beef', 8), item('ender_eye', 0), item('diamond_sword', 1)] })
   bot.game.dimension = 'the_nether'
   bot.findBlocks = () => []
   ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
@@ -1149,7 +1165,7 @@ test('the blaze rods failed for food (no food left to heal on) or hurt on the tr
   assert.equal(rodsFailedForFood(new SkillError('MISSING_ITEMS', 'no food left to heal on in the nook, health 6.8')), true)
   assert.equal(rodsFailedForFood(Object.assign(new SkillError('MISSING_ITEMS', 'hurt'), { tripHurt: true })), true)
   assert.equal(rodsFailedForFood(new SkillError('TIMEOUT', '0 of 8 blaze rods')), false)
-  const bot = fakeBot({ items: [item('diamond_sword', 1), item('bow', 1), item('arrow', 64)] })
+  const bot = fakeBot({ items: [item('cooked_beef', 8), item('diamond_sword', 1), item('bow', 1), item('arrow', 64)] })
   bot.game.dimension = 'the_nether'
   bot.findBlocks = () => []
   ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
@@ -1169,6 +1185,30 @@ test('the blaze rods failed for food (no food left to heal on) or hurt on the tr
   assert.equal(err?.notReady, true, String(err))
   assert.equal(err?.foodShort, true)
   assert.deepEqual(tasks, ['blaze rods', 'back to the overworld'])
+})
+
+test('the nether milestone begun in the nether short of NETHER_STAY_FOOD food points goes back to the overworld for the gate, not to the rods (f7-1.21.11: in by the kit, the rods fought with 24 points)', async () => {
+  const { netherHandler } = await import('../../src/milestones')
+  const fortressSkills = require('../../src/nether/fortressSkills')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const bot = fakeBot({ items: [item('cooked_beef', 3), item('diamond_sword', 1)] })
+  bot.game.dimension = 'the_nether'
+  bot.findBlocks = () => []
+  ;(bot as any).pathfinder = { defaultMoveSettings: {}, setMoveOptions: () => {} }
+  const memory = new WorldMemory()
+  ;(bot as any).survival = { memory }
+  const real = fortressSkills.collectBlazeRods
+  const tasks: string[] = []
+  fortressSkills.collectBlazeRods = async () => { tasks.push('fight'); return { rods: 0, kills: 0, ticks: 0 } }
+  const executor: any = { memory, tasks: { tick: 0 }, obtain: async () => {}, task: async (name: string, fn: (s: AbortSignal) => Promise<unknown>) => { tasks.push(name); if (name === 'back to the overworld') return; return await fn(new AbortController().signal) } }
+  let err: any = null
+  try {
+    err = await netherHandler({ bot, executor, signal: new AbortController().signal, log: () => {}, milestone: null as any, state: null as any }).then(() => null, e => e)
+  } finally {
+    fortressSkills.collectBlazeRods = real
+  }
+  assert.equal(err?.notReady, true, String(err))
+  assert.deepEqual(tasks, ['back to the overworld'])
 })
 
 test('netherKit: no bow to be had, the water bottles held: ready with no slime ball nor magma cream (the cubes of the nether give the cream; asking for a ball kept full-1.21.11-fresh-g out for good), not ready without the bottles', async () => {

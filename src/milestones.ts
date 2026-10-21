@@ -938,6 +938,18 @@ export async function lavaSearch (bot: Bot, executor: Executor, bound: ObsidianB
  * golden piece worn (the piglins leave a player with gold on alone: PiglinAi.isWearingGold), crafted from the ingots
  */
 export async function netherKit (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<void> {
+  // in the nether already (a try's fight left it there, a walk took it through the portal): nothing gathered in there
+  // (no spider, cow nor carrot to be had), and short of NETHER_STAY_FOOD food points, back to the overworld for the
+  // gate's, the milestone not ready. A 1.21.11 bot's kit, its gold planned from nether gold ore, went through the portal
+  // and on hunting spiders and cows in the nether 25000 ticks, then fought for the rods with 24 food points
+  // (f7-1.21.11 resumed from its enchanting, seed -3768674050494303582)
+  if (inNether(bot)) {
+    const food = heldFor(ownedInventory(bot), FOOD_GOAL, { unit: 'nutrition' })
+    if (food >= NETHER_STAY_FOOD) return
+    log(`nether kit: in the nether with ${food} food points: back to the overworld for the gate's`)
+    await executor.task('back to the overworld', async (s) => await backToOverworld(bot, s), signal)
+    throw Object.assign(new SkillError('MISSING_ITEMS', `in the nether with ${food} food points, under ${NETHER_STAY_FOOD}`), { notReady: true, foodShort: true, foodPoints: food })
+  }
   const worn = (slot: 'torso'): string | undefined => bot.inventory.slots[bot.getEquipmentDestSlot(slot)]?.name
   const want: Array<{ item: string | string[], count: number, optional?: boolean }> = []
   if (countItems(bot, ['diamond_sword', 'iron_sword', 'netherite_sword']) === 0) want.push({ item: 'iron_sword', count: 1, optional: true })
@@ -1112,6 +1124,8 @@ export async function netherSpares (bot: Bot, executor: Executor, gate: NetherGa
 export const NETHER_FOOD_TICKS = 12000
 /** the ticks a try of the nether kit spends on the gate's arrows after the rest of the gear */
 export const NETHER_ARROW_TICKS = 12000
+/** the food points under which a bot found in the nether at the milestone's start goes back for the gate's (netherKit) */
+export const NETHER_STAY_FOOD = 60
 /** the pickaxes of iron or better the nether's trip goes with (netherKit gets the spare, the trip kit leaves it) */
 export const NETHER_PICKAXES = 2
 /** the spiders' misses in a row (the bow's string) after which the gate goes without a bow (the water bottles) */
@@ -1379,6 +1393,10 @@ export const netherHandler: MilestoneHandler = async ({ bot, executor, signal, l
       await buildAPortal(bot, executor, signal, log)
       await executor.task('into the nether', async (s) => { if (!inNether(bot)) await enterNether(bot, { build: false }, s) }, signal)
     }
+  } else {
+    // in already at the start (a try's fight left it there, or the kit's walk went through the portal): short of
+    // NETHER_STAY_FOOD food points, back for the gate's (netherKit)
+    await netherKit(bot, executor, signal, log)
   }
   await goldOnInTheNether(bot, executor, signal, log)
   await recoverNetherDrops(bot, executor, signal, log)
