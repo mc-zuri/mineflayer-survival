@@ -18,7 +18,7 @@ function fakeBot (): any {
 test('createPlugin sets bot.survival with the default options', () => {
   const bot = fakeBot()
   createPlugin()(bot)
-  assert.deepStrictEqual(bot.survival.options, { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {} })
+  assert.deepStrictEqual(bot.survival.options, { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, spawnProtection: 'auto' })
   assert.ok(bot.survival.stock != null, 'the stock policy is on by default')
   assert.ok(bot.survival.reflexes != null)
   assert.deepStrictEqual(bot.survival.diagnostics.lastReports(), [])

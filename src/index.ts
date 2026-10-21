@@ -26,6 +26,7 @@ import { guardEdges } from './skills/edgeGuard'
 import { saveBetterPickaxes } from './skills/digTool'
 import { rememberNetherDeath } from './nether/deaths'
 import { keepNetherTrail, pruneTrail } from './nether/trail'
+import { installSpawnProtection, type SpawnProtectionOption } from './skills/spawnProtection'
 
 export * from './core'
 export * from './planner'
@@ -56,6 +57,11 @@ export interface SurvivalOptions {
   diagnostics?: DiagnosticsOptions
   /** the stock policy (planner/stock.ts): its marks, overrides and working set; false or enabled: false for none */
   stock?: StockOptions | false
+  /**
+   * the server's spawn protection (skills/spawnProtection): its radius when known (0: none), or 'auto' (the default)
+   * to learn it from the server's refusals; the bot breaks and places nothing in it
+   */
+  spawnProtection?: SpawnProtectionOption
 }
 
 export interface Survival {
@@ -100,7 +106,7 @@ export const KILLER_TICKS = 200
 export const DEATH_CARRIED_TICKS = 20
 
 export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
-  const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, ...opts }
+  const options: Required<SurvivalOptions> = { loadPathfinder: true, reflexes: true, diagnostics: {}, stock: {}, spawnProtection: 'auto', ...opts }
   return function (bot: Bot): void {
     if (options.loadPathfinder && bot.pathfinder == null) bot.loadPlugin(createPathfinder())
     useScaffoldItems(bot)
@@ -131,6 +137,8 @@ export function createPlugin (opts: SurvivalOptions = {}): (bot: Bot) => void {
     watchArrivals(bot)
     // (and the work's paths round a trident drowned's zone: skills/tridentZone)
     keepOffTridentZones(bot)
+    // nothing broken or placed in the square about the world spawn a dedicated server keeps (spawn-protection)
+    installSpawnProtection(bot, options.spawnProtection)
     // no stare at a calm enderman by accident (EnderMan.isLookingAtMe)
     installGazeGuard(bot)
     // the ticks since the bot last slept (Stats.TIME_SINCE_REST): the night below the surface is slept only when due
