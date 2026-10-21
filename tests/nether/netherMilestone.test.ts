@@ -436,39 +436,57 @@ test('netherKit: the arrows are got on their own after the gear, and once the hu
   assert.deepStrictEqual(missed, ['chicken'])
 })
 
-test('netherKit: no bow got within its budget (no spider found for the string), the gate goes without the bow and its arrows and asks for the water bottles for fire resistance', async () => {
-  const { netherKit, netherGate } = await import('../../src/milestones')
+test('netherKit: the spiders for the bow hunted by night; BOW_NIGHT_HUNTS night hunts that find none, the gate goes without the bow and its arrows and asks for the water bottles; a stopped hunt by day counts none (f8-1.21.11)', async () => {
+  const { netherKit, netherGate, bowNightHunts, BOW_NIGHT_HUNTS } = await import('../../src/milestones')
   const { fakeBot, item } = await import('../reflexes/fakeBot')
   const gear = NETHER_GEAR().filter((i: any) => i.name !== 'bow' && i.name !== 'arrow')
-  // a spider missed already: no bow asked for
   const memory = new WorldMemory()
-  assert.equal(netherGate(fakeBot({ items: gear }), { memory, sightings: { misses: (n: string) => n === 'spider' ? 3 : 0 } }).bow, false)
-  assert.equal(netherGate(fakeBot({ items: [...gear, item('bow', 1)] }), { memory, sightings: { misses: () => 1 } }).bow, true)
-  // missed fewer than BOW_SPIDER_MISSES times: the bow still asked for
-  const { BOW_SPIDER_MISSES } = await import('../../src/milestones')
-  assert.equal(netherGate(fakeBot({ items: gear }), { memory, sightings: { misses: (n: string) => n === 'spider' ? BOW_SPIDER_MISSES - 1 : 0 } }).bow, true)
+  // the sightings' misses no longer give it up; the night hunts do
+  assert.equal(netherGate(fakeBot({ items: gear }), { memory, sightings: { misses: () => 9 } }).bow, true)
+  const given = fakeBot({ items: gear })
+  bowNightHunts(given, BOW_NIGHT_HUNTS)
+  assert.equal(netherGate(given, { memory }).bow, false)
+  assert.equal(netherGate(fakeBot({ items: [...gear, item('bow', 1)] }), { memory }).bow, true)
   const bot = fakeBot({ items: gear })
   bot.game.dimension = 'overworld'
-  // (missed twice before: this try's miss the third)
-  const missed: string[] = new Array(BOW_SPIDER_MISSES - 1).fill('spider')
+  bot.time = { timeOfDay: 14000, age: 0 }
   const asked: string[] = []
   const executor: any = {
     memory,
     tasks: { tick: 0 },
-    sightings: { misses: (n: string) => missed.filter(m => m === n).length, missing: (names: string[]) => missed.push(...names) },
     obtain: async (reqs: any[]) => {
       asked.push(reqs.map(r => r.item).join(','))
       if (reqs.some(r => r.item === 'bow')) throw new TaskError('NOT_FOUND', 'no spider found exploring')
     },
     task: async () => {}
   }
+  for (let i = 1; i < BOW_NIGHT_HUNTS; i++) {
+    const err: any = await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e)
+    assert.equal(bowNightHunts(bot), i)
+    assert.match(err?.message ?? '', /bow/)
+  }
+  asked.length = 0
   const err: any = await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e)
-  assert.deepStrictEqual(missed, new Array(BOW_SPIDER_MISSES).fill('spider'))
+  assert.equal(bowNightHunts(bot), BOW_NIGHT_HUNTS)
   assert.equal(asked[0], 'bow')
   // no arrows asked for after; the bottles (none to be had here) keep it out
   assert.ok(!asked.includes('arrow'), asked.join(' | '))
   assert.match(err?.message ?? '', /without a bow or 3 water bottles/)
   assert.equal(err?.notReady, true)
+  // by day: the night waited for, the hunt after it (a night hunt: counted)
+  const day = fakeBot({ items: gear })
+  day.game.dimension = 'overworld'
+  day.time = { timeOfDay: 1000, age: 0 }
+  const lines: string[] = []
+  const ticking = setInterval(() => { for (let k = 0; k < 50; k++) { day.time.timeOfDay += 20; day.emit('physicsTick') } }, 1)
+  try {
+    await netherKit(day, executor, new AbortController().signal, (l: string) => lines.push(l)).catch(() => {})
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.ok(lines.some(l => /spiders for the bow by night: waiting/.test(l)), lines.join(' | '))
+  assert.ok(day.time.timeOfDay >= 13000, String(day.time.timeOfDay))
+  assert.equal(bowNightHunts(day), 1)
 })
 
 test('netherKit: short of only the food after its tries, the milestone is not ready with the food points banked (foodShort)', async () => {
@@ -1218,11 +1236,14 @@ test('netherKit: no bow to be had, the water bottles held: ready with no slime b
   const bare = NETHER_GEAR().filter((i: any) => i.name !== 'bow' && i.name !== 'arrow')
   const memory = new WorldMemory()
   const executor: any = { memory, tasks: { tick: 0 }, sightings: { misses: (n: string) => n === 'spider' ? 3 : 0, missing: () => {} }, obtain: async () => {}, task: async () => {} }
+  const { bowNightHunts, BOW_NIGHT_HUNTS } = await import('../../src/milestones')
   const bot = fakeBot({ items: [...bare, water(), water(), water()] })
   bot.game.dimension = 'overworld'
+  bowNightHunts(bot, BOW_NIGHT_HUNTS)
   assert.equal(await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e), null)
   const dry = fakeBot({ items: bare })
   dry.game.dimension = 'overworld'
+  bowNightHunts(dry, BOW_NIGHT_HUNTS)
   const err: any = await netherKit(dry, executor, new AbortController().signal, () => {}).then(() => null, e => e)
   assert.equal(err?.notReady, true)
   assert.match(err?.message ?? '', /water bottles/)
@@ -1348,11 +1369,12 @@ test('blazeFightFood: the gate food from the tick budget of the blaze fight, 160
 })
 
 test('netherKit: the gear all held but no bow to be had, the water bottles are gone for on every try of the gate, not only BREW_KIT_TRIES (f3k-run5, f4-run2: not ready for good after two failed fills)', async () => {
-  const { netherKit, BREW_KIT_TRIES } = await import('../../src/milestones')
+  const { netherKit, BREW_KIT_TRIES, bowNightHunts, BOW_NIGHT_HUNTS } = await import('../../src/milestones')
   const { fakeBot } = await import('../reflexes/fakeBot')
   const gear = NETHER_GEAR().filter((i: any) => i.name !== 'bow' && i.name !== 'arrow')
   const bot = fakeBot({ items: gear })
   bot.game.dimension = 'overworld'
+  bowNightHunts(bot, BOW_NIGHT_HUNTS)
   const asked: string[] = []
   const executor: any = {
     memory: new WorldMemory(),

@@ -1044,12 +1044,23 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   }
   // the bow within NETHER_BOW_TICKS: not got (no spider found for its string), the gate goes without it and asks for
   // the water bottles for fire resistance instead (gate.bow)
+  // short of its string, the spiders hunted by night (they spawn on the surface in the dark; by day they were looked
+  // for in vain, f8-1.21.11), the night waited for BOW_NIGHT_WAIT at the most, the night reflex's sleep held off; a
+  // hunt that finds none by night counts toward the bowless gate (bowHunts), one by day or cut short of the night not
   if (netherGearNeeds(ownedInventory(bot), gate).some(r => r.item === 'bow')) {
-    await withTickBudget(bot, NETHER_BOW_TICKS, signal, async (s) => await executor.obtain([{ item: 'bow', count: 1 }], s)).catch(err => {
-      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
-      log(`nether kit: the bow: ${(err as Error).message}`)
-      if (countItems(bot, 'bow') === 0) (executor as any).sightings?.missing?.(['spider'])
-    })
+    const short = countItems(bot, 'string') < 3
+    if (short && bot.time?.timeOfDay != null && dayPhase(bot.time.timeOfDay) !== 'night') log('nether kit: the spiders for the bow by night: waiting for it')
+    const night = !short || await untilNight(bot, signal)
+    const noSleep = night && short ? (bot as any).survival?.reflexes?.inhibit?.(['night']) as (() => void) | undefined : undefined
+    try {
+      await withTickBudget(bot, NETHER_BOW_TICKS, signal, async (s) => await executor.obtain([{ item: 'bow', count: 1 }], s)).catch(err => {
+        if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+        log(`nether kit: the bow: ${(err as Error).message}`)
+      })
+    } finally {
+      noSleep?.()
+    }
+    if (countItems(bot, 'bow') === 0 && night && short) bowHunts.set(bot, (bowHunts.get(bot) ?? 0) + 1)
     Object.assign(gate, { bow: netherGate(bot, executor as any).bow })
     if (gate.bow === false) log('nether kit: no bow to be had: fire resistance instead (the water bottles)')
   }
@@ -1137,8 +1148,29 @@ export const NETHER_STAY_FOOD = 60
 export const NETHER_PICKAXES = 2
 /** the ticks netherKit spends on the spare at the most */
 export const NETHER_PICKAXE_TICKS = 6000
-/** the spiders' misses in a row (the bow's string) after which the gate goes without a bow (the water bottles) */
-export const BOW_SPIDER_MISSES = 3
+/** the night hunts for the bow's spiders (string) that found none after which the gate goes without a bow */
+export const BOW_NIGHT_HUNTS = 2
+/** the ticks the kit waits for the night at the most for the bow's spiders (they spawn on the surface by night) */
+export const BOW_NIGHT_WAIT = 12000
+/** each bot's night hunts for the bow's spiders that found none (netherKit's; netherGate's bow) */
+const bowHunts = new WeakMap<Bot, number>()
+
+/** the night hunts for the bow's spiders that found none so far (bowHunts), set to `n` with it given */
+export function bowNightHunts (bot: Bot, n?: number): number {
+  if (n != null) bowHunts.set(bot, n)
+  return bowHunts.get(bot) ?? 0
+}
+
+/** waits for the night (dayPhase), BOW_NIGHT_WAIT ticks at the most; resolves whether it's night */
+async function untilNight (bot: Bot, signal: AbortSignal, maxTicks = BOW_NIGHT_WAIT): Promise<boolean> {
+  // (no time known: as good as night, the hunt goes now)
+  const night = (): boolean => bot.time?.timeOfDay == null || dayPhase(bot.time.timeOfDay) === 'night'
+  for (let waited = 0; !night() && waited < maxTicks; waited += 100) {
+    if (signal.aborted) throw signal.reason
+    await waitTicks(bot, 100, signal)
+  }
+  return night()
+}
 /** the ticks a try of the nether kit spends on the bow (its string) after the rest of the gear */
 export const NETHER_BOW_TICKS = 12000
 
@@ -1266,11 +1298,10 @@ export function netherGate (bot: Bot, executor: Pick<Executor, 'memory'> & { sig
   if ((executor.sightings?.misses('chicken') ?? 0) > 0) chickensMissed.add(bot)
   const noChickens = chickensMissed.has(bot)
   const arrows = fireRes >= NETHER_FIRE_POTIONS ? NETHER_ARROWS_FIRE_RESISTANT : noChickens ? NETHER_ARROWS_NO_FEATHERS : NETHER_ARROWS
-  // no bow held and no spider found for its string: none asked for
-  // (the spiders missed BOW_SPIDER_MISSES times in a row, each try's hunt of NETHER_BOW_TICKS: once was the bowless
-  // gate's for good, and 1.21.11 bots went in with the sword alone, a bunker of no kill in 2818 ticks, f6-1.21.11 and
-  // f7-1.21.11)
-  const bow = bot.inventory.items().some(i => i.name === 'bow') || countItems(bot, 'string') >= 3 || (executor.sightings?.misses('spider') ?? 0) < BOW_SPIDER_MISSES
+  // no bow held and no spider found for its string at night, BOW_NIGHT_HUNTS hunts of it (bowHunts): none asked for.
+  // The sightings' misses gave it up after one try in the day, the plan's 3 steps in it each a miss (f8-1.21.11,
+  // t337332 to t350476), and 1.21.11 bots went in with the sword alone, a bunker of no kill in 2818 ticks (f7-1.21.11)
+  const bow = bot.inventory.items().some(i => i.name === 'bow') || countItems(bot, 'string') >= 3 || (bowHunts.get(bot) ?? 0) < BOW_NIGHT_HUNTS
   return { food, arrows, bow }
 }
 
