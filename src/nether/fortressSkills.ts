@@ -28,7 +28,7 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, blazesAbout, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, inNook, shutInWhereItStands, netherStepForbidden, nookBlocks, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, shellAgain, withBlocksKept } from './blazeFight'
+import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, blazesAbout, fetchThreats, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, inNook, shutInWhereItStands, netherStepForbidden, nookBlocks, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, shellAgain, withBlocksKept } from './blazeFight'
 import { handleFire } from '../skills/escape'
 import { lightFromBunker, litCells, spawnCells } from './spawnerLight'
 
@@ -496,10 +496,14 @@ export const LIGHT_CLEAR = 8
  * BUNKER_FETCH_BLAZES about. A 26.3 bot gone out of its bunker at 15 health with two blazes in the corridor under it
  * was punched to death 3 blocks out (seed 2's open throne, (-290, 77, -209))
  */
-export function lightTripDue (bot: Bot): boolean {
+export function lightTripDue (bot: Bot, spawner?: Vec3): boolean {
   const me = bot.entity.position
-  return fightHealth(bot) >= BUNKER_FETCH_HEALTH && blazesAbout(bot) <= BUNKER_FETCH_BLAZES &&
-    !Object.values(bot.entities).some(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(me) <= LIGHT_CLEAR)
+  if (fightHealth(bot) < BUNKER_FETCH_HEALTH || blazesAbout(bot) > BUNKER_FETCH_BLAZES) return false
+  if (Object.values(bot.entities).some(e => e.name === 'blaze' && isAlive(bot, e) && e.position.distanceTo(me) <= LIGHT_CLEAR)) return false
+  // and none that sees the bot or the spawner's top, where the trip goes (fetchThreats): a 26.3 bot's trip onto seed
+  // 2's open throne at (-290, 77, -209), two blazes about in the cave in sight of it, was shot from 20 health to its
+  // death in 250 ticks
+  return spawner == null || fetchThreats(bot, [eyePosition(bot), spawner.offset(0.5, 1 + 1.62, 0.5)]).length === 0
 }
 
 /** shields the blaze fight carries when it can make them (the one in the off hand and a spare) */
@@ -770,7 +774,7 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     const key = spawner.toString()
     const fromBunker = bunker
     const light = async (): Promise<boolean> => {
-      if (args.light === false || (tries.get(key) ?? 0) >= LIGHT_TRIES || countItems(bot, 'torch') === 0 || !lightTripDue(bot)) return false
+      if (args.light === false || (tries.get(key) ?? 0) >= LIGHT_TRIES || countItems(bot, 'torch') === 0 || !lightTripDue(bot, spawner)) return false
       if (spawnerLitShare(bot, spawner) <= LIGHT_DONE) return false
       tries.set(key, (tries.get(key) ?? 0) + 1)
       // (back in at BUNKER_FETCH_HEALTH: in from a trip at 3.6 health the bot was fireballed in its bunker)

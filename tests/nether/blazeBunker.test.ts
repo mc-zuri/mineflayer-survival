@@ -612,3 +612,21 @@ test('shutInWhereItStands: hurt on the way in, a box put up round the bot (back,
   for (const p of ['(6, 64, 13)', '(7, 65, 12)', '(5, 64, 12)', '(6, 66, 12)', '(6, 64, 11)', '(6, 65, 11)']) assert.ok(placed.includes(p), `${p} put: ${placed.join(' ')}`)
   assert.ok(!filled.has('(6, 64, 11)') && !filled.has('(6, 65, 11)'))
 })
+
+test('lightTripDue: healed, few about, none near, and none that sees the bot or the spawner top the trip goes to; one in sight of the top keeps it in', async () => {
+  const { entity } = await import('../reflexes/fakeBot')
+  const { lightTripDue } = await import('../../src/nether/fortressSkills')
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 64, 14.5), meta: { health: 20 } })
+  const { bot, restore } = await bunkerBot([blaze])
+  try {
+    bot.health = 20
+    const spawner = new Vec3(0, 64, 0)
+    assert.equal(lightTripDue(bot, spawner), true)
+    // across the cave from the throne, the spawner's top in its sight
+    blaze.position = new Vec3(0.5, 66, -12)
+    assert.equal(lightTripDue(bot, spawner), false)
+    assert.equal(lightTripDue(bot), true)
+  } finally {
+    restore()
+  }
+})
