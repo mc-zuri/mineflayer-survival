@@ -548,3 +548,20 @@ test('walkDanger: a charged blaze that sees the bot, one at its side, or a fireb
     restore()
   }
 })
+
+test('fightFromNook in a bunker: a hole in its walls (a side wall gone) is put again, nothing about to shoot', async () => {
+  const { fightFromNook } = await import('../../src/nether/blazeFight')
+  const { bot, b, filled, placed, restore } = await bunkerBot([])
+  const ac = new AbortController()
+  try {
+    filled.delete('(1, 65, 5)')
+    const done = fightFromNook(bot, b, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 3000 }, ac.signal).catch(err => err)
+    await ticks(bot, 30)
+    assert.deepEqual(placed, ['(1, 65, 5)'])
+    ac.abort()
+    await ticks(bot, 5)
+    await done
+  } finally {
+    restore()
+  }
+})

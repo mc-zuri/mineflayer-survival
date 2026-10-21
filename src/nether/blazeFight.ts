@@ -727,6 +727,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   let drinkFails = 0
   let lastReport = 0
   let lureAgain = 0
+  let mendAgain = 0
   let fireCheck = 0
   let lures = 0
   let lureGain = 0
@@ -973,6 +974,19 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       if (nook.bunker != null && drawn === 0 && opts.errand != null && seeing.length === 0) {
         unblock()
         if (await opts.errand()) { blocking = false; continue }
+      }
+      // a bunker's walls looked over each BUNKER_MEND_EVERY ticks with nothing about to shoot, a hole put again (a turn's
+      // old slit not walled, a block a fetch's walk broke): a 1.21.11 bunker by seed 2's throne at (-277, 77, -159) took
+      // fireballs from its side after a turn, shut its slit at 8 health and burned all the same
+      if (nook.bunker != null && tick >= mendAgain && danger.length === 0 && fireball == null && drawn === 0 && inNook(bot, nook)) {
+        mendAgain = tick + BUNKER_MEND_EVERY
+        const holes = shellAgain(p => bot.blockAt(p) as NookBlock | null, nook)?.build ?? []
+        if (holes.length > 0) {
+          trace('fightFromNook: the bunker mended,', holes.length, 'blocks')
+          unblock()
+          await fillNook(bot, holes, signal, false, false)
+          continue
+        }
       }
       if (nook.bunker != null) {
         // a rod by the sill (a blaze the sword killed at the slit drops it 2 off, out of the bot's reach in its cell): the
@@ -1550,6 +1564,9 @@ export async function fetchFromBunker (bot: Bot, nook: BlazeNook, item: Entity, 
   const bunkerWatch: FetchWatch = { ...watch, sealAt: Math.max(watch.sealAt, BUNKER_FETCH_LEAVE), abort: () => fetchThreats(bot, [eyePosition(bot)]).length > (fireProof(bot) ? BUNKER_FETCH_PROOF_BLAZES : BUNKER_FETCH_SEEN) + 1 }
   await withBlocksKept(bot, bunkerKept(nook), async () => await fetchDrops(bot, nook, item, bunkerWatch, signal))
 }
+
+/** a bunker's walls are looked over each so many ticks (shellAgain), a hole in them put again */
+export const BUNKER_MEND_EVERY = 100
 
 /** a bunker looks for the fires by it each so many ticks (bunkerFires) */
 export const BUNKER_FIRE_EVERY = 20
