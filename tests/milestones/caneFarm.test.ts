@@ -49,7 +49,7 @@ test('tableBookCanes: 3 less the paper held, none with a table or a book', async
 test('keepCaneFarm with no farm: CANE_FARM_CANES canes beyond the table\'s book\'s got, and those planted by the base\'s door; none with no base', async () => {
   const { keepCaneFarm, CANE_FARM_CANES } = await import('../../src/milestones')
   const planted: any[] = []
-  const plant = async (_b: any, args: any): Promise<any> => { planted.push(args); return { water: [], planted: [] } }
+  const plant = async (_b: any, args: any): Promise<any> => { planted.push(args); return { water: [], planted: [new Vec3(4, 65, 2)] } }
   // a base: the canes asked for (11: the book's 3 and 8), planted by its door
   const { bot, executor, obtained } = setup(5, 20)
   executor.memory.setBase({ x: 0, y: 64, z: 0 }, 'overworld')
@@ -111,4 +111,17 @@ test('tableBookWait: the table\'s book short of canes with a farm planted, a not
   assert.equal(err?.waitTicks, CANE_WAIT_TICKS)
   assert.match(err.message, /1 canes of 3/)
   assert.equal(tableBookWait(fakeBot({ items: [item('sugar_cane', 3)] }), memory), null)
+})
+
+test('keepCaneFarm: nothing planted within CANE_FARM_RADIUS of the door (a base on a stony shore), planted out to CANE_FARM_RADIUS_FAR', async () => {
+  const { keepCaneFarm, CANE_FARM_RADIUS, CANE_FARM_RADIUS_FAR } = await import('../../src/milestones')
+  const radii: number[] = []
+  const plant = async (_b: any, args: any): Promise<any> => { radii.push(args.radius); return { water: [], planted: args.radius > CANE_FARM_RADIUS ? [new Vec3(30, 64, 0)] : [] } }
+  const { bot, executor } = setup(11)
+  executor.memory.setBase({ x: 0, y: 64, z: 0 }, 'overworld')
+  await stubbed([
+    ['../../src/skills/caneFarm', 'plantSugarCane', plant],
+    ['../../src/end/strongholdSkills', 'overland', async () => {}]
+  ], async () => await keepCaneFarm(bot, executor, new AbortController().signal, () => {}))
+  assert.deepEqual(radii, [CANE_FARM_RADIUS, CANE_FARM_RADIUS_FAR])
 })

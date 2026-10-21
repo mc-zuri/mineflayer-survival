@@ -108,6 +108,8 @@ export function rememberCanes (bot: Bot, memory: WorldMemory, radius = CANE_SIGH
  * each way stays water), and the banks either side the canes stand on: 2 a cell
  */
 export const CANE_CHANNEL_LENGTH = 9
+/** a channel's cells where the level ground takes no CANE_CHANNEL_LENGTH */
+export const CANE_SHORT_CHANNEL = 5
 /** the spots a cane farm is planted on at most (a channel's two banks) */
 export const CANE_FARM_SPOTS = 2 * CANE_CHANNEL_LENGTH
 /** ticks a cane takes to grow a block (SugarCaneBlock.randomTick: 16 random ticks, a block's every 4096 / 3 ticks) */
@@ -286,7 +288,8 @@ export async function plantSugarCane (bot: Bot, args: { count?: number, center?:
   const water: Vec3[] = []
   // water where there's too little: a channel dug and a bucket poured in it, else holes (4 spots round each)
   if (spots().length < count && countItems(bot, 'water_bucket') > 0) {
-    const site = caneChannelSite(lookup, center, { avoid, radius })
+    // (a shorter one where the level ground takes no full one: a hillside's grass)
+    const site = caneChannelSite(lookup, center, { avoid, radius }) ?? caneChannelSite(lookup, center, { avoid, radius, length: CANE_SHORT_CHANNEL })
     if (site != null) {
       try {
         water.push(...await makeCaneChannel(bot, site, signal))

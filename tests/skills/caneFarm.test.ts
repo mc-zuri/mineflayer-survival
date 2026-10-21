@@ -191,3 +191,21 @@ test('plantSugarCane plants the banks of the channel it dug first, out to its ra
   ], async () => await plantSugarCane(bot, { count: CANE_FARM_SPOTS, center: new Vec3(0.5, 64, 0.5), radius: 16 }))
   assert.equal(res.planted.length, CANE_FARM_SPOTS, res.planted.map(p => p.toString()).join(' '))
 })
+
+test('plantSugarCane: where the level grass takes no channel of 9 (a strip 7 long), a channel of CANE_SHORT_CHANNEL', async () => {
+  const { plantSugarCane, CANE_SHORT_CHANNEL } = await import('../../src/skills/caneFarm')
+  const { bot, set } = farmBot([item('water_bucket'), item('sugar_cane', 32)])
+  // grass only in x 4 to 10, z -3 to 3: stone about it
+  const ground = bot.blockAt
+  bot.blockAt = (p: Vec3) => {
+    const b = ground(p)
+    return p.y === 63 && b.name === 'grass_block' && (p.x < 4 || p.x > 10 || Math.abs(p.z) > 3) ? { ...b, name: 'stone', boundingBox: 'block' } : b
+  }
+  const res = await stubbed([
+    ['../../src/skills/collectBlock', 'collectBlock', dig(set)],
+    ['../../src/skills/navigate', 'navigateNear', async () => {}],
+    ['../../src/skills/placeBlock', 'placeBlock', place(set, bot)]
+  ], async () => await plantSugarCane(bot, { count: 10, center: new Vec3(0.5, 64, 0.5) }))
+  assert.equal(res.water.length, CANE_SHORT_CHANNEL)
+  assert.equal(res.planted.length, 10)
+})

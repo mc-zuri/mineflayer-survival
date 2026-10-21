@@ -28,7 +28,7 @@ import { applyBooks } from './skills/anvil'
 import { experience, gainLevels } from './skills/xp'
 import { knownFarmableSpawners, nearestXpFarm } from './skills/spawnerFarm'
 import { BREEDING_FOOD, breedAnimals, gatherHerd, isAdult, releaseAnimals } from './skills/husbandry'
-import { CANE_FARM_SPOTS, emptyCaneSpots, grownCanes, knownCaneFarm, makeWaterHole, plantSugarCane, tendCaneFarm } from './skills/caneFarm'
+import { CANE_FARM_SPOTS, type CaneFarmResult, emptyCaneSpots, grownCanes, knownCaneFarm, makeWaterHole, plantSugarCane, tendCaneFarm } from './skills/caneFarm'
 import { baseRecord } from './base/pois'
 import { withinOwnTicks } from './executor/steps'
 import { carvePumpkin, wearPumpkin } from './skills/pumpkin'
@@ -336,6 +336,8 @@ export function tableBookCanes (bot: Bot, memory: WorldMemory): number {
 
 /** how far from the base's door the cane farm is planted (by water there, or on a channel's banks) */
 export const CANE_FARM_RADIUS = 24
+/** how far it is planted where nothing within CANE_FARM_RADIUS takes it (the farm still in the simulation distance of home) */
+export const CANE_FARM_RADIUS_FAR = 48
 /** how far off the cane farm is tended from (keepCaneFarm) */
 export const CANE_FARM_RANGE = 96
 
@@ -372,7 +374,13 @@ export async function keepCaneFarm (bot: Bot, executor: Executor, signal: AbortS
       await executor.task('to the cane farm', async (s) => await overland(bot, { target: center, range: 4 }, s), signal).catch(fail('the way there'))
     }
     if (countItems(bot, 'water_bucket') === 0 && countItems(bot, 'bucket') > 0) await refillWater(bot, signal)
-    const r = await executor.task('plant a cane farm', async (s) => await plantSugarCane(bot, { count, center, memory, avoid, radius: CANE_FARM_RADIUS }, s), signal).catch(fail('planting'))
+    // (further out where the ground about the door takes none: a base on a stony shore, f3-1.21.11's, had its grass
+    // 22 blocks off, a hillside, and planted none)
+    let r: CaneFarmResult | void = undefined
+    for (const radius of [CANE_FARM_RADIUS, CANE_FARM_RADIUS_FAR]) {
+      r = await executor.task('plant a cane farm', async (s) => await plantSugarCane(bot, { count, center, memory, avoid, radius }, s), signal).catch(fail('planting'))
+      if (r == null || r.planted.length > 0) break
+    }
     if (r != null) log(`cane farm: ${r.planted.length} canes planted, ${r.water.length} water cells made (${knownCaneFarm(memory)?.spots.length ?? 0} spots)`)
   }
   const farm = knownCaneFarm(memory, p => bot.blockAt(p) as any)
