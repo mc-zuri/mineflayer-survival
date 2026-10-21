@@ -3059,8 +3059,8 @@ export const HERD_BIOMES: ReadonlySet<string> = new Set(['plains', 'sunflower_pl
 export const HERD_SEARCH_TICKS = 72000
 /** after a search that found none, the next only after this many (six days: a search is dear) */
 export const HERD_SEARCH_FAIL_TICKS = 144000
-/** the ticks a herd's search explores for, at the most */
-export const HERD_SEARCH_BUDGET = 8000
+/** the ticks a herd's search explores for, at the most (within the upkeep's HERD_UPKEEP_TICKS, 6000) */
+export const HERD_SEARCH_BUDGET = 5000
 /** a herd's search's spot, noted (its note: whether a group was found) */
 export const HERD_SEARCH_POI = 'herd_search'
 /** how far from home a search's spot is at the least (the land about home is hunted out) and from a spot searched before */
@@ -3079,7 +3079,7 @@ export function herdSearchDue (memory: WorldMemory, now: number): boolean {
 /**
  * Where a herd's search goes: the food biomes noted (FOOD_BIOME_POI: the surveys' and the seed's) within
  * HERD_FETCH_RANGE of home and HERD_SEARCH_OUT off it, not within HERD_SEARCH_SPACING of a spot searched before, the
- * open land's (HERD_BIOMES) first, the nearest home first; null with none
+ * open land's (HERD_BIOMES) first, then another biome than home's own, the nearest home first; null with none
  */
 export function herdSearchTarget (memory: WorldMemory, home: Vec3): { pos: Vec3, biome: string } | null {
   const searched = memory.getPois(HERD_SEARCH_POI, { dimension: 'overworld' })
@@ -3090,7 +3090,10 @@ export function herdSearchTarget (memory: WorldMemory, home: Vec3): { pos: Vec3,
       return d <= HERD_FETCH_RANGE && d >= HERD_SEARCH_OUT && !searched.some(s => Math.hypot(s.x - t.pos.x, s.z - t.pos.z) < HERD_SEARCH_SPACING)
     })
   const by = (t: { pos: Vec3 }): number => Math.hypot(t.pos.x - home.x, t.pos.z - home.z)
-  return spots.filter(t => HERD_BIOMES.has(t.biome)).sort((a, b) => by(a) - by(b))[0] ?? spots.sort((a, b) => by(a) - by(b))[0] ?? null
+  // (then another biome than home's own, its animals hunted out: an old growth pine taiga's 48 off home was searched)
+  const homeBiome = memory.getPois(FOOD_BIOME_POI, { dimension: 'overworld', near: home })[0]?.note
+  const others = spots.filter(t => t.biome !== homeBiome)
+  return spots.filter(t => HERD_BIOMES.has(t.biome)).sort((a, b) => by(a) - by(b))[0] ?? (others.length > 0 ? others : spots).sort((a, b) => by(a) - by(b))[0] ?? null
 }
 
 /**
@@ -3111,6 +3114,9 @@ export async function searchHerd (bot: Bot, executor: Executor, home: Vec3, sign
   const target = herdSearchTarget(memory, home)
   if (target == null) { log('herd: no group seen and no meat biome noted near to look for one in'); return false }
   log(`herd: no group seen within ${HERD_FETCH_RANGE} of home: looking for one in the ${target.biome} at ${target.pos.toString()}`)
+  // (noted as tried before it starts: a search cut short by the upkeep's budget was the same spot's again, three times
+  // a game, f5-1.21.11 t122990 to t216071)
+  memory.addPoi(HERD_SEARCH_POI, target.pos, 'overworld', JSON.stringify({ found: false }))
   try {
     await withTickBudget(bot, HERD_SEARCH_BUDGET, signal, async (s) => {
       await executor.task('look for a herd', async (t) => await exploreSurface(bot, { found: known, center: target.pos, step: 16, maxRadius: 64, memory }, t), s)

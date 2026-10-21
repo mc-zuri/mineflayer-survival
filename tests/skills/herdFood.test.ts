@@ -437,3 +437,20 @@ test('startHerd with no group seen within 256 of home: by day a search of the pl
   assert.equal(await startHerd(nb, n.executor, signal(), () => {}), false)
   assert.ok(!n.tasks.includes('look for a herd'))
 })
+
+test('herd search: a search cut short (the upkeep\'s budget) is noted as tried all the same, not the same spot again; with no open land\'s biome, another than home\'s own first', async () => {
+  const { searchHerd, herdSearchTarget, HERD_SEARCH_POI } = await import('../../src/milestones')
+  const memory = new WorldMemory()
+  memory.addPoi('food_biome', new Vec3(0, 70, 8), 'overworld', 'old_growth_pine_taiga')
+  memory.addPoi('food_biome', new Vec3(-8, 95, -60), 'overworld', 'old_growth_pine_taiga')
+  memory.addPoi('food_biome', new Vec3(150, 70, 0), 'overworld', 'snowy_taiga')
+  assert.deepEqual(herdSearchTarget(memory, new Vec3(0, 64, 0)), { pos: new Vec3(150, 70, 0), biome: 'snowy_taiga' })
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wheat', 6)] })
+  bot.game.dimension = 'overworld'
+  bot.time = { age: 0, timeOfDay: 1000 }
+  const ctrl = new AbortController()
+  const { executor } = fakeExecutor(bot, memory, () => { ctrl.abort(new Error('out of the upkeep\'s ticks')); throw new Error('aborted') })
+  await assert.rejects(searchHerd(bot, executor, new Vec3(0, 64, 0), ctrl.signal, () => {}))
+  assert.equal(memory.getPois(HERD_SEARCH_POI).length, 1)
+  assert.deepEqual(herdSearchTarget(memory, new Vec3(0, 64, 0)), { pos: new Vec3(-8, 95, -60), biome: 'old_growth_pine_taiga' })
+})
