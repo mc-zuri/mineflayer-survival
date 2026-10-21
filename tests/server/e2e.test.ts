@@ -6,7 +6,7 @@ import * as fs from 'node:fs'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { EventEmitter } from 'node:events'
-import { disconnection, formatWall, parseArgs, summary, testPassed } from '../e2e/e2e'
+import { disconnection, foodLine, formatWall, parseArgs, summary, testPassed } from '../e2e/e2e'
 import { copyWorld } from '../harness/server'
 
 describe('pnpm e2e', () => {
@@ -24,6 +24,14 @@ describe('pnpm e2e', () => {
     assert.match(d.checkpoints, /[\\/]\.e2e[\\/]2-\d{4}-/)
     assert.throws(() => parseArgs(['--seed']), /--seed needs a value/)
     assert.throws(() => parseArgs(['--fast']), /unknown option --fast/)
+    assert.strictEqual(d.foodEvery, 0)
+    assert.strictEqual(parseArgs(['--food-every', '500']).foodEvery, 500)
+  })
+
+  test('the food line: the bar, its saturation, the health and the food points carried at a tick', () => {
+    const registry = require('minecraft-data')('1.21.11')
+    const bot: any = { food: 14, foodSaturation: 2.5, health: 19, registry, inventory: { items: () => [{ name: 'bread', count: 3 }, { name: 'cobblestone', count: 64 }] } }
+    assert.strictEqual(foodLine(12000, bot), 'food t12000 14 2.5 19.0 15')
   })
 
   test('the summary has each milestone\'s tick and wall time and the ticks a wall second', () => {

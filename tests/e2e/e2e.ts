@@ -9,6 +9,7 @@
 //
 //   pnpm e2e [--seed 2] [--max-ticks 3000000] [--until <milestone>] [--resume <checkpoint dir>] [--stage dragon]
 //            [--checkpoints <dir>] [--version 1.21.11] [--username player] [--server-log <file>] [--realtime] [--grim]
+//            [--food-every <ticks>]
 //
 // --seed random: a seed of its own (logged). --realtime: no lockstep mod, the server and the bot each on their 50 ms.
 // --grim: a server with GrimAC, each of its flags counted by check and logged, the bot's actions at the start of its
@@ -41,6 +42,8 @@ export interface E2EOptions {
   realtime: boolean
   /** GrimAC on the server: the local build under lockstep (grimLockstepMods), the pinned one in real time (GRIM_MODS) */
   grim: boolean
+  /** a food line (the bar, its saturation, the health and the food points carried) every this many game ticks; 0 none */
+  foodEvery: number
 }
 
 /** a random world seed: a signed 64-bit number, as level-seed takes it (WorldOptions.parseSeed) */
@@ -57,7 +60,8 @@ export function parseArgs (argv: string[]): E2EOptions {
     checkpoints: '',
     statusMs: 60000,
     realtime: false,
-    grim: false
+    grim: false,
+    foodEvery: 0
   }
   for (let i = 0; i < argv.length; i++) {
     const [flag, inline] = argv[i].split('=', 2)
@@ -79,6 +83,7 @@ export function parseArgs (argv: string[]): E2EOptions {
       case '--status-ms': opts.statusMs = Number(value()); break
       case '--realtime': opts.realtime = true; break
       case '--grim': opts.grim = true; break
+      case '--food-every': opts.foodEvery = Number(value()); break
       default: throw new Error(`unknown option ${argv[i]}`)
     }
   }
@@ -88,6 +93,13 @@ export function parseArgs (argv: string[]): E2EOptions {
     opts.checkpoints = path.join(__dirname, '..', '.e2e', `${opts.seed}-${stamp}`)
   }
   return opts
+}
+
+/** "food t<tick> <bar> <saturation> <health> <points carried>": the food bar at a game tick (--food-every) */
+export function foodLine (tick: number, bot: Pick<Bot, 'food' | 'foodSaturation' | 'health' | 'inventory' | 'registry'>): string {
+  const foods = (bot.registry as any)?.foodsByName ?? {}
+  const carried = (bot.inventory?.items() ?? []).reduce((n, i) => n + (foods[i.name]?.foodPoints ?? 0) * i.count, 0)
+  return `food t${tick} ${bot.food ?? 0} ${(bot.foodSaturation ?? 0).toFixed(1)} ${(bot.health ?? 0).toFixed(1)} ${carried}`
 }
 
 /** "1h02m03s" */
@@ -273,6 +285,11 @@ export async function runE2E (opts: E2EOptions): Promise<boolean> {
       lastWall = now
     }, opts.statusMs)
     status.unref()
+    // the food bar over the run, by game tick (a game's food read off its log: foodLine)
+    if (opts.foodEvery > 0) {
+      let since = 0
+      b.on('physicsTick', () => { if (++since >= opts.foodEvery) { since = 0; log(foodLine(b.lockstep.ticks, b)) } })
+    }
     // no tick for a minute: what the bot was at, in the log and a report by the stuck reports
     noTicks = watchTicks(() => b.lockstep.ticks, 60, seconds => {
       const tasks = (b as any).survival?.tasks
