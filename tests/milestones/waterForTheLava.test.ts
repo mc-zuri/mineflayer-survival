@@ -148,6 +148,13 @@ test('homeBucketsToCraft: up to 3 buckets in all, no more than the casts left, 3
   assert.equal(homeBucketsToCraft(3, 10, 20), 0)
 })
 
+test('homeBucketsToCraft: the raw iron held counts, smelted by the planner (f3-1.21.11: 4 raw iron, no ingot)', async () => {
+  const { homeBucketsToCraft } = await import('../../src/milestones')
+  assert.equal(homeBucketsToCraft(1, 8, 0, 4), 1)
+  assert.equal(homeBucketsToCraft(1, 8, 2, 4), 2)
+  assert.equal(homeBucketsToCraft(1, 8, 0, 2), 0)
+})
+
 test('obsidianAtHome: 2 more buckets crafted of the iron held, 3 buckets of lava a trip, 3 casts a trip home: the frame\'s 10 in 4 trips, not 10 (f3-1.21.11)', async () => {
   const { obsidianAtHome } = await import('../../src/milestones')
   const { WorldMemory } = await import('../../src/core/memory')

@@ -1500,7 +1500,7 @@ export async function obsidianAtHome (bot: Bot, executor: Executor, count: numbe
   if (countItems(bot, ['bucket', 'lava_bucket']) === 0) await executor.obtain([{ item: 'bucket', count: 1 }], signal).catch(quiet)
   if (countItems(bot, ['bucket', 'lava_bucket']) === 0) return false
   // more buckets for more lava a trip, of the iron held (homeBucketsToCraft)
-  const extra = homeBucketsToCraft(countItems(bot, ['bucket', 'lava_bucket']), count - have(), countItems(bot, 'iron_ingot'))
+  const extra = homeBucketsToCraft(countItems(bot, ['bucket', 'lava_bucket']), count - have(), countItems(bot, 'iron_ingot'), countItems(bot, 'raw_iron'))
   if (extra > 0) {
     log(`obsidian: ${extra} more bucket${extra > 1 ? 's' : ''} for the lava`)
     await executor.obtain([{ item: 'bucket', count: countItems(bot, 'bucket') + extra }], signal).catch(quiet)
@@ -1589,12 +1589,13 @@ export const HOME_CAST_BUCKETS = 3
 
 /**
  * The buckets to craft for the casts at home: up to HOME_CAST_BUCKETS in all (the empty and lava ones held), no more
- * than the casts left, 3 iron ingots each of the ingots held (no trip for iron). A trip a bucket was a walk into the
- * rock and back home each block, 10 for a portal frame (f3-1.21.11, t192905 on).
+ * than the casts left, 3 iron each of the ingots held and the raw iron held (the planner's smelt for it: the furnace
+ * and the coal the bot has; no trip for iron). A trip a bucket was a walk into the rock and back home each block, 10
+ * for a portal frame, and a 1.21.11 bot with 4 raw iron and no ingot carried one a trip (f3-1.21.11, t192905 on).
  */
-export function homeBucketsToCraft (held: number, castsLeft: number, ironIngots: number): number {
+export function homeBucketsToCraft (held: number, castsLeft: number, ironIngots: number, rawIron = 0): number {
   const want = Math.min(HOME_CAST_BUCKETS, castsLeft) - held
-  return Math.max(0, Math.min(want, Math.floor(ironIngots / 3)))
+  return Math.max(0, Math.min(want, Math.floor((ironIngots + rawIron) / 3)))
 }
 
 /** the enchanting's tries at its obsidian within OBSIDIAN_HOME_RANGE before its trips go past it */
