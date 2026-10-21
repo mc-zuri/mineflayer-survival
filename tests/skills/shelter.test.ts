@@ -404,3 +404,58 @@ test('shelter: at the spawn of a server with spawn protection the bot walks out 
   assert.equal(told.refused.length, 1)
   assert.ok(told.result.dug && !underSpawnProtection(told.bot, told.result.feet), `the hole at ${String(told.result.feet)}`)
 })
+
+test('shelter: a column whose shelter failed (no way to it, its dig down unsafe) is left by the next try (SHELTER_FAIL_TICKS) and the dig goes on in the next best column: the night reflex\'s try 20 ticks after took the same column again', async () => {
+  const { SkillError } = await import('../../src/skills/errors')
+  const { SHELTER_FAIL_TICKS, shelterFailedAt } = await import('../../src/skills/shelter')
+  assert.equal(SHELTER_FAIL_TICKS, 1200)
+  const actions = require('../../src/core/actions')
+  const nav = require('../../src/skills/navigate')
+  const realDig = actions.dig
+  const realNavigate = nav.navigate
+  // a pad of stone under the bot (no pickaxe: no column there), plains about it
+  const changed = new Map<string, string>()
+  const ground = (p: Vec3): string => changed.get(p.toString()) ?? (Math.abs(p.x) <= 1 && Math.abs(p.z) <= 1 && p.y < 64 ? 'stone' : plains(p))
+  const night = (): any => {
+    const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('dirt', 8)], world: ground })
+    bot.time = { timeOfDay: 18000 }
+    bot.equip = async () => {}
+    bot.digTime = () => 10
+    bot.placeBlock = async (against: any, face: Vec3) => { changed.set(against.position.plus(face).toString(), 'dirt') }
+    return bot
+  }
+  try {
+    // no way to any column: three tried, then the next try three others
+    const walks: string[] = []
+    nav.navigate = async (_b: any, args: any) => { walks.push(`${String(args.goal.x)},${String(args.goal.z)}`); throw new SkillError('NO_PATH', 'no path') }
+    const bot = night()
+    await assert.rejects(shelter(bot, { torch: false, leave: false, until: () => true }), (err: any) => err.reason === 'NO_PATH')
+    await assert.rejects(shelter(bot, { torch: false, leave: false, until: () => true }), (err: any) => err.reason === 'NO_PATH')
+    assert.equal(walks.length, 6)
+    assert.equal(new Set(walks).size, 6, walks.join(' '))
+    // the first column's ground opens into a cave under its first block dug (digDownHazard): the next column dug
+    nav.navigate = async (b: any, args: any) => { b.entity.position = new Vec3(args.goal.x + 0.5, 64, args.goal.z + 0.5); return {} }
+    let first: Vec3 | null = null
+    actions.dig = async (b: any, target: any) => {
+      const pos = target.position as Vec3
+      first = first ?? new Vec3(pos.x, 64, pos.z)
+      changed.set(pos.toString(), 'air')
+      if (pos.x === first.x && pos.z === first.z) for (const y of [60, 61]) changed.set(new Vec3(pos.x, y, pos.z).toString(), 'air')
+      b.entity.position = b.entity.position.offset(0, -1, 0)
+    }
+    const dug = night()
+    const physics = setInterval(() => dug.emit('physicsTick'), 1)
+    try {
+      const result = await shelter(dug, { torch: false, leave: false, until: () => true })
+      assert.ok(first != null)
+      assert.ok(result.dug && (result.feet.x !== (first as Vec3).x || result.feet.z !== (first as Vec3).z), `the hole at ${String(result.feet)}`)
+      assert.ok(isEnclosed((p) => dug.blockAt(p), result.feet))
+      assert.equal(shelterFailedAt(dug, first as Vec3), true)
+    } finally {
+      clearInterval(physics)
+    }
+  } finally {
+    actions.dig = realDig
+    nav.navigate = realNavigate
+  }
+})

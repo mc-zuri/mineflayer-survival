@@ -597,8 +597,42 @@ function inWaterNow (bot: Bot): boolean {
 
 /** how far past the edge of the ground the server refuses the bot walks to dig its shelter out of it (leaveRefusedGround) */
 export const SHELTER_LEAVE_MARGIN = 3
-/** the columns a shelter() tries whose digs the server refuses, at most (two near the spawn teach a 1.21.11 bot its square) */
-export const SHELTER_REFUSED_TRIES = 4
+/**
+ * the columns a shelter() digs that fail, at most: the server refuses the digs (two near the spawn teach a 1.21.11 bot
+ * its square) or the dig down isn't safe
+ */
+export const SHELTER_DIG_TRIES = 4
+
+/**
+ * ticks a column whose shelter failed (no way to it, its dig refused or not safe, the seal not in, the hole not shut)
+ * is left by the next shelter(): the night reflex's next try, 20 ticks after, took the same column and failed the same
+ * way, night after night, the bot by it in the open
+ */
+export const SHELTER_FAIL_TICKS = 1200
+
+const failedColumns = new WeakMap<Bot, Map<string, number>>()
+
+function nowTick (bot: Bot): number {
+  return (bot as any).survival?.tasks?.tick ?? (bot as any).lockstep?.ticks ?? Math.floor(Date.now() / 50)
+}
+
+/** the column over this surface cell failed as a shelter: left for SHELTER_FAIL_TICKS */
+export function noteShelterFailed (bot: Bot, surface: Vec3): void {
+  let map = failedColumns.get(bot)
+  if (map == null) failedColumns.set(bot, map = new Map())
+  const now = nowTick(bot)
+  for (const [k, at] of map) if (now - at > SHELTER_FAIL_TICKS || at > now) map.delete(k)
+  map.set(vecKey(surface.floored()), now)
+  trace('shelter: the column at', surface.toString(), 'left for', SHELTER_FAIL_TICKS, 'ticks')
+}
+
+/** whether the column over this surface cell failed as a shelter within SHELTER_FAIL_TICKS */
+export function shelterFailedAt (bot: Bot, surface: Vec3): boolean {
+  const at = failedColumns.get(bot)?.get(vecKey(surface.floored()))
+  if (at == null) return false
+  const now = nowTick(bot)
+  return now - at >= 0 && now - at <= SHELTER_FAIL_TICKS
+}
 
 /** whether the server refuses a dig of one of the column's blocks still to dig, or its seal (ShelterRefusals) */
 export function columnRefused (spot: ShelterSpot, refusals: ShelterRefusals): boolean {
@@ -653,16 +687,21 @@ async function shelterOnce (bot: Bot, opts: ShelterOptions): Promise<ShelterResu
     const refusals = shelterRefusals(bot)
     // the hole the bot is in already (cut off before the seal went on), else the best column about
     let target: ShelterSpot | null = null
-    for (let d = 0; d <= SHELTER_DEPTH && target == null; d++) target = shelterAt(lookup, feet.offset(0, d, 0), digCost, true, refusals)
+    // (not one that failed lately: shelterFailedAt)
+    for (let d = 0; d <= SHELTER_DEPTH && target == null; d++) {
+      target = shelterAt(lookup, feet.offset(0, d, 0), digCost, true, refusals)
+      if (target != null && shelterFailedAt(bot, target.surface)) target = null
+    }
     // up a tree (a spawn on a jungle's canopy): down through the leaves to the ground first
     if (target == null && onTree(bot)) await climbDownTree(bot, signal)
     const exclude = new Set<string>()
     let walks = 0
-    let refused = 0
+    let digs = 0
     let walkedOut = false
     for (;;) {
-      // (none where the bot drowned lately: another spot 8 off and more, skills/breath drownedNear)
-      target = target ?? findShelterSpot(lookup, bot.entity.position, { radius: opts.radius, digCost, exclude, avoid: p => drownedNear(bot, p), refusals })
+      // (none where the bot drowned lately: another spot 8 off and more, skills/breath drownedNear; nor one whose
+      // shelter failed lately, shelterFailedAt)
+      target = target ?? findShelterSpot(lookup, bot.entity.position, { radius: opts.radius, digCost, exclude, avoid: p => drownedNear(bot, p) || shelterFailedAt(bot, p), refusals })
       if (target == null) {
         // none about but on ground the server refuses the digs on (the spawn's square, a protected region): out of it,
         // SHELTER_LEAVE_MARGIN past its edge, and a look there, once
@@ -680,8 +719,10 @@ async function shelterOnce (bot: Bot, opts: ShelterOptions): Promise<ShelterResu
         try {
           await navigate(bot, { goal: new goals.GoalBlock(t.surface.x, t.surface.y, t.surface.z) }, signal)
         } catch (err) {
+          if (isAbort(err) || signal?.aborted === true) throw err
           // can't get there: the next best column, three times
-          if (isAbort(err) || ++walks >= 3) throw err
+          noteShelterFailed(bot, t.surface)
+          if (++walks >= 3) throw err
           exclude.add(vecKey(t.surface))
           target = null
           continue
@@ -694,28 +735,37 @@ async function shelterOnce (bot: Bot, opts: ShelterOptions): Promise<ShelterResu
         await digBelow(bot, t.feet.y, signal, t.surface)
         break
       } catch (err) {
-        // a dig the server refused (put back, or the square learnt as it dug: its refusal stops the dig): the next
-        // best column, out of what it refuses, SHELTER_REFUSED_TRIES times
-        if (isAbort(err) || !(isSkillError(err, 'REFUSED') || columnRefused(t, refusals)) || ++refused >= SHELTER_REFUSED_TRIES) throw err
-        trace('shelter: the column at', t.surface.toString(), 'refused:', (err as Error).message)
+        if (isAbort(err) || signal?.aborted === true) throw err
+        noteShelterFailed(bot, t.surface)
+        // a dig the server refused (put back, or the square learnt as it dug: its refusal stops the dig), or a dig down
+        // that isn't safe (digDownHazard: a cave opened under it): the next best column, SHELTER_DIG_TRIES times
+        if (!(isSkillError(err, 'REFUSED') || isSkillError(err, 'CANNOT_PLACE') || columnRefused(t, refusals)) || ++digs >= SHELTER_DIG_TRIES) throw err
+        trace('shelter: the column at', t.surface.toString(), 'failed:', (err as Error).message)
         exclude.add(vecKey(t.surface))
         target = null
       }
     }
-    await waitUntil(bot, () => bot.entity.onGround, 20, signal)
-    // the dug blocks' drops fall in with the bot (ItemEntity's 10 ticks of pickup delay)
-    await waitUntil(bot, () => sealItem(bot) != null, 40, signal)
-    const item = sealItem(bot)
-    if (item == null) throw new SkillError('MISSING_ITEMS', 'no block to seal the shelter with')
-    if (!isSolid(lookup(target.seal))) await placeAgainstSide(bot, target.seal, item, signal)
-    if (opts.torch !== false) await putUpTorch(bot, target.feet.offset(0, 1, 0))
-    feet = target.feet
-    dug = true
-    if (!isEnclosed(lookup, feet)) throw new SkillError('VERIFY_FAILED', `the hole at ${feet.toString()} isn't shut`)
-    // and dry, shut: water come in (a crack to an aquifer) is no shelter, the spot kept off (drownedNear)
-    if ([feet, feet.offset(0, 1, 0)].some(c => LIQUIDS.has(lookup(c)?.name ?? ''))) {
-      noteDrowning(bot, feet)
-      throw new SkillError('VERIFY_FAILED', `the shelter at ${feet.toString()} has water in it`)
+    const spot = target
+    try {
+      await waitUntil(bot, () => bot.entity.onGround, 20, signal)
+      // the dug blocks' drops fall in with the bot (ItemEntity's 10 ticks of pickup delay)
+      await waitUntil(bot, () => sealItem(bot) != null, 40, signal)
+      const item = sealItem(bot)
+      if (item == null) throw new SkillError('MISSING_ITEMS', 'no block to seal the shelter with')
+      if (!isSolid(lookup(spot.seal))) await placeAgainstSide(bot, spot.seal, item, signal)
+      if (opts.torch !== false) await putUpTorch(bot, spot.feet.offset(0, 1, 0))
+      feet = spot.feet
+      dug = true
+      if (!isEnclosed(lookup, feet)) throw new SkillError('VERIFY_FAILED', `the hole at ${feet.toString()} isn't shut`)
+      // and dry, shut: water come in (a crack to an aquifer) is no shelter, the spot kept off (drownedNear)
+      if ([feet, feet.offset(0, 1, 0)].some(c => LIQUIDS.has(lookup(c)?.name ?? ''))) {
+        noteDrowning(bot, feet)
+        throw new SkillError('VERIFY_FAILED', `the shelter at ${feet.toString()} has water in it`)
+      }
+    } catch (err) {
+      // (the next try another column, not this hole again)
+      if (!isAbort(err) && signal?.aborted !== true) noteShelterFailed(bot, spot.surface)
+      throw err
     }
   }
 
