@@ -704,6 +704,8 @@ export class Runner {
     this.store = options.saveStore ?? (options.saveFile != null ? fileSaveStore(options.saveFile) : null)
     // (the night reflex's: below the surface without the gear its progress had, no night's work there)
     if ((bot as any).survival != null) (bot as any).survival.nightGeared = (): boolean => this.nightGeared()
+    // (the milestones' surface work by day: the night waited out first, netherKit's surfaceByDay)
+    if ((bot as any).survival != null) (bot as any).survival.waitOutNight = async (signal?: AbortSignal): Promise<void> => await this.waitOutNight(signal)
     // the reports of a stuck bot next to the save (a stuck folder), when nothing else says where: an e2e run's
     // checkpoints have them then
     const diag = this.diagnostics

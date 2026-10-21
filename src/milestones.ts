@@ -1067,10 +1067,11 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
     if (gate.bow === false) log('nether kit: no bow to be had: fire resistance instead (the water bottles)')
   }
   // the arrows within NETHER_ARROW_TICKS, the gate looked at again after (a hunt for the feathers' chickens that found
-  // none asks for fewer: the plan went on for 64 after its miss, 11 chickens more, full-26.3-fresh-p)
+  // none asks for fewer: the plan went on for 64 after its miss, 11 chickens more, full-26.3-fresh-p); by day, their
+  // chickens hunted over the surface (surfaceByDay)
   const arrows = netherGearNeeds(ownedInventory(bot), gate).filter(r => r.item === 'arrow')
   if (arrows.length > 0) {
-    await withTickBudget(bot, NETHER_ARROW_TICKS, signal, async (s) => await executor.obtain(arrows, s)).catch(err => {
+    await surfaceByDay(bot, signal, log, 'the arrows', async (d) => await withTickBudget(bot, NETHER_ARROW_TICKS, d, async (s) => await executor.obtain(arrows, s))).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`nether kit: the arrows: ${(err as Error).message}`)
       // the budget gone with the arrows short: the chickens as good as not found (the hunt for them stopped, not
@@ -1079,9 +1080,10 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
     })
     Object.assign(gate, { arrows: netherGate(bot, executor as any).arrows })
   }
+  // (by day too: the animals hunted, the land explored for them, surfaceByDay)
   const food = netherGearNeeds(ownedInventory(bot), gate).filter(r => r.unit === 'nutrition')
   if (food.length > 0) {
-    await withTickBudget(bot, NETHER_FOOD_TICKS, signal, async (s) => await executor.obtain(food, s)).catch(err => {
+    await surfaceByDay(bot, signal, log, 'the food', async (d) => await withTickBudget(bot, NETHER_FOOD_TICKS, d, async (s) => await executor.obtain(food, s))).catch(err => {
       if (signal.aborted || TaskError.is(err, 'DIED')) throw err
       log(`nether kit: the food: ${(err as Error).message}`)
     })
@@ -1105,6 +1107,56 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
     })
   }
   await brewKit(bot, executor, signal, log)
+}
+
+/** the tries surfaceByDay's work makes, each cut off at the nightfall but the last */
+export const NIGHT_SURFACE_TRIES = 3
+
+/** night in the overworld (dayPhase): the monsters out on the surface */
+export function surfaceNight (bot: Bot): boolean {
+  return bot.time?.timeOfDay != null && normalizeDimension(bot.game?.dimension) === 'overworld' && dayPhase(bot.time.timeOfDay) === 'night'
+}
+
+/**
+ * The nether kit's surface work (the arrows' feathers, the gate's food: hunts and explorings over the surface) by day,
+ * as the stock's surface top-ups are (topUpPlaces): at night in the overworld the night waited out first (the runner's
+ * waitOutNight: the base's box, a bed, a hole dug), and the work cut off at the nightfall waits the night out and goes
+ * on, NIGHT_SURFACE_TRIES tries at the most; no wait to be had (no runner, a shelter that failed and the night still on),
+ * the work goes on as it is. A 1.21.11 bot in full iron, its night's mine over at 13659, explored for a chicken for
+ * its arrows' feathers till midnight among the zombies, a skeleton and a creeper, and was blown up (f9-1.21.11, t305885)
+ */
+export async function surfaceByDay<T> (bot: Bot, signal: AbortSignal, log: (line: string) => void, what: string, fn: (s: AbortSignal) => Promise<T>): Promise<T> {
+  const wait = (bot as any).survival?.waitOutNight as ((s?: AbortSignal) => Promise<void>) | undefined
+  if (wait == null) return await fn(signal)
+  for (let i = 0; ; i++) {
+    if (surfaceNight(bot)) {
+      log(`nether kit: ${what} by day: the night (time ${bot.time.timeOfDay}) waited out first`)
+      await wait(signal)
+      throwIfAborted(signal)
+      // (no shelter to be had, the night still on: the work as it is)
+      if (surfaceNight(bot)) return await fn(signal)
+    }
+    if (i >= NIGHT_SURFACE_TRIES - 1) return await fn(signal)
+    const ctrl = new AbortController()
+    const onOuter = (): void => ctrl.abort(signal.reason)
+    signal.addEventListener('abort', onOuter, { once: true })
+    let n = 0
+    let nightfall = false
+    const watch = (): void => {
+      if (++n % 20 !== 0 || ctrl.signal.aborted || !surfaceNight(bot)) return
+      nightfall = true
+      ctrl.abort(new TaskError('ABORTED', 'nightfall: the surface work waits for the day'))
+    }
+    bot.on('physicsTick', watch)
+    try {
+      return await fn(ctrl.signal)
+    } catch (err) {
+      if (signal.aborted || !nightfall || TaskError.is(err, 'DIED')) throw err
+    } finally {
+      bot.off('physicsTick', watch)
+      signal.removeEventListener('abort', onOuter)
+    }
+  }
 }
 
 /**
