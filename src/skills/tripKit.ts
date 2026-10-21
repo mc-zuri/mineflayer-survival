@@ -170,7 +170,7 @@ export interface TripKitKeep {
   nutrition?: (name: string) => number
 }
 
-export function tripKitItems (items: readonly ItemCount[], keep: TripKitKeep = {}): ItemCount[] {
+export function tripKitItems (items: readonly ItemCount[], keep: TripKitKeep = {}, shieldHeld = true): ItemCount[] {
   const count = (name: string): number => items.filter(i => i.name === name).reduce((n, i) => n + i.count, 0)
   const out: ItemCount[] = []
   const add = (name: string, n: number): void => { if (n > 0) out.push({ name, count: n }) }
@@ -211,8 +211,10 @@ export function tripKitItems (items: readonly ItemCount[], keep: TripKitKeep = {
     if (!ARMOR.test(i.name) || out.some(o => o.name === i.name)) continue
     add(i.name, count(i.name) - (gate && i.name.startsWith('golden_') ? 1 : 0))
   }
-  // a shield carried (the one held is in the off hand, not the bag)
-  add('shield', count('shield'))
+  // a shield carried (the one held is in the off hand, not the bag); with none held, one of the bag's stays for the
+  // trip: the off hand empty, the bag's one shield went in the nether's trip kit as a spare (f6-1.21.11's bot carried its
+  // one in the bag 100000 ticks, the off hand empty, then fought its blaze bunker with none)
+  add('shield', count('shield') - (shieldHeld ? 0 : 1))
   if (count('golden_apple') >= 2) add('golden_apple', 1)
   return out
 }
@@ -300,7 +302,7 @@ export async function stashTripKit (bot: Bot, memory: WorldMemory, signal?: Abor
     await placeBlock(bot, { pos, item: 'chest' }, signal)
   }
   const stored: Record<string, number> = {}
-  for (const it of tripKitItems(bot.inventory.items().map(i => ({ name: i.name, count: i.count })), opts.keep)) {
+  for (const it of tripKitItems(bot.inventory.items().map(i => ({ name: i.name, count: i.count })), opts.keep, bot.inventory.slots[45]?.name === 'shield')) {
     throwIfAborted(signal)
     try {
       const res = await storeItems(bot, { chest: pos, filter: it.name, count: it.count, memory }, signal)

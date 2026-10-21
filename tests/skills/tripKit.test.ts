@@ -16,6 +16,9 @@ test('tripKitItems: the weapons but the best, half the arrows, food and blocks (
   assert.deepStrictEqual(tripKitItems([{ name: 'diamond_sword', count: 1 }, { name: 'arrow', count: 20 }]), [])
   // a shield carried goes in (the one held is in the off hand, not the bag)
   assert.deepStrictEqual(tripKitItems([{ name: 'shield', count: 1 }, { name: 'iron_chestplate', count: 1 }]), [{ name: 'iron_chestplate', count: 1 }, { name: 'shield', count: 1 }])
+  // with none held (the off hand empty), the bag's one stays, of two one goes
+  assert.deepStrictEqual(tripKitItems([{ name: 'shield', count: 1 }, { name: 'iron_chestplate', count: 1 }], {}, false), [{ name: 'iron_chestplate', count: 1 }])
+  assert.deepStrictEqual(tripKitItems([{ name: 'shield', count: 2 }], {}, false), [{ name: 'shield', count: 1 }])
 })
 
 test('kitSpares: an iron chestplate and leggings from 15 iron when no armor is carried spare, then a shield from an ingot left', () => {
