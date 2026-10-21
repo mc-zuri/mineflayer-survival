@@ -19,8 +19,8 @@ import { describeLevel, markAt, StockPolicy, stockedItem, storedAtBase, type Sto
 import { inWater, onSurface, SURFACE_MIN_Y, toShore } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
-import { buildBase, keepBaseUnbroken, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
-import { baseRecord } from './base/pois'
+import { bedIfNear, buildBase, keepBaseUnbroken, HOUSE_BLUEPRINT, HOUSE_DEPTHS, type BuildBaseOptions } from './base/build'
+import { baseBuilt, baseRecord } from './base/pois'
 import { DEPOT_POI, Executor, describeRequest, ownedInventory, type ExecutorOptions, type PlanOptions } from './executor/executor'
 import { SPARE_FOOD_POINTS, gearScore, milestoneNeeds, spareKitGoals, stockKeepRule, tripSpareGoals } from './executor/keep'
 import { isAbort } from './skills/errors'
@@ -471,6 +471,9 @@ export const MEAL_RETRY_TICKS = 6000
 
 /** ticks between the herd's upkeeps between trips: the breeding's cooldown (Animal.setAge(6000)) */
 export const HERD_TEND_TICKS = 6000
+
+/** ticks between the tries for the base's bed, when the base was built without it (bedLater) */
+export const BED_LATER_TICKS = 6000
 /** ticks an upkeep of the herd between trips may take */
 export const HERD_UPKEEP_TICKS = 6000
 
@@ -534,18 +537,23 @@ const obtainGoals: MilestoneHandler = async ({ milestone, state, executor, signa
   await executor.obtain(milestone.goals(state), signal)
 }
 
+/**
+ * The base's house built (or built on, where the memory has it): the first base is the minimal house of day 1, dug in
+ * a few blocks under the ground (HOUSE_BLUEPRINT); the full creeper-proof base is play's base options' (BASE_BLUEPRINT)
+ * for later. `gather` false: what's held put in, nothing got first (the bed got later, bedLater)
+ */
+async function buildHouse (bot: Bot, executor: Executor, signal: AbortSignal | undefined, log: (line: string) => void, gather = true): Promise<void> {
+  const opts = (bot as any).survival?.playOptions?.base ?? {}
+  // (by the food land when the bot went to one: the spawn's land has no food, foodLand.ts)
+  const land = foodLandOf(executor.memory)
+  // a base left with most of its blocks missing is built on where it is, not sited again (baseBuilt)
+  const base = executor.memory.base
+  const at = base != null && base.dimension === normalizeDimension(bot.game?.dimension) ? { origin: new Vec3(base.x, base.y, base.z) } : {}
+  await buildBase(bot, { blueprint: HOUSE_BLUEPRINT, depths: HOUSE_DEPTHS, chests: 2, ...(land != null ? { around: land } : {}), ...at, ...opts, ...(gather ? {} : { gather: false }), executor, signal, log })
+}
+
 const defaultHandlers: Partial<Record<MilestoneId, MilestoneHandler>> = {
-  base: async ({ bot, executor, signal, log }) => {
-    const opts = (bot as any).survival?.playOptions?.base ?? {}
-    // the first base is the minimal house of day 1, dug in a few blocks under the ground (HOUSE_BLUEPRINT); the full
-    // creeper-proof base is play's base options' (BASE_BLUEPRINT) for later
-    // (by the food land when the bot went to one: the spawn's land has no food, foodLand.ts)
-    const land = foodLandOf(executor.memory)
-    // a base left with most of its blocks missing is built on where it is, not sited again (baseBuilt)
-    const base = executor.memory.base
-    const at = base != null && base.dimension === normalizeDimension(bot.game?.dimension) ? { origin: new Vec3(base.x, base.y, base.z) } : {}
-    await buildBase(bot, { blueprint: HOUSE_BLUEPRINT, depths: HOUSE_DEPTHS, chests: 2, ...(land != null ? { around: land } : {}), ...at, ...opts, executor, signal, log })
-  },
+  base: async ({ bot, executor, signal, log }) => await buildHouse(bot, executor, signal, log),
   ...MILESTONE_HANDLERS,
   ...EPOCH_HANDLERS
 }
@@ -579,6 +587,8 @@ export class Runner {
   private waterRetryAt = 0
   /** the tick the herd was last tended at between trips (keepHerd) */
   private herdTendedAt = -Infinity
+  /** the tick the base's bed was last tried for (bedLater) */
+  private bedTriedAt = -Infinity
   private readonly store: SaveStore | null
   /** what play keeps on hand beyond the milestones' needs (planner/stock.ts), null for nothing */
   readonly stock: StockPolicy | null
@@ -1115,12 +1125,30 @@ export class Runner {
     if (Math.hypot(p.x - base.origin.x, p.y - base.origin.y, p.z - base.origin.z) > 96) return
     try {
       await this.executor.storeAtBase({}, signal)
+      await this.bedLater(signal)
       await this.stashSpareKit(signal)
       await this.carrySpare(signal)
     } catch (err) {
       if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
       this.log(`storing failed: ${(err as Error).message}`)
     }
+  }
+
+  /**
+   * The base's bed put in when the base was built without it (buildBase's bedIfNear: no wool near then), once its wool
+   * is near: a bed held, or one planned within BED_NOW_TICKS (a sheep in sight). Every BED_LATER_TICKS at most.
+   */
+  async bedLater (signal?: AbortSignal): Promise<void> {
+    const bot = this.bot
+    const base = baseRecord(this.memory)
+    if (base == null || base.bed != null || !baseBuilt(this.memory)) return
+    if (normalizeDimension(bot.game?.dimension) !== (this.memory.base?.dimension ?? 'overworld')) return
+    const now = bot.survival.tasks.tick
+    if (now - this.bedTriedAt < BED_LATER_TICKS) return
+    this.bedTriedAt = now
+    if (!await bedIfNear(bot, this.executor, signal, line => this.log(`base bed: ${line}`))) return
+    this.log('base bed: put in')
+    await buildHouse(bot, this.executor, signal, this.log, false)
   }
 
   /**

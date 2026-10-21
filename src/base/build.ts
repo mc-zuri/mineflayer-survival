@@ -257,6 +257,41 @@ function materialRequests (bot: Bot, materials: Record<string, number>, shellMat
   return out
 }
 
+/** ticks a bed's plan may cost for it to be got before the base is built (bedIfNear) */
+export const BED_NOW_TICKS = 2400
+/** how many times dearer a sheep or spider not in sight is to the bed's plan (ObtainOptions.unseenFactor) */
+export const BED_UNSEEN_FACTOR = 16
+
+/** the bed items of the registry, the white one first (the one made of white wool) */
+export function bedItems (bot: Bot): string[] {
+  return ['white_bed', ...Object.keys(bot.registry.itemsByName).filter(n => isBed(n) && n !== 'white_bed')]
+}
+
+/**
+ * A bed got when its wool is near: one held, or a plan for one within BED_NOW_TICKS with the sheep and spiders not in
+ * sight BED_UNSEEN_FACTOR times dearer (a sheep in sight, the wool held). Else none for now: the base is built without
+ * it and the bed put in later (the runner's bedLater), the nights waited out by the night reflexes meanwhile. A 26.3
+ * base's 'kill 3 sheep for 3 white_wool' explored for sheep from t7458 to dusk, and from t23535 to its NOT_FOUND at
+ * t28925, then for spiders by day, and the base was built at t58427 (f3-26.3). Whether a bed is held after.
+ */
+export async function bedIfNear (bot: Bot, executor: Executor, signal: AbortSignal | undefined, log: (line: string) => void): Promise<boolean> {
+  const beds = bedItems(bot)
+  if (countItems(bot, beds) > 0) return true
+  const request = { item: beds, count: 1 }
+  const plan = executor.plan([request], undefined, { unseenFactor: BED_UNSEEN_FACTOR })
+  if (!plan.ok || plan.cost > BED_NOW_TICKS) {
+    log(`no bed for now (${plan.ok ? `${plan.cost} ticks, over ${BED_NOW_TICKS}` : 'no plan'}): the base without it, the bed when its wool is near`)
+    return false
+  }
+  try {
+    await executor.obtain([request], signal, { unseenFactor: BED_UNSEEN_FACTOR })
+  } catch (err) {
+    if (TaskError.is(err, 'DIED', 'ABORTED') || isAbort(err)) throw err
+    log(`no bed: ${(err as Error).message}`)
+  }
+  return countItems(bot, beds) > 0
+}
+
 /**
  * Builds the base and records it in the executor's memory. Returns what was built and the safety checker's report on
  * the blocks as they are in the world (`safety.safe`: no chest can be blown up from anywhere a mob gets to).
@@ -293,12 +328,13 @@ export async function buildBase (bot: Bot, opts: BuildBaseOptions): Promise<Buil
     const requests = materialRequests(bot, materials, material)
     log(`base materials: ${requests.map(r => `${r.count} ${String(r.item).split(',')[0]}`).join(', ')}`)
     try {
-      await executor.obtain(requests, signal)
+      await executor.obtain(requests.filter(r => r.optional !== true), signal)
     } catch (err) {
       if (TaskError.is(err, 'DIED', 'ABORTED')) throw err
-      // the optional bed may be what failed: build without what's missing
       log(`base materials short: ${(err as Error).message}`)
     }
+    // the bed when its wool is near, else the base built without it (bedIfNear)
+    if (requests.some(r => r.optional === true)) await bedIfNear(bot, executor, signal, log)
   }
 
   const unprotect = protectSite(bot, blueprint)

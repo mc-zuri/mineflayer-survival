@@ -1311,3 +1311,36 @@ test('deathSpotSkip: a spot the bot drowned at, its drops under the water, isn\'
   assert.equal(dropsUnderWater(sea, shore), false)
   assert.notEqual(deathSpotSkip(shore, now, 6000), 'drowned there, the drops under the water')
 })
+
+test('bedLater: a base built without its bed (no wool near then) gets it once the bed\'s wool is near, tried every BED_LATER_TICKS at most; none for a base with its bed', async () => {
+  const { BED_LATER_TICKS } = await import('../../src/runner')
+  const { BASE_POI } = await import('../../src/base/pois')
+  const { BED_NOW_TICKS } = await import('../../src/base/build')
+  const bot = fakeBot()
+  const lines: string[] = []
+  const runner = new Runner(bot, { log: l => lines.push(l) })
+  const memory = bot.survival.memory as WorldMemory
+  memory.setBase({ x: 0, y: 60, z: 0 }, 'overworld')
+  memory.addPoi(BASE_POI.build, { x: 0, y: 60, z: 0 }, 'overworld', '1/40/1/0')
+  let planned = 0
+  let cost = BED_NOW_TICKS + 100
+  ;(runner.executor as any).plan = () => { planned++; return { ok: true, cost, steps: [] } }
+  await runner.bedLater()
+  assert.equal(planned, 1)
+  assert.ok(lines.some(l => l.startsWith('base bed: no bed for now')), lines.join('\n'))
+  // again at once: not tried
+  await runner.bedLater()
+  assert.equal(planned, 1)
+  // BED_LATER_TICKS on, a sheep in sight: got (the fake obtain gives the bed), then put in (the build: stopped here)
+  for (let i = 0; i < BED_LATER_TICKS; i++) bot.survival.tasks.tick++
+  cost = 500
+  ;(runner.executor as any).obtain = async () => { bot.give('white_bed', 1); return { plans: 1, steps: 1 } }
+  await runner.bedLater().catch(() => {})
+  assert.equal(planned, 2)
+  assert.ok(lines.includes('base bed: put in'), lines.join('\n'))
+  // the base with its bed: nothing
+  memory.addPoi(BASE_POI.bed, { x: 1, y: 60, z: 1 }, 'overworld')
+  for (let i = 0; i < BED_LATER_TICKS; i++) bot.survival.tasks.tick++
+  await runner.bedLater()
+  assert.equal(planned, 2)
+})

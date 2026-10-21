@@ -154,3 +154,46 @@ test('inTheWay: the room\'s and the airlock\'s cells holding what the blueprint 
   assert.ok(res.missing.some(p => p.block.endsWith('_door')))
   assert.match(executor.memory.getPois('base_build')[0].note, /^\d+\/\d+\/1\/2$/, 'the two doors noted missing')
 })
+
+test('buildBase: the materials got without the bed, the bed only when its wool is near (bedIfNear: a plan within BED_NOW_TICKS, the unseen sheep and spiders dearer); else the base built without it (f3-26.3: the base\'s sheep explored for from t7458 to t28925, then spiders, built at t58427)', async () => {
+  const { buildBase, bedIfNear, BED_NOW_TICKS, BED_UNSEEN_FACTOR, HOUSE_BLUEPRINT } = await import('../../src/base/build')
+  const { TaskError } = await import('../../src/core/errors')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const make = (cost: number, ok = true, items: any[] = []): { bot: any, executor: any, obtained: any[][], planned: any[], lines: string[] } => {
+    const bot = fakeBot({ world: (p: any) => p.y < 76 ? 'stone' : 'air', items })
+    bot.pathfinder = { defaultMoveSettings: { exclusionAreasBreak: [], exclusionAreasPlace: [] }, setMoveOptions (s: any) { this.defaultMoveSettings = s } }
+    const obtained: any[][] = []
+    const planned: any[] = []
+    const lines: string[] = []
+    const executor: any = {
+      memory: new WorldMemory(),
+      log: () => {},
+      plan: (requests: any[], _inv: unknown, opts: any) => { planned.push({ requests, opts }); return { ok, cost, steps: [] } },
+      obtain: async (requests: any[]) => { obtained.push(requests.map(r => String(r.item).split(',')[0])); return { plans: 1, steps: 1 } },
+      // (the build stops on the way to the site: only the materials matter here)
+      task: async (name: string) => { if (name === 'to the base site') throw new TaskError('DIED', 'the bot died'); return false }
+    }
+    return { bot, executor, obtained, planned, lines }
+  }
+  // no sheep near: the materials, no bed asked for
+  const far = make(BED_NOW_TICKS + 1)
+  await assert.rejects(buildBase(far.bot, { blueprint: HOUSE_BLUEPRINT, origin: { x: -8, y: 74, z: 120 }, executor: far.executor, log: l => far.lines.push(l) }), (err: unknown) => TaskError.is(err, 'DIED'))
+  assert.equal(far.obtained.length, 1)
+  assert.ok(!far.obtained[0].some(n => n.endsWith('_bed')), far.obtained[0].join(', '))
+  assert.ok(far.obtained[0].includes('chest'))
+  assert.equal(far.planned.length, 1)
+  assert.equal(far.planned[0].opts.unseenFactor, BED_UNSEEN_FACTOR)
+  assert.ok(far.lines.some(l => l.startsWith(`no bed for now (${BED_NOW_TICKS + 1} ticks, over ${BED_NOW_TICKS})`)), far.lines.join('\n'))
+  // a sheep in sight: the bed got too
+  const near = make(600)
+  await assert.rejects(buildBase(near.bot, { blueprint: HOUSE_BLUEPRINT, origin: { x: -8, y: 74, z: 120 }, executor: near.executor, log: l => near.lines.push(l) }))
+  assert.equal(near.obtained.length, 2)
+  assert.equal(near.obtained[1][0], 'white_bed')
+  // a bed held: nothing planned for it; no plan: none
+  const held = make(600, true, [item('red_bed', 1)])
+  assert.equal(await bedIfNear(held.bot, held.executor, undefined, l => held.lines.push(l)), true)
+  assert.equal(held.planned.length, 0)
+  const none = make(0, false)
+  assert.equal(await bedIfNear(none.bot, none.executor, undefined, l => none.lines.push(l)), false)
+  assert.equal(none.obtained.length, 0)
+})
