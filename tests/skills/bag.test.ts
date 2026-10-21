@@ -3,8 +3,8 @@ import { test } from 'node:test'
 import assert from 'node:assert'
 import { EventEmitter } from 'node:events'
 import { Vec3 } from 'vec3'
-import { bagKeeper, bagShort, holdBag, keepRoom, unwantedDrop, type BagKeeper } from '../../src/skills/bag'
-import { fakeBot, item } from '../reflexes/fakeBot'
+import { BAG_HOSTILE_RANGE, bagKeeper, bagShort, bagUnsafe, holdBag, keepRoom, unwantedDrop, type BagKeeper } from '../../src/skills/bag'
+import { entity, fakeBot, item } from '../reflexes/fakeBot'
 
 /** a fake bot whose 36 slots hold `stacks` stacks of cobblestone (the rest empty) */
 function bagBot (stacks: number, extra: any[] = []): any {
@@ -215,4 +215,26 @@ test('the executor\'s tasks hold the bag with its keeper (the route\'s stone ove
   assert.strictEqual(inside?.unwanted('obsidian'), false)
   assert.strictEqual(await ex.task('store cobblestone', async () => bagKeeper(bot), undefined, { room: false }), null)
   assert.strictEqual(bagKeeper(bot), null)
+})
+
+test('keepRoom: no room made with a hostile within BAG_HOSTILE_RANGE (bagUnsafe), made once it is gone (ls4-26.3, t386611: junk thrown 5 times in 50 ticks among four zombies)', async () => {
+  const zombie = entity({ name: 'zombie', position: new Vec3(0.5 + BAG_HOSTILE_RANGE - 2, 64, 0.5) })
+  const bot = bagBot(35)
+  bot.entities[zombie.id] = zombie
+  const k = keeper(bot)
+  const release = holdBag(bot, k, new AbortController().signal)
+  assert.strictEqual(bagUnsafe(bot), true)
+  assert.strictEqual(await keepRoom(bot), false)
+  assert.strictEqual(k.calls.length, 0)
+  // a cow there is no threat; the zombie further off neither
+  const cow = entity({ name: 'cow', position: new Vec3(2.5, 64, 0.5) })
+  delete bot.entities[zombie.id]
+  bot.entities[cow.id] = cow
+  assert.strictEqual(bagUnsafe(bot), false)
+  zombie.position = new Vec3(0.5 + BAG_HOSTILE_RANGE + 2, 64, 0.5)
+  bot.entities[zombie.id] = zombie
+  assert.strictEqual(bagUnsafe(bot), false)
+  assert.strictEqual(await keepRoom(bot), true)
+  assert.strictEqual(k.calls.length, 1)
+  release()
 })

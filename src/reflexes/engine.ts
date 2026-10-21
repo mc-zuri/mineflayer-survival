@@ -33,6 +33,10 @@ export class ReflexEngine {
   /** a task is using the off hand: the totem reflex waits */
   offhandLocked = false
   private lastHurtTick = -Infinity
+  /** the tick a mob (not the bot itself, a fall, the fire) last hurt the bot at */
+  private lastMobHurtTick = -Infinity
+  /** the tick each reflex's wait after a failure began */
+  private readonly cooldownFrom = new Map<string, number>()
   private armorChanged = true
   private readonly swell = new Map<number, number>()
   private running: Running | null = null
@@ -47,7 +51,10 @@ export class ReflexEngine {
   private readonly onHurt = (entity: Entity, source?: Entity): void => {
     if (entity !== this.bot.entity) return
     this.lastHurtTick = this.tick
-    if (source != null && source !== this.bot.entity) this.attackers.set(source.id, this.tick)
+    if (source != null && source !== this.bot.entity) {
+      this.attackers.set(source.id, this.tick)
+      this.lastMobHurtTick = this.tick
+    }
   }
   private readonly onCollect = (collector: Entity): void => { if (collector === this.bot.entity) this.armorChanged = true }
   private readonly onSlot = (_slot: number, _old: unknown, item: { name: string } | null): void => {
@@ -108,7 +115,10 @@ export class ReflexEngine {
     const holds = this.holds(ctx)
     let best: UrgentTask | null = null
     for (const reflex of this.reflexes) {
-      if ((this.cooldownUntil.get(reflex.name) ?? -Infinity) > this.tick) continue
+      // (waiting after a failure; a mob's hit since ends a hitEndsCooldown reflex's wait: the hostiles reflex's fight
+      // ended, the work threw junk and walked off for 20 ticks under four zombies' hits, five times, till the bot died,
+      // ls4-26.3, t386611)
+      if ((this.cooldownUntil.get(reflex.name) ?? -Infinity) > this.tick && !(reflex.hitEndsCooldown === true && this.lastMobHurtTick >= (this.cooldownFrom.get(reflex.name) ?? Infinity))) continue
       if (this.running?.task.name === reflex.name) continue
       if (this.inhibited.has(reflex.name)) continue
       const task = reflex.check(ctx)
@@ -182,6 +192,7 @@ export class ReflexEngine {
         if (!TaskError.is(err, 'PREEMPTED')) {
           const cooldown = this.reflexes.find(r => r.name === task.name)?.retryCooldownTicks ?? this.config.retryCooldownTicks
           this.cooldownUntil.set(task.name, this.tick + cooldown)
+          this.cooldownFrom.set(task.name, this.tick)
         }
         this.bot.emit('reflexFailed' as any, task.name, err)
       }

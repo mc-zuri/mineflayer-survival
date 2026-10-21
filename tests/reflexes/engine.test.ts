@@ -227,3 +227,36 @@ test('a drowning task that failed goes again at once (retryCooldownTicks 0), not
   engine.stop()
   assert.strictEqual(drowningReflex.retryCooldownTicks, 0)
 })
+
+test('a hostiles task that failed waits out its cooldown, but a mob\'s hit since ends the wait at once (hitEndsCooldown; ls4-26.3, t386611: the work threw junk under four zombies\' hits between the fights)', async () => {
+  const { hostilesReflex } = await import('../../src/reflexes/rules')
+  assert.strictEqual(hostilesReflex.hitEndsCooldown, true)
+  const bot = fakeBot()
+  const zombie = entity({ name: 'zombie', position: new Vec3(2.5, 64, 0.5) })
+  let runs = 0
+  const failing: Reflex = {
+    name: 'hostiles',
+    priority: 60,
+    hitEndsCooldown: true,
+    check: () => ({ name: 'hostiles', priority: 60, run: async () => { runs++; throw new Error('the fight turned') } })
+  }
+  const engine = new ReflexEngine(bot, { reflexes: [failing] })
+  bot.emit('physicsTick')
+  await flush()
+  assert.strictEqual(runs, 1)
+  // waiting: no hit, no run
+  bot.emit('physicsTick')
+  await flush()
+  assert.strictEqual(runs, 1)
+  // a fall's hurt (no mob) doesn't end it
+  bot.emit('entityHurt', bot.entity)
+  bot.emit('physicsTick')
+  await flush()
+  assert.strictEqual(runs, 1)
+  // the zombie's hit does
+  bot.emit('entityHurt', bot.entity, zombie)
+  bot.emit('physicsTick')
+  await flush()
+  assert.strictEqual(runs, 2)
+  engine.stop()
+})

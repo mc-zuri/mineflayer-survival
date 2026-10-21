@@ -583,6 +583,8 @@ function cachedRefuge (ctx: ReflexContext, near: Entity[]): DoorRefuge | null {
 export const hostilesReflex: Reflex = {
   name: 'hostiles',
   priority: 60,
+  // (a hit after a fight or a flee failed: at it again at once, not the work's 20 ticks under the hits)
+  hitEndsCooldown: true,
   check (ctx) {
     const { bot, config } = ctx
     if (!config.hostiles.enabled) return null

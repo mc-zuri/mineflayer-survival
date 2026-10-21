@@ -52,6 +52,8 @@ export interface Reflex {
   hold?: (ctx: ReflexContext) => ReflexHold | null
   /** ticks before it may fire again once its task failed (default config.retryCooldownTicks) */
   retryCooldownTicks?: number
+  /** a hit by a mob after its task failed ends the wait (retryCooldownTicks) at once */
+  hitEndsCooldown?: boolean
 }
 
 /** What a reflex's hold keeps from firing: the reflexes under `below`, but a task `except` lets by. */

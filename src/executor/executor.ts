@@ -25,8 +25,8 @@ import { isAbort } from '../skills/errors'
 import { tossAway } from '../skills/pickupDrops'
 import { navigate } from '../skills/navigate'
 import { goals } from '@nxg-org/mineflayer-pathfinder'
-import { holdBag, type BagKeeper } from '../skills/bag'
-import { countItems, emptySlots, trace } from '../skills/util'
+import { bagUnsafe, holdBag, type BagKeeper } from '../skills/bag'
+import { countItems, emptySlots, trace, waitTicks } from '../skills/util'
 import { replacementTiers, usesLeft, watchToolWear, wornOutTools, type WornTool } from './durability'
 import { defaultKeep, JUNK, junkToToss, neededItems, ROUTE_STONE, scaffoldKeepIn, spareToolsKeep, splitInventory, THROW_LOOP_REPEATS, THROW_LOOP_TICKS, ThrowHistory, type KeepRule, type ProtectOptions, type ScaffoldKeep } from './keep'
 import { DEFAULT_RUNNERS, HUNT_EXPLORE_MAX, MIN_TOOL_USES, mobSubstitutes, outOfTheWay, SCAFFOLD_ITEMS, type StepContext, type StepOutcome, type StepRunner } from './steps'
@@ -228,6 +228,9 @@ export function requestsMet (inv: Inventory, requests: readonly ObtainRequest[])
   })
 }
 
+/** ticks a room forced (a step's INVENTORY_FULL) waits for the hostiles about to go (bagUnsafe) */
+export const ROOM_COMBAT_WAIT = 400
+
 /** ticks between the biome surveys of the chunks loaded since (BiomeSurvey.survey), and the chunks a survey takes at most */
 export const BIOME_SURVEY_TICKS = 100
 export const BIOME_SURVEY_MAX = 64
@@ -251,6 +254,8 @@ export class Executor {
   /** the tool replacement in progress (it obtains with this executor: no replacing within it) */
   private replacing = false
   private makingRoom = false
+  /** the tick 'no room made: hostiles about' was last logged */
+  private roomCombatLogged = -Infinity
   /** the stacks thrown for room lately: one thrown again and again was picked up again (ThrowHistory) */
   private readonly throws = new ThrowHistory()
   /** a loop of throws with no chest to break it found: no room made on the way till this tick */
@@ -873,6 +878,18 @@ export class Executor {
    */
   async makeRoom (needed: Record<string, number> = {}, signal?: AbortSignal, force = false, inTask?: AbortSignal, toward?: Vec3): Promise<void> {
     if (this.makingRoom) return
+    // never with hostiles about (bagUnsafe): the room forced (a step failed INVENTORY_FULL) waits ROOM_COMBAT_WAIT
+    // ticks at most for them to go, the rest is made later
+    if (bagUnsafe(this.bot)) {
+      if (force) {
+        for (let t = 0; t < ROOM_COMBAT_WAIT && bagUnsafe(this.bot); t += 10) await waitTicks(this.bot, 10, inTask ?? signal)
+      }
+      if (bagUnsafe(this.bot)) {
+        if (this.tasks.tick - this.roomCombatLogged >= ROOM_COMBAT_WAIT) this.log('no room made: hostiles about')
+        this.roomCombatLogged = this.tasks.tick
+        return
+      }
+    }
     this.makingRoom = true
     const run: RoomRunner = inTask != null ? async (_name, fn) => await fn(inTask) : async (name, fn) => await this.task(name, fn, signal, { room: false })
     try {

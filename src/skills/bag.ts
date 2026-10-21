@@ -10,6 +10,31 @@ import type { Vec3 } from 'vec3'
 import { emptySlots } from './util'
 import { throwIfAborted } from './errors'
 
+/** how near a hostile keeps the bag as it is (bagUnsafe: the hostiles reflex's range) */
+export const BAG_HOSTILE_RANGE = 8
+
+/**
+ * Whether no room is made now: a hostile within BAG_HOSTILE_RANGE, alive, or the reflexes in combat (one in range, or a
+ * hit lately). A throw turns the bot from the mob, a walk off takes it 8 blocks among them: a 26.3 bot fighting four
+ * zombies in a cave at y -58 threw its cobbled deepslate away 5 times in 50 ticks between its fights, walking off
+ * each time, and was slain (ls4-26.3, t386611)
+ */
+export function bagUnsafe (bot: Bot): boolean {
+  const engine = (bot as any).survival?.reflexes
+  try {
+    if (engine?.enabled === true && engine.context?.().inCombat === true) return true
+  } catch {}
+  const pos = bot.entity?.position
+  if (pos == null) return false
+  return Object.values(bot.entities ?? {}).some((e: any) => {
+    if (e === bot.entity || e?.position == null) return false
+    if ((bot.registry?.entitiesByName as any)?.[e.name ?? '']?.type !== 'hostile') return false
+    const health = e.metadata?.[9]
+    if (typeof health === 'number' && health <= 0) return false
+    return e.position.distanceTo(pos) <= BAG_HOSTILE_RANGE
+  })
+}
+
 export interface BagKeeper {
   /** slots kept free: room is made when fewer are */
   minFree: number
@@ -72,6 +97,8 @@ export async function keepRoom (bot: Bot, signal?: AbortSignal, toward?: Vec3): 
   throwIfAborted(signal)
   const hold = liveHold(bot)
   if (hold == null || busy.has(bot) || emptySlots(bot) >= hold.keeper.minFree) return false
+  // (none with hostiles about: bagUnsafe)
+  if (bagUnsafe(bot)) return false
   busy.add(bot)
   try {
     await hold.keeper.room(hold.signal, toward)
