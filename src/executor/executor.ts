@@ -417,6 +417,8 @@ export class Executor {
   private async obtainLoop (requests: readonly ObtainRequest[], signal?: AbortSignal, planOptions: PlanOptions = {}): Promise<ObtainOutcome> {
     const diag = this.diagnostics
     const failures = new Map<string, number>()
+    // the steps that failed INVENTORY_FULL and were given room, run again uncounted once
+    const roomRetried = new Set<string>()
     let plans = 0
     let steps = 0
     let lastError: unknown = null
@@ -482,8 +484,20 @@ export class Executor {
           this.forgetMissingStation(err)
           this.noteMissing(step, err, began)
           await this.noteUncraftable(step, err)
+          if (TaskError.is(err, 'INVENTORY_FULL')) {
+            // the room forced; a step that failed for room only and got it is no failure of the step's, the first
+            // time (a craft with the bag full, 'gave 0 of 4: the inventory is full', five milestone failures with 43
+            // dirt and 53 granite, diorite and andesite to throw: f2b-grim, 1.21.11, t99663 to t105284)
+            const free = emptySlots(this.bot)
+            await this.makeRoom(needed, signal, true)
+            if (emptySlots(this.bot) > free && !roomRetried.has(key)) {
+              roomRetried.add(key)
+              failures.set(key, n - 1)
+              this.log(`room made (${emptySlots(this.bot)} slots free): ${describeStep(step)} again`)
+              break
+            }
+          }
           if (n >= this.options.maxStepFailures) throw err
-          if (TaskError.is(err, 'INVENTORY_FULL')) await this.makeRoom(needed, signal, true)
           break
         }
         failures.delete(key)

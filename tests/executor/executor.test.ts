@@ -1098,3 +1098,48 @@ test('a worn pickaxe replaceWornTools can make no new one for is muted: the next
   assert.equal(lines.filter(l => /uses left: making another/.test(l)).length, tries)
   assert.deepEqual(muted, [true])
 })
+
+test('a step that fails for room (INVENTORY_FULL) and is given it runs again uncounted, once; with no room made it counts (f2b-grim: \'gave 0 of 4: the inventory is full\', five milestone failures)', async () => {
+  // a bag of 36 stacks, granite the last: no slot free
+  const fill: Record<string, number> = { oak_planks: 2 }
+  for (const name of Object.keys(registry.itemsByName).filter(n => /_wool$|_concrete$|_terracotta$/.test(n)).slice(0, 34)) fill[name] = 1
+  fill.granite = 33
+  const run = async (frees: boolean, fullTimes: number): Promise<{ tries: number, lines: string[], err: unknown }> => {
+    const bot = fakeBot(fill)
+    bot.inventory.inventoryStart = 9
+    bot.inventory.inventoryEnd = 45
+    const lines: string[] = []
+    let tries = 0
+    const ex = new Executor(bot, {
+      runners: {
+        craft: async (step) => {
+          tries++
+          if (tries <= fullTimes || bot.inventory.slots.slice(9, 45).every((s: any) => s != null)) throw new SkillError('NO_SPACE', `crafting ${step.item} x1 gave 0 of 4: the inventory is full`, { item: step.item, crafted: 0, table: null, placedTable: false })
+          for (const i of step.ingredients) bot.take(i.name, i.count)
+          bot.give(step.item, step.count)
+          return { gained: step.count }
+        }
+      },
+      maxStepFailures: 1,
+      log: line => lines.push(line)
+    })
+    // (the room before a step makes none: the forced one after the failure does)
+    ex.makeRoom = async (_needed, _signal, force = false) => { if (frees && force) bot.take('granite', 33) }
+    let err: unknown = null
+    try { await ex.obtain([{ item: 'stick', count: 4 }]) } catch (e) { err = e }
+    return { tries, lines, err }
+  }
+  // room made: the craft again, no failure of it
+  const ok = await run(true, 1)
+  assert.equal(ok.err, null)
+  assert.equal(ok.tries, 2)
+  assert.ok(ok.lines.includes('room made (1 slots free): craft 4 stick again'), ok.lines.join('\n'))
+  // no room made: the failure counts (maxStepFailures 1)
+  const none = await run(false, 1)
+  assert.ok(TaskError.is(none.err, 'INVENTORY_FULL'))
+  assert.equal(none.tries, 1)
+  // room made but the step full again: uncounted once only
+  const twice = await run(true, 2)
+  assert.ok(TaskError.is(twice.err, 'INVENTORY_FULL'))
+  assert.equal(twice.tries, 2)
+})
