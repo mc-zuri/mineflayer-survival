@@ -518,3 +518,18 @@ test('a farm step from 300 blocks off goes by travel\'s hops first, then to the 
     travelModule.travel = real.travel
   }
 })
+
+test('harvestGrownFarms keepWheat: a meal\'s harvest bakes all its wheat (keepWheat 0), the upkeep\'s keeps the herd\'s 6 (f5-1.21.11: 3 wheat kept for a herd still to start, the starving meal went hunting)', async () => {
+  const { harvestGrownFarms, HERD_WHEAT_KEPT } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const memory = new WorldMemory()
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wheat', 3)] })
+  bot.game.dimension = 'overworld'
+  const asked: any[] = []
+  const executor: any = { memory, farmCost: () => undefined, obtain: async (reqs: any[]) => { asked.push(...reqs) }, runStep: async () => ({}) }
+  await harvestGrownFarms(bot, executor, new AbortController().signal, () => {})
+  assert.deepEqual(asked, [])
+  assert.ok(HERD_WHEAT_KEPT >= 3)
+  await harvestGrownFarms(bot, executor, new AbortController().signal, () => {}, true, 3, 0)
+  assert.deepEqual(asked, [{ item: 'bread', count: 1 }])
+})

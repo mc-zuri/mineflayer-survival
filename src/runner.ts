@@ -1839,7 +1839,9 @@ export class Runner {
   async harvestPassing (signal: AbortSignal): Promise<void> {
     this.harvestingFarm = true
     try {
-      await harvestGrownFarms(this.bot, this.executor, signal, this.log, true, MEAL_FARM_PLOTS).catch(err => {
+      // (hungry: all the wheat baked, none kept for the herd)
+      const hungry = mealGoals(this.bot.food ?? 20, ownedInventory(this.bot)) != null
+      await harvestGrownFarms(this.bot, this.executor, signal, this.log, true, MEAL_FARM_PLOTS, hungry ? 0 : undefined).catch(err => {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
         this.log(`farm: ${(err as Error).message}`)
       })
@@ -1927,7 +1929,9 @@ export class Runner {
     if (!home.farm && !home.herd) return false
     this.log(`the home's food first:${home.farm ? ' the farm grown' : ''}${home.herd ? ' the herd surplus' : ''}`)
     if (home.farm) {
-      await harvestGrownFarms(this.bot, this.executor, signal, this.log, true, MEAL_FARM_PLOTS).catch(err => {
+      // (a meal's: all the wheat baked, none kept for the herd: a starving bot's 3 wheat kept for a herd still to
+      // start, and its meal went hunting for 6000 ticks, f5-1.21.11 t126389)
+      await harvestGrownFarms(this.bot, this.executor, signal, this.log, true, MEAL_FARM_PLOTS, 0).catch(err => {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
         this.log(`farm: ${(err as Error).message}`)
       })

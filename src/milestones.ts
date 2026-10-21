@@ -2684,7 +2684,7 @@ export const MEAL_FARM_PLOTS = 3
  * of its plots grown, a meal's), within FARM_RANGE, harvested and sown again, and its wheat baked into bread, the herd's kept (herdWheatKept). Resolves the
  * bread made.
  */
-export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, bake = true, least?: number): Promise<number> {
+export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, bake = true, least?: number, keepWheat?: number): Promise<number> {
   const dimension = normalizeDimension(bot.game?.dimension)
   let bread = 0
   let harvested = 0
@@ -2703,7 +2703,7 @@ export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: A
   // the harvest's seeds beyond the plots' own sown about the water (the farm grows to FARM_TARGET_PLOTS)
   if (harvested > 0) await growFarms(bot, executor, signal, log)
   // (the herd's wheat kept: a calf bred is a cow's 16 points later, 2 wheat baked two thirds of a bread's 5)
-  const wheat = countItems(bot, 'wheat') - herdWheatKept(executor.memory)
+  const wheat = countItems(bot, 'wheat') - (keepWheat ?? herdWheatKept(executor.memory))
   if (bake && wheat >= 3) {
     const before = countItems(bot, 'bread')
     await executor.obtain([{ item: 'bread', count: before + Math.floor(wheat / 3) }], signal)
