@@ -141,3 +141,30 @@ test('pourPoint: a face the use ray hits first (pourRayLands): a point whose ray
   lava = true
   assert.equal(pourRayLands(bot, eye, new Vec3(2.8, 64, 0.8), floor, pos), false)
 })
+
+test('a fill from the nearest water never takes a farm\'s own (keptWater: the wheat farm\'s hole, the water by the cane farm\'s spots): with no other, NOT_FOUND (f5-1.21.11: the obsidian\'s bucket filled at the farm\'s hole, the farm dried)', async () => {
+  const { fillBucket, keptWater } = await import('../../src/skills/bucket')
+  const { WorldMemory } = await import('../../src/core/memory')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const { Vec3 } = await import('vec3')
+  const memory = new WorldMemory()
+  memory.addPoi('farm', new Vec3(5, 63, 5), 'overworld', JSON.stringify({ crop: 'wheat', cells: [[6, 63, 5]], sown: 0 }))
+  memory.addPoi('cane_farm', new Vec3(20, 64, 0), 'overworld', JSON.stringify({ spots: [[20, 63, 0]] }))
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('bucket', 1)] })
+  bot.survival = { memory }
+  const kept = keptWater(bot)
+  assert.equal(kept(new Vec3(5, 63, 5)), true)
+  assert.equal(kept(new Vec3(21, 63, 0)), true)
+  assert.equal(kept(new Vec3(22, 63, 0)), false)
+  assert.equal(kept(new Vec3(40, 63, 40)), false)
+  // mineflayer's findBlock: the nearest that matches, its extra info checked too
+  const waters = [new Vec3(5, 63, 5), new Vec3(21, 63, 0)]
+  bot.findBlock = (opts: any) => {
+    for (const p of waters) {
+      const block = { name: 'water', position: p, getProperties: () => ({ level: 0 }) }
+      if (opts.matching(block) && (typeof opts.useExtraInfo !== 'function' || opts.useExtraInfo(block))) return block
+    }
+    return null
+  }
+  await assert.rejects(fillBucket(bot, { fluid: 'water' }), /no water source nearby/)
+})

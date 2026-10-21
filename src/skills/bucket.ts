@@ -19,6 +19,25 @@ export function isSource (block: { name: string, getProperties?: () => Record<st
   return Number(level) === 0
 }
 
+/**
+ * The water the bot's farms stand by, which a fill from the nearest source never takes (fillBucket without a `pos`):
+ * the wheat farm's water ('farm' points of interest, at their water) and the cells by the cane farm's spots (its
+ * channel's or holes' water). A wheat farm's water hole is a lone source: taken, it's gone, the farmland dries and its
+ * crops all but stop (FarmBlock.randomTick, CropBlock.getGrowthSpeed). A 1.21.11 bot's obsidian cast filled its bucket at
+ * its farm's hole by home, and the farm's 10 plots stood at ages 0 to 5 70000 ticks after the sowing, its bare rows grass
+ * again (f5-1.21.11 resumed from its base, seed 671229120248951486, t79353 to t151571)
+ */
+export function keptWater (bot: Bot): (pos: Vec3) => boolean {
+  const memory = (bot as any).survival?.memory
+  if (memory == null || typeof memory.getPois !== 'function') return () => false
+  const farms: Vec3[] = memory.getPois('farm', { dimension: 'overworld' }).map((p: any) => new Vec3(p.x, p.y, p.z))
+  const spots: Vec3[] = []
+  for (const poi of memory.getPois('cane_farm', { dimension: 'overworld' })) {
+    try { for (const [x, y, z] of JSON.parse(poi.note ?? '').spots ?? []) spots.push(new Vec3(x, y, z)) } catch {}
+  }
+  return pos => farms.some(f => f.equals(pos)) || spots.some(s => s.y === pos.y && Math.abs(s.x - pos.x) + Math.abs(s.z - pos.z) === 1)
+}
+
 export interface FillBucketArgs {
   fluid: Fluid
   /** the source to take (default: the nearest within `maxDistance`) */
@@ -150,8 +169,10 @@ export async function fillBucket (bot: Bot, args: FillBucketArgs, signal?: Abort
     if (!isSource(source, fluid)) throw new SkillError('NOT_FOUND', `no ${fluid} source at ${args.pos.toString()}`)
     if (knownNoSource(bot, args.pos)) throw new SkillError('NOT_FOUND', `no ${fluid} source at ${args.pos.toString()}: a fill came back empty from it lately`)
   } else {
-    // (the nearest one no fill came back empty from lately: the next after one that did)
-    source = bot.findBlock({ matching: (block: any) => fillableSource(bot, block, fluid), maxDistance: args.maxDistance ?? 32 })
+    // (the nearest one no fill came back empty from lately: the next after one that did; never a farm's own water: a
+    // lone source taken is gone, and its farm dries, keptWater)
+    const kept = fluid === 'water' ? keptWater(bot) : () => false
+    source = bot.findBlock({ matching: (block: any) => fillableSource(bot, block, fluid) && (block?.position == null || !kept(block.position)), maxDistance: args.maxDistance ?? 32 })
     if (source == null) throw new SkillError('NOT_FOUND', `no ${fluid} source nearby`)
   }
   const pos = source.position
