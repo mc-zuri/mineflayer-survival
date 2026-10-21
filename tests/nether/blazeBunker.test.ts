@@ -457,6 +457,31 @@ test('fightFromNook in a bunker: the magma cubes and the skeletons are its own w
   }
 })
 
+test('fightFromNook in a bunker out of ticks: the fight goes on till it is quiet to go out (bunkerDepartDue), then TIMEOUT', async () => {
+  const { entity } = await import('../reflexes/fakeBot')
+  const { fightFromNook, BUNKER_FETCH_BLAZES } = await import('../../src/nether/blazeFight')
+  // behind its back wall, out of the slit's sight, more than BUNKER_FETCH_BLAZES about
+  const crowd = [0.2, 0.5, 0.8, 1.1].map(x => entity({ name: 'blaze', position: new Vec3(x, 64, 9.5), meta: { health: 20, flags: 0 } }))
+  assert.ok(crowd.length > BUNKER_FETCH_BLAZES)
+  const { bot, b, restore } = await bunkerBot(crowd)
+  bot.health = 20
+  const ac = new AbortController()
+  let ended: any = null
+  try {
+    const done = fightFromNook(bot, b, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 20 }, ac.signal).then(r => { ended = r }, err => { ended = err })
+    await ticks(bot, 80)
+    assert.equal(ended, null)
+    // gone: out it goes
+    for (const z of crowd) z.position = new Vec3(0.5, 66, -40)
+    await ticks(bot, 10)
+    await done
+    assert.match(String(ended?.message), /TIMEOUT/)
+  } finally {
+    ac.abort()
+    restore()
+  }
+})
+
 test('fireballReaches: a small fireball from a blaze ahead at the bot\'s height meets the bunker\'s sill, one from over it comes in at the slit, one from beside it meets the wall', async () => {
   const { fireballReaches, FIREBALL_SPAWN_HEIGHT } = await import('../../src/nether/blazeFight')
   const { bot, restore } = await bunkerBot([])

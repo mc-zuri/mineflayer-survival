@@ -801,6 +801,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   try {
     // (a bunker's fight with its rods goes on till it's quiet to go out of it: bunkerDepartDue)
     let reached: number | null = null
+    let timedOut: number | null = null
     for (;;) {
       if (countItems(bot, 'blaze_rod') >= opts.count) {
         if (nook.bunker == null || !inNook(bot, nook)) break
@@ -811,7 +812,15 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       if (bot.health <= 0) throw new SkillError('VERIFY_FAILED', 'the bot died in the nook', { ...result, ticks: tick })
       // the fireballs' fire in the nook's cells put out here (the hazard reflex leaves it to the fight: handleFire)
       if (!fireProof(bot) && await putOutFireOnBot(bot, signal) > 0) continue
-      if (tick > maxTicks) throw new SkillError('TIMEOUT', `${countItems(bot, 'blaze_rod')} of ${opts.count} blaze rods after ${tick} ticks in the nook`, { ...result, ticks: tick })
+      // out of ticks: a bunker's fight goes on till it's quiet to go out of it (bunkerDepartDue), BUNKER_DEPART_WAIT at
+      // the most, as with its rods got: a 26.3 bot's TIMEOUT by seed 2's open throne at (-290, 77, -209) had it walk out
+      // among 57 blazes for its next work, and it was fireballed (tests/integration/blaze BLAZE_AT=s2fortress2)
+      if (tick > maxTicks) {
+        timedOut ??= tick
+        if (nook.bunker == null || !inNook(bot, nook) || bunkerDepartDue(bot, fightHealth(bot)) || tick - timedOut > BUNKER_DEPART_WAIT) {
+          throw new SkillError('TIMEOUT', `${countItems(bot, 'blaze_rod')} of ${opts.count} blaze rods after ${tick} ticks in the nook`, { ...result, ticks: tick })
+        }
+      }
       // nothing left to heal on (no meal, the bar under 18): the fight ends while the health's still up (a 26.3 bot
       // ate its last meal in the nook by seed 7741's spawner, sat 15000 ticks shut in it at 4.9 health, then came out
       // among 12 blazes and burned)
