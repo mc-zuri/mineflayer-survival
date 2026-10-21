@@ -311,18 +311,34 @@ export function caveRuleOn (bot: Bot): boolean {
 }
 
 /**
- * the extra cost (ticks) of a move ending in a cave's cell for a bot under the cave rule: far over a tunnel's step dug
- * through the rock (stone with a stone pickaxe some 12 ticks a block, deepslate 23; a step is two), so a way stays in
- * the rock unless a cave's saves a long way round; never forbidden (a bot in a cave walks out of it)
+ * the extra cost (ticks) of a move ending in a cave's cell for a bot under the cave rule that is in a cave already (its
+ * way out of it: far over a tunnel's step dug through the rock, stone with a stone pickaxe some 12 ticks a block,
+ * deepslate 23, a step two)
  */
 export const CAVE_STEP_COST = 100
+/**
+ * the cost of a move ending in a cave's cell for a bot under the cave rule out of the caves: the pathfinder's COST_INF,
+ * no way through a cave at all (the rock dug through instead). With CAVE_STEP_COST alone a 26.3 game's walks went into
+ * the caves 92 times in 386000 ticks, the deep ones at y -50 and under where the deepslate's caves are everywhere (its
+ * obsidian, its diamonds, a pickaxe's craft, the trips back), and zombies killed the bot in plain iron at y -58
+ * (ls4-26.3, t386611)
+ */
+export const CAVE_FORBID = 1000000
 /** the extra cost of breaking a block with a cave's cell against a face: the dig opens the way into the cave */
 export const CAVE_BREAK_COST = 100
 
-/** the pathfinder's step rule of the cave rule: CAVE_STEP_COST into a cave's cell */
+/**
+ * the pathfinder's step rule of the cave rule: no move into a cave's cell (CAVE_FORBID), but for a bot in a cave already
+ * (its feet's cell a cave's: its way out, CAVE_STEP_COST a cell)
+ */
 export function caveStepCost (bot: Bot): (block: { position: { x: number, y: number, z: number } }) => number {
   const cells = caveCells(bot)
-  return (block) => caveRuleOn(bot) && cells.isCave(block.position) ? CAVE_STEP_COST : 0
+  return (block) => {
+    if (!caveRuleOn(bot) || !cells.isCave(block.position)) return 0
+    const p = bot.entity?.position
+    const inCave = p != null && cells.isCave({ x: Math.floor(p.x), y: Math.floor(p.y + 1e-6), z: Math.floor(p.z) })
+    return inCave ? CAVE_STEP_COST : CAVE_FORBID
+  }
 }
 
 /** the pathfinder's break rule of the cave rule: CAVE_BREAK_COST for a block with a cave's cell against a face */

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { Vec3 } from 'vec3'
-import { CAVE_BREAK_COST, CAVE_CELLS, CAVE_STEP_COST, CaveCells, caveBreakCost, caveCells, caveReady, caveStepCost, caveUnreadiness, dugByBot, keepOutOfCaves, type CaveView } from '../../src/skills/caves'
+import { CAVE_BREAK_COST, CAVE_CELLS, CAVE_FORBID, CAVE_STEP_COST, CaveCells, caveBreakCost, caveCells, caveReady, caveStepCost, caveUnreadiness, dugByBot, keepOutOfCaves, type CaveView } from '../../src/skills/caves'
 import { fakeBot, item } from '../reflexes/fakeBot'
 
 const SOLID = new Set(['stone', 'deepslate', 'cobblestone', 'dirt', 'oak_planks'])
@@ -197,7 +197,11 @@ test('caveStepCost and caveBreakCost: a cave\'s cell, and a block against one, c
   }
   const step = caveStepCost(bot)
   const brk = caveBreakCost(bot)
+  // out of the cave: no way into it; in it, its way out costs CAVE_STEP_COST a cell
+  assert.equal(step({ position: { x: 4, y: 21, z: 0 } }), CAVE_FORBID)
+  bot.entity.position = new Vec3(5.5, 20, 0.5)
   assert.equal(step({ position: { x: 4, y: 21, z: 0 } }), CAVE_STEP_COST)
+  bot.entity.position = new Vec3(0.5, 20, 0.5)
   assert.equal(step({ position: { x: 0, y: 21, z: 0 } }), 0)
   assert.equal(brk({ position: { x: 1, y: 21, z: 0 } }), CAVE_BREAK_COST)
   assert.equal(brk({ position: { x: 0, y: 21, z: 0 } }), 0)
@@ -317,4 +321,49 @@ test('watchCaveEntries: each way into a cave under the rule counted and logged, 
   assert.ok(lines.some(l => /cave-ready now/.test(l)), lines.join('\n'))
   for (const x of [0, 1, 2]) walk(x)
   assert.equal(caveEntries(bot), 2)
+})
+
+test('keepOutOfCaves: a wide cave in the way is dug round however dear the digging (CAVE_FORBID: no way through it at all), through it without the rule or at CAVE_STEP_COST a cell, and a bot in a cave walks out of it', { timeout: 180000 }, async () => {
+  // rock from y 64 to 75; a cave 31 across (x 3 to 33, z -15 to 15) between the bot's tunnel and the goal at x 38; a
+  // block dug by hand 45 ticks (digCost 0.3): round the cave some 6000 ticks, through it 31 cells (3100 at CAVE_STEP_COST)
+  const inCave = (x: number, y: number, z: number): boolean => x >= 3 && x <= 33 && y >= 64 && y <= 67 && z >= -15 && z <= 15
+  for (const mode of ['none', 'cost', 'rule']) {
+    const { rig } = setup.createCacheWorld('1.21.11', 64, new Vec3(-2.5, 64, 0.5))
+    const bot = rig.bot
+    // (a shell of bedrock round the rock: no way round it over the open ground outside)
+    for (let x = -5; x <= 41; x++) for (let y = 64; y <= 76; y++) for (let z = -20; z <= 20; z++) {
+      const shell = x === -5 || x === 41 || z === -20 || z === 20 || y === 76
+      const tunnel = z === 0 && x >= -3 && x <= 0 && y <= 65
+      const goal = z === 0 && x === 38 && y <= 65
+      if (shell) bot.world.setBlock(new Vec3(x, y, z), 'bedrock')
+      else if (!tunnel && !goal && !inCave(x, y, z)) bot.world.setBlock(new Vec3(x, y, z), 'stone')
+    }
+    bot.loadPlugin(pf.createPlugin({ pathfinderSettings: { partialPathProducer: false, searchTimeoutMs: 60000 } }))
+    bot.pathfinder.setMoveOptions({ ...bot.pathfinder.defaultMoveSettings, canDig: true, canPlace: false, digCost: 1 })
+    caveCells(bot)
+    for (let x = -3; x <= 0; x++) for (const y of [64, 65]) bot.emit('diggingCompleted', { position: new Vec3(x, y, 0) })
+    if (mode === 'rule') keepOutOfCaves(bot)
+    // (the old rule: CAVE_STEP_COST a cave's cell, the bot in the cave or not)
+    if (mode === 'cost') {
+      const settings = bot.pathfinder.defaultMoveSettings
+      bot.pathfinder.setMoveOptions({ ...settings, exclusionAreasStep: [...settings.exclusionAreasStep, (b: any) => caveCells(bot).isCave(b.position) ? CAVE_STEP_COST : 0] })
+    }
+
+    try {
+      let final: any
+      for await (const res of bot.pathfinder.getPathTo(new pf.goals.GoalBlock(38, 64, 0))) final = res
+      assert.equal(final?.result?.status, 'success', mode)
+      const through = final.result.path.filter((m: any) => inCave(m.x, m.y, m.z))
+      if (mode === 'rule') assert.deepEqual(through.map((m: any) => `${m.x},${m.y},${m.z}`), [])
+      else assert.ok(through.length > 0, `${mode}: the way through the cave`)
+      if (mode === 'rule') {
+        // the bot down in the cave: a way out of it (to its tunnel) all the same
+        const a = caveStepCost(bot)
+        bot.entity.position = new Vec3(10.5, 64, 0.5)
+        assert.equal(a({ position: { x: 9, y: 64, z: 0 } }), CAVE_STEP_COST)
+      }
+    } finally {
+      rig.stopPassivePhysics()
+    }
+  }
 })
