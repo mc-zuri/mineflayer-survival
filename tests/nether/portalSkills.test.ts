@@ -243,3 +243,37 @@ test('placeFrame: a block left inside the frame (cobblestone) dug out after the 
   const getBlock = (p: Pos): BlockInfo | null => { const n = cells.get(key(p)) ?? (p.y < 64 ? 'stone' : 'air'); return { name: n, boundingBox: n === 'air' ? 'empty' : 'block' } as any }
   assert.equal(checkPortalFrame(getBlock, frame).valid, true)
 })
+
+test('fillerSolid: a filler\'s or a mould\'s place that left another solid block there serves; obsidian, a fluid or air there, or another error, not (f3-1.21.11: \'andesite is at (-77, 66, 136) after placing cobblestone\')', async () => {
+  const { fillerSolid } = await import('../../src/nether/portalSkills')
+  const { SkillError } = await import('../../src/skills/errors')
+  const verify = new SkillError('VERIFY_FAILED', 'andesite is at (-77, 66, 136) after placing cobblestone')
+  assert.equal(fillerSolid(verify, { name: 'andesite', boundingBox: 'block' } as any), true)
+  assert.equal(fillerSolid(verify, { name: 'air', boundingBox: 'empty' } as any), false)
+  assert.equal(fillerSolid(verify, { name: 'obsidian', boundingBox: 'block' } as any), false)
+  assert.equal(fillerSolid(new SkillError('CANNOT_PLACE', 'no face'), { name: 'andesite', boundingBox: 'block' } as any), false)
+})
+
+test('placeFrame: a corner whose cobblestone came down as andesite goes on (the frame built)', async () => {
+  const { placeFrame } = await import('../../src/nether/portalSkills')
+  const { SkillError } = await import('../../src/skills/errors')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const place = require('../../src/skills/placeBlock')
+  const frame = portalFrame({ x: 0, y: 64, z: 0 }, 'x')
+  const cells = new Map<string, string>()
+  const key = (p: any): string => `${p.x},${p.y},${p.z}`
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 2.5), items: [item('obsidian', 10), item('cobblestone', 16)], world: p => cells.get(key(p)) ?? (p.y < 64 ? 'stone' : 'air') })
+  const real = place.placeBlock
+  let wrong = 0
+  place.placeBlock = async (_b: any, args: any) => {
+    if (args.item === 'cobblestone' && wrong === 0) { wrong++; cells.set(key(args.pos), 'andesite'); throw new SkillError('VERIFY_FAILED', `andesite is at ${args.pos} after placing cobblestone`) }
+    cells.set(key(args.pos), args.item)
+  }
+  try {
+    await placeFrame(bot, frame)
+  } finally {
+    place.placeBlock = real
+  }
+  assert.equal(wrong, 1)
+  assert.ok(frame.obsidian.every(p => cells.get(key(p)) === 'obsidian'))
+})

@@ -16,7 +16,7 @@ import { findPlacement } from '../skills/placement'
 import { countItems, findInventoryItem, settleInventory, trace, waitTicks, waitUntil, withinReach } from '../skills/util'
 import { findBlock } from '../core/findBlocks'
 import {
-  type Axis, type BlockGetter, type CastStep, type LavaCastOptions, type LavaCastPlan, type PortalFrame,
+  type Axis, type BlockGetter, type BlockInfo, type CastStep, type LavaCastOptions, type LavaCastPlan, type PortalFrame,
   checkPortalFrame, chooseFrameSite, findLavaSources, frameCell, isAir, isSolid, planLavaCast, portalFrame
 } from './portal'
 
@@ -347,7 +347,11 @@ export async function placeFrame (bot: Bot, frame: PortalFrame, signal?: AbortSi
     const b = getBlock(step.pos)
     if (step.item === 'filler' && isSolid(b)) continue
     if (step.item === 'obsidian' && b?.name === 'obsidian') continue
-    await placeBlock(bot, { pos, item: step.item === 'filler' ? filler as string : 'obsidian' }, signal)
+    await placeBlock(bot, { pos, item: step.item === 'filler' ? filler as string : 'obsidian' }, signal).catch(err => {
+      // a corner's filler is any solid block (fillerSolid)
+      if (step.item === 'filler' && fillerSolid(err, getBlock(step.pos))) return
+      throw err
+    })
   }
   const check = checkPortalFrame(getBlock, frame)
   if (check.missing.length > 0) throw new SkillError('VERIFY_FAILED', `the frame lacks obsidian at ${check.missing.map(p => `${p.x},${p.y},${p.z}`).join(' ')}`)
@@ -360,6 +364,16 @@ export async function placeFrame (bot: Bot, frame: PortalFrame, signal?: AbortSi
     trace('placeFrame: the inside cleared of', blocked.map(p => getBlock(p)?.name).join(', '))
     await collectBlock(bot, { positions: blocked, pickup: false }, signal)
   }
+}
+
+/**
+ * Whether a filler's or a mould's place that failed its check left a solid block there all the same (another block
+ * than the one asked for, the held item not the one equipped as the server saw it), which serves as well: a 1.21.11
+ * bot's frames failed 'andesite is at (-77, 66, 136) after placing cobblestone' and 'granite is at (-85, 78, 85)
+ * after placing cobblestone', each frame's obsidian left in it half built (f3-1.21.11, t231962 and t287174)
+ */
+export function fillerSolid (err: unknown, block: BlockInfo | null): boolean {
+  return isSkillError(err, 'VERIFY_FAILED') && isSolid(block) && block?.name !== 'obsidian' && block?.name !== 'lava' && block?.name !== 'water'
 }
 
 /** pours a bucket into a cell; true once the cell holds the fluid's source, or what water makes of it (obsidian) */
@@ -401,7 +415,11 @@ async function castStep (bot: Bot, step: CastStep, frameCells: Set<string>, getB
   switch (step.kind) {
     case 'place_block':
       if (isSolid(getBlock(step.pos))) return
-      await placeBlock(bot, { pos: v3(step.pos), item: step.item }, signal)
+      await placeBlock(bot, { pos: v3(step.pos), item: step.item }, signal).catch(err => {
+        // the mould's a solid block of any kind (fillerSolid)
+        if (step.item !== 'obsidian' && fillerSolid(err, getBlock(step.pos))) return
+        throw err
+      })
       return
     case 'fill_lava': {
       // (a trip carries a bucket of lava per fill step: one held already skipped only the first's fill, and a trip of
