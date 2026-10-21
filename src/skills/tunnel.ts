@@ -1,6 +1,7 @@
 // tunnelTo: a staircase dug down (or a 2-high tunnel along) toward a point underground, a block at a time, never
 // opening a block lava touches and never stepping onto nothing: the way players dig down to a stronghold.
 import type { Bot } from 'mineflayer'
+import { caveStep, sealCaveOpenings } from './caves'
 import { Vec3 } from 'vec3'
 import { SkillError, throwIfAborted } from './errors'
 import { walkTo } from './navigate'
@@ -86,6 +87,10 @@ export async function tunnelTo (bot: Bot, args: TunnelArgs, signal?: AbortSignal
       const { clear, stand, floor } = stepCells(feet, dir, down)
       if (clear.some(c => LIQUID.has(name(c)) || ((bot.blockAt(c)?.boundingBox === 'block') && liquidAgainst(c)))) { trace('tunnelTo: liquid by the step', dir.toString()); continue }
       if (LIQUID.has(name(floor))) { trace('tunnelTo: liquid floor', dir.toString()); continue }
+      // (nor into a cave, opening one or over one, for a bot not fit for the caves: round it in the rock, caveStep; the
+      // ls4-26.3 game's dug ways to its deep lava pools for obsidian came out in their caves, 5 of its 17 cave entries)
+      const cave = caveStep(bot, { open: clear, floor })
+      if (cave != null) { trace('tunnelTo: turns from', dir.toString(), cave); continue }
       // open the cells
       let ok = true
       for (const c of clear) {
@@ -129,7 +134,12 @@ export async function tunnelTo (bot: Bot, args: TunnelArgs, signal?: AbortSignal
       await walkTo(bot, stand.offset(0.5, 0, 0.5), { within: 0.25, maxTicks: 30 }, signal)
       // the step down is a fall into the hole: a few ticks after the bot is over it
       await waitUntil(bot, () => bot.entity.onGround && bot.entity.position.y < landing.y + 0.5, 15 + 5 * (stand.y - landing.y), signal)
-      if (bot.entity.position.floored().equals(landing) || bot.entity.position.distanceTo(landing.offset(0.5, 0, 0.5)) < 0.8) { stepped = true; break }
+      if (bot.entity.position.floored().equals(landing) || bot.entity.position.distanceTo(landing.offset(0.5, 0, 0.5)) < 0.8) {
+        // a hole into a cave the step opened all the same sealed
+        await sealCaveOpenings(bot, signal)
+        stepped = true
+        break
+      }
       trace('tunnelTo: the step to', stand.toString(), 'ended at', bot.entity.position.toString())
     }
     if (!stepped) throw new SkillError('NO_PATH', `no safe step toward ${target.toString()} from ${feet.toString()}`, { steps, dug, position: bot.entity.position.clone() })

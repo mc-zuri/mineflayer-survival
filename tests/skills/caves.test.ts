@@ -367,3 +367,18 @@ test('keepOutOfCaves: a wide cave in the way is dug round however dear the diggi
     }
   }
 })
+
+test('tunnelTo: a dug way that would open into a cave is turned from under the cave rule (NO_PATH with no other way), nothing dug', async () => {
+  const { tunnelTo } = await import('../../src/skills/tunnel')
+  // the bot in its dug cell at x 0 (y 20), the target 10 east, a cave from x 2 to 8 in the way
+  const bot = fakeBot({ position: new Vec3(0.5, 20, 0.5), world: (p: Vec3) => (p.x >= 2 && p.x <= 8 && p.y >= 19 && p.y <= 23 && Math.abs(p.z) <= 3) || (p.x === 0 && p.z === 0 && (p.y === 20 || p.y === 21)) ? 'air' : p.y > 70 ? 'air' : 'stone' })
+  bot.game.dimension = 'overworld'
+  caveCells(bot)
+  for (const y of [20, 21]) bot.emit('diggingCompleted', { position: new Vec3(0, y, 0) })
+  let dug = 0
+  bot.dig = async () => { dug++ }
+  let err: any = null
+  await tunnelTo(bot, { target: new Vec3(10, 20, 0), range: 1 }).catch(e => { err = e })
+  assert.equal(err?.code ?? err?.reason, 'NO_PATH')
+  assert.equal(dug, 0)
+})
