@@ -1,8 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert'
-import { chooseFuel, cookFood } from '../../src/skills/cookFood'
+import { Vec3 } from 'vec3'
+import { chooseFuel, cookFood, cookNearby } from '../../src/skills/cookFood'
 import { TaskError } from '../../src/core/errors'
 import { fakeBot, item } from '../reflexes/fakeBot'
+import { VERSIONS } from '../versions'
 
 test('chooseFuel: enough of the longest burner, else what there is', () => {
   // 8 beef in a furnace: 1600 ticks, one coal
@@ -33,3 +35,21 @@ test('cookFood smelts each raw food with the smelter and reports what came out',
   assert.deepStrictEqual(calls2, [{ input: 'beef', count: 5 }, { input: 'porkchop', count: 1 }])
   await assert.rejects(cookFood(fakeBot({ items: [item('bread')] })), (err: unknown) => TaskError.is(err, 'MISSING_ITEMS'))
 })
+
+for (const version of VERSIONS) {
+  test(`cookNearby (${version}): a walk to the furnace that ends short of it (the pathfinder's GoalNotReachedError) fails NO_PATH, the furnace never opened`, async () => {
+    const registry = require('minecraft-data')(version)
+    const furnace = { name: 'furnace', type: registry.blocksByName.furnace.id, position: new Vec3(10, 64, 0) }
+    let opened = false
+    const bot: any = {
+      registry,
+      entity: { position: new Vec3(0.5, 64, 0.5) },
+      inventory: { items: () => [{ name: 'beef', count: 4 }, { name: 'coal', count: 2 }] },
+      findBlock: () => furnace,
+      openFurnace: async () => { opened = true; throw new Error('opened') },
+      pathfinder: { goto: async () => { throw Object.assign(new Error('Goto: ended at (0.5, 64, 0.5), short of the goal (the search ended: noPath)'), { code: 'GOAL_NOT_REACHED' }) } }
+    }
+    await assert.rejects(cookNearby(bot, { input: 'beef' }), (err: any) => TaskError.is(err, 'NO_PATH') && /no way to the furnace at \(10, 64, 0\): Goto: ended at/.test(err.message) && err.cause?.code === 'GOAL_NOT_REACHED')
+    assert.strictEqual(opened, false)
+  })
+}

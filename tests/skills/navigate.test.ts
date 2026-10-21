@@ -184,3 +184,30 @@ test('navigate counts the stuck ticks again from the end of a dig: a long dig (a
   await tick(30)
   await rejected
 })
+
+test('navigate: a goto short of its goal (the pathfinder\'s GoalNotReachedError) is told as before, NO_PATH \'the path ended ... short of the goal\' with a no_path report, not \'the pathfinder failed\'; another failure of goto as it was', async () => {
+  const run = async (error: Error): Promise<{ err: any, kinds: string[] }> => {
+    const bot: any = pathBot('stuck')
+    const kinds: string[] = []
+    bot.survival = { diagnostics: { report: (r: any) => { kinds.push(r.kind); return { diagnosis: 'd' } }, fileOf: () => null } }
+    bot.pathfinder.goto = async () => {
+      setImmediate(() => bot.emit('pathGenerated', { path: [] }))
+      await new Promise(resolve => setImmediate(resolve))
+      await new Promise(resolve => setImmediate(resolve))
+      throw error
+    }
+    try {
+      const err = await navigate(bot, { goal: new goals.GoalBlock(50, 64, 0), stuckTicks: 1000 }).then(() => null, e => e)
+      return { err, kinds }
+    } finally { bot.stop() }
+  }
+  const short = Object.assign(new Error('Goto: ended at (0.7, 64, 0.5), short of the goal (the search ended: noPath)'), { name: 'GoalNotReachedError', code: 'GOAL_NOT_REACHED' })
+  const a = await run(short)
+  assert.ok(isSkillError(a.err, 'NO_PATH'), String(a.err))
+  assert.match(a.err.message, /the path ended at .* short of the goal/)
+  assert.doesNotMatch(a.err.message, /the pathfinder failed/)
+  assert.deepStrictEqual(a.kinds, ['no_path'])
+  const b = await run(new Error('Goto: 5 moves in a row failed'))
+  assert.match(b.err.message, /the pathfinder failed: Goto: 5 moves in a row failed/)
+  assert.deepStrictEqual(b.kinds, ['goto_failed'])
+})

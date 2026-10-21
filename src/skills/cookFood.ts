@@ -64,7 +64,10 @@ export async function cookNearby (bot: Bot, args: { input: string, count?: numbe
   const fuel = chooseFuel(bot.inventory.items(), count * cookTicks)
   if (fuel == null) throw new TaskError('MISSING_ITEMS', 'no fuel')
   if (bot.entity.position.distanceTo(block.position.offset(0.5, 0.5, 0.5)) > 4) {
-    await bot.pathfinder.goto(goals.GoalNear.fromBlock(block, 2))
+    // (a walk short of it, the pathfinder's GoalNotReachedError, or any other failure of it: NO_PATH)
+    await bot.pathfinder.goto(goals.GoalNear.fromBlock(block, 2)).catch(err => {
+      throw new TaskError('NO_PATH', `no way to the ${block.name} at ${block.position.toString()}: ${(err as Error)?.message ?? String(err)}`, { cause: err })
+    })
   }
   throwIfAborted(signal)
   const before = output != null ? countOf(bot, output) : 0

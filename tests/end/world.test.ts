@@ -98,3 +98,18 @@ test('digDown: a pillar of end stone (dug from the island for blocks) is taken d
   assert.strictEqual(Math.floor(bot.entity.position.y), 62)
   assert.strictEqual(dug.size, 18)
 })
+
+test('goto (the End\'s): a pathfinder goto short of its goal (GoalNotReachedError) fails NO_PATH \'stopped short of the goal\'; another failure \'the pathfinder failed\'', async () => {
+  const { goto } = await import('../../src/end/skills/world')
+  const { EventEmitter } = await import('node:events')
+  const make = (error: Error): any => {
+    const bot: any = new EventEmitter()
+    bot.entity = { position: new Vec3(0.5, 64, 0.5) }
+    bot.clearControlStates = () => {}
+    bot.pathfinder = { goto: async () => { throw error }, cancel: async () => {} }
+    return bot
+  }
+  const short = Object.assign(new Error('Goto: ended at (0.5, 64, 0.5), short of the goal (the search ended: noPath)'), { code: 'GOAL_NOT_REACHED' })
+  await assert.rejects(goto(make(short), {}, () => false, { retries: 1 }), (err: any) => err.code === 'NO_PATH' && /stopped short of the goal, at/.test(err.message) && !/pathfinder failed/.test(err.message))
+  await assert.rejects(goto(make(new Error('Goto: 5 moves in a row failed')), {}, () => false, { retries: 0 }), (err: any) => err.code === 'NO_PATH' && /the pathfinder failed: Goto: 5 moves/.test(err.message))
+})

@@ -4,6 +4,7 @@ import { Vec3 } from 'vec3'
 import type { Pos } from '../../core/memory'
 import type { ExitPortal } from '../spikes'
 import { TaskError, throwIfAborted, type SkillOptions } from '../../skills/combatUtil'
+import { isGoalNotReached } from '../../skills/navigate'
 import { SCAFFOLD_ITEMS } from '../../executor/steps'
 
 // The End skills' view of the world around the bot: where the ground is, where the void starts, and getting
@@ -187,7 +188,8 @@ export async function goto (bot: Bot, goal: any, arrived: () => boolean, opts: G
       throwIfAborted(opts.signal)
       const message = String((err as Error)?.message ?? err)
       if (strayed == null && /exceeded \d+ms/.test(message) && slowTries++ < 8) attempt--
-      lastError = new TaskError('NO_PATH', strayed != null ? `the walk ${String(strayed)}` : `the pathfinder failed: ${message}`)
+      // (a goto short of its goal, the pathfinder's GoalNotReachedError: 'stopped short of the goal' below)
+      if (strayed != null || !isGoalNotReached(err)) lastError = new TaskError('NO_PATH', strayed != null ? `the walk ${String(strayed)}` : `the pathfinder failed: ${message}`)
     } finally {
       bot.off('physicsTick', watchdog)
       opts.signal?.removeEventListener('abort', onAbort)

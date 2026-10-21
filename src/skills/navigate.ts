@@ -315,7 +315,9 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
       waitUntil(bot, () => cancelledFor >= CANCEL_TICKS, Number.MAX_SAFE_INTEGER, stopWaiting.signal).then(() => { hung = true }, () => {})
     ])
   } catch (err) {
-    error = err
+    // a goto that ended short of its goal (the pathfinder's GoalNotReachedError: its search gave up, its path ended)
+    // is told by where the bot is, as before the pathfinder said so: a no_path report, not a goto_failed one
+    if (!isGoalNotReached(err)) error = err
   } finally {
     stopWaiting.abort()
     if (hung) {
@@ -350,6 +352,11 @@ async function navigateOnce (bot: Bot, args: NavigateArgs, signal?: AbortSignal)
   }
   const message = pathFound ? `the path ended at ${result.position.toString()}, short of the goal` : 'no path to the goal'
   throw withDiagnosis(new SkillError('NO_PATH', message, result), stuckReport(bot, 'no_path', goal, message))
+}
+
+/** the pathfinder's GoalNotReachedError: a goto that ended short of its goal, not cancelled */
+export function isGoalNotReached (err: unknown): boolean {
+  return (err as { code?: unknown } | null)?.code === 'GOAL_NOT_REACHED'
 }
 
 /**
