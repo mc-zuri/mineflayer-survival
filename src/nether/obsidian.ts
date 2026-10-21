@@ -8,6 +8,8 @@ import { SkillError, isAbort, throwIfAborted } from '../skills/errors'
 import { collectBlock } from '../skills/collectBlock'
 import { placeBlock } from '../skills/placeBlock'
 import { emptyBucket, fillBucket, isSource } from '../skills/bucket'
+import { scoopByTunnel } from '../skills/lavaScoop'
+import { caveCells, caveRuleOn } from '../skills/caves'
 import { aimAtFace } from '../core/actions'
 import { navigateNear } from '../skills/navigate'
 import { countItems, findInventoryItem, trace, waitTicks, waitUntil } from '../skills/util'
@@ -299,6 +301,19 @@ export async function obsidianInPit (bot: Bot, get: ObsidianLookup, lava: readon
       } catch (err) {
         if (isAbort(err)) throw err
         trace('obsidianFromLava: the lava at', source.toString(), 'out of reach:', (err as Error).message)
+      }
+      // no spot sees it: scooped from a tunnel dug to it (sealed in the rock by a cave, for a bot not fit for the
+      // caves), as at home (scoopByTunnel): a 1.21.11 bot's pit casts by the deep pools found 'no spot found to see'
+      // each source of a pool in turn (f3-1.21.11, t272067)
+      try {
+        const cells = caveRuleOn(bot) ? caveCells(bot) : null
+        const caveSide = cells != null && cells.beside([source]).length > 0
+        await scoopByTunnel(bot, source, signal, caveSide ? q => cells.isCave(q) : undefined)
+        filled = countItems(bot, 'lava_bucket') > 0
+        if (filled) break
+      } catch (err) {
+        if (isAbort(err)) throw err
+        trace('obsidianFromLava: the lava at', source.toString(), 'by a tunnel:', (err as Error).message)
       }
     }
     if (!filled) return false

@@ -187,3 +187,49 @@ test('obsidianFromLava: a pool with nothing to pour on in place (no shore, no pe
   assert.equal(made, 9)
   assert.ok(pours[0] === `lava ${key(pit)}` && !pit.equals(new V(4, 63, 0)), pours.join(', '))
 })
+
+test('obsidianInPit: a source no spot sees scooped from a tunnel to it (scoopByTunnel), then cast in the pit (f3-1.21.11 t272067)', async () => {
+  const { Vec3: V } = await import('vec3')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const obsidianMod = require('../../src/nether/obsidian')
+  const bucket = require('../../src/skills/bucket')
+  const scoop = require('../../src/skills/lavaScoop')
+  const collect = require('../../src/skills/collectBlock')
+  const source = new V(9, 63, 0)
+  const cells = new Map<string, string>([[`${source.x},${source.y},${source.z}`, 'lava']])
+  const key = (p: any): string => `${p.x},${p.y},${p.z}`
+  const name = (p: any): string => cells.get(key(p)) ?? (p.y < 64 ? 'stone' : 'air')
+  const bot = fakeBot({ position: new V(0.5, 64, 0.5), items: [item('water_bucket', 1), item('bucket', 1), item('diamond_pickaxe', 1)] })
+  bot.blockAt = (p: any) => { const n = name(p.floored()); return { name: n, position: p.floored(), boundingBox: n === 'stone' || n === 'obsidian' ? 'block' : 'empty', getProperties: () => ({ level: 0 }) } }
+  bot.findBlock = () => null
+  const slots = bot.inventory.slots
+  const swap = (from: string, to: string): void => { const i = slots.findIndex((s: any) => s?.name === from); slots[i] = Object.assign(item(to, 1), { slot: i }) }
+  const real = { empty: bucket.emptyBucket, fill: bucket.fillBucket, scoop: scoop.scoopByTunnel, collect: collect.collectBlock }
+  const calls: string[] = []
+  let pit: any = null
+  bucket.fillBucket = async (_b: any, args: any) => {
+    if (args.fluid === 'lava') { calls.push('fill lava'); throw new Error(`no spot found to see ${args.pos} from`) }
+    if (args.pos == null || name(args.pos) !== 'water') throw new Error('no water')
+    cells.set(key(args.pos.floored()), 'air'); swap('bucket', 'water_bucket')
+  }
+  scoop.scoopByTunnel = async (_b: any, p: any) => { calls.push(`scoop ${key(p)}`); cells.set(key(p), 'air'); swap('bucket', 'lava_bucket') }
+  bucket.emptyBucket = async (_b: any, args: any) => {
+    const p = args.pos.floored()
+    swap(`${args.fluid}_bucket`, 'bucket')
+    if (args.fluid === 'lava') { pit = p; cells.set(key(p), 'lava'); return }
+    cells.set(key(p), 'water'); cells.set(key(pit), 'obsidian')
+  }
+  collect.collectBlock = async (_b: any, args: any) => { for (const p of args.positions) { const was = name(p); cells.set(key(p), 'air'); if (was === 'obsidian') slots[30] = Object.assign(item('obsidian', 1), { slot: 30 }) } }
+  const ticks = setInterval(() => bot.emit('physicsTick'), 1)
+  let ok = false
+  try {
+    ok = await obsidianMod.obsidianInPit(bot, obsidianMod.obsidianLookup(bot), [source])
+  } finally {
+    clearInterval(ticks)
+    Object.assign(bucket, { emptyBucket: real.empty, fillBucket: real.fill })
+    Object.assign(scoop, { scoopByTunnel: real.scoop })
+    Object.assign(collect, { collectBlock: real.collect })
+  }
+  assert.equal(ok, true)
+  assert.deepEqual(calls, ['fill lava', `scoop ${key(source)}`])
+})
