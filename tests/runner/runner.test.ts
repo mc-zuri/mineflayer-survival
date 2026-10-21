@@ -1560,3 +1560,52 @@ test('roomForTopUps: a bag short of the stock\'s free slots stores at the base f
   await runner.roomForTopUps()
   assert.equal(stored, 1)
 })
+
+test('starving (food 6 or under, nothing to eat carried) cuts any work under way, a long milestone task too, no failure counted; food is the only work till the bar is over 12, then the work goes on (f5-1.21.11: starved twice under a tool\'s replacement and a spare kit)', async () => {
+  const bot = fakeBot()
+  bot.blockAt = (p: Vec3) => ({ name: p.y < 64 ? 'stone' : 'air', position: p, boundingBox: p.y < 64 ? 'block' : 'empty' })
+  bot.food = 20
+  const logs: string[] = []
+  const calls: string[] = []
+  let cutReason = ''
+  const runner: any = new Runner(bot, {
+    until: 'wood',
+    log: (l: string) => logs.push(l),
+    handlers: {
+      wood: async ({ signal }: any) => {
+        calls.push(`wood at food ${bot.food}`)
+        if (calls.length === 1) {
+          // a long task: the bar runs down to 4 under it, nothing to eat carried
+          bot.food = 4
+          await new Promise<void>((_resolve, reject) => { signal.addEventListener('abort', () => { cutReason = String(signal.reason?.message ?? signal.reason); reject(signal.reason) }, { once: true }) })
+          return
+        }
+        bot.give('wooden_pickaxe', 1)
+        bot.give('crafting_table', 1)
+      }
+    }
+  })
+  runner.toFoodLand = async () => {}
+  let meals = 0
+  runner.executor.obtain = async (reqs: any[]) => {
+    if (reqs.some(r => r.unit === 'nutrition')) {
+      meals++
+      calls.push(`meal at food ${bot.food}`)
+      // the first meal gets the bar to 10 only (still under 13: food first again), the second to 20
+      bot.food = meals === 1 ? 10 : 20
+    }
+    return { plans: 0, steps: 0 }
+  }
+  const ticking = setInterval(() => { for (let i = 0; i < 200; i++) bot.emit('physicsTick') }, 1)
+  let r: any
+  try {
+    r = await runner.play()
+  } finally {
+    clearInterval(ticking)
+  }
+  assert.equal(r.reason, 'until', logs.join(' | '))
+  assert.match(cutReason, /starving: food first/)
+  assert.deepEqual(calls, ['wood at food 20', 'meal at food 4', 'meal at food 10', 'wood at food 20'])
+  assert.ok(!logs.some(l => /milestone wood failed/.test(l)), logs.join(' | '))
+  assert.ok(logs.some(l => /the work stopped for food/.test(l)), logs.join(' | '))
+})

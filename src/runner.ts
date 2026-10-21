@@ -12,10 +12,11 @@ import { TaskError } from './core/errors'
 import { isBed } from './core/items'
 import { Inventory, type ItemCount } from './core/inventory'
 import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './core/memory'
-import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, MILESTONES, foodGoals, mealGoals, milestonesAhead, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
+import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, HUNGRY_FOOD, MILESTONES, STARVING_FOOD, foodGoals, mealGoals, milestonesAhead, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { carriesWeapon, comeUp, dayPhase, nightAction, nightGeared, nightGoals, topUpPlaces } from './planner/schedule'
 import { describeLevel, markAt, STOCK_RESERVE_SLOTS, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
+import { eat } from './skills/eat'
 import { ensureSurface, exploreForBlocks, inWater, onSurface, SURFACE_MIN_Y, toShore } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
@@ -113,6 +114,9 @@ export const FOOD_BANK_WAIT_TICKS = 2400
  */
 export const GROW_WAIT_TRIES = 8
 export const GROW_WAIT_TICKS = 6000
+
+/** the wait after a starving bot's food work that got none, before the next (feedFirst) */
+export const FOOD_FIRST_WAIT_TICKS = 200
 
 /** the ticks a spare kit for the base may take to get (stashSpareKit), its food and tools; none stored after */
 export const SPARE_KIT_TICKS = 12000
@@ -610,6 +614,14 @@ export class Runner {
   private sleepCooldownUntil = 0
   /** play's signal, for the night's work started from the executor's beforeStep hook */
   private playSignal?: AbortSignal
+  /** the round of work under way (loop), cut by the starving watch */
+  private roundCtrl: AbortController | null = null
+  /** whether the round was cut for food */
+  private cutForFood = false
+  /** food comes first (foodFirstNow's latch) */
+  private foodFirst = false
+  /** feedFirst under way */
+  private feeding = false
   /** the day (bot.time.day) whose night's mining is over: the rest of that night is the milestones' and the reflexes' */
   private nightMinedDay = -1
   private inNightWork = false
@@ -791,6 +803,7 @@ export class Runner {
       controller.abort(new TaskError('TIMEOUT', `play ran out of its ${this.options.maxTicks} ticks`))
     }
     this.bot.on('physicsTick', onTick)
+    const offStarving = this.watchStarving()
     // the reflexes that preempt the work, in the log: one line a reflex, repeats within REFLEX_LOG_TICKS counted
     let last: { name: string, tick: number, repeats: number } | null = null
     const onReflex = (name: string, detail?: string): void => {
@@ -841,6 +854,7 @@ export class Runner {
       return result
     } finally {
       this.bot.off('physicsTick', onTick)
+      offStarving()
       this.bot.off('reflex' as any, onReflex)
       this.bot.off('death', onDeath)
       this.bot.off('messagestr' as any, onMessage)
@@ -851,8 +865,8 @@ export class Runner {
     }
   }
 
-  private async loop (signal: AbortSignal): Promise<PlayResult> {
-    this.playSignal = signal
+  private async loop (playSignal: AbortSignal): Promise<PlayResult> {
+    this.playSignal = playSignal
     const skip = new Set(this.options.skip ?? [])
     const failures = new Map<MilestoneId, number>()
     // the fast failures in a row (failureBackoff)
@@ -864,345 +878,400 @@ export class Runner {
     const growWaits = new Map<MilestoneId, number>()
     const spent = new Map<MilestoneId, number>()
     const maxFailures = this.options.maxFailures ?? 5
-    const stopped = (): boolean => signal.aborted
+    const stopped = (): boolean => playSignal.aborted
     this.load()
     this.loaded = true
+    let detach = (): void => {}
     for (;;) {
-      if (stopped()) return this.stop(null, 'aborted')
-      if (this.bot.health <= 0 || (this.bot as any).isAlive === false) await this.recover(signal)
-      const state = progressState(this.bot, this.memory)
-      this.noteReached(state)
-      if (this.options.until != null && this.reached.some(r => r.id === this.options.until)) return this.stop(null, 'until')
-      const reachedIds = this.reached.map(r => r.id)
+      // each round of the work under its own signal, cut when the bot is starving (the starving watch: watchStarving)
+      detach()
+      const round = new AbortController()
+      const onPlay = (): void => round.abort(playSignal.reason)
+      if (playSignal.aborted) onPlay()
+      playSignal.addEventListener('abort', onPlay, { once: true })
+      detach = () => playSignal.removeEventListener('abort', onPlay)
+      this.roundCtrl = round
+      this.cutForFood = false
+      const signal = round.signal
       try {
-        await this.nightSchedule(signal)
-      } catch (err) {
-        if (stopped()) return this.stop(null, 'aborted', err)
-        if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
-          this.log(`died in the night's mine: ${(err as Error).message}`)
-          await this.recover(signal)
-          continue
-        }
-        throw err
-      }
-      // the water bucket kept filled for the fall reflex (keepWaterBucket), at a pool near, in the overworld
-      if (this.bot.survival.tasks.tick >= this.waterRetryAt && normalizeDimension(this.bot.game?.dimension) === 'overworld' && waterBucketEmpty(this.bot)) {
-        let filled = false
-        try {
-          filled = await this.executor.task('fill the water bucket', async (s) => await keepWaterBucket(this.bot, s), signal)
-        } catch (err) {
-          if (stopped()) return this.stop(null, 'aborted', err)
-          if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
-            await this.recover(signal)
-            continue
-          }
-        }
-        if (filled) this.log('the water bucket filled again')
-        else this.waterRetryAt = this.bot.survival.tasks.tick + WATER_RETRY_TICKS
-      }
-      // a meal first when hungry and short of food (mealGoals): what's in sight before a cow somewhere, its own ticks
-      // at most; the work it left (untilDusk's hunger watch) after
-      const meal = this.mealDue()
-      if (meal != null) {
-        this.log(`hungry (food ${this.bot.food ?? 0}, ${ownedInventory(this.bot).foodPoints()} points carried): a meal first`)
-        try {
-          await this.foodWorking(async () => await this.untilDusk(signal, async (s) => {
-            await this.upForFood(s)
-            await this.toFoodLand(s)
-            await this.withinTicks(MEAL_TICKS, s, async (t) => {
-              await this.executor.obtain(meal, t, { unseenFactor: HUNGRY_FIND_FACTOR })
-            })
-          }))
-        } catch (err) {
-          if (stopped()) return this.stop(null, 'aborted', err)
-          if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
-            this.log(`died getting a meal: ${(err as Error).message}`)
-            await this.recover(signal)
-            continue
-          }
-          this.log(`no meal for now: ${(err as Error).message}`)
-        }
-        if (this.mealDue() != null) this.mealRetryAt = this.bot.survival.tasks.tick + MEAL_RETRY_TICKS
-        continue
-      }
-      const restock = this.bot.survival.tasks.tick >= this.restockRetryAt ? restockGoals(state, reachedIds) : null
-      if (restock != null) {
-        try {
-          this.log(`food low (${state.inventory.foodPoints()} points): getting more before going on`)
-          await this.foodWorking(async () => await this.untilDusk(signal, { hunger: true }, async (s) => {
-            // the renewable food first: the farm's harvest, and the herd's surplus slaughtered and cooked
-            await harvestGrownFarms(this.bot, this.executor, s, this.log)
-            await this.tendHerdFor(FOOD_POINTS - ownedInventory(this.bot).foodPoints(), s)
-            // then the rest from food land when home's has none
-            if (restockGoals(progressState(this.bot, this.memory), reachedIds) != null) await this.toFoodLand(s)
-            // (RESTOCK_TICKS of its own at most, the reflexes' not counted: the milestone goes on after, the meals
-            // keep the bar up meanwhile)
-            await this.withinTicks(RESTOCK_TICKS, s, () => (this.executor.tasks.current?.priority ?? 0) <= 0, async (t) => {
-              await this.executor.obtain(restockGoals(progressState(this.bot, this.memory), reachedIds) ?? [], t)
-            })
-          }))
-        } catch (err) {
-          if (stopped()) return this.stop('food', 'aborted', err)
-          if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
-            this.log(`died getting food: ${(err as Error).message}`)
-            await this.recover(signal)
-            continue
-          }
-          this.restockRetryAt = this.bot.survival.tasks.tick + RESTOCK_RETRY_TICKS
-          this.log(`no more food for now: ${(err as Error).message}`)
-        }
-        continue
-      }
-      // bare (the wood's milestone done and no pickaxe left: a re-equip after a death that failed): no milestone's work
-      // in that state, its mines and its caves with the fists; the kit taken and the basics made again first, tried
-      // again after a backoff (bareBackoffTicks) while they don't come. A 26.3 bot back from its second death with
-      // nothing, its re-equip failing 'no oak_log found exploring', went on with the enchanting's work 165000 ticks
-      // with dirt and gravel, down to y -53 (f4-26.3, seed -6080033689226204554, t107263 on)
-      if (bareForWork(this.bot, reachedIds)) {
-        const now = this.bot.survival.tasks.tick
-        if (now >= this.bareRetryAt) {
-          this.log(`bare (no pickaxe): re-equipping before the work${this.bareTries > 0 ? ` (try ${this.bareTries + 1})` : ''}`)
+        if (stopped()) return this.stop(null, 'aborted')
+        if (this.bot.health <= 0 || (this.bot as any).isAlive === false) await this.recover(signal)
+        // starving: food is the only work till the bar is over HUNGRY_FOOD (foodFirstNow), no milestone, stock, kit
+        // or tool's replacement started meanwhile
+        if (this.foodFirstNow()) {
           try {
-            if (baseRecord(this.memory) != null) await this.rekit(signal)
-            await this.reequip(signal)
+            await this.feedFirst(signal)
           } catch (err) {
             if (stopped()) return this.stop(null, 'aborted', err)
             if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
-              this.log(`died re-equipping: ${(err as Error).message}`)
+              this.log(`died getting food: ${(err as Error).message}`)
+              await this.recover(signal)
+            }
+          }
+          continue
+        }
+        const state = progressState(this.bot, this.memory)
+        this.noteReached(state)
+        if (this.options.until != null && this.reached.some(r => r.id === this.options.until)) return this.stop(null, 'until')
+        const reachedIds = this.reached.map(r => r.id)
+        try {
+          await this.nightSchedule(signal)
+        } catch (err) {
+          if (stopped()) return this.stop(null, 'aborted', err)
+          // (cut for the bot's food: starving, the work given up for it, no failure counted)
+          if (this.cutForFood) continue
+          if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+            this.log(`died in the night's mine: ${(err as Error).message}`)
+            await this.recover(signal)
+            continue
+          }
+          throw err
+        }
+        // the water bucket kept filled for the fall reflex (keepWaterBucket), at a pool near, in the overworld
+        if (this.bot.survival.tasks.tick >= this.waterRetryAt && normalizeDimension(this.bot.game?.dimension) === 'overworld' && waterBucketEmpty(this.bot)) {
+          let filled = false
+          try {
+            filled = await this.executor.task('fill the water bucket', async (s) => await keepWaterBucket(this.bot, s), signal)
+          } catch (err) {
+            if (stopped()) return this.stop(null, 'aborted', err)
+            // (cut for the bot's food: starving, the work given up for it, no failure counted)
+            if (this.cutForFood) continue
+            if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
               await this.recover(signal)
               continue
             }
-            this.log(`re-equipping: ${(err as Error).message}`)
+          }
+          if (filled) this.log('the water bucket filled again')
+          else this.waterRetryAt = this.bot.survival.tasks.tick + WATER_RETRY_TICKS
+        }
+        // a meal first when hungry and short of food (mealGoals): what's in sight before a cow somewhere, its own ticks
+        // at most; the work it left (untilDusk's hunger watch) after
+        const meal = this.mealDue()
+        if (meal != null) {
+          this.log(`hungry (food ${this.bot.food ?? 0}, ${ownedInventory(this.bot).foodPoints()} points carried): a meal first`)
+          try {
+            await this.foodWorking(async () => await this.untilDusk(signal, async (s) => {
+              await this.upForFood(s)
+              await this.toFoodLand(s)
+              await this.withinTicks(MEAL_TICKS, s, async (t) => {
+                await this.executor.obtain(meal, t, { unseenFactor: HUNGRY_FIND_FACTOR })
+              })
+            }))
+          } catch (err) {
+            if (stopped()) return this.stop(null, 'aborted', err)
+            // (cut for the bot's food: starving, the work given up for it, no failure counted)
+            if (this.cutForFood) continue
+            if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+              this.log(`died getting a meal: ${(err as Error).message}`)
+              await this.recover(signal)
+              continue
+            }
+            this.log(`no meal for now: ${(err as Error).message}`)
+          }
+          if (this.mealDue() != null) this.mealRetryAt = this.bot.survival.tasks.tick + MEAL_RETRY_TICKS
+          continue
+        }
+        const restock = this.bot.survival.tasks.tick >= this.restockRetryAt ? restockGoals(state, reachedIds) : null
+        if (restock != null) {
+          try {
+            this.log(`food low (${state.inventory.foodPoints()} points): getting more before going on`)
+            await this.foodWorking(async () => await this.untilDusk(signal, { hunger: true }, async (s) => {
+              // the renewable food first: the farm's harvest, and the herd's surplus slaughtered and cooked
+              await harvestGrownFarms(this.bot, this.executor, s, this.log)
+              await this.tendHerdFor(FOOD_POINTS - ownedInventory(this.bot).foodPoints(), s)
+              // then the rest from food land when home's has none
+              if (restockGoals(progressState(this.bot, this.memory), reachedIds) != null) await this.toFoodLand(s)
+              // (RESTOCK_TICKS of its own at most, the reflexes' not counted: the milestone goes on after, the meals
+              // keep the bar up meanwhile)
+              await this.withinTicks(RESTOCK_TICKS, s, () => (this.executor.tasks.current?.priority ?? 0) <= 0, async (t) => {
+                await this.executor.obtain(restockGoals(progressState(this.bot, this.memory), reachedIds) ?? [], t)
+              })
+            }))
+          } catch (err) {
+            if (stopped()) return this.stop('food', 'aborted', err)
+            // (cut for the bot's food: starving, the work given up for it, no failure counted)
+            if (this.cutForFood) continue
+            if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+              this.log(`died getting food: ${(err as Error).message}`)
+              await this.recover(signal)
+              continue
+            }
+            this.restockRetryAt = this.bot.survival.tasks.tick + RESTOCK_RETRY_TICKS
+            this.log(`no more food for now: ${(err as Error).message}`)
+          }
+          continue
+        }
+        // bare (the wood's milestone done and no pickaxe left: a re-equip after a death that failed): no milestone's work
+        // in that state, its mines and its caves with the fists; the kit taken and the basics made again first, tried
+        // again after a backoff (bareBackoffTicks) while they don't come. A 26.3 bot back from its second death with
+        // nothing, its re-equip failing 'no oak_log found exploring', went on with the enchanting's work 165000 ticks
+        // with dirt and gravel, down to y -53 (f4-26.3, seed -6080033689226204554, t107263 on)
+        if (bareForWork(this.bot, reachedIds)) {
+          const now = this.bot.survival.tasks.tick
+          if (now >= this.bareRetryAt) {
+            this.log(`bare (no pickaxe): re-equipping before the work${this.bareTries > 0 ? ` (try ${this.bareTries + 1})` : ''}`)
+            try {
+              if (baseRecord(this.memory) != null) await this.rekit(signal)
+              await this.reequip(signal)
+            } catch (err) {
+              if (stopped()) return this.stop(null, 'aborted', err)
+              // (cut for the bot's food: starving, the work given up for it, no failure counted)
+              if (this.cutForFood) continue
+              if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+                this.log(`died re-equipping: ${(err as Error).message}`)
+                await this.recover(signal)
+                continue
+              }
+              this.log(`re-equipping: ${(err as Error).message}`)
+            }
+            if (bareForWork(this.bot, reachedIds)) {
+              const wait = bareBackoffTicks(this.bareTries++)
+              this.bareRetryAt = this.bot.survival.tasks.tick + wait
+              this.log(`still bare: the work waits, re-equipping again in ${wait} ticks`)
+            }
           }
           if (bareForWork(this.bot, reachedIds)) {
-            const wait = bareBackoffTicks(this.bareTries++)
-            this.bareRetryAt = this.bot.survival.tasks.tick + wait
-            this.log(`still bare: the work waits, re-equipping again in ${wait} ticks`)
-          }
-        }
-        if (bareForWork(this.bot, reachedIds)) {
-          await this.waitTicksOrAbort(Math.max(1, Math.min(BARE_WAIT_TICKS, this.bareRetryAt - this.bot.survival.tasks.tick)), signal)
-          continue
-        }
-      }
-      this.bareTries = 0
-      this.bareRetryAt = 0
-      // the epochs once the milestones are done (the dragon dead), when play's options ask for them
-      const m = nextToWork(state, reachedIds, skip) ?? (this.options.epochs === true ? nextEpoch(state, reachedIds, skip) : null)
-      if (m == null) return this.stop(null, 'finished')
-      this.current = m.id
-      this.working = m
-      if (this.options.stopAt === m.id) return this.stop(m.id, 'until')
-      const handler = this.handlerFor(m.id)
-      if (handler == null) {
-        this.log(`milestone ${m.id} needs skills that aren't wired yet: stopping (register bot.survival.handlers.${m.id})`)
-        return this.stop(m.id, 'unwired')
-      }
-      // an optional milestone that has had its time is left out (the enchanting's 5 failures took 300000 ticks of a
-      // 26.3 whole game, the dragon not needing it)
-      if (OPTIONAL_MILESTONES.includes(m.id) && (spent.get(m.id) ?? 0) >= OPTIONAL_MILESTONE_TICKS) {
-        this.log(`milestone ${m.id} left out after ${spent.get(m.id) ?? 0} ticks: on to the next`)
-        skip.add(m.id)
-        continue
-      }
-      this.log(`working on ${m.id}: ${m.title}`)
-      this.diagnostics?.milestoneStarted(m.id, m.title, describeGoals(m, state))
-      const begun = this.bot.survival.tasks.tick
-      const account = (): void => { spent.set(m.id, (spent.get(m.id) ?? 0) + this.bot.survival.tasks.tick - begun) }
-      try {
-        const how = await this.foodWorking(async () => await this.untilDusk(signal, { hunger: true }, async (s) => {
-          if (m.id === 'food') await this.toFoodLand(s)
-          await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log, seed: this.options.seed })
-          // the milestone ends with the stock topped up for the ones after it, what can be got where the bot is
-          // (topUpPlaces: the surface's by day, the mine's down there); the milestone's own marks apply once it's done
-          const done = m.done(progressState(this.bot, this.memory))
-          await this.topUp(this.topUpPlacesNow(), s, done ? [...reachedIds, m.id] : reachedIds)
-        }), m.id === 'food')
-        account()
-        if (stopped()) return this.stop(m.id, 'aborted')
-        if (how === 'dusk') {
-          this.log(`dusk: ${m.id} left for the night's mine`)
-          continue
-        }
-        if (how === 'hungry') {
-          this.log(`hungry: ${m.id} left for a meal`)
-          continue
-        }
-        failures.delete(m.id)
-        fastFailures.delete(m.id)
-        growWaits.delete(m.id)
-      } catch (err) {
-        account()
-        if (stopped()) return this.stop(m.id, 'aborted', err)
-        if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
-          this.log(`died working on ${m.id}: ${(err as Error).message}`)
-          await this.recover(signal)
-          continue
-        }
-        // a milestone not ready to go on (the nether's gear still being got: netherKit's notReady) is tried again
-        // without counting it a failure, NOT_READY_TRIES times (a 26.3 bot back from its deaths failed the nether
-        // twice on 'not going into the nether without' its armor, the game's stop three more away)
-        if ((err as any)?.notReady === true) {
-          // its way being searched for (the portal frame's lava, down a staircase at the next spot: lavaSearch): tried
-          // again from there, never counted, a while waited when it came back at once; a 1.21.11 bot with no lava nor
-          // obsidian known failed the nether five times in 4500 ticks and play stopped (f4-1.21.11, t191592)
-          if ((err as any).searching === true) {
-            this.log(`milestone ${m.id}: ${(err as Error).message}`)
-            if (this.bot.survival.tasks.tick - begun < NOT_READY_MIN_TICKS) {
-              const from = this.bot.survival.tasks.tick
-              try {
-                await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
-                const left = NOT_READY_WAIT_TICKS - (this.bot.survival.tasks.tick - from)
-                if (left > 0) await this.waitTicksOrAbort(left, signal)
-              } catch (e) {
-                if (stopped()) return this.stop(m.id, 'aborted', e)
-                if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
-                  this.log(`died waiting to search for ${m.id} again: ${(e as Error).message}`)
-                  await this.recover(signal)
-                }
-              }
-            }
+            await this.waitTicksOrAbort(Math.max(1, Math.min(BARE_WAIT_TICKS, this.bareRetryAt - this.bot.survival.tasks.tick)), signal)
             continue
           }
-          // waiting for a farm to grow (the enchanting table's book's canes, the cane farm by home): a wait by home
-          // with the herd tended and the stock topped up, not a try counted, GROW_WAIT_TRIES times
-          if ((err as any).growing === true) {
-            const k = (growWaits.get(m.id) ?? 0) + 1
-            growWaits.set(m.id, k)
-            if (k <= GROW_WAIT_TRIES) {
-              const wait = Number((err as any).waitTicks ?? GROW_WAIT_TICKS)
-              this.log(`milestone ${m.id}: ${(err as Error).message}: waiting by home (${k} of ${GROW_WAIT_TRIES})`)
-              const from = this.bot.survival.tasks.tick
-              try {
-                await this.keepHerd(signal)
-                await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
-                const left = wait - (this.bot.survival.tasks.tick - from)
-                if (left > 0) await this.waitTicksOrAbort(left, signal)
-              } catch (e) {
-                if (stopped()) return this.stop(m.id, 'aborted', e)
-                if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
-                  this.log(`died waiting for ${m.id}'s farm: ${(e as Error).message}`)
-                  await this.recover(signal)
-                }
-              }
-              continue
-            }
-          }
-          // short of the food only, and more of it than at the last try: banked, not a try counted (its own cap
-          // FOOD_BANK_TRIES); the farm and the herd tended, and the crops waited for by home in between
-          const points = Number((err as any).foodPoints)
-          if ((err as any).foodShort === true && Number.isFinite(points)) {
-            const last = foodBank.get(m.id)
-            const tries = (last?.tries ?? 0) + 1
-            foodBank.set(m.id, { points, tries })
-            if ((last == null || points > last.points) && tries <= FOOD_BANK_TRIES) {
-              this.log(`milestone ${m.id}: ${points} food points banked (${tries}): the farm and the herd till the next try`)
-              const from = this.bot.survival.tasks.tick
-              try {
-                await this.keepHerd(signal)
-                // the stock's top-ups meanwhile (the work by home), else a wait
-                await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
-                const left = FOOD_BANK_WAIT_TICKS - (this.bot.survival.tasks.tick - from)
-                if (left > 0) await this.waitTicksOrAbort(left, signal)
-              } catch (e) {
-                if (stopped()) return this.stop(m.id, 'aborted', e)
-                if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
-                  this.log(`died banking food for ${m.id}: ${(e as Error).message}`)
-                  await this.recover(signal)
-                }
-              }
-              continue
-            }
-          }
-          const k = (notReady.get(m.id) ?? 0) + 1
-          notReady.set(m.id, k)
-          if (k < NOT_READY_TRIES) {
-            this.log(`milestone ${m.id} not ready (${k}): ${(err as Error).message}`)
-            // back at once (nothing could be got: a bag full of junk that wouldn't go, 26.3, the ten tries and five
-            // failures all in one tick, the game stopped): a while waited first
-            if (this.bot.survival.tasks.tick - begun < NOT_READY_MIN_TICKS) {
-              // the stock's top-ups meanwhile (the string, feathers and slime the gate may be short of come in so
-              // over the tries), the wait for what's left of NOT_READY_WAIT_TICKS: a 1.21.11 bot with no bow waited
-              // out ten tries a failure for a slime ball, then its water bottles, and the game stopped at the nether
-              // (full-1.21.11-fresh-g)
-              const from = this.bot.survival.tasks.tick
-              try {
-                // the bag's room made at the base first, the top-ups' room after (a bag short of it got none of
-                // the string the gate was short of, 'no room this trip for arrow, string, feather, flint (4 slots
-                // free)' at each of its tries: f3k-run5, f4-run2)
-                await this.roomForTopUps(signal)
-                await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
-              } catch (e) {
-                if (stopped()) return this.stop(m.id, 'aborted', e)
-                if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
-                  this.log(`died topping up for ${m.id}: ${(e as Error).message}`)
-                  await this.recover(signal)
-                  continue
-                }
-              }
-              const left = NOT_READY_WAIT_TICKS - (this.bot.survival.tasks.tick - from)
-              this.log(`milestone ${m.id}: nothing came of it, the stock topped up${left > 0 ? `, waiting ${left} ticks` : ''}`)
-              if (left > 0) await this.waitTicksOrAbort(left, signal)
-            }
-            continue
-          }
-          notReady.delete(m.id)
         }
-        const n = (failures.get(m.id) ?? 0) + 1
-        failures.set(m.id, n)
-        this.log(`milestone ${m.id} failed (${n}): ${(err as Error).message}`)
-        this.diagnostics?.milestoneFailed(m.id, err)
-        if (n >= maxFailures && (OPTIONAL_MILESTONES.includes(m.id) || isEpoch(m.id))) {
-          // the dragon doesn't need it: the game goes on without
-          this.log(`milestone ${m.id} left out after ${n} failures: on to the next`)
+        this.bareTries = 0
+        this.bareRetryAt = 0
+        // the epochs once the milestones are done (the dragon dead), when play's options ask for them
+        const m = nextToWork(state, reachedIds, skip) ?? (this.options.epochs === true ? nextEpoch(state, reachedIds, skip) : null)
+        if (m == null) return this.stop(null, 'finished')
+        this.current = m.id
+        this.working = m
+        if (this.options.stopAt === m.id) return this.stop(m.id, 'until')
+        const handler = this.handlerFor(m.id)
+        if (handler == null) {
+          this.log(`milestone ${m.id} needs skills that aren't wired yet: stopping (register bot.survival.handlers.${m.id})`)
+          return this.stop(m.id, 'unwired')
+        }
+        // an optional milestone that has had its time is left out (the enchanting's 5 failures took 300000 ticks of a
+        // 26.3 whole game, the dragon not needing it)
+        if (OPTIONAL_MILESTONES.includes(m.id) && (spent.get(m.id) ?? 0) >= OPTIONAL_MILESTONE_TICKS) {
+          this.log(`milestone ${m.id} left out after ${spent.get(m.id) ?? 0} ticks: on to the next`)
           skip.add(m.id)
-          failures.delete(m.id)
           continue
         }
-        // a milestone not ready (its kit still short) never ends play: its tries go on with its back-off, the kit's
-        // top-ups and its own gets between (two 1.21.11 games stopped at the nether's gate for its water bottles, five
-        // failures of ten tries each: f3k-run5, f4-run2)
-        if (n >= maxFailures && (err as any)?.notReady === true && (err as any).growing !== true) {
-          this.log(`milestone ${m.id} still not ready after ${n} failures: backing off, its kit's still to get`)
-          failures.set(m.id, maxFailures - 1)
-        } else if (n >= maxFailures) return this.stop(m.id, 'failed', err)
-        // back at once: a while before the next try (the stock's top-ups meanwhile, then the wait for what's left)
-        const worked = this.bot.survival.tasks.tick - begun
-        const fast = worked < FAST_FAILURE_TICKS ? (fastFailures.get(m.id) ?? 0) + 1 : 0
-        fastFailures.set(m.id, fast)
-        const backoff = failureBackoff(fast, worked, this.options.failureBackoffTicks ?? 0)
-        if (backoff > 0) {
-          this.log(`milestone ${m.id} failed ${worked} ticks in: ${backoff} ticks before its next try`)
-          const from = this.bot.survival.tasks.tick
-          try {
-            await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
-            const left = backoff - (this.bot.survival.tasks.tick - from)
-            if (left > 0) await this.waitTicksOrAbort(left, signal)
-          } catch (e) {
-            if (stopped()) return this.stop(m.id, 'aborted', e)
-            if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
-              this.log(`died waiting to try ${m.id} again: ${(e as Error).message}`)
-              await this.recover(signal)
+        this.log(`working on ${m.id}: ${m.title}`)
+        this.diagnostics?.milestoneStarted(m.id, m.title, describeGoals(m, state))
+        const begun = this.bot.survival.tasks.tick
+        const account = (): void => { spent.set(m.id, (spent.get(m.id) ?? 0) + this.bot.survival.tasks.tick - begun) }
+        try {
+          const how = await this.foodWorking(async () => await this.untilDusk(signal, { hunger: true }, async (s) => {
+            if (m.id === 'food') await this.toFoodLand(s)
+            await handler({ bot: this.bot, milestone: m, state, executor: this.executor, signal: s, log: this.log, seed: this.options.seed })
+            // the milestone ends with the stock topped up for the ones after it, what can be got where the bot is
+            // (topUpPlaces: the surface's by day, the mine's down there); the milestone's own marks apply once it's done
+            const done = m.done(progressState(this.bot, this.memory))
+            await this.topUp(this.topUpPlacesNow(), s, done ? [...reachedIds, m.id] : reachedIds)
+          }), m.id === 'food')
+          account()
+          if (stopped()) return this.stop(m.id, 'aborted')
+          if (how === 'dusk') {
+            this.log(`dusk: ${m.id} left for the night's mine`)
+            continue
+          }
+          if (how === 'hungry') {
+            this.log(`hungry: ${m.id} left for a meal`)
+            continue
+          }
+          failures.delete(m.id)
+          fastFailures.delete(m.id)
+          growWaits.delete(m.id)
+        } catch (err) {
+          account()
+          if (stopped()) return this.stop(m.id, 'aborted', err)
+          // (cut for the bot's food: starving, the work given up for it, no failure counted)
+          if (this.cutForFood) continue
+          if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+            this.log(`died working on ${m.id}: ${(err as Error).message}`)
+            await this.recover(signal)
+            continue
+          }
+          // a milestone not ready to go on (the nether's gear still being got: netherKit's notReady) is tried again
+          // without counting it a failure, NOT_READY_TRIES times (a 26.3 bot back from its deaths failed the nether
+          // twice on 'not going into the nether without' its armor, the game's stop three more away)
+          if ((err as any)?.notReady === true) {
+            // its way being searched for (the portal frame's lava, down a staircase at the next spot: lavaSearch): tried
+            // again from there, never counted, a while waited when it came back at once; a 1.21.11 bot with no lava nor
+            // obsidian known failed the nether five times in 4500 ticks and play stopped (f4-1.21.11, t191592)
+            if ((err as any).searching === true) {
+              this.log(`milestone ${m.id}: ${(err as Error).message}`)
+              if (this.bot.survival.tasks.tick - begun < NOT_READY_MIN_TICKS) {
+                const from = this.bot.survival.tasks.tick
+                try {
+                  await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
+                  const left = NOT_READY_WAIT_TICKS - (this.bot.survival.tasks.tick - from)
+                  if (left > 0) await this.waitTicksOrAbort(left, signal)
+                } catch (e) {
+                  if (stopped()) return this.stop(m.id, 'aborted', e)
+                  // (cut for the bot's food: starving, the work given up for it, no failure counted)
+                  if (this.cutForFood) continue
+                  if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
+                    this.log(`died waiting to search for ${m.id} again: ${(e as Error).message}`)
+                    await this.recover(signal)
+                  }
+                }
+              }
+              continue
+            }
+            // waiting for a farm to grow (the enchanting table's book's canes, the cane farm by home): a wait by home
+            // with the herd tended and the stock topped up, not a try counted, GROW_WAIT_TRIES times
+            if ((err as any).growing === true) {
+              const k = (growWaits.get(m.id) ?? 0) + 1
+              growWaits.set(m.id, k)
+              if (k <= GROW_WAIT_TRIES) {
+                const wait = Number((err as any).waitTicks ?? GROW_WAIT_TICKS)
+                this.log(`milestone ${m.id}: ${(err as Error).message}: waiting by home (${k} of ${GROW_WAIT_TRIES})`)
+                const from = this.bot.survival.tasks.tick
+                try {
+                  await this.keepHerd(signal)
+                  await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
+                  const left = wait - (this.bot.survival.tasks.tick - from)
+                  if (left > 0) await this.waitTicksOrAbort(left, signal)
+                } catch (e) {
+                  if (stopped()) return this.stop(m.id, 'aborted', e)
+                  // (cut for the bot's food: starving, the work given up for it, no failure counted)
+                  if (this.cutForFood) continue
+                  if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
+                    this.log(`died waiting for ${m.id}'s farm: ${(e as Error).message}`)
+                    await this.recover(signal)
+                  }
+                }
+                continue
+              }
+            }
+            // short of the food only, and more of it than at the last try: banked, not a try counted (its own cap
+            // FOOD_BANK_TRIES); the farm and the herd tended, and the crops waited for by home in between
+            const points = Number((err as any).foodPoints)
+            if ((err as any).foodShort === true && Number.isFinite(points)) {
+              const last = foodBank.get(m.id)
+              const tries = (last?.tries ?? 0) + 1
+              foodBank.set(m.id, { points, tries })
+              if ((last == null || points > last.points) && tries <= FOOD_BANK_TRIES) {
+                this.log(`milestone ${m.id}: ${points} food points banked (${tries}): the farm and the herd till the next try`)
+                const from = this.bot.survival.tasks.tick
+                try {
+                  await this.keepHerd(signal)
+                  // the stock's top-ups meanwhile (the work by home), else a wait
+                  await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
+                  const left = FOOD_BANK_WAIT_TICKS - (this.bot.survival.tasks.tick - from)
+                  if (left > 0) await this.waitTicksOrAbort(left, signal)
+                } catch (e) {
+                  if (stopped()) return this.stop(m.id, 'aborted', e)
+                  // (cut for the bot's food: starving, the work given up for it, no failure counted)
+                  if (this.cutForFood) continue
+                  if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
+                    this.log(`died banking food for ${m.id}: ${(e as Error).message}`)
+                    await this.recover(signal)
+                  }
+                }
+                continue
+              }
+            }
+            const k = (notReady.get(m.id) ?? 0) + 1
+            notReady.set(m.id, k)
+            if (k < NOT_READY_TRIES) {
+              this.log(`milestone ${m.id} not ready (${k}): ${(err as Error).message}`)
+              // back at once (nothing could be got: a bag full of junk that wouldn't go, 26.3, the ten tries and five
+              // failures all in one tick, the game stopped): a while waited first
+              if (this.bot.survival.tasks.tick - begun < NOT_READY_MIN_TICKS) {
+                // the stock's top-ups meanwhile (the string, feathers and slime the gate may be short of come in so
+                // over the tries), the wait for what's left of NOT_READY_WAIT_TICKS: a 1.21.11 bot with no bow waited
+                // out ten tries a failure for a slime ball, then its water bottles, and the game stopped at the nether
+                // (full-1.21.11-fresh-g)
+                const from = this.bot.survival.tasks.tick
+                try {
+                  // the bag's room made at the base first, the top-ups' room after (a bag short of it got none of
+                  // the string the gate was short of, 'no room this trip for arrow, string, feather, flint (4 slots
+                  // free)' at each of its tries: f3k-run5, f4-run2)
+                  await this.roomForTopUps(signal)
+                  await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
+                } catch (e) {
+                  if (stopped()) return this.stop(m.id, 'aborted', e)
+                  // (cut for the bot's food: starving, the work given up for it, no failure counted)
+                  if (this.cutForFood) continue
+                  if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
+                    this.log(`died topping up for ${m.id}: ${(e as Error).message}`)
+                    await this.recover(signal)
+                    continue
+                  }
+                }
+                const left = NOT_READY_WAIT_TICKS - (this.bot.survival.tasks.tick - from)
+                this.log(`milestone ${m.id}: nothing came of it, the stock topped up${left > 0 ? `, waiting ${left} ticks` : ''}`)
+                if (left > 0) await this.waitTicksOrAbort(left, signal)
+              }
+              continue
+            }
+            notReady.delete(m.id)
+          }
+          const n = (failures.get(m.id) ?? 0) + 1
+          failures.set(m.id, n)
+          this.log(`milestone ${m.id} failed (${n}): ${(err as Error).message}`)
+          this.diagnostics?.milestoneFailed(m.id, err)
+          if (n >= maxFailures && (OPTIONAL_MILESTONES.includes(m.id) || isEpoch(m.id))) {
+            // the dragon doesn't need it: the game goes on without
+            this.log(`milestone ${m.id} left out after ${n} failures: on to the next`)
+            skip.add(m.id)
+            failures.delete(m.id)
+            continue
+          }
+          // a milestone not ready (its kit still short) never ends play: its tries go on with its back-off, the kit's
+          // top-ups and its own gets between (two 1.21.11 games stopped at the nether's gate for its water bottles, five
+          // failures of ten tries each: f3k-run5, f4-run2)
+          if (n >= maxFailures && (err as any)?.notReady === true && (err as any).growing !== true) {
+            this.log(`milestone ${m.id} still not ready after ${n} failures: backing off, its kit's still to get`)
+            failures.set(m.id, maxFailures - 1)
+          } else if (n >= maxFailures) return this.stop(m.id, 'failed', err)
+          // back at once: a while before the next try (the stock's top-ups meanwhile, then the wait for what's left)
+          const worked = this.bot.survival.tasks.tick - begun
+          const fast = worked < FAST_FAILURE_TICKS ? (fastFailures.get(m.id) ?? 0) + 1 : 0
+          fastFailures.set(m.id, fast)
+          const backoff = failureBackoff(fast, worked, this.options.failureBackoffTicks ?? 0)
+          if (backoff > 0) {
+            this.log(`milestone ${m.id} failed ${worked} ticks in: ${backoff} ticks before its next try`)
+            const from = this.bot.survival.tasks.tick
+            try {
+              await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
+              const left = backoff - (this.bot.survival.tasks.tick - from)
+              if (left > 0) await this.waitTicksOrAbort(left, signal)
+            } catch (e) {
+              if (stopped()) return this.stop(m.id, 'aborted', e)
+              // (cut for the bot's food: starving, the work given up for it, no failure counted)
+              if (this.cutForFood) continue
+              if (TaskError.is(e, 'DIED') || this.bot.health <= 0) {
+                this.log(`died waiting to try ${m.id} again: ${(e as Error).message}`)
+                await this.recover(signal)
+              }
             }
           }
         }
-      }
-      try {
-        await this.afterTrip(signal)
-      } catch (err) {
-        if (stopped()) return this.stop(m.id, 'aborted', err)
-        // a death in the herd's upkeep or the store at the base after a milestone (keepHerd's tendHerd: its hunt, its
-        // kelp) goes to the recovery as every other: thrown on, it ended play and the whole game. A 1.21.11 bot
-        // drowned getting the herd's kelp, and the e2e stopped 'play threw: the bot died' (ls3c-1.21.11, t390765;
-        // full-1.21.11-fresh-j, t210976, blown up by a creeper while exploring for kelp)
-        if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
-          this.log(`died after ${m.id}: ${(err as Error).message}`)
-          await this.recover(signal)
-          continue
+        try {
+          await this.afterTrip(signal)
+        } catch (err) {
+          if (stopped()) return this.stop(m.id, 'aborted', err)
+          // (cut for the bot's food: starving, the work given up for it, no failure counted)
+          if (this.cutForFood) continue
+          // a death in the herd's upkeep or the store at the base after a milestone (keepHerd's tendHerd: its hunt, its
+          // kelp) goes to the recovery as every other: thrown on, it ended play and the whole game. A 1.21.11 bot
+          // drowned getting the herd's kelp, and the e2e stopped 'play threw: the bot died' (ls3c-1.21.11, t390765;
+          // full-1.21.11-fresh-j, t210976, blown up by a creeper while exploring for kelp)
+          if (TaskError.is(err, 'DIED') || this.bot.health <= 0) {
+            this.log(`died after ${m.id}: ${(err as Error).message}`)
+            await this.recover(signal)
+            continue
+          }
+          throw err
         }
+        this.save()
+      } catch (err) {
+        // a cut for the food that got past the round's own catches: the food first, next round
+        if (!stopped() && this.cutForFood) continue
         throw err
       }
-      this.save()
     }
   }
 
@@ -1635,6 +1704,72 @@ export class Runner {
     } finally {
       bot.off('physicsTick', watch)
       signal.removeEventListener('abort', onOuter)
+    }
+  }
+
+  /**
+   * Whether food comes first: starving (the bar at STARVING_FOOD or under with none to eat carried: mealGoals), from
+   * then till the bar is over HUNGRY_FOOD, in the overworld. A 1.21.11 bot starved twice under work nothing stopped
+   * for a meal (a worn pickaxe's replacement exploring the deepslate 155000 ticks; a spare kit's 76000 ticks for its
+   * food) and a hit of 1 killed it each time (f5-1.21.11, t1124683 and t1308224)
+   */
+  foodFirstNow (): boolean {
+    const bot = this.bot
+    if (bot.entity == null || normalizeDimension(bot.game?.dimension) !== 'overworld') return false
+    const food = bot.food ?? 20
+    if (this.foodFirst && food > HUNGRY_FOOD) this.foodFirst = false
+    if (!this.foodFirst && food <= STARVING_FOOD && mealGoals(food, ownedInventory(bot)) != null) this.foodFirst = true
+    return this.foodFirst
+  }
+
+  /**
+   * The starving watch: every 20 ticks, food first (foodFirstNow) and no food work under way, the round of work cut
+   * (whatever it is: a milestone, the stock, a kit, a tool's replacement, a recovery's), the reflexes left to run
+   */
+  watchStarving (): () => void {
+    let n = 0
+    const tick = (): void => {
+      if (++n % 20 !== 0 || this.feeding || !this.foodFirstNow()) return
+      const round = this.roundCtrl
+      if (round == null || round.signal.aborted) return
+      this.cutForFood = true
+      this.log(`starving (food ${this.bot.food ?? 0}, nothing to eat carried): the work stopped for food`)
+      round.abort(new TaskError('ABORTED', 'starving: food first'))
+    }
+    this.bot.on('physicsTick', tick)
+    return () => { this.bot.off('physicsTick', tick) }
+  }
+
+  /**
+   * Food, the only work while it comes first: what's carried eaten, else the meal (up to the surface first, the food
+   * land, the meal's goals within MEAL_TICKS), a wait of FOOD_FIRST_WAIT_TICKS after one that came to nothing
+   */
+  async feedFirst (signal: AbortSignal): Promise<void> {
+    this.feeding = true
+    try {
+      const food = this.bot.food ?? 20
+      const meal = mealGoals(food, ownedInventory(this.bot))
+      if (meal == null) {
+        await eat(this.bot, { signal }).catch(err => { if (signal.aborted) throw err })
+        if ((this.bot.food ?? 20) <= food) await this.waitTicksOrAbort(FOOD_FIRST_WAIT_TICKS, signal)
+        return
+      }
+      this.log(`starving (food ${food}): food is the only work till the bar is over ${HUNGRY_FOOD}`)
+      try {
+        await this.foodWorking(async () => {
+          await this.upForFood(signal)
+          await this.toFoodLand(signal)
+          await this.withinTicks(MEAL_TICKS, signal, async (t) => {
+            await this.executor.obtain(meal, t, { unseenFactor: HUNGRY_FIND_FACTOR })
+          })
+        })
+      } catch (err) {
+        if (signal.aborted || TaskError.is(err, 'DIED') || this.bot.health <= 0) throw err
+        this.log(`no food yet: ${(err as Error).message}`)
+        await this.waitTicksOrAbort(FOOD_FIRST_WAIT_TICKS, signal)
+      }
+    } finally {
+      this.feeding = false
     }
   }
 
