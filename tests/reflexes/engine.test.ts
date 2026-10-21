@@ -260,3 +260,24 @@ test('a hostiles task that failed waits out its cooldown, but a mob\'s hit since
   assert.strictEqual(runs, 2)
   engine.stop()
 })
+
+test('a reflex whose check throws is passed over that tick, the others still checked: the drowning reflex fires past it (f1-grim)', async () => {
+  const { Vec3 } = await import('vec3')
+  const { ReflexEngine } = await import('../../src/reflexes/engine')
+  const { drowningReflex } = await import('../../src/reflexes/rules')
+  const { fakeBot } = await import('./fakeBot')
+  const bot = fakeBot({ position: new Vec3(0.5, 60, 0.5), oxygen: 3, world: () => 'water' })
+  const broken = { name: 'broken', priority: 95, check: () => { throw new Error('a check gone wrong') }, hold: () => { throw new Error('a hold gone wrong') } }
+  const engine = new ReflexEngine(bot, { enabled: false, reflexes: [broken as any, drowningReflex] })
+  const errors: string[] = []
+  bot.on('reflexCheckError', (name: string) => errors.push(name))
+  const realError = console.error
+  console.error = () => {}
+  try {
+    assert.equal(engine.evaluate()?.name, 'drowning')
+  } finally {
+    console.error = realError
+    engine.stop()
+  }
+  assert.deepEqual(errors, ['broken'])
+})

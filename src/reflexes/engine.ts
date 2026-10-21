@@ -15,6 +15,9 @@ export interface ReflexEngineOptions {
   enabled?: boolean
 }
 
+/** ticks between the lines of a reflex whose check keeps throwing */
+export const CHECK_ERROR_LOG_TICKS = 1200
+
 interface Running {
   task: UrgentTask
   cancel: (message?: string) => void
@@ -121,7 +124,7 @@ export class ReflexEngine {
       if ((this.cooldownUntil.get(reflex.name) ?? -Infinity) > this.tick && !(reflex.hitEndsCooldown === true && this.lastMobHurtTick >= (this.cooldownFrom.get(reflex.name) ?? Infinity))) continue
       if (this.running?.task.name === reflex.name) continue
       if (this.inhibited.has(reflex.name)) continue
-      const task = reflex.check(ctx)
+      const task = this.checkOne(reflex, ctx)
       if (task == null || holds.some(h => task.priority < h.below && h.except?.(task) !== true)) continue
       if (best == null || task.priority > best.priority) best = task
     }
@@ -133,12 +136,41 @@ export class ReflexEngine {
     return best
   }
 
+  /**
+   * a reflex's check, an error in it that reflex's alone (none for it this tick, noted): an error thrown by one check
+   * took every reflex with it, the drowning reflex's too, tick after tick (a 1.21.11 Grim game's bot drowned in the sea
+   * with no reflex for 600 ticks after its last eat, f1-grim t108053 to t108690)
+   */
+  private checkOne (reflex: Reflex, ctx: ReflexContext): UrgentTask | null {
+    try {
+      return reflex.check(ctx)
+    } catch (err) {
+      this.noteCheckError(reflex, err)
+      return null
+    }
+  }
+
+  /** the reflexes whose check threw, the tick each last did (one line a reflex every CHECK_ERROR_LOG_TICKS) */
+  private readonly checkErrors = new Map<string, number>()
+  private noteCheckError (reflex: Reflex, err: unknown): void {
+    const last = this.checkErrors.get(reflex.name)
+    if (last != null && this.tick - last < CHECK_ERROR_LOG_TICKS) return
+    this.checkErrors.set(reflex.name, this.tick)
+    this.bot.emit('reflexCheckError' as any, reflex.name, err)
+    console.error(`[survival] reflex ${reflex.name}: its check threw: ${(err as Error)?.stack ?? String(err)}`)
+  }
+
   /** the holds the reflexes put on those under them now (Reflex.hold); an inhibited reflex puts none */
   holds (ctx: ReflexContext): ReflexHold[] {
     const out: ReflexHold[] = []
     for (const reflex of this.reflexes) {
       if (reflex.hold == null || this.inhibited.has(reflex.name)) continue
-      const hold = reflex.hold(ctx)
+      let hold: ReflexHold | null = null
+      try {
+        hold = reflex.hold(ctx)
+      } catch (err) {
+        this.noteCheckError(reflex, err)
+      }
       if (hold != null) out.push(hold)
     }
     return out
