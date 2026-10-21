@@ -19,6 +19,11 @@ const LIQUID = new Set(['lava', 'water', 'bubble_column'])
 export const SCOOP_FILLERS = ['cobblestone', 'cobbled_deepslate', 'stone', 'deepslate', 'dirt', 'netherrack']
 /** the steps a tunnel to a scoop's stand takes at most */
 export const SCOOP_TUNNEL_STEPS = 160
+/**
+ * how far across from the bot a scoop's stand may be (its tunnel a way down, not a way across the land): a 1.21.11
+ * bot's walk to a source 100 blocks off ended short, and its scoop dug off toward it from there (f4-1.21.11, t80802)
+ */
+export const SCOOP_REACH = 24
 
 export interface ScoopStand {
   /** where the bot stands (its feet) */
@@ -74,6 +79,7 @@ export async function scoopByTunnel (bot: Bot, source: Vec3, signal?: AbortSigna
   const at = bot.entity.position
   const stands = scoopStands(get, source, isCave).sort((a, b) => a.stand.distanceTo(at) - b.stand.distanceTo(at))
   if (stands.length === 0) throw new SkillError('NO_PATH', `no stand to scoop the lava at ${source.toString()} from`)
+  if (Math.hypot(stands[0].stand.x + 0.5 - at.x, stands[0].stand.z + 0.5 - at.z) > SCOOP_REACH) throw new SkillError('NO_PATH', `the lava at ${source.toString()} is over ${SCOOP_REACH} blocks off to scoop from a tunnel`)
   let lastErr: unknown = null
   for (const { stand, opening } of stands.slice(0, 2)) {
     try {

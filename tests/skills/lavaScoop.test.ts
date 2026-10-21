@@ -81,3 +81,19 @@ test('scoopStands with a cave by the source (a bot not fit for the caves): only 
   // a cave against the source itself only (under it): the stands as without
   assert.equal(scoopStands(get, source, p => p.equals(new Vec3(6, 39, 0))).length, 4)
 })
+
+test('scoopByTunnel: a source over SCOOP_REACH across, no tunnel dug toward it (f4-1.21.11 t80802)', async () => {
+  const { scoopByTunnel, SCOOP_REACH } = await import('../../src/skills/lavaScoop')
+  const tunnel = require('../../src/skills/tunnel')
+  const real = tunnel.tunnelTo
+  let dug = 0
+  tunnel.tunnelTo = async () => { dug++ }
+  const cells: Record<string, string> = { '100,30,60': 'lava' }
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('bucket', 1)], world: p => cells[key(p)] ?? (p.y < 64 ? 'stone' : 'air') })
+  try {
+    await assert.rejects(scoopByTunnel(bot, new Vec3(100, 30, 60)), (err: any) => err.reason === 'NO_PATH' && new RegExp(`over ${SCOOP_REACH}`).test(err.message))
+  } finally {
+    tunnel.tunnelTo = real
+  }
+  assert.equal(dug, 0)
+})
