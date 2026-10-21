@@ -569,7 +569,8 @@ test('exploreSurface: a bot under the cave rule underground with no way up but t
   } finally {
     nav.navigate = real
   }
-  assert.deepEqual(shut, [true])
+  // the caves shut first, then (none by the rock) the cave's cells by it, its way out; a staircase dug after each
+  assert.deepEqual(shut, [true, false])
   assert.equal(err?.reason, 'NO_PATH', String(err))
 })
 

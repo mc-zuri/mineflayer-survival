@@ -812,7 +812,7 @@ export async function climbOut (bot: Bot, args: DigRouteArgs = {}, signal?: Abor
       const step = staircaseUpStep(feet, d)
       // the step stands on the block ahead: it has to be there (or be put there)
       // (nor into a cave's cells or against them for a bot under the cave rule, once out of the cave it began in)
-      const why = climbHazard(unsafeStep(lookup, { open: step.open, floor: step.floor }), inWater(bot)) ?? (atCave(bot) ? null : caveStep(bot, step))
+      const why = climbHazard(unsafeStep(lookup, { open: step.open, floor: step.floor }), inWater(bot)) ?? (atCave(bot) || args.caves === false ? null : caveStep(bot, step))
       if (why != null) { trace('explore: climb turns from', d.toString(), why); continue }
       // (nor through a block the pathfinder is kept from breaking: a 1.21.11 bot shut in its house dug its staircase up
       // through the roof the base's protection kept, onto its crafting table, ls-1.21.11 t102592)
@@ -861,7 +861,7 @@ export async function climbToward (bot: Bot, target: Vec3, args: DigRouteArgs = 
     let stepped = false
     for (const d of turns) {
       const step = staircaseUpStep(feet, d)
-      const why = climbHazard(unsafeStep(lookup, { open: step.open, floor: step.floor }), inWater(bot)) ?? (atCave(bot) ? null : caveStep(bot, step))
+      const why = climbHazard(unsafeStep(lookup, { open: step.open, floor: step.floor }), inWater(bot)) ?? (atCave(bot) || args.caves === false ? null : caveStep(bot, step))
       if (why != null) { trace('explore: climb toward', target.toString(), 'turns from', d.toString(), why); continue }
       const kept = step.open.find(c => breakKept(bot, c))
       if (kept != null) { trace('explore: climb toward', target.toString(), 'turns from', d.toString(), 'kept unbroken at', kept.toString()); continue }
@@ -903,7 +903,21 @@ export async function ensureSurface (bot: Bot, signal?: AbortSignal): Promise<bo
   if (onSurface(lookup, feetOf(bot), overworld)) return true
   // the pathfinder planned no way up (or none it could walk): a staircase dug by hand
   trace('explore: digging a staircase up from', feetOf(bot).toString())
-  return await climbOut(bot, {}, signal)
+  if (await climbOut(bot, {}, signal)) return true
+  if (!caveRuleOn(bot)) return false
+  // none by the rock alone for a bot under the cave rule: the cave's cells by it (its way out, CAVE_ESCAPE_RADIUS) to the
+  // open sky, then a staircase that may open onto a cave (the caves reflex seals what it opens); never no way at all. A
+  // 26.3 bot at y 61 just under the surface found no way up but through a cave, its stone milestone failed 5 times on
+  // 'no exploring from here' and play stopped (f8-26.3, t54094 to t55902)
+  trace('explore: no way up by the rock alone from', feetOf(bot).toString(), ': by the cave by it')
+  try {
+    await up()
+  } catch (err) {
+    if (isAbort(err)) throw err
+    trace('explore: no way up by the cave', (err as Error).message)
+  }
+  if (onSurface(lookup, feetOf(bot), overworld)) return true
+  return await climbOut(bot, { caves: false }, signal)
 }
 
 /**
@@ -1254,6 +1268,8 @@ export interface DigRouteArgs {
   room?: (toward?: Vec3) => Promise<void>
   /** most steps (default 160) */
   maxSteps?: number
+  /** a staircase up turns from the caves' cells under the cave rule (default true); false: the rock's way only */
+  caves?: boolean
 }
 
 /**
