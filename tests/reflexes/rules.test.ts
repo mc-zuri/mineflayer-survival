@@ -1081,3 +1081,39 @@ test('hostiles reflex in the water: a mob that hit the bot within HIT_BACK_TICKS
   zombie.position = new Vec3(12.5, 63, 0.5)
   assert.strictEqual(hitInReach(bot, new Map([[zombie.id, 90]]), 100), false)
 })
+
+test('hostiles reflex: a mob fought FRUITLESS_TICKS with no damage done is let be (a magma cube\'s splits, one out of reach), even after it hit the bot, but not while it hits from within FRUITLESS_NEAR; a polar bear never (the bunker\'s 600-tick magma cube fights)', async () => {
+  const { FRUITLESS_TICKS, noteFight, fruitlessLetBe } = await import('../../src/reflexes/rules')
+  const cube = entity({ name: 'magma_cube', position: new Vec3(4.5, 64, 0.5), meta: { size: 0 } })
+  const bot = fakeBot({ items: [item('diamond_sword'), item('cobblestone', 64)], entities: [cube] })
+  const engine = new ReflexEngine(bot, { enabled: false })
+  const tick = (n: number): void => { for (let i = 0; i < n; i++) bot.emit('physicsTick') }
+  // it hit the bot from 4 off: fought
+  bot.emit('entityHurt', bot.entity, cube)
+  assert.strictEqual(hostilesReflex.check(engine.context())?.detail, 'fight magma_cube')
+  noteFight(bot, cube)
+  tick(FRUITLESS_TICKS - 10)
+  assert.strictEqual(fruitlessLetBe(engine.context(), cube), false)
+  // FRUITLESS_TICKS on with no hit landed: let be, the reflex off it
+  tick(20)
+  assert.strictEqual(fruitlessLetBe(engine.context(), cube), true)
+  assert.notStrictEqual(hostilesReflex.check(engine.context())?.detail, 'fight magma_cube')
+  // hitting from within FRUITLESS_NEAR: fought again
+  cube.position = new Vec3(2.2, 64, 0.5)
+  bot.emit('entityHurt', bot.entity, cube)
+  assert.strictEqual(fruitlessLetBe(engine.context(), cube), false)
+  // a hit landed on it: the count's good again
+  const c2 = entity({ name: 'zombie', position: new Vec3(4.5, 64, 0.5) })
+  bot.entities[c2.id] = c2
+  noteFight(bot, c2)
+  tick(FRUITLESS_TICKS + 5)
+  bot.emit('entityHurt', c2, bot.entity)
+  assert.strictEqual(fruitlessLetBe(engine.context(), c2), false)
+  // a polar bear: never let be so
+  const bear = entity({ name: 'polar_bear', position: new Vec3(4.5, 64, 0.5) })
+  bot.entities[bear.id] = bear
+  noteFight(bot, bear)
+  tick(FRUITLESS_TICKS + 5)
+  assert.strictEqual(fruitlessLetBe(engine.context(), bear), false)
+  engine.stop()
+})

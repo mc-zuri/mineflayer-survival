@@ -868,6 +868,57 @@ export const STRONG_NEUTRALS = new Set(['polar_bear', 'iron_golem'])
 /** at or under this health a strong neutral's fight is a flee (or more than one of them at any health) */
 export const STRONG_FIGHT_HEALTH = 12
 
+/** ticks of fighting a mob with no damage done to it before it's let be (fruitlessLetBe) */
+export const FRUITLESS_TICKS = 200
+/** ticks with no fight with a mob after which its fight's count starts over */
+export const FRUITLESS_IDLE = 600
+/** how near a let-be mob still hitting the bot is fought all the same */
+export const FRUITLESS_NEAR = 2.5
+
+interface FightLedger { tick: number, since: Map<number, number>, last: Map<number, number>, damaged: Map<number, number>, hitBy: Map<number, number> }
+const ledgers = new WeakMap<Bot, FightLedger>()
+
+/** each bot's fights: when each mob's began (since), was last fought (last), last took the bot's damage (damaged) */
+function ledgerOf (bot: Bot): FightLedger {
+  let l = ledgers.get(bot)
+  if (l != null) return l
+  const ledger: FightLedger = { tick: 0, since: new Map(), last: new Map(), damaged: new Map(), hitBy: new Map() }
+  ledgers.set(bot, ledger)
+  ;(bot as any).on?.('physicsTick', () => { ledger.tick++ })
+  ;(bot as any).on?.('entityHurt', (e: Entity, source?: Entity) => {
+    if (e == null || source == null) return
+    if (source === bot.entity) ledger.damaged.set(e.id, ledger.tick)
+    else if (e === bot.entity) ledger.hitBy.set(source.id, ledger.tick)
+  })
+  return ledger
+}
+
+/** a fight of the hostiles reflex with `e` noted (its start, unless it was fought within FRUITLESS_IDLE) */
+export function noteFight (bot: Bot, e: Entity): void {
+  const l = ledgerOf(bot)
+  const last = l.last.get(e.id)
+  if (last == null || l.tick - last > FRUITLESS_IDLE) l.since.set(e.id, l.tick)
+  l.last.set(e.id, l.tick)
+}
+
+/**
+ * Whether the hostiles reflex lets a mob be: fought FRUITLESS_TICKS or more with no damage done to it in the last
+ * FRUITLESS_TICKS (a magma cube's or a slime's small splits, hard to hit; one out of reach a level down), unless it's
+ * hitting the bot from within FRUITLESS_NEAR; never a strong neutral (STRONG_NEUTRALS: fled when it's the worse). The
+ * 'never let be while it hits' rule kept 1.21.11 bots in 600-tick fights with magma cubes in the nether, over and over
+ */
+export function fruitlessLetBe (ctx: ReflexContext, e: Entity): boolean {
+  if (STRONG_NEUTRALS.has(e.name ?? '')) return false
+  const l = ledgerOf(ctx.bot)
+  const since = l.since.get(e.id)
+  const last = l.last.get(e.id)
+  if (since == null || last == null || l.tick - last > FRUITLESS_IDLE || l.tick - since < FRUITLESS_TICKS) return false
+  const dmg = l.damaged.get(e.id)
+  if (dmg != null && dmg >= since && l.tick - dmg < FRUITLESS_TICKS) return false
+  const hit = l.hitBy.get(e.id)
+  return !(hit != null && l.tick - hit <= ATTACK_HOLD_TICKS && distance(ctx.bot, e) <= FRUITLESS_NEAR)
+}
+
 /**
  * The mobs attacking the bot now: alive, a hostile or one of the retaliate list (a neutral angered), that hurt it
  * within ATTACK_HOLD_TICKS and are within ATTACKER_RANGE; the nearest first. While there is one the hostiles reflex
@@ -880,7 +931,7 @@ export function attackingNow (ctx: ReflexContext): Entity[] {
     if (e === bot.entity || !isAlive(bot, e)) return false
     if (!isHostile(bot, e) && !config.hostiles.retaliate.includes(e.name ?? '') && !STRONG_NEUTRALS.has(e.name ?? '')) return false
     const at = ctx.attackers?.get(e.id)
-    return at != null && ctx.tick - at >= 0 && ctx.tick - at <= ATTACK_HOLD_TICKS && distance(bot, e) <= ATTACKER_RANGE
+    return at != null && ctx.tick - at >= 0 && ctx.tick - at <= ATTACK_HOLD_TICKS && distance(bot, e) <= ATTACKER_RANGE && !fruitlessLetBe(ctx, e)
   }).sort((a, b) => distance(bot, a) - distance(bot, b))
 }
 
@@ -1147,6 +1198,8 @@ export const hostilesReflex: Reflex = {
     // (one attacking it now never let be: attackingNow)
     const hitting = (e: Entity): boolean => attacking.some(a => a.id === e.id)
     const fightable = (nether ? near : near.filter(e => hitting(e) || (!leftInWater(bot, e) && !tridentInWater(bot, e)))).filter(e => hitting(e) || !unkilledLetBe(bot, e, ctx.tick))
+      // (one fought FRUITLESS_TICKS with no damage done let be, but at the bot: fruitlessLetBe)
+      .filter(e => !fruitlessLetBe(ctx, e))
     if (fightable.length === 0) return attacking.length > 0 ? fleeAttackers('flee attacker') : null
     // creepers: shot from a distance when there's a bow; melee only with a shield to take the blast
     const target = fightable.find(e => {
@@ -1208,7 +1261,7 @@ export const hostilesReflex: Reflex = {
           name: 'hostiles',
           priority: config.hostiles.priority,
           detail: `fight ${target.name ?? ''}`,
-          run: async (signal) => await fight(bot, target, { signal, ...meleeOptions(target, config, true), until: () => turned() || pastLeash(anchor, bot.entity.position) })
+          run: async (signal) => { noteFight(bot, target); return await fight(bot, target, { signal, ...meleeOptions(target, config, true), until: () => turned() || pastLeash(anchor, bot.entity.position) || fruitlessLetBe(ctx, target) }) }
         }
       }
     }
@@ -1220,10 +1273,10 @@ export const hostilesReflex: Reflex = {
       detail: `${useBow ? 'shoot' : 'fight'} ${target.name ?? ''}`,
       run: async (signal) => useBow
         ? await shoot(bot, target, { signal, maxShots: 3 })
-        : await fight(bot, target, { signal, ...meleeOptions(target, config), dry, until: () => turned() || (dry && bodyInWater(bot, bot.entity.position)) }).catch(err => {
+        : (noteFight(bot, target), await fight(bot, target, { signal, ...meleeOptions(target, config), dry, until: () => turned() || (dry && bodyInWater(bot, bot.entity.position)) || fruitlessLetBe(ctx, target) }).catch(err => {
           if (TaskError.is(err, 'TIMEOUT')) noteUnkilled(bot, target, ctx.tick)
           throw err
-        })
+        }))
     }
   }
 }
