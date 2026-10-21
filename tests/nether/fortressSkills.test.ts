@@ -917,3 +917,40 @@ test('collectBlazeRods bunkerOnly (a sword alone, no fire resistance): no bunker
     gridModule.moveNear = realMove
   }
 })
+
+test('collectBlazeRods: the bunker fought from before, the bot in it, a block of it not put, is built again a while on, not left for another', async () => {
+  const { collectBlazeRods, resetBlazeCover, KEPT_BUNKER_TRIES } = await import('../../src/nether/fortressSkills')
+  const { SkillError } = await import('../../src/skills/errors')
+  const fightModule = require('../../src/nether/blazeFight')
+  const realBuild = fightModule.buildNook
+  const realFight = fightModule.fightFromNook
+  const builds: string[] = []
+  let failing = 0
+  fightModule.buildNook = async (_b: unknown, nook: any) => {
+    builds.push(nook.stand.toString())
+    if (failing > 0) { failing--; throw new SkillError('CANNOT_PLACE', '1 of the nook\'s 1 blocks not put') }
+  }
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 12.5), items: [item('cobblestone', 64), item('bow'), item('arrow', 64)], world: (p: any) => p.y < 64 ? 'stone' : 'air' })
+  bot.game.dimension = 'the_nether'
+  bot.entity.effects = {}
+  ;(bot as any).world = { raycast: () => null }
+  bot.findBlocks = () => []
+  resetBlazeCover(bot)
+  fightModule.fightFromNook = async () => { bot.inventory.slots[20 + builds.length] = item('blaze_rod'); return { kills: 1, shots: 0, blocked: 0, ticks: 10 } }
+  const ticking = setInterval(() => { for (let k = 0; k < 20; k++) bot.emit('physicsTick') }, 1)
+  try {
+    await collectBlazeRods(bot, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 1000, safety: false })
+    const first = builds[0]
+    // the bot in it now
+    const [x, y, z] = first.replace(/[()]/g, '').split(',').map(Number)
+    bot.entity.position = new Vec3(x + 0.5, y, z + 0.5)
+    builds.length = 0
+    failing = KEPT_BUNKER_TRIES - 1
+    await collectBlazeRods(bot, { count: 2, spawner: new Vec3(0, 64, 0), maxTicks: 1000, safety: false })
+    assert.deepEqual(builds, new Array(KEPT_BUNKER_TRIES).fill(first))
+  } finally {
+    clearInterval(ticking)
+    fightModule.buildNook = realBuild
+    fightModule.fightFromNook = realFight
+  }
+})

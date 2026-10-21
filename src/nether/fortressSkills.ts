@@ -28,7 +28,7 @@ import {
 } from './fortress'
 import { dimensionOf } from './portalTravel'
 import { withNetherSafety, type NetherSafetyOptions } from './safety'
-import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, BUNKER_FETCH_LEAVE, blazesAbout, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, netherStepForbidden, nookAround, nookBlocks, openNook, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, sealAndHeal, shellAgain, withBlocksKept } from './blazeFight'
+import { SPAWN_RANGE, BUNKER_FETCH_BLAZES, BUNKER_FETCH_HEALTH, BUNKER_FETCH_LEAVE, blazesAbout, fightHealth, inSpawnVolume, type BlazeNook, type NookLookup, buildNook, fightFromNook, inNook, netherStepForbidden, nookAround, nookBlocks, openNook, planBlazeBunkers, planBlazeNooks, putOutFireOnBot, sealAndHeal, shellAgain, withBlocksKept } from './blazeFight'
 import { handleFire } from '../skills/escape'
 import { lightFromBunker, litCells, spawnCells } from './spawnerLight'
 import { walkTo } from '../skills/navigate'
@@ -479,6 +479,10 @@ function keptNook (bot: Bot, spawner: Vec3, lookup: NookLookup, melee: boolean |
   return shellAgain(lookup, kept)
 }
 
+/** the builds of the bunker fought from before, the bot in it, a block not put each (KEPT_BUNKER_WAIT ticks apart) */
+export const KEPT_BUNKER_TRIES = 3
+export const KEPT_BUNKER_WAIT = 40
+
 /** a bunker tried after one with no kill for long stands this far from it at the least */
 export const BUNKER_APART = 4
 
@@ -756,17 +760,28 @@ export async function collectBlazeRods (bot: Bot, args: BlazeRodsArgs = {}, sign
     let bunker: BlazeNook | null = null
     for (const c of candidates) {
       trace('collectBlazeRods: the bunker at', c.stand.toString(), 'facing', c.facing.toString(), c.build.length, 'blocks', c.bunker?.visor != null ? 'visored' : 'no visor')
-      try {
-        await buildNook(bot, c, signal)
-        bunker = c
-        break
-      } catch (err) {
-        if (isAbort(err) || bot.health <= 0) throw err
-        trace('collectBlazeRods: the bunker not built:', (err as Error).message)
-        if (isSkillError(err, 'NO_PATH') || isSkillError(err, 'STUCK') || isSkillError(err, 'CANNOT_PLACE')) {
-          bad.push(c.stand)
-          if (kept?.stand.equals(c.stand) === true) nooks.get(bot)?.delete(nookKey(spawner, 'bunker'))
+      // (the one fought from before, with the bot in it, a block that didn't go in tried again a while on, not left for
+      // another: the walk to the next one 4 off through seed 2's throne room at (-277, 77, -159), its blocks not all
+      // put either among the blazes, burned a 26.3 bot)
+      const again = kept?.stand.equals(c.stand) === true && inNook(bot, c) ? KEPT_BUNKER_TRIES : 1
+      let built = false
+      let failure: unknown = null
+      for (let i = 0; i < again && !built; i++) {
+        try {
+          if (i > 0) await waitTicks(bot, KEPT_BUNKER_WAIT, signal)
+          await buildNook(bot, c, signal)
+          built = true
+        } catch (err) {
+          if (isAbort(err) || bot.health <= 0) throw err
+          failure = err
+          trace('collectBlazeRods: the bunker not built:', (err as Error).message)
+          if (!isSkillError(err, 'CANNOT_PLACE')) break
         }
+      }
+      if (built) { bunker = c; break }
+      if (isSkillError(failure, 'NO_PATH') || isSkillError(failure, 'STUCK') || isSkillError(failure, 'CANNOT_PLACE')) {
+        bad.push(c.stand)
+        if (kept?.stand.equals(c.stand) === true) nooks.get(bot)?.delete(nookKey(spawner, 'bunker'))
       }
     }
     if (bunker == null) { trace('collectBlazeRods: no bunker by the spawner at', spawner.toString(), 'of', candidates.length); return null }
