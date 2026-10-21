@@ -15,7 +15,7 @@ import { normalizeDimension, type WorldMemory, type WorldMemoryJSON } from './co
 import { FOOD_GOAL, FOOD_POINTS, HUNGRY_FIND_FACTOR, MILESTONES, foodGoals, mealGoals, milestonesAhead, type Milestone, type MilestoneId, type ProgressState } from './planner/progression'
 import { heldFor, unitValue, type ObtainRequest } from './planner/obtain'
 import { carriesWeapon, comeUp, dayPhase, nightAction, nightGeared, nightGoals, topUpPlaces } from './planner/schedule'
-import { describeLevel, markAt, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
+import { describeLevel, markAt, STOCK_RESERVE_SLOTS, StockPolicy, stockedItem, storedAtBase, type StockLevel, type StockOptions, type StockPlace, type TopUp } from './planner/stock'
 import { ensureSurface, exploreForBlocks, inWater, onSurface, SURFACE_MIN_Y, toShore } from './executor/explore'
 import { itemTags } from './core/tags'
 import type { Station } from './planner/steps'
@@ -1127,6 +1127,10 @@ export class Runner {
               // (full-1.21.11-fresh-g)
               const from = this.bot.survival.tasks.tick
               try {
+                // the bag's room made at the base first, the top-ups' room after (a bag short of it got none of
+                // the string the gate was short of, 'no room this trip for arrow, string, feather, flint (4 slots
+                // free)' at each of its tries: f3k-run5, f4-run2)
+                await this.roomForTopUps(signal)
                 await this.topUp(this.topUpPlacesNow(), signal, reachedIds)
               } catch (e) {
                 if (stopped()) return this.stop(m.id, 'aborted', e)
@@ -1202,6 +1206,25 @@ export class Runner {
     if (error !== undefined) result.error = error
     this.bot.emit('survivalStopped' as any, result)
     return result
+  }
+
+  /**
+   * Room in the bag for the stock's top-ups (STOCK_RESERVE_SLOTS free): what isn't kept stored at the base's chests
+   * (storeAtBase) when there's a base and the bag has less; nothing else done. Throws only for a death or the signal.
+   */
+  async roomForTopUps (signal?: AbortSignal): Promise<void> {
+    const free = this.bot.inventory.emptySlotCount?.() ?? 36
+    const stock = this.options.stock
+    if (stock === false || free >= (stock?.reserveSlots ?? STOCK_RESERVE_SLOTS)) return
+    const base = baseRecord(this.memory)
+    if (base == null || base.chests.length === 0) return
+    try {
+      const moved = await this.executor.storeAtBase({}, signal)
+      this.log(`room for the stock: ${Object.entries(moved).map(([n, c]) => `${c} ${n}`).join(', ') || 'nothing'} stored at the base (${free} slots free before)`)
+    } catch (err) {
+      if (TaskError.is(err, 'DIED') || isAbort(err)) throw err
+      this.log(`room for the stock: ${(err as Error).message}`)
+    }
   }
 
   /** the valuables into the base's chests when the bot is back near it, the herd tended first (keepHerd) */

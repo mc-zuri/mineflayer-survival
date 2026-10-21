@@ -1511,3 +1511,20 @@ test('the spare kit after a recovery is its tools alone, within SPARE_KIT_RECOVE
   await runner.stashSpareKit()
   assert.ok(asked.some(g => g.unit === 'nutrition'), JSON.stringify(asked))
 })
+
+test('roomForTopUps: a bag short of the stock\'s free slots stores at the base first; with room, or no base, nothing', async () => {
+  const bot = fakeBot()
+  const runner = new Runner(bot, { log: () => {}, executor: { log: () => {} } })
+  let stored = 0
+  ;(runner as any).executor.storeAtBase = async () => { stored++; return { dirt: 64 } }
+  bot.inventory.emptySlotCount = () => 4
+  await runner.roomForTopUps()
+  assert.equal(stored, 0)
+  bot.survival.memory.setBase({ x: 0, y: 64, z: 0 })
+  bot.survival.memory.rememberChest({ x: 1, y: 64, z: 0 }, {})
+  await runner.roomForTopUps()
+  assert.equal(stored, 1)
+  bot.inventory.emptySlotCount = () => 20
+  await runner.roomForTopUps()
+  assert.equal(stored, 1)
+})
