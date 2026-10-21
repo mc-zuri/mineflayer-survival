@@ -60,10 +60,17 @@ export function pourTarget (get: ObsidianLookup, sources: readonly Vec3[], intoL
     const spot = pourSpot(get, p)
     if (spot != null) return { source: p, spot, side: true }
   }
-  // (the water poured into a lava cell turns it to obsidian and is gone: a bucket an obsidian, with no water near to
-  // fill it again, so only when asked)
+  // (the water poured into a lava source's own cell replaces it with a water source, scooped back after, and the lava
+  // sources beside it turn to obsidian: BucketItem.emptyContents puts the water in the fluid's cell, as seen on 26.3
+  // and 1.21.11, tests/integration/pourIntoLava; asked for by obsidianFromLava when no shore is by the lava)
   if (!intoLava) return null
-  const open = sources.find(p => AIR.has(get(p.offset(0, 1, 0))?.name ?? ''))
+  // (the one with the most sources beside it, each turned by the one pour; the nearest of those)
+  const besideLava = (p: Vec3): number => SIDES.filter(s => isLavaSource(get(p.plus(s)))).length
+  let open: Vec3 | undefined
+  for (const p of sources) {
+    if (!AIR.has(get(p.offset(0, 1, 0))?.name ?? '')) continue
+    if (open == null || besideLava(p) > besideLava(open)) open = p
+  }
   return open == null ? null : { source: open, spot: open, side: false }
 }
 
@@ -164,6 +171,10 @@ async function makeObsidian (bot: Bot, count: number, signal?: AbortSignal): Pro
         if (lid.some(p => get(p)?.name !== 'obsidian')) continue
       }
     }
+    // no shore, pedestal nor lid: the water poured into a source's own cell, which it replaces and is scooped back from,
+    // the sources beside it turned (pourTarget into the lava: a pedestal's water over the lake turns more, but needs a
+    // block and a face for it); a 26.3 pool had 'no lava source left to turn to obsidian (3 of 10)' (f6-26.3, t193866)
+    if (target == null) target = pourTarget(get, all, true)
     // none to pour on in place (no shore, no pedestal, no lid): its lava carried a bucket at a time to a pit by it, as a
     // deep lake's (obsidianInPit). A 1.21.11 bot's frame stopped at 8 of 10 by three pools in turn, 'no lava source
     // left to turn to obsidian (8 of 10)' at each (f3-1.21.11, t261483 to t277444)
