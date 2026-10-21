@@ -2762,7 +2762,12 @@ export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: A
   const wheat = countItems(bot, 'wheat') - (keepWheat ?? herdWheatKept(executor.memory))
   if (bake && wheat >= 3) {
     const before = countItems(bot, 'bread')
-    await executor.obtain([{ item: 'bread', count: before + Math.floor(wheat / 3) }], signal)
+    // (a bread eaten while the rest are baked, the eat reflex's: the goal's count then short of the wheat left, 'can't
+    // craft 1 bread: short of 1 bread' with 1 wheat, f5-1.21.11 t169678; the wheat all baked is the bake done)
+    await executor.obtain([{ item: 'bread', count: before + Math.floor(wheat / 3) }], signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED') || countItems(bot, 'wheat') >= 3) throw err
+      log(`farm: the wheat baked, a bread eaten meanwhile (${(err as Error).message})`)
+    })
     bread = countItems(bot, 'bread') - before
   }
   return bread

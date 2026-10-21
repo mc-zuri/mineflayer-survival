@@ -600,3 +600,24 @@ test('two farms: each its own cost (farmCost by its water), the farm step of one
   }
   assert.deepEqual(went, ['(0, 63, 0)', '(20, 63, 0)'])
 })
+
+test('the farm\'s bake: a bread eaten while the rest are baked (the goal\'s count then short of the wheat left) is the bake done, no error; short with the wheat still held, the error (f5-1.21.11: \'can\'t craft 1 bread: short of 1 bread\', 1 wheat left)', async () => {
+  const { harvestGrownFarms } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const memory = new WorldMemory()
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 0.5), items: [item('wheat', 7)] })
+  bot.game.dimension = 'overworld'
+  const executor: any = {
+    memory,
+    farmCost: () => undefined,
+    runStep: async () => ({}),
+    // 2 bread baked of 6 wheat, one eaten: the goal of 2 short, 1 wheat left
+    obtain: async () => { bot.inventory.slots[9] = item('wheat', 1); bot.inventory.slots[10] = item('bread', 1); throw new Error('MISSING_ITEMS: can\'t craft 1 bread: short of 1 bread') }
+  }
+  const lines: string[] = []
+  assert.equal(await harvestGrownFarms(bot, executor, new AbortController().signal, l => lines.push(l), true, undefined, 0), 1)
+  assert.ok(lines.some(l => /a bread eaten meanwhile/.test(l)), lines.join(' | '))
+  executor.obtain = async () => { throw new Error('NO_PATH: no table') }
+  bot.inventory.slots[9] = item('wheat', 7)
+  await assert.rejects(harvestGrownFarms(bot, executor, new AbortController().signal, () => {}, true, undefined, 0), /no table/)
+})
