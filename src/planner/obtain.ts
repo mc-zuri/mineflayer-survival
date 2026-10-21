@@ -322,6 +322,10 @@ export class Resolver {
     for (const item of this.orderAlternatives(s, alts)) {
       const lim = best == null ? limit : Math.min(limit, best.cost)
       const r = this.produce(clone(s), item, missing, path, lim)
+      // one alternative made of the others holds no more of them together: the wood stock's 4 logs short (any of
+      // #logs_that_burn) planned 'craft 33 oak_wood' out of the 60 oak_log held, 4 logs to 3 bark blocks, the stock
+      // fewer for it and the oak_wood a block no step of the plans asked for
+      if (r != null && r.inv.countAny(alts) < count) continue
       if (r != null && r.cost <= lim && (best == null || r.cost < best.cost)) best = r
     }
     return best

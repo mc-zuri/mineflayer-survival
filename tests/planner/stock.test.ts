@@ -5,6 +5,9 @@ import { Inventory } from '../../src/core/inventory'
 import { STOCK_MARKS, StockPolicy, describeLevel, markValue, stockLevels, storedAtBase, type StockMark } from '../../src/planner/stock'
 import { splitInventory, stockKeepRule } from '../../src/executor/keep'
 import { VERSIONS } from '../versions'
+import { obtainAll } from '../../src/planner/obtain'
+import type { PlanStep } from '../../src/planner/steps'
+import { itemTags } from '../../src/core/tags'
 
 const ALL = ['wood', 'stone', 'food', 'base', 'iron', 'diamonds'] as const
 
@@ -47,6 +50,27 @@ for (const version of VERSIONS) {
     assert.equal(policy.topUps(inv({ oak_log: 40 }), {}, [], ['surface']).length, 0)
     // under the low mark again: due again
     assert.equal(policy.topUps(inv({ oak_log: 30 }), {}, [], ['surface']).length, 1)
+  })
+
+  test(`${version}: the wood's top-up mines logs: no log crafted into bark blocks (oak_wood) or other members of #logs_that_burn`, () => {
+    // f2-grim t8543: 60 oak_log, 4 short of the 64, planned 'craft 33 oak_wood' (4 logs make 3) and the next plan
+    // 'mine 20 oak_log, craft 15 oak_wood'
+    const policy = new StockPolicy()
+    policy.topUps(inv({ oak_log: 20 }), {}, [], ['surface'])
+    const [up] = policy.topUps(inv({ oak_log: 60 }), {}, [], ['surface'])
+    assert.deepEqual(up.request, { item: '#logs_that_burn', count: 64 })
+    const madeOfLogs = (steps: PlanStep[]): string[] => steps.filter(s => s.kind === 'craft').map(s => s.item)
+    const plan = obtainAll(registry, [up.request], { inventory: { oak_log: 60 } })
+    assert.equal(plan.ok, true)
+    assert.deepEqual(madeOfLogs(plan.steps), [])
+    assert.deepEqual(plan.steps.map(s => [s.kind, s.item, s.count]), [['mine', 'oak_log', 4]])
+    // the same for any wood's tag of logs (a recipe's ingredient) and with no log held
+    for (const [item, held] of [['#birch_logs', { birch_log: 3 }], ['#logs', {}]] as const) {
+      const p = obtainAll(registry, [{ item, count: 8 }], { inventory: held })
+      assert.equal(p.ok, true)
+      assert.deepEqual(madeOfLogs(p.steps), [], item)
+      assert.equal(p.inventory.countAny(itemTags(registry).resolve(item)), 8, item)
+    }
   })
 
   test(`${version}: what the base's chests hold counts: no top-up when the stock is at the base`, () => {
