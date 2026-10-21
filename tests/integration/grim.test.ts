@@ -247,6 +247,36 @@ describe(`a ${REALTIME ? 'real-time' : 'lockstep'} ${VERSION} server with GrimAC
     assert.ok(got.count >= 3, `mined ${got.mined}, ${got.count} gained`)
   })
 
+  step('deepwater', async () => {
+    // a lake 7 deep, the bot put at its bottom in the middle, and the way out to the shore: it swims (sprinting in
+    // water: the swimming pose) up and across, not sinking where it was (f1-grim drowned twice holding forward)
+    const lake = at(-14, 0, 8)
+    await fill(lake.offset(-5, -8, -5), lake.offset(5, -1, 5), 'water')
+    await run(`tp ${USERNAME} ${lake.x + 0.5} ${lake.y - 7} ${lake.z + 0.5}`)
+    assert.ok(await waitUntil(bot, () => bot.entity.position.y < lake.y - 5, 40))
+    await waitTicks(bot, 10)
+    // and the clicks of a tool swapped in every few ticks (an equip, a dig's tool, as the bot's skills do on the way)
+    // (a hotbar full: the tools come up from the bag with clicks)
+    await run(`give ${USERNAME} cobblestone ${64 * 9}`)
+    await waitTicks(bot, 5)
+    await give('stone_sword', 1)
+    await give('wooden_hoe', 1)
+    let swaps = 0
+    const swap = (): void => {
+      if (++swaps % Number(process.env.GRIM_SWAP_EVERY ?? 3) !== 0) return
+      const item = bot.inventory.items().find(i => i.name === (bot.heldItem?.name === 'stone_sword' ? 'wooden_hoe' : 'stone_sword'))
+      if (item != null) void bot.equip(item, 'hand').catch(() => {})
+    }
+    bot.on('physicsTick', swap)
+    try {
+      await navigateNear(bot, lake.offset(8, 0, 0), 1)
+    } finally {
+      bot.off('physicsTick', swap)
+    }
+    assert.ok(bot.entity.position.y >= lake.y - 0.1, `at ${bot.entity.position.toString()}`)
+    assert.ok(bot.health > 15, `health ${bot.health}`)
+  })
+
   it('no Grim alerts at all', { skip: REPORT }, () => {
     assert.deepStrictEqual(alerts.map(a => `${a.check} ${a.verbose}`), [])
   })
