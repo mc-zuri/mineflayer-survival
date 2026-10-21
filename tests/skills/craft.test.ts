@@ -32,7 +32,8 @@ test('countsDelta keeps the names that changed', () => {
 })
 
 /** a bot in its inventory menu, ticked by hand, whose server answers a resync (a click on no slot) with the menu */
-function fakeCraftBot (items: Record<string, number>): any {
+function fakeCraftBot (items: Record<string, number>, version = '1.21.11'): any {
+  const registry = require('minecraft-data')(version)
   const { EventEmitter } = require('node:events')
   const bot: any = new EventEmitter()
   bot.registry = registry
@@ -234,3 +235,44 @@ test('craft: planks of oak_wood go to bot.craft as a recipe of oak_wood (f2-grim
   }
   assert.deepStrictEqual(used, ['2 oak_wood'])
 })
+
+for (const version of ['1.21.11', '26.3']) {
+  test(`craft (${version}): the walk to the table makes no pickaxe of the craft's ingredients, and the plan is made again after it: short then, MISSING_ITEMS, no clicks (f9-26.3: 'missing ingredient' after each respawn, the planks made a table on the way)`, async () => {
+    const { craft } = require('../../src/skills/craft')
+    const navModule = require('../../src/skills/navigate')
+    const reg = require('minecraft-data')(version)
+    const { Vec3 } = require('vec3')
+    const table = new Vec3(-246, 59, -112)
+    const make = (): any => {
+      const bot = fakeCraftBot({ spruce_planks: 3, stick: 2 }, version)
+      bot.entity = { position: new Vec3(-217, 64, -84) }
+      bot.blockAt = (p: any) => p.equals(table) ? { type: reg.blocksByName.crafting_table.id, name: 'crafting_table', position: table } : null
+      bot.crafted = 0
+      bot.craft = async () => { bot.crafted++; bot.counts.set('spruce_planks', 0); bot.counts.set('stick', 0); bot.counts.set('wooden_pickaxe', 1) }
+      return bot
+    }
+    const real = navModule.navigateToReach
+    const walks: any[] = []
+    let onWalk = (_bot: any): void => {}
+    navModule.navigateToReach = async (b: any, _p: unknown, _s: unknown, opts: any) => { walks.push(opts); onWalk(b); return { position: b.entity.position, ticks: 0 } }
+    try {
+      const bot = make()
+      const ticking = setInterval(() => bot.emit('physicsTick'), 5)
+      try {
+        const res = await craft(bot, { item: 'wooden_pickaxe', table })
+        assert.strictEqual(res.crafted, 1)
+      } finally { clearInterval(ticking) }
+      assert.deepStrictEqual(walks, [{ pickaxe: false }])
+      // the planks gone on the way (a table made of them): short, and bot.craft never clicked with the old plan
+      const short = make()
+      onWalk = (b) => b.counts.set('spruce_planks', 2)
+      const ticking2 = setInterval(() => short.emit('physicsTick'), 5)
+      try {
+        await assert.rejects(craft(short, { item: 'wooden_pickaxe', table }), (err: any) => err.code === 'MISSING_ITEMS' && /after the walk to the table/.test(err.message))
+      } finally { clearInterval(ticking2) }
+      assert.strictEqual(short.crafted, 0)
+    } finally {
+      navModule.navigateToReach = real
+    }
+  })
+}

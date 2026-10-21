@@ -450,7 +450,7 @@ export async function pickaxeForTheWay (bot: Bot, signal?: AbortSignal): Promise
 }
 
 /** navigate to where the bot can click the block at `pos` (no trip when it already can) */
-export async function navigateToReach (bot: Bot, pos: Vec3, signal?: AbortSignal, opts: { reach?: number, outside?: boolean } = {}): Promise<NavigateResult> {
+export async function navigateToReach (bot: Bot, pos: Vec3, signal?: AbortSignal, opts: { reach?: number, outside?: boolean, pickaxe?: boolean } = {}): Promise<NavigateResult> {
   const goal = new GoalReachBlock(pos.floored(), opts.reach ?? 4, eyeHeight(bot), opts.outside ?? true)
   if (goalReached(bot, goal)) return { position: bot.entity.position.clone(), ticks: 0 }
   // a block in the base (its chests, table, furnace) got to by its door from outside
@@ -458,7 +458,8 @@ export async function navigateToReach (bot: Bot, pos: Vec3, signal?: AbortSignal
   const door = memory != null ? baseWayIn(memory, pos, bot.entity.position, normalizeDimension(bot.game?.dimension)) : null
   if (door != null) {
     trace('navigateToReach: into the base by its entrance at', door)
-    await pickaxeForTheWay(bot, signal)
+    // (opts.pickaxe false: none made of what's carried, a craft's ingredients)
+    if (opts.pickaxe !== false) await pickaxeForTheWay(bot, signal)
     await navigate(bot, { goal: new goals.GoalNear(door.x, door.y, door.z, 1) }, signal).catch(err => {
       if (isAbort(err)) throw err
       trace('navigateToReach: not to the entrance:', (err as Error).message)

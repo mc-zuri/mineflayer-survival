@@ -159,7 +159,16 @@ export async function craft (bot: Bot, args: CraftArgs, signal?: AbortSignal): P
         throw new SkillError('MISSING_ITEMS', `can't craft ${count} ${args.item} after making the table: short of ${describe(bot, plan.itemsRequiredBase)}`, { ...result(), plan })
       }
     }
-    await navigateToReach(bot, table.position, signal)
+    // (no pickaxe made for the way of what the craft's to be made of: pickaxeForTheWay's ensurePickaxe made a table of
+    // the planks a wooden pickaxe's craft had walked to the base's table for, and the craft went on with its plan from
+    // before the walk, 'missing ingredient' after each respawn of a 26.3 bot, f9-26.3 t349478, t567742, t638086; a
+    // 1.21.11 one's 'short of 1 wooden_pickaxe', f9-1.21.11 t314468)
+    await navigateToReach(bot, table.position, signal, { pickaxe: false })
+    // and the plan made again from what the bag holds after the walk (its scaffolding, a reflex's meal on the way)
+    plan = await planFromInventory(bot, args.item, count)
+    if (plan.status !== 'complete') {
+      throw new SkillError('MISSING_ITEMS', `can't craft ${count} ${args.item} after the walk to the table: short of ${describe(bot, plan.itemsRequiredBase)}`, { ...result(), plan })
+    }
   }
   // the drops in reach in before the menu opens (a staircase stopped mid-dig by a worn pickaxe crafted its next one
   // as the last block's drops came in, and the craft failed 'the server's menu kept changing')
