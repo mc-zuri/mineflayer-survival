@@ -995,7 +995,9 @@ export async function netherKit (bot: Bot, executor: Executor, signal: AbortSign
   // (the gate passed: the water bottles for fire resistance brewed in there, none to be had in the nether, when they
   // can be got; not a reason not to go in)
   if (missing.length === 0) {
-    await brewKit(bot, executor, signal, log)
+    // (the bowless gate's every try, not BREW_KIT_TRIES: with the gear got before, this way out was the one taken, its
+    // 2 tries spent on a fill that failed, and the gate never tried again, 'not ready' for good: f3k-run5, f4-run2)
+    await brewKit(bot, executor, signal, log, gate.bow === false)
     if (gate.bow === false) bowlessBrewGate(bot)
     return
   }

@@ -1255,3 +1255,24 @@ test('blazeFightFood: the gate food from the tick budget of the blaze fight, 160
   assert.equal(NETHER_FOOD_POINTS, 160)
   assert.equal(NETHER_FOOD_POINTS_LEAST, 120)
 })
+
+test('netherKit: the gear all held but no bow to be had, the water bottles are gone for on every try of the gate, not only BREW_KIT_TRIES (f3k-run5, f4-run2: not ready for good after two failed fills)', async () => {
+  const { netherKit, BREW_KIT_TRIES } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const gear = NETHER_GEAR().filter((i: any) => i.name !== 'bow' && i.name !== 'arrow')
+  const bot = fakeBot({ items: gear })
+  bot.game.dimension = 'overworld'
+  const asked: string[] = []
+  const executor: any = {
+    memory: new WorldMemory(),
+    tasks: { tick: 0 },
+    sightings: { misses: (n: string) => n === 'spider' ? 1 : 0, missing: () => {} },
+    obtain: async (reqs: any[]) => { asked.push(reqs.map(r => r.item).join(',')) },
+    task: async (name: string) => { if (name === 'fill the water bottles') throw new Error('no spot found to see the water from') }
+  }
+  for (let i = 0; i < BREW_KIT_TRIES + 2; i++) {
+    const err: any = await netherKit(bot, executor, new AbortController().signal, () => {}).then(() => null, e => e)
+    assert.equal(err?.notReady, true)
+  }
+  assert.equal(asked.filter(a => a.includes('glass_bottle')).length, BREW_KIT_TRIES + 2)
+})
