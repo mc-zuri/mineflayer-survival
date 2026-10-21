@@ -46,7 +46,7 @@ import { CaveCells, caveCells, caveRuleOn, inCaveWall } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
-import { extendFarm, farmCells, farmCensus, FARM_MIN_PLOTS, farmHoleSite, findFarmSite, knownFarms, plantFarm, plotCells, rememberFarm, SEED_OF } from './skills/farm'
+import { extendFarm, farmCells, farmCensus, FARM_MIN_PLOTS, farmHoleSite, findFarmSite, grownPlots, knownFarms, plantFarm, plotCells, rememberFarm, SEED_OF } from './skills/farm'
 import { describeRequest, ownedInventory, type Executor } from './executor/executor'
 import { NETHER_SCAFFOLD_KEEP } from './executor/keep'
 import { heldFor, type ObtainRequest } from './planner/obtain'
@@ -2588,21 +2588,27 @@ export async function growFarms (bot: Bot, executor: Executor, signal: AbortSign
   return sown
 }
 
+/** the grown plots of a farm a meal harvests it for (harvestGrownFarms' least): a bread's 3 wheat */
+export const MEAL_FARM_PLOTS = 3
+
 /**
- * The renewable food first: a farm the bot sowed that has grown (Executor.farmCost: nothing left to wait), within
- * FARM_RANGE, harvested and sown again, and its wheat baked into bread, the herd's kept (herdWheatKept). Resolves the
+ * The renewable food first: a farm the bot sowed that has grown (Executor.farmCost: nothing left to wait; or `least`
+ * of its plots grown, a meal's), within FARM_RANGE, harvested and sown again, and its wheat baked into bread, the herd's kept (herdWheatKept). Resolves the
  * bread made.
  */
-export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, bake = true): Promise<number> {
+export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, bake = true, least?: number): Promise<number> {
   const dimension = normalizeDimension(bot.game?.dimension)
   let bread = 0
   let harvested = 0
   for (const farm of knownFarms(executor.memory, dimension)) {
     const walk = bot.entity.position.distanceTo(farm.water)
     const cost = executor.farmCost(farm.crop)
-    if (walk > FARM_RANGE || cost == null || cost > walk * 5 + 1) continue
+    if (walk > FARM_RANGE || cost == null) continue
+    // (half grown; or, with `least` asked, that many plots grown: a meal's)
+    const grown = least != null ? grownPlots(pos => bot.blockAt(pos) as any, farmCells(farm), farm.crop).length : 0
+    if (cost > walk * 5 + 1 && (least == null || grown < least)) continue
     const item = farm.crop === 'wheat' ? 'wheat' : farm.crop === 'beetroots' ? 'beetroot' : SEED_OF[farm.crop]
-    log(`the ${farm.crop} at ${farm.water.toString()} has grown: harvesting it`)
+    log(`the ${farm.crop} at ${farm.water.toString()} has grown${cost > walk * 5 + 1 ? ` (${grown} plots)` : ''}: harvesting it`)
     await executor.runStep({ kind: 'farm', item, count: farm.cells.length, crop: farm.crop, seed: SEED_OF[farm.crop], plots: 0, cycles: 1, cost }, signal)
     harvested++
   }

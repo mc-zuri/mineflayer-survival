@@ -32,8 +32,8 @@ import { SPAWNER_POI } from './skills/spawnerFarm'
 import { keepWaterBucket, waterBucketEmpty } from './skills/bucket'
 import { retrieveItems } from './skills/chest'
 import { canSleepNow, sleep } from './skills/sleep'
-import { FARM_RANGE, HERD_TRIP, MILESTONE_HANDLERS, harvestGrownFarms, keepCaneFarm, keepFarm, tendHerd } from './milestones'
-import { knownFarms } from './skills/farm'
+import { FARM_RANGE, HERD_TRIP, MEAL_FARM_PLOTS, MILESTONE_HANDLERS, harvestGrownFarms, keepCaneFarm, keepFarm, tendHerd } from './milestones'
+import { farmCells, grownPlots, knownFarms } from './skills/farm'
 import { herdFromMemory, herdSupply } from './skills/herd'
 import { knownCaneFarm } from './skills/caneFarm'
 import { EPOCHS, EPOCH_HANDLERS, isEpoch, nextEpoch } from './epochs'
@@ -1822,16 +1822,19 @@ export class Runner {
   }
 
   /**
-   * The home's food now: a farm the bot sowed grown within FARM_RANGE (the walk to it short of its growing left), or
+   * The home's food now: a farm the bot sowed grown within FARM_RANGE (the walk to it short of its growing left, or
+   * MEAL_FARM_PLOTS of its plots seen grown), or
    * the herd's surplus (herdSupply: adults beyond its BREEDERS_KEPT, as seen or remembered) within HERD_TRIP
    */
   homeFoodNow (): { farm: boolean, herd: boolean } {
     const bot = this.bot
     if (bot.entity == null || normalizeDimension(bot.game?.dimension) !== 'overworld') return { farm: false, herd: false }
+    // (or a bread's worth of its plots grown, MEAL_FARM_PLOTS, as seen: its rows ripen a plot at a time)
     const farm = knownFarms(this.memory, 'overworld').some(f => {
       const walk = bot.entity.position.distanceTo(f.water)
       const cost = this.executor.farmCost(f.crop)
-      return walk <= FARM_RANGE && cost != null && cost <= walk * 5 + 1
+      if (walk > FARM_RANGE || cost == null) return false
+      return cost <= walk * 5 + 1 || (typeof bot.blockAt === 'function' && grownPlots(p => bot.blockAt(p) as any, farmCells(f), f.crop).length >= MEAL_FARM_PLOTS)
     })
     const herd = herdFromMemory(this.memory, bot.entity.position)
     const supply = herd != null ? herdSupply(bot, this.memory, herd.mob, Number((bot.time as any)?.age ?? 0)) : undefined
@@ -1848,7 +1851,7 @@ export class Runner {
     if (!home.farm && !home.herd) return false
     this.log(`the home's food first:${home.farm ? ' the farm grown' : ''}${home.herd ? ' the herd surplus' : ''}`)
     if (home.farm) {
-      await harvestGrownFarms(this.bot, this.executor, signal, this.log).catch(err => {
+      await harvestGrownFarms(this.bot, this.executor, signal, this.log, true, MEAL_FARM_PLOTS).catch(err => {
         if (signal.aborted || TaskError.is(err, 'DIED')) throw err
         this.log(`farm: ${(err as Error).message}`)
       })

@@ -468,3 +468,25 @@ test('farmCensus: the crops by age, the bare plots, the ones trampled to dirt, t
   assert.equal(farmCensus(lookup, cells, 'wheat'), '1 at age 7, 2 at age 2, 1 bare, 1 no farmland, light 6 at the least')
 })
 
+test('harvestGrownFarms with least: a farm with 3 of its 14 plots grown is harvested for a meal (MEAL_FARM_PLOTS), not for the upkeep', async () => {
+  const { harvestGrownFarms, MEAL_FARM_PLOTS } = await import('../../src/milestones')
+  const { fakeBot } = await import('../reflexes/fakeBot')
+  const water = new Vec3(10, 63, 10)
+  const cells = plotCells(world([water]), water)
+  const memory = new WorldMemory()
+  rememberFarm(memory, { water, cells, crop: 'wheat' }, 0)
+  const lookup = (p: Vec3): any => {
+    const i = cells.findIndex(c => c.equals(p.offset(0, -1, 0)))
+    if (i >= 0) return { name: 'wheat', getProperties: () => ({ age: i < 3 ? 7 : 4 }) }
+    return world([water])(p)
+  }
+  const bot = fakeBot({ position: new Vec3(12.5, 64, 12.5) })
+  bot.blockAt = (p: Vec3) => ({ ...lookup(p.floored()), position: p.floored() })
+  bot.game.dimension = 'overworld'
+  const steps: any[] = []
+  const executor: any = { memory, farmCost: () => 20000, plan: () => ({ ok: false }), obtain: async () => {}, runStep: async (step: any) => { steps.push(step); return { gained: 3 } }, task: async () => null }
+  await harvestGrownFarms(bot, executor, new AbortController().signal, () => {}, false)
+  assert.equal(steps.length, 0)
+  await harvestGrownFarms(bot, executor, new AbortController().signal, () => {}, false, MEAL_FARM_PLOTS)
+  assert.equal(steps.length, 1)
+})
