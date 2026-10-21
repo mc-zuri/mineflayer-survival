@@ -13,6 +13,7 @@
     "test": "node --test tests/run.cjs",
     "test:integration": "node --test tests/integration/run.cjs",
     "e2e": "node tests/e2e/run.cjs",
+    "rec": "node tools/rec.cjs",
     "lint": "ts-standard -y --fix"
   },
   "dependencies": {
