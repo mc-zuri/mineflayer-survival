@@ -19,8 +19,13 @@ test('obsidianHazard: lava within 2, magma within 1, or under the rock for a bot
   assert.equal(obsidianHazard(lava, at), true)
   const magma = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: world({ ...open, '6,63,0': 'magma_block' }, 400) })
   assert.equal(obsidianHazard(magma, at), true)
-  const magmaFar = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: world({ ...open, '7,63,0': 'magma_block' }, 400) })
+  const magmaNear = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: world({ ...open, '7,63,0': 'magma_block' }, 400) })
+  assert.equal(obsidianHazard(magmaNear, at), true)
+  const magmaFar = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: world({ ...open, '8,63,0': 'magma_block' }, 400) })
   assert.equal(obsidianHazard(magmaFar, at), false)
+  // on the sea's floor: the water over it
+  const sea = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: world({ ...open, '5,66,0': 'water' }, 400) })
+  assert.equal(obsidianHazard(sea, at), true)
   // under rock (stone from 71 up): the rule's, not a bot fit for the caves'
   const under = fakeBot({ position: new Vec3(0.5, 64, 0.5), world: world(open) })
   under.game.dimension = 'overworld'

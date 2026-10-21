@@ -135,19 +135,19 @@ export function keepOffMagma (bot: Bot): void {
 }
 
 /**
- * Whether obsidian in sight is no place to mine for the bot: lava within 2 of it, magma within 1 (a ruined portal's
- * floor: the bot stands on it or beside it to mine), or, for a bot not fit for the caves (skills/caves caveRuleOn),
- * under the rock or in a cave's wall (a ruined portal underground is a cave's, its netherrack and magma round it). A
- * 26.3 bot's 'obsidian: 1 in sight: mining 1' went for a ruined portal's underground at y 46, stood on its magma, and
- * burned to death there through 12 hazard reflexes (ls4-26.3, t54809 to t57447).
+ * Whether obsidian in sight is no place to mine for the bot: lava, magma or water within 2 of it (a ruined portal's
+ * floor of magma the bot stands on or beside to mine it; one on the sea's floor), or, for a bot not fit for the caves
+ * (skills/caves caveRuleOn), under the rock or in a cave's wall (a ruined portal underground is a cave's, its
+ * netherrack and magma round it). A 26.3 bot's 'obsidian: 1 in sight: mining 1' went for the ruined portal on the sea's
+ * floor at y 46, stood on its magma, and burned to death there through 12 hazard reflexes (ls4-26.3, t54809 to
+ * t57447); with magma within 1 kept off alone, the resumed game went for it again, 5 hazard reflexes.
  */
 export function obsidianHazard (bot: Bot, p: Vec3): boolean {
   for (let dx = -2; dx <= 2; dx++) {
     for (let dy = -2; dy <= 2; dy++) {
       for (let dz = -2; dz <= 2; dz++) {
         const name = bot.blockAt(p.offset(dx, dy, dz))?.name
-        if (name === 'lava') return true
-        if (name === 'magma_block' && Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz)) <= 1) return true
+        if (name === 'lava' || name === 'magma_block' || name === 'water' || name === 'bubble_column') return true
       }
     }
   }
