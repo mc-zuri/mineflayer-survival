@@ -16,6 +16,7 @@ import { bedRoomToDig, findBedPlacement, type BlockLookup, type BlockView } from
 import { SCAFFOLD_ITEMS, towerUp } from '../end/skills/world'
 import { isBed } from '../core/items'
 import { dig } from '../core/actions'
+import { drownedNear, noteDrowning } from './breath'
 
 /** how deep the hole goes: the feet three blocks down, the head two, the seal one (flush with the ground) */
 export const SHELTER_DEPTH = 3
@@ -54,6 +55,8 @@ export interface FindShelterOptions {
   exclude?: Set<string>
   /** what a block costs to dig, Infinity for never (default: soft ground 1, stone 4 with a pickaxe, else never) */
   digCost?: (name: string) => number
+  /** columns not to take, by their surface cell (a spot the bot drowned at lately: skills/breath drownedNear) */
+  avoid?: (surface: Vec3) => boolean
 }
 
 /** soft ground is cheap, stone is dear and only with a pickaxe */
@@ -79,6 +82,7 @@ export function findShelterSpot (lookup: BlockLookup, from: Vec3, opts: FindShel
       for (let dy = -dyMax; dy <= dyMax; dy++) {
         const surface = start.offset(dx, dy, dz)
         if (opts.exclude?.has(vecKey(surface)) === true) continue
+        if (opts.avoid?.(surface) === true) continue
         const spot = shelterAt(lookup, surface, digCost)
         if (spot == null) continue
         const score = spot.cost * 4 + Math.hypot(dx, dz) + Math.abs(dy)
@@ -118,7 +122,27 @@ export function shelterAt (lookup: BlockLookup, surface: Vec3, digCost: (name: s
     }
   }
   if (sealSides === 0) return null
+  // no water or lava within SHELTER_DRY_REACH of the column's cells, the floor's too (a dig by it lets it in; a 26.3
+  // bot's night shelter at y 43 by an aquifer flooded, the bot sank to y 38 in it and drowned there after 8 drowning
+  // reflexes, f1-26.3 t196613 to t200563)
+  if (liquidNear(lookup, surface.offset(0, -SHELTER_DEPTH - 1, 0), surface, SHELTER_DRY_REACH)) return null
   return { surface, feet, seal, cost }
+}
+
+/** how far from a shelter's column (across, and under its floor) no water or lava may be (shelterAt) */
+export const SHELTER_DRY_REACH = 2
+
+/** whether water or lava is within `reach` (across, and under) of the column from `bottom` up to `top` */
+function liquidNear (lookup: BlockLookup, bottom: Vec3, top: Vec3, reach: number): boolean {
+  for (let y = bottom.y - reach; y <= top.y; y++) {
+    for (let dx = -reach; dx <= reach; dx++) {
+      for (let dz = -reach; dz <= reach; dz++) {
+        const b = lookup(new Vec3(top.x + dx, y, top.z + dz))
+        if (b != null && LIQUIDS.has(b.name)) return true
+      }
+    }
+  }
+  return false
 }
 
 /** Shut in: the cells of the body open, solid over the head, under the feet and all round. */
@@ -534,7 +558,8 @@ async function shelterOnce (bot: Bot, opts: ShelterOptions): Promise<ShelterResu
     if (target == null && onTree(bot)) await climbDownTree(bot, signal)
     const exclude = new Set<string>()
     for (let tries = 0; ; tries++) {
-      target = target ?? findShelterSpot(lookup, bot.entity.position, { radius: opts.radius, digCost, exclude })
+      // (none where the bot drowned lately: another spot 8 off and more, skills/breath drownedNear)
+      target = target ?? findShelterSpot(lookup, bot.entity.position, { radius: opts.radius, digCost, exclude, avoid: p => drownedNear(bot, p) })
       if (target == null) throw new SkillError('NOT_FOUND', 'no ground to dig a shelter in nearby')
       const t = target
       const inColumn = Math.floor(bot.entity.position.x) === t.surface.x && Math.floor(bot.entity.position.z) === t.surface.z &&
@@ -564,6 +589,11 @@ async function shelterOnce (bot: Bot, opts: ShelterOptions): Promise<ShelterResu
     feet = target.feet
     dug = true
     if (!isEnclosed(lookup, feet)) throw new SkillError('VERIFY_FAILED', `the hole at ${feet.toString()} isn't shut`)
+    // and dry, shut: water come in (a crack to an aquifer) is no shelter, the spot kept off (drownedNear)
+    if ([feet, feet.offset(0, 1, 0)].some(c => LIQUIDS.has(lookup(c)?.name ?? ''))) {
+      noteDrowning(bot, feet)
+      throw new SkillError('VERIFY_FAILED', `the shelter at ${feet.toString()} has water in it`)
+    }
   }
 
   rememberShelter(bot, feet.offset(0, SHELTER_DEPTH, 0))

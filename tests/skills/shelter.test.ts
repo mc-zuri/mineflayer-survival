@@ -243,3 +243,14 @@ test('shelterRunning: true while a shelter() runs, false once it is done', async
   assert.deepStrictEqual(during, [true, true])
   assert.strictEqual(shelterRunning(bot), false)
 })
+
+test('findShelterSpot: no column with water within 2 of it, across or under its floor, nor one the caller avoids (a spot drowned at); another a way off (f1-26.3)', () => {
+  // an aquifer's water at y 58, under the floor of the columns about x 0 (the floor at 60), x -2 to 2
+  const wet = (p: Vec3): string => p.y === 58 && Math.abs(p.x) <= 2 && Math.abs(p.z) <= 2 ? 'water' : plains(p)
+  const spot = findShelterSpot(world(wet), new Vec3(0.5, 64, 0.5))
+  assert.ok(spot != null)
+  assert.ok(Math.max(Math.abs(spot.surface.x), Math.abs(spot.surface.z)) >= 5, `the shelter at ${spot.surface.toString()}`)
+  // a column the caller avoids (the drowning reflex's spot, 8 round it)
+  const dry = findShelterSpot(world(plains), new Vec3(0.5, 64, 0.5), { avoid: p => Math.max(Math.abs(p.x), Math.abs(p.z)) <= 3 })
+  assert.ok(dry != null && Math.max(Math.abs(dry.surface.x), Math.abs(dry.surface.z)) > 3)
+})
