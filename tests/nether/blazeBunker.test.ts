@@ -565,3 +565,19 @@ test('fightFromNook in a bunker: a hole in its walls (a side wall gone) is put a
     restore()
   }
 })
+
+test('bunkerFetchDue: a drop in the spawn volume is fetched with no blaze in sight at all; one out of it with one', async () => {
+  const { entity } = await import('../reflexes/fakeBot')
+  const ahead = entity({ name: 'blaze', position: new Vec3(0.5, 64, -6.5), meta: { health: 20 } })
+  const { bot, b, restore } = await bunkerBot([ahead])
+  try {
+    const spawner = new Vec3(0, 64, -2)
+    // (0.5, 64, 2.5): 4 off the spawner across, in its volume; with the spawner further, out of it
+    assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, new Vec3(0.5, 64, 2.5), spawner), false)
+    assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, new Vec3(0.5, 64, 2.5), new Vec3(0, 64, -10)), true)
+    ahead.position = new Vec3(0.5, 66, -40)
+    assert.equal(bunkerFetchDue(bot, b, 20, () => true, false, new Vec3(0.5, 64, 2.5), spawner), true)
+  } finally {
+    restore()
+  }
+})
