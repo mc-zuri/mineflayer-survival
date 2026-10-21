@@ -27,9 +27,10 @@ function world (water: Vec3[], crops: Array<{ at: Vec3, name: string, age: numbe
   }
 }
 
-test('a farm site: the water, and the plot ground in a block of 5 by 5 round it, open above, the nearest first, at most 8', () => {
+test('a farm site: the water, and the plot ground in a block of 5 by 5 round it, open above, the nearest first, FARM_PLOTS (12) at most', () => {
   const water = [new Vec3(10, 63, 10)]
-  const site = findFarmSite(world(water), new Vec3(0, 64, 0), 24)
+  assert.equal(findFarmSite(world(water), new Vec3(0, 64, 0), 24)?.cells.length, FARM_PLOTS)
+  const site = findFarmSite(world(water), new Vec3(0, 64, 0), 24, 8)
   assert.ok(site != null)
   assert.ok(site.water.equals(water[0]))
   assert.equal(site.cells.length, 8)
@@ -309,4 +310,77 @@ test('nearlyGrownPlots: the grown plots and the ones a stage short; a farm with 
     navModule.navigateNear = realNav
   }
   assert.equal(harvested, true)
+})
+
+test('growFarms: a farm of 12 by its water sown further from the seeds of its harvest, up to FARM_TARGET_PLOTS (18), its record grown; none past it, none far off', async () => {
+  const { growFarms, FARM_TARGET_PLOTS } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const farmModule = require('../../src/skills/farm')
+  const water = new Vec3(10, 63, 10)
+  const memory = new WorldMemory()
+  const first = plotCells(world([water]), water, 12)
+  rememberFarm(memory, { water, cells: first, crop: 'wheat' }, 1000)
+  // the first 12 sown (wheat on them), the rest of the block bare grass
+  const lookup = (p: Vec3): any => first.some(c => c.equals(p.offset(0, -1, 0))) ? { name: 'wheat', getProperties: () => ({ age: 0 }) } : first.some(c => c.equals(p)) ? { name: 'farmland' } : world([water])(p)
+  const bot = fakeBot({ position: new Vec3(12.5, 64, 12.5), items: [item('wooden_hoe', 1), item('wheat_seeds', 9)] })
+  bot.blockAt = (p: Vec3) => ({ ...lookup(p.floored()), position: p.floored() })
+  bot.game.dimension = 'overworld'
+  bot.time = { age: 60000 }
+  const asked: any[] = []
+  const executor: any = { memory, plan: () => ({ ok: true, cost: 100 }), obtain: async () => {}, task: async (_n: string, fn: any, s: AbortSignal) => await fn(s) }
+  const real = farmModule.plantFarm
+  farmModule.plantFarm = async (_b: any, args: any) => { asked.push(args); return { water: args.water, cells: plotCells(lookup, args.water, args.plots), crop: 'wheat' } }
+  try {
+    assert.equal(await growFarms(bot, executor, new AbortController().signal, () => {}), FARM_TARGET_PLOTS - 12)
+    assert.equal(asked.length, 1)
+    assert.ok(asked[0].water.equals(water))
+    assert.equal(asked[0].plots, 6)
+    const rec = knownFarms(memory)[0]
+    assert.equal(rec.cells.length, FARM_TARGET_PLOTS)
+    // sown when it was first (its growing goes on)
+    assert.equal(rec.sown, 1000)
+    // at its 18: no more
+    assert.equal(await growFarms(bot, executor, new AbortController().signal, () => {}), 0)
+    assert.equal(asked.length, 1)
+    // a farm 40 off: not from here
+    const far = new WorldMemory()
+    rememberFarm(far, { water: new Vec3(50, 63, 10), cells: [new Vec3(51, 63, 10)], crop: 'wheat' }, 0)
+    assert.equal(await growFarms(bot, { ...executor, memory: far }, new AbortController().signal, () => {}), 0)
+  } finally {
+    farmModule.plantFarm = real
+  }
+})
+
+test('harvestGrownFarms: a farm harvested is sown further from the seeds it gave', async () => {
+  const { harvestGrownFarms } = await import('../../src/milestones')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const farmModule = require('../../src/skills/farm')
+  const water = new Vec3(10, 63, 10)
+  const memory = new WorldMemory()
+  rememberFarm(memory, { water, cells: plotCells(world([water]), water, 12), crop: 'wheat' }, 0)
+  const bot = fakeBot({ position: new Vec3(12.5, 64, 12.5), items: [item('wooden_hoe', 1)] })
+  bot.blockAt = (p: Vec3) => ({ ...world([water])(p.floored()), position: p.floored() })
+  bot.game.dimension = 'overworld'
+  bot.time = { age: 60000 }
+  const steps: any[] = []
+  const executor: any = {
+    memory,
+    farmCost: () => 0,
+    plan: () => ({ ok: true, cost: 100 }),
+    obtain: async () => {},
+    // (the harvest: 12 wheat and 20 seeds, 12 of them sown again)
+    runStep: async (step: any) => { steps.push(step); bot.inventory.slots[20] = item('wheat_seeds', 8); return { gained: 12 } },
+    task: async (_n: string, fn: any, s: AbortSignal) => await fn(s)
+  }
+  const real = farmModule.plantFarm
+  let grown = 0
+  farmModule.plantFarm = async (_b: any, args: any) => { grown = args.plots; return { water: args.water, cells: plotCells(world([water]), args.water, 24).slice(12, 12 + args.plots), crop: 'wheat' } }
+  try {
+    await harvestGrownFarms(bot, executor, new AbortController().signal, () => {}, false)
+  } finally {
+    farmModule.plantFarm = real
+  }
+  assert.equal(steps.length, 1)
+  assert.equal(grown, 6)
+  assert.equal(knownFarms(memory)[0].cells.length, 18)
 })

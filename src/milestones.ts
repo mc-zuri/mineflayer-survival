@@ -46,7 +46,7 @@ import { CaveCells, caveCells, caveRuleOn, inCaveWall } from './skills/caves'
 import { normalizeDimension, type WorldMemory } from './core/memory'
 import { TaskError } from './core/errors'
 import { FARM_PLOTS } from './core/crops'
-import { FARM_MIN_PLOTS, farmHoleSite, findFarmSite, knownFarms, plantFarm, rememberFarm, SEED_OF } from './skills/farm'
+import { extendFarm, FARM_MIN_PLOTS, farmHoleSite, findFarmSite, knownFarms, plantFarm, plotCells, rememberFarm, SEED_OF } from './skills/farm'
 import { describeRequest, ownedInventory, type Executor } from './executor/executor'
 import { NETHER_SCAFFOLD_KEEP } from './executor/keep'
 import { heldFor, type ObtainRequest } from './planner/obtain'
@@ -2527,11 +2527,16 @@ export async function startFarm (bot: Bot, executor: Executor, signal: AbortSign
     }
   }
   if (site == null) { log('no water with ground by it near: no farm yet'); return false }
-  const plots = Math.min(FARM_PLOTS, site.cells.length)
-  const requests = [{ item: '#hoes', count: 1 }, { item: 'wheat_seeds', count: plots }]
-  const plan = executor.plan(requests)
+  // (FARM_PLOTS when the seeds are cheap, else FARM_MIN_PLOTS: the harvests' seeds grow it, growFarms)
+  let plots = Math.min(FARM_PLOTS, site.cells.length)
+  const requests = (n: number): Array<{ item: string, count: number }> => [{ item: '#hoes', count: 1 }, { item: 'wheat_seeds', count: n }]
+  let plan = executor.plan(requests(plots))
+  if ((!plan.ok || plan.cost > FARM_START_TICKS) && plots > FARM_MIN_PLOTS) {
+    plots = FARM_MIN_PLOTS
+    plan = executor.plan(requests(plots))
+  }
   if (!plan.ok || plan.cost > FARM_START_TICKS) { log(`a farm would cost ${plan.ok ? plan.cost : 'no plan'} ticks to start: not now`); return false }
-  await executor.obtain(requests, signal)
+  await executor.obtain(requests(plots), signal)
   const water = site.water
   const res = await executor.task('sow a farm', async (s) => await plantFarm(bot, { seed: 'wheat_seeds', water, plots }, s), signal)
   rememberFarm(executor.memory, res, Number((bot.time as any)?.age ?? 0), dimension)
@@ -2543,6 +2548,46 @@ export async function startFarm (bot: Bot, executor: Executor, signal: AbortSign
 export const FARM_RANGE = 96
 
 /**
+ * the plots a farm is grown to from its own harvests' seeds, in the block round its water (plotCells): a grown plot
+ * drops its wheat and 0 to 3 seeds (the wheat loot table's binomial 3 at 0.5714), one sowing it again, so 12 plots
+ * are 18 after a harvest. Bread is 5 food points and 6 of saturation: 18 plots are 6 bread a growing (GROW_TICKS)
+ */
+export const FARM_TARGET_PLOTS = 18
+/** how far off the bot a farm is sown further from the seeds it holds */
+export const FARM_GROW_RANGE = 16
+
+/**
+ * The farms near (FARM_GROW_RANGE) sown further from the wheat seeds held, up to FARM_TARGET_PLOTS each, at their own
+ * water (plantFarm's water: the block's plots not made yet), the hoe held or got when it's cheap. Resolves the plots
+ * sown.
+ */
+export async function growFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void): Promise<number> {
+  const dimension = normalizeDimension(bot.game?.dimension)
+  let sown = 0
+  for (const farm of knownFarms(executor.memory, dimension)) {
+    if (farm.crop !== 'wheat' || bot.entity.position.distanceTo(farm.water) > FARM_GROW_RANGE) continue
+    const plots = Math.min(FARM_TARGET_PLOTS - farm.cells.length, countItems(bot, 'wheat_seeds'))
+    if (plots <= 0 || plotCells(pos => bot.blockAt(pos) as any, farm.water, plots).length === 0) continue
+    if (!bot.inventory.items().some(i => i.name.endsWith('_hoe'))) {
+      const plan = executor.plan([{ item: '#hoes', count: 1 }])
+      if (!plan.ok || plan.cost > FARM_START_TICKS) continue
+      await executor.obtain([{ item: '#hoes', count: 1 }], signal)
+    }
+    const water = farm.water
+    const res = await executor.task('sow the farm further', async (s) => await plantFarm(bot, { seed: 'wheat_seeds', water, plots }, s), signal).catch(err => {
+      if (signal.aborted || TaskError.is(err, 'DIED')) throw err
+      log(`farm: not sown further: ${(err as Error).message}`)
+      return null
+    })
+    if (res == null) continue
+    const rec = extendFarm(executor.memory, res, Number((bot.time as any)?.age ?? 0), dimension)
+    sown += res.cells.length
+    log(`farm: ${res.cells.length} more wheat sown by the water at ${water.toString()} (${rec.cells.length} plots)`)
+  }
+  return sown
+}
+
+/**
  * The renewable food first: a farm the bot sowed that has grown (Executor.farmCost: nothing left to wait), within
  * FARM_RANGE, harvested and sown again, and its wheat baked into bread, the herd's kept (herdWheatKept). Resolves the
  * bread made.
@@ -2550,6 +2595,7 @@ export const FARM_RANGE = 96
 export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: AbortSignal, log: (line: string) => void, bake = true): Promise<number> {
   const dimension = normalizeDimension(bot.game?.dimension)
   let bread = 0
+  let harvested = 0
   for (const farm of knownFarms(executor.memory, dimension)) {
     const walk = bot.entity.position.distanceTo(farm.water)
     const cost = executor.farmCost(farm.crop)
@@ -2557,7 +2603,10 @@ export async function harvestGrownFarms (bot: Bot, executor: Executor, signal: A
     const item = farm.crop === 'wheat' ? 'wheat' : farm.crop === 'beetroots' ? 'beetroot' : SEED_OF[farm.crop]
     log(`the ${farm.crop} at ${farm.water.toString()} has grown: harvesting it`)
     await executor.runStep({ kind: 'farm', item, count: farm.cells.length, crop: farm.crop, seed: SEED_OF[farm.crop], plots: 0, cycles: 1, cost }, signal)
+    harvested++
   }
+  // the harvest's seeds beyond the plots' own sown about the water (the farm grows to FARM_TARGET_PLOTS)
+  if (harvested > 0) await growFarms(bot, executor, signal, log)
   // (the herd's wheat kept: a calf bred is a cow's 16 points later, 2 wheat baked two thirds of a bread's 5)
   const wheat = countItems(bot, 'wheat') - herdWheatKept(executor.memory)
   if (bake && wheat >= 3) {

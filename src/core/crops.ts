@@ -40,8 +40,8 @@ export function growsAny (names: readonly string[]): boolean {
  */
 export const GROW_TICKS = 48000
 
-/** plots sown per farm */
-export const FARM_PLOTS = 8
+/** plots a farm is sown with at its start (the harvests' seeds grow it on: FARM_TARGET_PLOTS) */
+export const FARM_PLOTS = 12
 
 /** a farm the bot sowed, as its memory keeps it (a 'farm' point of interest at the water, this as the note) */
 export interface FarmRecord {
