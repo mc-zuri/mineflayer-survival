@@ -328,16 +328,36 @@ export const CAVE_FORBID = 1000000
 export const CAVE_BREAK_COST = 100
 
 /**
- * the pathfinder's step rule of the cave rule: no move into a cave's cell (CAVE_FORBID), but for a bot in a cave already
- * (its feet's cell a cave's: its way out, CAVE_STEP_COST a cell)
+ * Whether the bot is in a cave or at one for the cave rule's ways (its way out not forbidden): its feet's or head's cell a
+ * cave's, or against one out of its own tunnel (a cell by the lava lit, a pocket of the cave: in its own tunnel a hole's
+ * the caves reflex's to seal), or in water (a flooded cave: the water's cells are no cave's, and the bot there is in it). A
+ * 26.3 bot in a flooded deep cave at y -54, its cells water, had every way through the cave's air forbidden and drowned
+ * (ls4b-26.3, t141936 to t142231).
+ */
+export function atCave (bot: Bot): boolean {
+  const p = bot.entity?.position
+  if (p == null) return false
+  const cells = caveCells(bot)
+  const feet = new Vec3(Math.floor(p.x), Math.floor(p.y + 1e-6), Math.floor(p.z))
+  const head = feet.offset(0, 1, 0)
+  if ([feet, head].some(c => LIQUIDS.has(cells.view.block(c)?.name ?? ''))) return true
+  if (cells.isCave(feet) || cells.isCave(head)) return true
+  return !dugByBot(bot, feet) && cells.beside([feet, head]).length > 0
+}
+
+/**
+ * the pathfinder's step rule of the cave rule: no move into a cave's cell (CAVE_FORBID), but for a bot in a cave or at
+ * one already (atCave: its way out, CAVE_STEP_COST a cell)
  */
 export function caveStepCost (bot: Bot): (block: { position: { x: number, y: number, z: number } }) => number {
   const cells = caveCells(bot)
+  // (atCave looked at once a tick: the search asks for every cell)
+  let at = { tick: -1, value: false }
   return (block) => {
     if (!caveRuleOn(bot) || !cells.isCave(block.position)) return 0
-    const p = bot.entity?.position
-    const inCave = p != null && cells.isCave({ x: Math.floor(p.x), y: Math.floor(p.y + 1e-6), z: Math.floor(p.z) })
-    return inCave ? CAVE_STEP_COST : CAVE_FORBID
+    const tick = ticks.get(bot)?.n ?? 0
+    if (at.tick !== tick) at = { tick, value: atCave(bot) }
+    return at.value ? CAVE_STEP_COST : CAVE_FORBID
   }
 }
 

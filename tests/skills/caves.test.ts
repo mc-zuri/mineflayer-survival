@@ -200,8 +200,10 @@ test('caveStepCost and caveBreakCost: a cave\'s cell, and a block against one, c
   // out of the cave: no way into it; in it, its way out costs CAVE_STEP_COST a cell
   assert.equal(step({ position: { x: 4, y: 21, z: 0 } }), CAVE_FORBID)
   bot.entity.position = new Vec3(5.5, 20, 0.5)
+  bot.emit('physicsTick')
   assert.equal(step({ position: { x: 4, y: 21, z: 0 } }), CAVE_STEP_COST)
   bot.entity.position = new Vec3(0.5, 20, 0.5)
+  bot.emit('physicsTick')
   assert.equal(step({ position: { x: 0, y: 21, z: 0 } }), 0)
   assert.equal(brk({ position: { x: 1, y: 21, z: 0 } }), CAVE_BREAK_COST)
   assert.equal(brk({ position: { x: 0, y: 21, z: 0 } }), 0)
@@ -405,4 +407,33 @@ test('tunnelTo with caves false (a way off the lava): the cave rule\'s turns lef
   } finally {
     actions.dig = realDig
   }
+})
+
+test('caveStepCost: a bot in water (a flooded cave) or at a cave out of its own tunnel has its way out through the cave; in its tunnel by a hole, none (ls4b-26.3)', () => {
+  // a cave of air from x 2 to 8 (y 20 to 23); water at x 1 (y 20, 21), the cells west of it the bot's tunnel
+  let water = true
+  const bot = fakeBot({ position: new Vec3(1.5, 20, 0.5) })
+  bot.game.dimension = 'overworld'
+  bot.blockAt = (p: Vec3) => {
+    const cave = p.y >= 20 && p.y <= 23 && p.x >= 2 && p.x <= 8 && Math.abs(p.z) <= 3
+    const tunnel = p.z === 0 && p.x >= -4 && p.x <= 1 && (p.y === 20 || p.y === 21)
+    const name = cave || (tunnel && !(water && p.x === 1)) ? 'air' : tunnel ? 'water' : p.y > 70 ? 'air' : 'stone'
+    return { name, position: p, boundingBox: name === 'stone' ? 'block' : 'empty' }
+  }
+  const cells = caveCells(bot)
+  for (let x = -4; x <= 0; x++) for (const y of [20, 21]) bot.emit('diggingCompleted', { position: new Vec3(x, y, 0) })
+  const step = caveStepCost(bot)
+  // in the water by the cave: its way out
+  assert.equal(step({ position: { x: 3, y: 20, z: 0 } }), CAVE_STEP_COST)
+  // dry, in a natural cell by the cave (x 1: not the bot's own): its way out too
+  water = false
+  cells.reset()
+  bot.emit('physicsTick')
+  assert.equal(step({ position: { x: 3, y: 20, z: 0 } }), CAVE_STEP_COST)
+  // in its own tunnel's end by the cave (x 0, a hole there being the caves reflex's): none
+  bot.entity.position = new Vec3(0.5, 20, 0.5)
+  bot.emit('physicsTick')
+  bot.blockAt = ((orig) => (p: Vec3) => p.x === 1 && p.z === 0 && (p.y === 20 || p.y === 21) ? { name: 'stone', position: p, boundingBox: 'block' } : orig(p))(bot.blockAt)
+  cells.reset()
+  assert.equal(step({ position: { x: 3, y: 20, z: 0 } }), CAVE_FORBID)
 })
