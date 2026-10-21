@@ -506,6 +506,14 @@ test('keepOffPits: no step under the floor less 1 near the bunker (a pit by the 
   assert.equal(cost(new Vec3(2, 75, 2)), 0)
   bot.entity.position = at
   release()
+  // a floor that moves (a fetch's drop 2 under it): what's under the drop's own kept off
+  let floor = 77
+  const moving = keepOffPits(bot, new Vec3(0, 79, 0), () => floor)
+  assert.equal(cost(new Vec3(2, 74, 2)), 1e9)
+  floor = 75
+  assert.equal(cost(new Vec3(2, 74, 2)), 0)
+  assert.equal(cost(new Vec3(2, 73, 2)), 1e9)
+  moving()
   bot.entity.position = home
   release()
   assert.deepStrictEqual(bot.pathfinder.defaultMoveSettings.exclusionAreasStep, [])

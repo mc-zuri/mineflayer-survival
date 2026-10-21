@@ -787,7 +787,9 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   const blazesLeft = engine?.leaveAlone?.(['blaze']) as (() => void) | undefined
   // (a bunker's ways out and back, its fetches' and its lighting trips', keep to the throne's floor: keepOffPits)
   const pitFloor = Math.min(nook.stand.y, opts.spawner.floored().y)
-  const pits = nook.bunker != null ? keepOffPits(bot, nook.stand, pitFloor) : null
+  // (a fetch's: its drop's floor when lower, PIT_DROP_BELOW at the most)
+  let pitAt = pitFloor
+  const pits = nook.bunker != null ? keepOffPits(bot, nook.stand, () => pitAt) : null
   let leave = engine?.leaveAlone?.(melee) as (() => void) | undefined
   // (out of it, on a fetch or an errand, they're the reflex's again: the cube in a pit on a 26.3 bunker's lighting
   // trip by seed 2's open throne at (-290, 77, -209) hit it 14 times on its way, 18.8 health to its death, unfought)
@@ -1111,7 +1113,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         ? (drawn === 0 ? bunkerDrops(bot, nook).find(e => {
             if ((tried.get(e.id) ?? 0) >= DROP_TRIES) return false
             // (none down a pit: the ways keep off it, keepOffPits)
-            if (Math.floor(e.position.y) < pitFloor - 1) return false
+            if (Math.floor(e.position.y) < pitFloor - PIT_DROP_BELOW) return false
             if (!dropSeen.has(e.id)) dropSeen.set(e.id, tick)
             const old = tick - (dropSeen.get(e.id) ?? tick) >= BUNKER_OLD_DROP
             return bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof, e.position, old ? BUNKER_FETCH_SEEN_OLD : BUNKER_FETCH_SEEN, old ? BUNKER_OLD_CLOSE : 0)
@@ -1123,10 +1125,15 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         tried.set(drop.id, (tried.get(drop.id) ?? 0) + 1)
         unblock()
         stopDraw()
-        await outOfIt(async () => {
-          if (nook.bunker != null) await fetchFromBunker(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
-          else await fetchDrops(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
-        })
+        pitAt = Math.min(pitFloor, Math.floor(drop.position.y))
+        try {
+          await outOfIt(async () => {
+            if (nook.bunker != null) await fetchFromBunker(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
+            else await fetchDrops(bot, nook, drop, { volleys, now: () => tick, sealAt }, signal)
+          })
+        } finally {
+          pitAt = pitFloor
+        }
         blocking = false
         continue
       }
@@ -1937,6 +1944,12 @@ export async function withNookKept<T> (bot: Bot, nook: BlazeNook, fn: () => Prom
 /** the pathfinder kept from breaking the blocks at `cells` while `fn` runs (the settings it had put back after) */
 /** a bunker fight's ways keep to the floor: no step under PIT_FLOOR's y less 1 within PIT_RADIUS of its stand */
 export const PIT_RADIUS = 16
+/**
+ * and its fetches go to drops up to this far under the floor, the way kept off what's under the drop's own: a 26.3
+ * bunker on seed 2's throne at (-277, 77, -159) killed 8 blazes at its slit with the sword alone, their rods on the
+ * steps 2 under it, and fetched none, kept out by the floor's exclusion
+ */
+export const PIT_DROP_BELOW = 2
 
 /**
  * Keeps the pathfinder's ways off the cells under `floorY` - 1 within PIT_RADIUS of `center` (a step exclusion,
@@ -1945,7 +1958,7 @@ export const PIT_RADIUS = 16
  * low'), on their way to the throne, and three bots burned or were punched to death climbing back out (26.3, tests/
  * integration/blaze BLAZE_AT=s2fortress2)
  */
-export function keepOffPits (bot: Bot, center: Vec3, floorY: number): () => void {
+export function keepOffPits (bot: Bot, center: Vec3, floor: number | (() => number)): () => void {
   const pathfinder: any = (bot as any).pathfinder
   const settings = pathfinder?.defaultMoveSettings
   if (settings == null || typeof pathfinder.setMoveOptions !== 'function') return () => {}
@@ -1953,6 +1966,7 @@ export function keepOffPits (bot: Bot, center: Vec3, floorY: number): () => void
   const area = (block: any): number => {
     const p = block?.position
     // (none while the bot is down there itself, fallen or come up from under: its way up would be kept off)
+    const floorY = typeof floor === 'number' ? floor : floor()
     if (p == null || bot.entity.position.y < floorY - 1) return 0
     return p.y < floorY - 1 && Math.abs(p.x - c.x) <= PIT_RADIUS && Math.abs(p.z - c.z) <= PIT_RADIUS ? 1e9 : 0
   }
