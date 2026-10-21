@@ -351,6 +351,15 @@ export async function placeFrame (bot: Bot, frame: PortalFrame, signal?: AbortSi
   }
   const check = checkPortalFrame(getBlock, frame)
   if (check.missing.length > 0) throw new SkillError('VERIFY_FAILED', `the frame lacks obsidian at ${check.missing.map(p => `${p.x},${p.y},${p.z}`).join(' ')}`)
+  // the inside cleared of blocks (a block the placing stood on, an old frame's corner left where the new one's inside
+  // is): with one in it PortalShape finds no frame. A 1.21.11 bot's frame of its 10 obsidian cast at home had
+  // cobblestone inside, 'the frame isn't ready' three times, the frame mined and built the same each time
+  // (f3-1.21.11, t240197 to t261419)
+  const blocked = frame.interior.map(v3).filter(p => isSolid(getBlock(p)))
+  if (blocked.length > 0) {
+    trace('placeFrame: the inside cleared of', blocked.map(p => getBlock(p)?.name).join(', '))
+    await collectBlock(bot, { positions: blocked, pickup: false }, signal)
+  }
 }
 
 /** pours a bucket into a cell; true once the cell holds the fluid's source, or what water makes of it (obsidian) */

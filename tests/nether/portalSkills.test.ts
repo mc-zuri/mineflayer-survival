@@ -217,3 +217,29 @@ test('castFrame: a deep pool\'s fill takes a source open to the air, not one und
   }
   assert.equal(tried[0].y, 61)
 })
+
+test('placeFrame: a block left inside the frame (cobblestone) dug out after the obsidian is placed (f3-1.21.11: \'the frame isn\'t ready\', cobblestone inside, three times)', async () => {
+  const { placeFrame } = await import('../../src/nether/portalSkills')
+  const { fakeBot, item } = await import('../reflexes/fakeBot')
+  const place = require('../../src/skills/placeBlock')
+  const collect = require('../../src/skills/collectBlock')
+  const frame = portalFrame({ x: 0, y: 64, z: 0 }, 'x')
+  const cells = new Map<string, string>()
+  const key = (p: any): string => `${p.x},${p.y},${p.z}`
+  const inside = frame.interior[1]
+  cells.set(key(inside), 'cobblestone')
+  const bot = fakeBot({ position: new Vec3(0.5, 64, 2.5), items: [item('obsidian', 10), item('cobblestone', 16)], world: p => cells.get(key(p)) ?? (p.y < 64 ? 'stone' : 'air') })
+  const real = { place: place.placeBlock, collect: collect.collectBlock }
+  const dug: string[] = []
+  place.placeBlock = async (_b: any, args: any) => { cells.set(key(args.pos), args.item) }
+  collect.collectBlock = async (_b: any, args: any) => { for (const p of args.positions) { dug.push(key(p)); cells.set(key(p), 'air') } }
+  try {
+    await placeFrame(bot, frame)
+  } finally {
+    place.placeBlock = real.place
+    collect.collectBlock = real.collect
+  }
+  assert.deepEqual(dug, [key(inside)])
+  const getBlock = (p: Pos): BlockInfo | null => { const n = cells.get(key(p)) ?? (p.y < 64 ? 'stone' : 'air'); return { name: n, boundingBox: n === 'air' ? 'empty' : 'block' } as any }
+  assert.equal(checkPortalFrame(getBlock, frame).valid, true)
+})
