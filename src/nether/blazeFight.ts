@@ -727,6 +727,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   let drinkFails = 0
   let lastReport = 0
   let lureAgain = 0
+  let fireCheck = 0
   let lures = 0
   let lureGain = 0
   let lastInSight = 0
@@ -843,6 +844,19 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         const b = bot.blockAt(p)
         if (b != null && (b.name === 'fire' || b.name === 'soul_fire')) await bot.dig(b as any, true).catch(() => {})
       }
+      // and the fires the eyes see by a bunker, where its kills' rods fall (one on netherrack burns for good, and a rod
+      // that falls in burns: 2 of a 26.3 bunker's by seed 2's open throne at (-290, 77, -209)), when nothing's about to
+      // shoot: punched out from inside
+      if (nook.bunker != null && tick >= fireCheck && danger.length === 0 && fireball == null && drawn === 0) {
+        fireCheck = tick + BUNKER_FIRE_EVERY
+        const fires = bunkerFires(bot, nook)
+        if (fires.length > 0) {
+          unblock()
+          for (const f of fires) { const b = bot.blockAt(f); if (b != null) await bot.dig(b as any, true).catch(() => {}) }
+          continue
+        }
+      }
+
       // one come close (in the front, hitting: BlazeAttackGoal within 2 blocks): the sword, the shield up between the
       // swings (a blaze in the front cell keeps the front from being shut: a 26.3 bot at 9 health tried to shut it
       // for 1200 ticks, the blaze punching it the while, and died). The swing goes while the others charge, as long as
@@ -1457,6 +1471,34 @@ export async function fetchFromBunker (bot: Bot, nook: BlazeNook, item: Entity, 
   // (given up once more see the bot than the fetch went with, one more)
   const bunkerWatch: FetchWatch = { ...watch, sealAt: Math.max(watch.sealAt, BUNKER_FETCH_LEAVE), abort: () => fetchThreats(bot, [eyePosition(bot)]).length > (fireProof(bot) ? BUNKER_FETCH_PROOF_BLAZES : BUNKER_FETCH_SEEN) + 1 }
   await withBlocksKept(bot, bunkerKept(nook), async () => await fetchDrops(bot, nook, item, bunkerWatch, signal))
+}
+
+/** a bunker looks for the fires by it each so many ticks (bunkerFires) */
+export const BUNKER_FIRE_EVERY = 20
+/** the reach its fires are punched out in, from the eyes (the player's block interaction range, 4.5, less a margin) */
+export const BUNKER_FIRE_REACH = 4.2
+
+/**
+ * The fire blocks within BUNKER_FIRE_REACH of the bunker's eyes that they see (a clear line to the cell's middle):
+ * the fireballs' fires on the floor its kills drop their rods on
+ */
+export function bunkerFires (bot: Bot, nook: BlazeNook): Vec3[] {
+  const eye = nook.stand.offset(0.5, 1.62, 0.5)
+  const out: Vec3[] = []
+  const r = Math.ceil(BUNKER_FIRE_REACH)
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dz = -r; dz <= r; dz++) {
+        const p = nook.stand.offset(dx, dy + 1, dz)
+        const name = bot.blockAt(p)?.name
+        if (name !== 'fire' && name !== 'soul_fire') continue
+        const mid = p.offset(0.5, 0.5, 0.5)
+        if (mid.distanceTo(eye) > BUNKER_FIRE_REACH || !rayClear(bot, eye, mid)) continue
+        out.push(p)
+      }
+    }
+  }
+  return out.sort((a, b) => a.offset(0.5, 0.5, 0.5).distanceTo(eye) - b.offset(0.5, 0.5, 0.5).distanceTo(eye))
 }
 
 /** the rods (and cream) a step out of the bunker into its sill's cell takes: in reach there (inPickupReach), not from its cell */

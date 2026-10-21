@@ -451,3 +451,15 @@ test('lightFromBunker: out by the sill, the planned torches put (LIGHT_TRIP_TORC
   assert.equal(busy.torches, 0, busy.placed.join(' '))
   assert.equal(busy.sillBack, true)
 })
+
+test('bunkerFires: the fires in front of the slit within reach that the eyes see, nearest first; not one under the sill, behind a wall of the bunker nor one out of reach', async () => {
+  const { bunkerFires } = await import('../../src/nether/blazeFight')
+  // (one on the floor just past the sill is under its line of sight: the sill hides it)
+  const fires = { '(0, 64, 3)': 'fire', '(1, 64, 2)': 'fire', '(0, 64, 1)': 'fire', '(0, 64, 7)': 'fire', '(0, 64, -3)': 'fire' }
+  const { bot, b, restore } = await bunkerBot([], [], fires)
+  try {
+    assert.deepEqual(bunkerFires(bot, b).map(String), ['(1, 64, 2)', '(0, 64, 1)'])
+  } finally {
+    restore()
+  }
+})
