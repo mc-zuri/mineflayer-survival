@@ -571,6 +571,11 @@ export const BUNKER_LURE_EVERY = 60
 export const BUNKER_LURES = 6
 /** the ticks the lure keeps the slit shut: the blazes come on 5 of them (BlazeAttackGoal's lastSeen < 5) */
 export const BUNKER_LURE_TICKS = 10
+/** a bunker's ambush (no bow): its slit opened for a blaze this near it (its middle to the slit's) */
+export const AMBUSH_RANGE = 3.5
+/** and shut again once none has been that near for this long, once each AMBUSH_EVERY at most */
+export const AMBUSH_HOLD_TICKS = 40
+export const AMBUSH_EVERY = 20
 
 export interface NookFightOptions {
   /** rods to have */
@@ -752,6 +757,9 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   let lureGain = 0
   let lastInSight = 0
   let turnAgain = 0
+  // (a bunker with no bow: its ambush, AMBUSH_*)
+  let lastAtSlit = -Infinity
+  let ambushAgain = 0
   const tracked = new Set<number>()
   const dead = new Set<number>()
   const tried = new Map<number, number>()
@@ -879,6 +887,16 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       for (const b of blazes) if (!tracked.has(b.id)) { tracked.add(b.id); tracker.track(b) }
       volleys.update(blazes.map(b => ({ id: b.id, charged: blazeCharged(bot, b) })), tick)
       const seeing = blazes.filter(b => blazeSeesBot(bot, b))
+      // a bunker's fight with the sword alone (no bow or no arrows) lies in ambush: its slit shut till a blaze comes to
+      // within AMBUSH_RANGE of it (BlazeAttackGoal flies at a target it doesn't see), then open for the sword, shut
+      // again once none has been there for AMBUSH_HOLD_TICKS. Open, they kept off and shot at it from afar, and a 1.21.11
+      // bunker with the sword alone had no kill in 2818 ticks (f7-1.21.11, seed -3768674050494303582)
+      const ambush = nook.bunker != null && !(bow() != null && hasArrows())
+      if (ambush && nook.bunker != null) {
+        const slitAt = nook.bunker.slit.offset(0.5, 0.5, 0.5)
+        if (blazes.some(b => b.position.offset(0, 0.9, 0).distanceTo(slitAt) <= AMBUSH_RANGE)) lastAtSlit = tick
+      }
+      const ambushWaits = ambush && tick - lastAtSlit > AMBUSH_HOLD_TICKS
       const me = bot.entity.position
       if (tick - lastReport >= 400) {
         lastReport = tick
@@ -1006,7 +1024,7 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
         }
         shutAgain = tick + SHUT_AGAIN_TICKS
       }
-      if (nook.front.some(p => bot.blockAt(p)?.boundingBox === 'block') && fightHealth(bot) > sealAt && tick >= shutUntil && danger.length === 0 && fireball == null) {
+      if (nook.front.some(p => bot.blockAt(p)?.boundingBox === 'block') && fightHealth(bot) > sealAt && tick >= shutUntil && danger.length === 0 && fireball == null && !ambushWaits) {
         unblock()
         await openNook(bot, nook, signal)
         continue
@@ -1152,6 +1170,12 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // 4000 ticks with 3 to 5 blazes 4 off seeing it, shooting at its sill, and no kill (26.3)
       // (BUNKER_LURES at most for each kill: a 1.21.11 bunker by seed 2's throne at (-277, 77, -159) shut its slit on 3
       // to 5 blazes every 60 ticks for 3000, none of them coming)
+      if (ambushWaits && tick >= ambushAgain && nook.front.every(p => bot.blockAt(p)?.boundingBox !== 'block')) {
+        ambushAgain = tick + AMBUSH_EVERY
+        unblock()
+        await fillNook(bot, nook.front, signal, false, false)
+        continue
+      }
       if (lureGain !== lastGain) { lureGain = lastGain; lures = 0 }
       if (nook.bunker != null && seeing.length > 0 && tick - lastGain > BUNKER_LURE_AFTER && tick >= lureAgain && lures < BUNKER_LURES && nook.front.every(p => bot.blockAt(p)?.boundingBox !== 'block')) {
         lureAgain = tick + BUNKER_LURE_EVERY

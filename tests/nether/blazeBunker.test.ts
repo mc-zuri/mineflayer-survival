@@ -350,27 +350,25 @@ async function bunkerBot (entities: any[], extra: any[] = [], blocks: Record<str
 
 const ticks = async (bot: any, n: number): Promise<void> => { for (let i = 0; i < n; i++) { bot.emit('physicsTick'); await new Promise(resolve => setImmediate(resolve)) } }
 
-test('fightFromNook in a bunker: a blaze that sees it through the slit out of the sword\'s reach, no bow, no kill for BUNKER_LURE_AFTER: the slit shut a while to draw it in, then open again', async () => {
+test('fightFromNook in a bunker with no bow lies in ambush: the slit shut while no blaze is near it, opened for one come within AMBUSH_RANGE, shut again AMBUSH_HOLD_TICKS after it left', async () => {
   const { entity } = await import('../reflexes/fakeBot')
-  const { fightFromNook, BUNKER_LURE_AFTER } = await import('../../src/nether/blazeFight')
-  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 64.2, 1.0), meta: { health: 20, flags: 0 } })
-  const { bot, b, filled, placed, restore } = await bunkerBot([blaze])
+  const { fightFromNook, AMBUSH_HOLD_TICKS } = await import('../../src/nether/blazeFight')
+  const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 66, -9.5), meta: { health: 20, flags: 0 } })
+  const { bot, b, filled, restore } = await bunkerBot([blaze])
   const ac = new AbortController()
+  const slit = b.bunker.slit.toString()
   try {
     const done = fightFromNook(bot, b, { count: 1, spawner: new Vec3(0, 64, 0), maxTicks: 3000 }, ac.signal).catch(err => err)
-    // (the slit's state each tick: shut, then open again)
-    let opened = 0
-    let wasShut = false
-    bot.on('physicsTick', () => { const shut = filled.has(b.bunker.slit.toString()); if (wasShut && !shut) opened++; wasShut = shut })
-    await ticks(bot, BUNKER_LURE_AFTER - 50)
-    assert.deepEqual(placed, [])
-    await ticks(bot, 100)
-    // shut, then open again (the blaze out of its sight now), and shut again BUNKER_LURE_EVERY on while it doesn't come
-    assert.deepEqual(placed, [b.bunker.slit.toString()])
-    assert.equal(opened, 1)
-    assert.ok(!filled.has(b.bunker.slit.toString()))
-    await ticks(bot, 80)
-    assert.ok(placed.length >= 2)
+    await ticks(bot, AMBUSH_HOLD_TICKS + 20)
+    assert.ok(filled.has(slit), 'shut, none near')
+    // come to the slit (BlazeAttackGoal's flight at a target it doesn't see): opened for the sword
+    blaze.position = new Vec3(0.5, 64.5, 2.6)
+    await ticks(bot, 10)
+    assert.ok(!filled.has(slit), 'open for it')
+    // gone off: shut again
+    blaze.position = new Vec3(0.5, 66, -9.5)
+    await ticks(bot, AMBUSH_HOLD_TICKS + 30)
+    assert.ok(filled.has(slit), 'shut again')
     ac.abort()
     await ticks(bot, 5)
     await done
@@ -380,10 +378,10 @@ test('fightFromNook in a bunker: a blaze that sees it through the slit out of th
 })
 
 test('fightFromNook in a bunker: with no blaze in its sight the errand (the spawner\'s lighting) is tried, and not while one sees it', async () => {
-  const { entity } = await import('../reflexes/fakeBot')
+  const { entity, item } = await import('../reflexes/fakeBot')
   const { fightFromNook } = await import('../../src/nether/blazeFight')
   const blaze = entity({ name: 'blaze', position: new Vec3(0.5, 64.2, 1.0), meta: { health: 20, flags: 0 } })
-  const { bot, b, restore } = await bunkerBot([blaze])
+  const { bot, b, restore } = await bunkerBot([blaze], [item('bow'), item('arrow', 64)])
   const ac = new AbortController()
   let errands = 0
   try {
@@ -687,7 +685,8 @@ test('walkDanger: a charged blaze that sees the bot, one at its side, or a fireb
 
 test('fightFromNook in a bunker: a hole in its walls (a side wall gone) is put again, nothing about to shoot', async () => {
   const { fightFromNook } = await import('../../src/nether/blazeFight')
-  const { bot, b, filled, placed, restore } = await bunkerBot([])
+  const { item } = await import('../reflexes/fakeBot')
+  const { bot, b, filled, placed, restore } = await bunkerBot([], [item('bow'), item('arrow', 64)])
   const ac = new AbortController()
   try {
     filled.delete('(1, 65, 5)')
