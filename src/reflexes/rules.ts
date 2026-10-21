@@ -4,7 +4,7 @@ import { eat, dueMeal, reserveAllows } from '../skills/eat'
 import { barrierCells, burningToDouse, douseBurning, escapeHazard, evadeCreeper, fireHandled, fleeFrom, headInWater, inFireOnly, inHazard, surface, wallOffShooter } from '../skills/escape'
 import { MELEE_GUARD_MARGIN, MELEE_MOBS, creeperSwelling, fight, inMobReach } from '../skills/fight'
 import { shoot, sparedInLine } from '../skills/shoot'
-import { armorPoints, botIsBrightOutside, isEnclosed, leaveShelter, nightPlan, shelter, shelterRunning, shelterToLeave, sleepThroughNight, ticksSinceRest, undergroundAtWork, type NightPlan } from '../skills/shelter'
+import { NIGHT_FIGHT_HEALTH, armorPoints, botIsBrightOutside, isEnclosed, leaveAtDay, leaveShelter, nightPlan, shelter, shelterRunning, shelterToLeave, sleepThroughNight, ticksSinceRest, undergroundAtWork, type NightPlan } from '../skills/shelter'
 import type { Vec3 } from 'vec3'
 import { bestMeleeWeapon } from '../skills/weapons'
 import { TaskError, hasLineOfSight, isAlive, type Entity } from '../skills/combatUtil'
@@ -832,6 +832,20 @@ export function pillarDue (bot: Bot, near: Entity[], config: ReflexConfig, tick:
   return pillarFits(bot)
 }
 
+/**
+ * Whether the hostiles reflex runs from the mobs about for the night (the night reflex's shelter after: hurtAtNight)
+ * rather than fight on: in the overworld at night (not bright outside) under the open sky (outInTheNight), hurt to
+ * sealHealth with two or more about, not cornered. A 1.21.11 bot in full iron at 9.1 health fought a zombie by a creeper
+ * at midnight, a skeleton about, and went on exploring for a chicken between its fights till the creeper blew it up
+ * (f9-1.21.11, t305885)
+ */
+export function nightRetreatDue (bot: Bot, near: Entity[], config: ReflexConfig, tick: number): boolean {
+  if (near.length < 2 || bot.health <= 0 || bot.health > config.hostiles.sealHealth || bot.time == null) return false
+  if (!/overworld/.test(String(bot.game?.dimension ?? 'overworld')) || botIsBrightOutside(bot)) return false
+  if (wasCornered(bot, tick)) return false
+  return outInTheNight(bot)
+}
+
 /** ticks after a wall-in at a cell the hostiles reflex fights there instead (walled in, dug out, and they were back) */
 export const WALL_IN_RETRY_TICKS = 600
 const wallIns = new WeakMap<Bot, { feet: string, tick: number }>()
@@ -1225,7 +1239,11 @@ export const hostilesReflex: Reflex = {
         run: async (signal) => await pillarRefuge(bot, () => Object.values(bot.entities).filter(e => isHostile(bot, e) && isAlive(bot, e) && distance(bot, e) <= config.combat.scanRange), { signal, giveUp: () => pillarRanged(bot) })
       }
     }
-    if (fleeDue(bot, near, config, ctx.tick)) {
+    // hurt to sealHealth at night under the open sky with two or more about, no box nor pillar to be had (a creeper
+    // among them, one that shoots): away from them all (nightRetreatDue), in behind a door when one is near, and the
+    // night reflex digs in once they're off (hurtAtNight), not a fight on at that health nor the work
+    const retreat = !fleeDue(bot, near, config, ctx.tick) && nightRetreatDue(bot, near, config, ctx.tick)
+    if (fleeDue(bot, near, config, ctx.tick) || retreat) {
       // a door near to get in behind (a house, the base's airlock): in there and shut, not a run in the open under
       // the bolts and arrows
       const refuge = cachedRefuge(ctx, near)
@@ -1248,7 +1266,7 @@ export const hostilesReflex: Reflex = {
       return {
         name: 'hostiles',
         priority: config.hostiles.priority,
-        detail: 'flee',
+        detail: retreat ? 'flee, hurt at night' : 'flee',
         run: async (signal) => await fleeFrom(bot, () => hostilesInRange({ ...ctx, hostiles: Object.values(bot.entities).filter(e => isHostile(bot, e)) }), { signal, distance: config.hostiles.fleeDistance }).catch(err => noteCornered(bot, ctx.tick, err))
       }
     }
@@ -1546,6 +1564,21 @@ export function nightChoice (i: NightChoiceInputs): NightChoice {
   return 'work'
 }
 
+/** the health a bot dug in for being hurt at night (hurtAtNight) comes out at, the night its work again */
+export const NIGHT_HEALED_HEALTH = 16
+
+/**
+ * Hurt to NIGHT_FIGHT_HEALTH out under the night's sky (outInTheNight): the night reflex digs in (its shelter) whatever
+ * the gear (nightPlan's 'fight'), till the health is back to NIGHT_HEALED_HEALTH or the day; the hostiles reflex runs
+ * from them first (nightRetreatDue). A 1.21.11 bot in full iron with a diamond sword went on exploring for a chicken at
+ * midnight at 10.5 and then 9.1 health among a zombie, a skeleton and a creeper, and was blown up (f9-1.21.11, t305885)
+ */
+export function hurtAtNight (bot: Bot): boolean {
+  if (bot.health <= 0 || bot.health > NIGHT_FIGHT_HEALTH) return false
+  // (in its shelter too: it waits there)
+  return outInTheNight(bot)
+}
+
 /** the bots whose bed failed this night (cleared at the day) */
 const sleepFailed = new WeakSet<Bot>()
 /** ticks the shelter's search for ground waits after it found none, at first; doubled each time after, to SHELTER_BACKOFF_MAX */
@@ -1575,7 +1608,10 @@ export const nightReflex: Reflex = {
     // the night's mining (the runner's schedule) is on its way down: a staircase is a roof within a few blocks; and a
     // shelter() task (the runner's wait for the day) is the night's shelter already
     if ((bot as any).survival?.nightWork === true || shelterRunning(bot)) return null
-    const plan = cachedNightPlan(ctx)
+    // (the gear to stay out with, but hurt out under the sky: dug in till it's healed, hurtAtNight)
+    const geared = cachedNightPlan(ctx) === 'fight'
+    const hurt = geared && hurtAtNight(bot)
+    const plan = hurt ? 'shelter' : cachedNightPlan(ctx)
     if (plan === 'fight') return null
     const underground = cachedUnderground(ctx)
     const choice = nightChoice({
@@ -1592,9 +1628,11 @@ export const nightReflex: Reflex = {
     if (choice === 'work') return null
     const backoff = noGround.get(bot)
     if (choice === 'shelter' && backoff != null && ctx.tick < backoff.until) return null
+    // (hurt with the gear to stay out: out again once healed, NIGHT_HEALED_HEALTH, the night its work again)
+    const healed = hurt ? leaveAtDay(bot) : null
     const dig = async (signal: AbortSignal): Promise<unknown> => {
       try {
-        const result = await shelter(bot, { signal, radius: backoff?.radius ?? config.night.shelterRadius })
+        const result = await shelter(bot, { signal, radius: backoff?.radius ?? config.night.shelterRadius, ...(healed != null ? { until: () => healed() || bot.health >= NIGHT_HEALED_HEALTH } : {}) })
         noGround.delete(bot)
         return result
       } catch (err) {

@@ -1213,3 +1213,39 @@ test('creeper reflex: its run notes the creeper for the hostiles reflex (chasing
   assert.strictEqual(chasingCreeper(engine.context())?.id, creeper.id)
   engine.stop()
 })
+
+test('hurt to NIGHT_FIGHT_HEALTH at night under the sky, the gear to stay out or not: the hostiles reflex runs from two or more (nightRetreatDue), the night reflex digs in (hurtAtNight); not by day, over the health, below the surface, nor against one (f9-1.21.11, t305885)', async () => {
+  const { NIGHT_HEALED_HEALTH, hurtAtNight, nightRetreatDue } = await import('../../src/reflexes/rules')
+  const { NIGHT_FIGHT_HEALTH } = await import('../../src/skills/shelter')
+  assert.ok(NIGHT_HEALED_HEALTH > NIGHT_FIGHT_HEALTH)
+  for (const version of ['1.21.11', '26.3']) {
+    const iron = { head: item('iron_helmet', 1, undefined, version), torso: item('iron_chestplate', 1, undefined, version), legs: item('iron_leggings', 1, undefined, version), feet: item('iron_boots', 1, undefined, version) }
+    const kit = { armor: iron, items: [item('diamond_sword', 1, undefined, version), item('bread', 4, undefined, version)], version }
+    const run = (reflex: Reflex, input: FakeBotInput, time: number): string | null => {
+      const bot = fakeBot(input)
+      bot.time = { timeOfDay: time }
+      bot.game.dimension = 'overworld'
+      const engine = new ReflexEngine(bot, { enabled: false })
+      const task = reflex.check(engine.context())
+      engine.stop()
+      return task == null ? null : (task.detail ?? task.name)
+    }
+    const zombie = entity({ name: 'zombie', position: at(2), version })
+    const skeleton = entity({ name: 'skeleton', position: at(-6), version })
+    const creeper = entity({ name: 'creeper', position: at(-6), version })
+    assert.strictEqual(run(hostilesReflex, { ...kit, health: 9.1, entities: [zombie, skeleton] }, 18000), 'flee, hurt at night', version)
+    assert.strictEqual(run(hostilesReflex, { ...kit, health: 9.1, entities: [zombie, creeper] }, 18000), 'flee, hurt at night', version)
+    assert.strictEqual(run(hostilesReflex, { ...kit, health: 9.1, entities: [zombie, skeleton] }, 6000), 'fight zombie', version)
+    assert.strictEqual(run(hostilesReflex, { ...kit, health: 12, entities: [zombie, skeleton] }, 18000), 'fight zombie', version)
+    assert.strictEqual(run(hostilesReflex, { ...kit, health: 9.1, entities: [zombie] }, 18000), 'fight zombie', version)
+    // under the rock (a mine): not a night out
+    const mine = (p: Vec3): string => p.y < 64 || p.y >= 67 ? 'stone' : 'air'
+    assert.strictEqual(nightRetreatDue(fakeBot({ ...kit, health: 9, world: mine }) as any, [zombie, skeleton], DEFAULT_REFLEX_CONFIG, 0), false)
+    // the night reflex: geared, hurt under the sky, a shelter; over the health, by day or under the rock, none
+    assert.strictEqual(run(nightReflex, { ...kit, health: 9.1 }, 18000), 'shelter', version)
+    assert.strictEqual(run(nightReflex, { ...kit, health: 12 }, 18000), null, version)
+    assert.strictEqual(run(nightReflex, { ...kit, health: 9.1 }, 6000), null, version)
+    assert.strictEqual(run(nightReflex, { ...kit, health: 9.1, world: mine }, 18000), null, version)
+    assert.strictEqual(hurtAtNight(fakeBot({ ...kit, health: 9.1 }) as any), true, version)
+  }
+})
