@@ -11,13 +11,13 @@ import { rememberArrivalHere } from './nether/portalTravel'
 import { travel } from './skills/travel'
 import { dayPhase } from './planner/schedule'
 import { findLavaSources, isLavaSource, lavaPools } from './nether/portal'
-import { obsidianFromLava, refillWater } from './nether/obsidian'
+import { obsidianFromLava, obsidianInPit, obsidianLookup, refillWater } from './nether/obsidian'
 import { setFoodReserve } from './skills/eat'
 import { POTION_IDS, potionOf } from './skills/potion'
-import { descendTo, ensureSurface, inWater, spiralWaypoints, toShore } from './executor/explore'
+import { SURFACE_MIN_Y, descendTo, ensureSurface, inWater, spiralWaypoints, toShore } from './executor/explore'
 import { moveNear } from './skills/gridWalk'
 import { tunnelTo } from './skills/tunnel'
-import { SkillError, isAbort, isSkillError } from './skills/errors'
+import { SkillError, isAbort, isSkillError, throwIfAborted } from './skills/errors'
 import type { ExploreOptions } from './nether/fortress'
 import { craftEyes, overland, strongholdToPortalRoom } from './end/strongholdSkills'
 import { crossToIsland, enterEnd, fightDragon, gotoNear, isInEnd, leaveEnd, readPortalRoom, rememberGateways, SCAFFOLD_ITEMS, visibleGateways } from './end/skills'
@@ -56,7 +56,7 @@ import { endermenFromCover, forgetCover } from './nether/endermanCover'
 import { NetherBiomeSource } from './worldgen/netherBiomes'
 import { blazeRodsWithBrew, resetBrewTries } from './nether/brewing'
 import { waterBottles } from './skills/brew'
-import { fillBottles } from './skills/bucket'
+import { fillBottles, fillBucket } from './skills/bucket'
 import { ruinedPortalCandidates } from './worldgen/placement'
 import { openSeedBiomes, type SeedBiomes } from './worldgen/seedBiomes'
 import type { Seed } from './worldgen/random'
@@ -1316,6 +1316,80 @@ export async function naturalObsidian (bot: Bot, executor: Executor, want: numbe
  */
 export const OBSIDIAN_HOME_RANGE = 160
 
+/** the trips obsidianAtHome makes for a bucket of lava at most (a block each) */
+export const HOME_CAST_TRIPS = 8
+/** the lava sources obsidianAtHome tries a trip */
+export const HOME_CAST_SOURCES = 4
+
+/**
+ * The lava sources a bucket is filled at for obsidianAtHome, nearest the bot first: sources (a block's level 0) within
+ * the bound, none in the deep dark (deepDarkNear), none against a cave's cells for a bot not fit for the caves (a
+ * pocket in the rock, a pool reached by a tunnel, its stand in the rock)
+ */
+export function homeLavaSources (bot: Bot, bound: ObsidianBound): Vec3[] {
+  const id = bot.registry.blocksByName.lava?.id
+  if (id == null) return []
+  const rule = caveRuleOn(bot)
+  const cells = caveCells(bot)
+  return findBlocks(bot, { matching: id, maxDistance: 96, count: 512 })
+    .filter(p => isLavaSource({ name: 'lava', properties: (bot.blockAt(p) as any)?.getProperties?.() } as any))
+    .filter(p => withinBound(bound, p) && !deepDarkNear(bot, p) && !(rule && cells.beside([p]).length > 0))
+    .sort((a, b) => a.distanceTo(bot.entity.position) - b.distanceTo(bot.entity.position))
+}
+
+/**
+ * Obsidian cast at home, a bucket of lava at a time: the lava scooped from a source near (homeLavaSources: in the rock,
+ * the bot's way to it the cave rule's, never into the cave), carried back to home and poured in a pit dug in the rock
+ * there, the water over it, the obsidian mined with the diamond pickaxe (nether/obsidian obsidianInPit); up to
+ * HOME_CAST_TRIPS trips. A water bucket and an empty one are got first. No trip far off, none to a deep pool's shore:
+ * a 26.3 bot's enchanting table went for its obsidian to a pool some 1000 blocks from home in the deep dark, where a
+ * warden killed it (f2-26.3, t83894 to t87920). Resolves whether `count` are held.
+ */
+export async function obsidianAtHome (bot: Bot, executor: Executor, count: number, signal: AbortSignal, log: (line: string) => void, bound: ObsidianBound): Promise<boolean> {
+  const have = (): number => countItems(bot, 'obsidian')
+  const quiet = (err: unknown): void => { if (signal.aborted || TaskError.is(err, 'DIED')) throw err }
+  if (have() >= count) return true
+  if (countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) return false
+  if (!(await waterForTheLava(bot, executor, signal, log))) return false
+  if (countItems(bot, ['bucket', 'lava_bucket']) === 0) await executor.obtain([{ item: 'bucket', count: 1 }], signal).catch(quiet)
+  if (countItems(bot, ['bucket', 'lava_bucket']) === 0) return false
+  const home = bound.home != null ? new Vec3(bound.home.x, bot.entity.position.y, bound.home.z) : bot.entity.position.clone()
+  for (let trip = 0; trip < HOME_CAST_TRIPS && have() < count; trip++) {
+    throwIfAborted(signal)
+    if (countItems(bot, 'lava_bucket') === 0) {
+      const sources = homeLavaSources(bot, bound).slice(0, HOME_CAST_SOURCES)
+      if (sources.length === 0) { log('obsidian: no lava near home to carry to a cast'); return false }
+      let filled = false
+      for (const source of sources) {
+        try {
+          await executor.task('lava for a cast at home', async (s) => await fillBucket(bot, { fluid: 'lava', pos: source }, s), signal)
+          filled = countItems(bot, 'lava_bucket') > 0
+          if (filled) break
+        } catch (err) {
+          quiet(err)
+          log(`obsidian: the lava at ${source.toString()}: ${(err as Error).message}`)
+        }
+      }
+      if (!filled) return false
+    }
+    // back home with it, up to the surface there, the pit dug in the rock by the bot
+    if (Math.hypot(bot.entity.position.x - home.x, bot.entity.position.z - home.z) > 16 || bot.entity.position.y < SURFACE_MIN_Y) {
+      await executor.task('back home with the lava', async (s) => {
+        await ensureSurface(bot, s)
+        await overland(bot, { target: home, range: 8 }, s)
+      }, signal).catch(quiet)
+    }
+    await refillWater(bot, signal)
+    const before = have()
+    await executor.task('a cast at home', async (s) => await obsidianInPit(bot, obsidianLookup(bot), [], s), signal).catch(err => {
+      quiet(err)
+      log(`obsidian: the cast at home: ${(err as Error).message}`)
+    })
+    log(`obsidian: ${have() > before ? 'one' : 'none'} cast at home, ${have()} of ${count}`)
+  }
+  return have() >= count
+}
+
 /** the enchanting's tries at its obsidian within OBSIDIAN_HOME_RANGE before its trips go past it */
 export const OBSIDIAN_BOUND_TRIES = 3
 const obsidianShortTries = new WeakMap<Bot, number>()
@@ -1409,6 +1483,8 @@ export async function obsidianFromPools (bot: Bot, executor: Executor, count: nu
   if (countItems(bot, ['diamond_pickaxe', 'netherite_pickaxe']) === 0) await executor.obtain([{ item: 'diamond_pickaxe', count: 1 }], signal).catch(quiet)
   // the obsidian in the world first (in sight, a ruined portal's)
   await naturalObsidian(bot, executor, count, signal, log, bound)
+  // then the lava near home carried to a cast pit there (obsidianAtHome), before any pool's shore
+  if (have() < count && bound.home != null) await obsidianAtHome(bot, executor, count, signal, log, bound).catch(quiet)
   for (let depth = 0; depth < 2 && have() < count; depth++) {
     if (depth === 1 && bot.entity.position.y >= DEEP_LAVA_Y + 10) {
       await executor.task('down to the deep lava', async (s) => await descendTo(bot, DEEP_LAVA_Y, {}, s), signal).catch(quiet)

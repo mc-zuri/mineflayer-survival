@@ -259,7 +259,15 @@ export function pitSite (get: ObsidianLookup, feet: Vec3, lava: readonly Vec3[])
  * over it till it sets, the water scooped back, the obsidian mined (its drop on the pit's stone floor). True when one
  * came into the bag.
  */
-async function obsidianInPit (bot: Bot, get: ObsidianLookup, lava: readonly Vec3[], signal?: AbortSignal): Promise<boolean> {
+/** the bot's world as obsidianFromLava's and obsidianInPit's lookups see it (the block's name, box and state) */
+export function obsidianLookup (bot: Bot): ObsidianLookup {
+  return p => {
+    const b = bot.blockAt(new Vec3(p.x, p.y, p.z)) as any
+    return b == null ? null : { name: b.name, boundingBox: b.boundingBox, properties: b.getProperties?.() }
+  }
+}
+
+export async function obsidianInPit (bot: Bot, get: ObsidianLookup, lava: readonly Vec3[], signal?: AbortSignal): Promise<boolean> {
   const before = countItems(bot, 'obsidian')
   const pit = pitSite(get, bot.entity.position.floored(), lava)
   if (pit == null) { trace('obsidianFromLava: no pit site by the lake'); return false }
