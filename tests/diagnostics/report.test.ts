@@ -229,6 +229,29 @@ test('crosshairFacts and its rule: the dig\'s block isn\'t the one in the crossh
   assert.strictEqual(crosshairFacts(r)?.onTarget, true)
 })
 
+test('crosshairFacts: a dig of the samples whose block broke is over, the look since another action\'s: no crosshair rule (f9-26.3: a pillar\'s place looking down, \'crosshair on dirt\' for the dig over its head that broke)', () => {
+  const dig: XYZ = [-188, 62, -90]
+  const samples = [
+    { tick: 51092, pos: [-187.5, 60, -89.57] as XYZ, vel: [0, -0.078, 0] as XYZ, onGround: true, controls: '', yaw: 3.144, pitch: 1.463, delta: 0, velDelta: 0, dig },
+    { tick: 51096, pos: [-187.5, 60.42, -89.57] as XYZ, vel: [0, 0.333, 0] as XYZ, onGround: false, controls: 'jump', yaw: 3.142, pitch: -1.508, delta: 0, velDelta: 0 }
+  ]
+  const events = [
+    { tick: 51071, type: 'dig_start', pos: dig, block: 'grass_block', face: 'bottom' },
+    { tick: 51092, type: 'block_update', pos: dig, from: 'grass_block', to: 'air', own: true },
+    { tick: 51093, type: 'dig_end', pos: dig }
+  ]
+  const bot = { ...emptyReport().bot, yaw: 3.1416, pitch: -1.508, cursorBlock: { pos: [-188, 60, -90] as XYZ, block: 'dirt#10' } }
+  const r = emptyReport({ kind: 'move_failed', tick: 51099, bot, recent: recent({ samples, events }) })
+  assert.strictEqual(crosshairFacts(r), null)
+  assert.ok(!/crosshair/.test(diagnose(r) ?? ''), diagnose(r) ?? '')
+  // a break the server put back (the block's last update): the dig's block is there, the crosshair's rule as before
+  const refused = emptyReport({ kind: 'move_failed', tick: 51099, bot, recent: recent({ samples, events: [...events, { tick: 51094, type: 'block_update', pos: dig, from: 'air', to: 'grass_block', own: false }] }) })
+  assert.deepStrictEqual(crosshairFacts(refused), { digTarget: dig, cursor: { pos: [-188, 60, -90], block: 'dirt#10' }, onTarget: false })
+  // a dig still under way: the crosshair's rule whatever the updates
+  const digging = emptyReport({ kind: 'move_failed', tick: 51099, bot: { ...bot, digging: { pos: dig, block: 'grass_block' } as any }, recent: recent({ samples, events }) })
+  assert.strictEqual(crosshairFacts(digging)?.onTarget, false)
+})
+
 test('faceVector: mineflayer\'s targetDigFace numbers (prismarine-world BlockFace) as vectors', () => {
   assert.deepStrictEqual(faceVector(0)?.toArray(), [0, -1, 0])
   assert.deepStrictEqual(faceVector(3)?.toArray(), [0, 0, 1])

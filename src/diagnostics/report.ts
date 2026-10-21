@@ -304,13 +304,29 @@ export function buildReport (bot: Bot, opts: BuildReportOptions): StuckReport {
   return report
 }
 
-/** the last dig's block (the dig now, else one in the samples of the last 20 ticks) against the block in the crosshair */
+/**
+ * The last dig's block (the dig now, else one in the samples of the last 20 ticks) against the block in the crosshair.
+ * None for a dig of the samples whose block broke (its last block update since left no block): that dig ended with its
+ * block gone, and the look since is another action's. A pillar's place, its look down, had 'crosshair on dirt at
+ * (-188, 60, -90), not the dig's block at (-188, 62, -90)' for the dig over its head that broke 6 ticks before (f9-26.3)
+ */
 export function crosshairFacts (r: StuckReport): ReportFacts['crosshair'] {
   let target: XYZ | null = r.bot.digging?.pos ?? null
   const samples = r.recent.samples
   const end = samples[samples.length - 1]?.tick ?? r.tick
-  for (let i = samples.length - 1; target == null && i >= 0 && samples[i].tick > end - 20; i--) target = samples[i].dig ?? null
+  // (the last tick of that dig in the samples)
+  let since = r.tick
+  for (let i = samples.length - 1; target == null && i >= 0 && samples[i].tick > end - 20; i--) {
+    target = samples[i].dig ?? null
+    since = samples[i].tick
+  }
   if (target == null) return null
+  if (r.bot.digging == null) {
+    const at = target
+    // (the last update of the block left none: broken, a fluid flowed in; a refused break's is the block put back)
+    const last = r.recent.events.filter((e) => e.type === 'block_update' && e.tick >= since && Array.isArray(e.pos) && (e.pos as number[]).every((v, i) => v === at[i])).pop()
+    if (last != null && /^(air|cave_air|void_air|water|lava)$/.test(String(last.to ?? ''))) return null
+  }
   const cursor = r.bot.cursorBlock
   const onTarget = cursor != null && cursor.pos.every((v, i) => v === target?.[i])
   return { digTarget: target, cursor, onTarget }
