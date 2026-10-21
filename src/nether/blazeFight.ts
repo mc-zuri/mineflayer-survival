@@ -736,6 +736,8 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
   const tracked = new Set<number>()
   const dead = new Set<number>()
   const tried = new Map<number, number>()
+  // (the tick each drop by a bunker was first seen: an old one is fetched among more blazes, BUNKER_FETCH_SEEN_OLD)
+  const dropSeen = new Map<number, number>()
   const onDead = (e: Entity): void => {
     if (e.name !== 'blaze') return
     dead.add(e.id)
@@ -1019,7 +1021,12 @@ export async function fightFromNook (bot: Bot, nook: BlazeNook, opts: NookFightO
       // for 20000 ticks with their rods left on the throne (26.3 runs mag-b and mag-d: 0 rods)
       // (a bunker's: with few blazes about, healed, out of it by the sill: bunkerFetchDue)
       const drop = nook.bunker != null
-        ? (drawn === 0 ? bunkerDrops(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES && bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof, e.position)) : undefined)
+        ? (drawn === 0 ? bunkerDrops(bot, nook).find(e => {
+            if ((tried.get(e.id) ?? 0) >= DROP_TRIES) return false
+            if (!dropSeen.has(e.id)) dropSeen.set(e.id, tick)
+            const old = tick - (dropSeen.get(e.id) ?? tick) >= BUNKER_OLD_DROP
+            return bunkerFetchDue(bot, nook, fightHealth(bot), () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)), proof, e.position, old ? BUNKER_FETCH_SEEN_OLD : BUNKER_FETCH_SEEN)
+          }) : undefined)
         : drawn === 0 && fetchWanted(fightHealth(bot), sealAt, proof, () => seeing.every(b => volleys.quietFor(b.id, tick, FETCH_QUIET)))
           ? dropsNear(bot, nook).find(e => (tried.get(e.id) ?? 0) < DROP_TRIES)
           : undefined
@@ -1515,6 +1522,13 @@ export function bunkerKept (nook: BlazeNook): Vec3[] {
 
 /** the most blazes that would see the bot at a drop (fetchThreats) for a bunker's fetch to go to it */
 export const BUNKER_FETCH_SEEN = 1
+/**
+ * and for a drop that has lain BUNKER_OLD_DROP ticks (its 6000 running out: ItemEntity.LIFETIME): the rods on seed 2's
+ * open throne at (-290, 77, -209), in sight of 2 or more of the cave's blazes whenever one was looked at, lay there
+ * till they were gone, 3 of a run's 7 (26.3)
+ */
+export const BUNKER_FETCH_SEEN_OLD = 2
+export const BUNKER_OLD_DROP = 2400
 /** and the most about at all (hidden ones come round), and none this near the drop (BlazeAttackGoal hits within 2) */
 export const BUNKER_FETCH_CROWD = 8
 export const DROP_CLEAR = 4
@@ -1546,7 +1560,7 @@ export function fetchThreats (bot: Bot, points: readonly Vec3[]): Entity[] {
  * blazes that see the bot or the drop (fetchThreats), none within DROP_CLEAR of the drop, BUNKER_FETCH_CROWD about at
  * the most. Fire resistant, BUNKER_FETCH_PROOF_BLAZES that see it (only their punches hurt then).
  */
-export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true, proof = false, drop?: Vec3): boolean {
+export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet: () => boolean = () => true, proof = false, drop?: Vec3, seenMost = BUNKER_FETCH_SEEN): boolean {
   const b = nook.bunker
   if (b == null || health < BUNKER_FETCH_HEALTH) return false
   const at = drop ?? b.sill.offset(0.5, 0, 0.5)
@@ -1556,7 +1570,7 @@ export function bunkerFetchDue (bot: Bot, nook: BlazeNook, health: number, quiet
   if (proof) return seen <= BUNKER_FETCH_PROOF_BLAZES
   // (a drop in the spawn volume counts as any other: with none to be in sight there, a bunker by seed 2's open throne at
   // (-290, 77, -209), whose kills' rods lie on the throne, fetched 0 to 4 times a run for 20 before, and 0 to 6 rods)
-  return seen <= BUNKER_FETCH_SEEN && !fireballNear(bot) && quiet()
+  return seen <= seenMost && !fireballNear(bot) && quiet()
 }
 
 /**
