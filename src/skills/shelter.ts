@@ -106,8 +106,10 @@ export function shelterAt (lookup: BlockLookup, surface: Vec3, digCost: (name: s
     if (!Number.isFinite(c)) return null
     cost += c
   }
-  const floor = lookup(surface.offset(0, -SHELTER_DEPTH - 1, 0))
-  if (!isSolid(floor)) return null
+  // solid ground under the floor, SHELTER_GROUND_DEPTH blocks of it: no thin crust over a cave or a ravine
+  for (let d = 1; d <= SHELTER_GROUND_DEPTH; d++) {
+    if (!isSolid(lookup(surface.offset(0, -SHELTER_DEPTH - d, 0)))) return null
+  }
   const seal = surface.offset(0, -1, 0)
   const head = surface.offset(0, -SHELTER_DEPTH + 1, 0)
   const feet = surface.offset(0, -SHELTER_DEPTH, 0)
@@ -128,6 +130,13 @@ export function shelterAt (lookup: BlockLookup, surface: Vec3, digCost: (name: s
   if (liquidNear(lookup, surface.offset(0, -SHELTER_DEPTH - 1, 0), surface, SHELTER_DRY_REACH)) return null
   return { surface, feet, seal, cost }
 }
+
+/**
+ * the blocks of solid ground a shelter's column has under its floor (shelterAt): the floor and two under it. A 26.3
+ * bot's night shelter on a mountain at t372485 ended 35 ticks on in a fall from a high place, health 15 to 0
+ * (f6-26.3, at (5, 74, -4))
+ */
+export const SHELTER_GROUND_DEPTH = 3
 
 /** how far from a shelter's column (across, and under its floor) no water or lava may be (shelterAt) */
 export const SHELTER_DRY_REACH = 2
@@ -422,7 +431,8 @@ async function centreOn (bot: Bot, centre: Vec3, signal?: AbortSignal): Promise<
       }
       void bot.look(Math.atan2(-(centre.x - p.x), -(centre.z - p.z)), bot.entity.pitch, true)
       bot.setControlState('forward', true)
-      bot.setControlState('sneak', d < 1)
+      // (sneaking all the way: no step off an edge by the column, a cliff's)
+      bot.setControlState('sneak', true)
       return false
     }, 80, signal)
   } finally {
@@ -430,12 +440,30 @@ async function centreOn (bot: Bot, centre: Vec3, signal?: AbortSignal): Promise<
   }
 }
 
-async function digBelow (bot: Bot, toY: number, signal?: AbortSignal): Promise<void> {
+/**
+ * Why the next dig down from `feet` in the shelter's column at `column` (x, z) to `toY` isn't safe, or null: the
+ * bot's feet out of the column (a centring that fell short: the ground under them not the column's looked over), or
+ * no solid ground in the column between the block to dig and the planned floor (a cave opened under it since: the dig
+ * would drop the bot into it).
+ */
+export function digDownHazard (lookup: BlockLookup, feet: Vec3, column: { x: number, z: number }, toY: number): string | null {
+  if (feet.x !== column.x || feet.z !== column.z) return `the feet at ${feet.toString()} are out of the column at ${column.x}, ${column.z}`
+  const under = feet.offset(0, -1, 0)
+  // the bot lands on the first solid block under the one dug: at the floor (toY - 1) or above it
+  for (let y = under.y - 1; y >= toY - 1; y--) if (isSolid(lookup(new Vec3(feet.x, y, feet.z)))) return null
+  return `no ground under ${under.toString()} down to the floor at y ${toY - 1}`
+}
+
+async function digBelow (bot: Bot, toY: number, signal?: AbortSignal, column?: { x: number, z: number }): Promise<void> {
+  const lookup = blockLookup(bot)
   for (let guard = 0; guard < 10 && Math.floor(bot.entity.position.y + 1e-6) > toY; guard++) {
     throwIfAborted(signal)
     const feet = bot.entity.position.floored()
     const below = bot.blockAt(feet.offset(0, -1, 0))
     if (below == null) throw new SkillError('NOT_FOUND', 'the block below is unloaded')
+    // no dig out of the column, nor one into a cave under it (the bot would fall in)
+    const hazard = below.boundingBox === 'block' && column != null ? digDownHazard(lookup, feet, column, toY) : null
+    if (hazard != null) throw new SkillError('CANNOT_PLACE', `no shelter dug down here: ${hazard}`)
     if (below.boundingBox === 'block') {
       await equipFor(bot, below)
       await dig(bot, below, { signal })
@@ -595,7 +623,7 @@ async function shelterOnce (bot: Bot, opts: ShelterOptions): Promise<ShelterResu
     const centre = target.surface.offset(0.5, 0, 0.5)
     // the body inside the column's cell (0.6 wide in a 1 wide hole), or it stays up on the rim
     await centreOn(bot, centre, signal)
-    await digBelow(bot, target.feet.y, signal)
+    await digBelow(bot, target.feet.y, signal, target.surface)
     await waitUntil(bot, () => bot.entity.onGround, 20, signal)
     // the dug blocks' drops fall in with the bot (ItemEntity's 10 ticks of pickup delay)
     await waitUntil(bot, () => sealItem(bot) != null, 40, signal)

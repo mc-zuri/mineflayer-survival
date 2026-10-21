@@ -277,3 +277,31 @@ test('shelter: a bot in the water goes ashore first (toShore), none dug from the
     explore.toShore = real
   }
 })
+
+test('shelterAt: solid ground SHELTER_GROUND_DEPTH blocks under its floor, none over a cave; digDownHazard: no dig out of the column nor into a cave under it (f6-26.3: a fall from a high place 35 ticks into a night shelter)', async () => {
+  const { SHELTER_GROUND_DEPTH, digDownHazard } = await import('../../src/skills/shelter')
+  assert.equal(SHELTER_GROUND_DEPTH, 3)
+  // dirt from y 50 to 63, air over 63
+  const lookup = (p: Vec3): any => {
+    const air = p.y >= 64 || p.y < 50
+    return { name: air ? 'air' : 'dirt', boundingBox: air ? 'empty' : 'block', position: p }
+  }
+  const surface = new Vec3(1, 64, 0)
+  const dig = defaultDigCost(true)
+  assert.ok(shelterAt(lookup, surface, dig) != null)
+  // the floor at 64 - SHELTER_DEPTH - 1 = 60, the cave 2 under it: no shelter there
+  const lowCave = (p: Vec3): any => {
+    const air = p.y >= 64 || (p.y >= 57 && p.y <= 58 && p.x >= 0 && p.x <= 3 && Math.abs(p.z) <= 2)
+    return { name: air ? 'air' : 'dirt', boundingBox: air ? 'empty' : 'block', position: p }
+  }
+  assert.equal(shelterAt(lowCave, surface, dig), null)
+  // the dig down: in the column with the ground under, fine; out of it, or the ground gone under the block to dig
+  const toY = 61
+  assert.equal(digDownHazard(lookup, new Vec3(5, 64, 0), { x: 5, z: 0 }, toY), null)
+  assert.match(digDownHazard(lookup, new Vec3(6, 64, 0), { x: 5, z: 0 }, toY) ?? '', /out of the column/)
+  const hollow = (p: Vec3): any => {
+    const air = p.y >= 64 || (p.x === 5 && p.z === 0 && p.y <= 62)
+    return { name: air ? 'air' : 'dirt', boundingBox: air ? 'empty' : 'block', position: p }
+  }
+  assert.match(digDownHazard(hollow, new Vec3(5, 64, 0), { x: 5, z: 0 }, toY) ?? '', /no ground under/)
+})
